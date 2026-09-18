@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from auth import verify_admin_token, generate_api_key
 from database import get_db
-from models import Client
+from models import Client, Backup
 from schemas import ClientCreate, ClientUpdate, ClientResponse, ClientWithKey
 from services.crypto_service import encrypt
 
@@ -78,6 +78,10 @@ def delete_client(client_id: UUID, db: Session = Depends(get_db)):
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+        
+    # Remove os backups associados no banco para evitar erro de Foreign Key
+    db.query(Backup).filter(Backup.client_id == client_id).delete(synchronize_session=False)
+    
     db.delete(client)
     db.commit()
 
