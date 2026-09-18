@@ -251,9 +251,14 @@ def run_backup(trigger: str = "scheduled"):
     finished_at = datetime.now()
 
     for r in resultados:
-        icone = {"OK": "OK", "PARCIAL": "PARCIAL", "ERRO": "ERRO",
-                 "SEM_ARQUIVOS": "SEM_ARQUIVOS", "JA_PROCESSADO": "JA_PROCESSADO",
-                 "TIPO_NAO_SUPORTADO": "SKIP"}.get(r["status"], "?")
+        icone = {
+            "OK": "OK", "PARCIAL": "PARCIAL", "ERRO": "ERRO",
+            "SEM_ARQUIVOS": "SEM_ARQUIVOS", "JA_PROCESSADO": "JA_PROCESSADO",
+            "TIPO_NAO_SUPORTADO": "SKIP",
+            "BACKUP_ANTIGO": "ANTIGO", "BACKUP_INCOMPLETO": "INCOMPLETO",
+            "BACKUP_INCONSISTENTE": "INCONSISTENTE", "BACKUP_NAO_ENCONTRADO": "NAO_ENCONTRADO",
+            "BACKUP_EM_PROCESSAMENTO": "ESPERA", "BACKUP_CORROMPIDO": "CORROMPIDO"
+        }.get(r["status"], r["status"])
         logging.info(f"  {icone} [{r.get('tipo', 'NVR')}] {r['nome']}")
 
     backup_id = post_report(conf, started_at, finished_at, resultados, trigger)

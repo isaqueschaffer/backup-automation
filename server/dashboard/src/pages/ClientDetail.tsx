@@ -194,8 +194,8 @@ export default function ClientDetail() {
       return;
     }
 
-    if (eqForm.tipo === "OLT" && eqForm.fabricante_olt === "UNM2000" && !eqForm.pasta_origem) {
-      toast("Para UNM2000, informe a pasta de origem dos backups.", "error");
+    if (eqForm.tipo === "OLT" && (eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI") && !eqForm.pasta_origem) {
+      toast(`Para ${eqForm.fabricante_olt}, informe a pasta de origem dos backups.`, "error");
       return;
     }
 
@@ -216,7 +216,7 @@ export default function ClientDetail() {
         password: eqForm.password,
         config_extra: eqForm.tipo === "OLT"
           ? {
-            ...(eqForm.fabricante_olt === "UNM2000"
+            ...((eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI")
               ? { pasta_origem: eqForm.pasta_origem }
               : {}),
             fabricante_olt: eqForm.fabricante_olt
@@ -476,6 +476,7 @@ export default function ClientDetail() {
                   }
                 >
                   <option value="UNM2000">🔵 UNM2000</option>
+                  <option value="HUAWEI">🔴 HUAWEI</option>
                   <option value="VSOL">🟢 VSOL</option>
                 </select>
               </div>
@@ -559,8 +560,8 @@ export default function ClientDetail() {
                     display: "block"
                   }}
                 >
-                  {eqForm.fabricante_olt === "UNM2000"
-                    ? "Pasta onde o UNM2000 exporta os arquivos de backup (.zip)."
+                  {(eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI")
+                    ? `Pasta onde o ${eqForm.fabricante_olt} exporta os arquivos de backup.`
                     : "Endereço IP, usuário e senha utilizados para acessar a VSOL."
                   }
                 </span>
