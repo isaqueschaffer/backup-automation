@@ -13,6 +13,7 @@ from src.application.api_client import fetch_server_config, post_report, upload_
 from src.nvr.factory import verificar_gravacao_nvr
 from src.olt.unm2000 import realizar_backup_olt
 from src.olt.vsol import realizar_backup_vsol
+from src.pabx.issabel import realizar_backup_issabel
 from src.backup.crypto import gerar_secretkey
 from src.backup.downloader import baixar_arquivo
 from src.backup.archiver import criar_zip, data_hoje
@@ -162,10 +163,17 @@ def processar_olt(
     }
 
 
+def processar_pabx(equipamento: dict, pasta_data: Path) -> dict:
+    nome_safe = equipamento.get("name", "PABX").replace(" ", "_")
+    pasta_pabx = pasta_data / nome_safe
+    pasta_pabx.mkdir(parents=True, exist_ok=True)
+    return realizar_backup_issabel(equipamento, pasta_pabx)
+
+
 def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path) -> dict:
     """
     Despachante principal — roteia o processamento pelo tipo do equipamento.
-    Tipos suportados: NVR, OLT
+    Tipos suportados: NVR, OLT, PABX
     Tipos futuros:    ONU, PABX (retornam status TIPO_NAO_SUPORTADO)
     """
     tipo = (equipamento.get("tipo") or "NVR").upper()
@@ -175,6 +183,9 @@ def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path
 
     if tipo == "OLT":
         return processar_olt(equipamento, pasta_data)
+
+    if tipo == "PABX":
+        return processar_pabx(equipamento, pasta_data)
 
     # Tipos cadastrados mas ainda não implementados
     logging.warning(f"  Tipo '{tipo}' ainda não suportado pelo agente. Equipamento: {equipamento.get('name')}")

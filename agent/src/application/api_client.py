@@ -7,14 +7,22 @@ TIMEOUT_SERVER = 120
 
 def fetch_server_config(conf: dict) -> dict:
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    url = f"{conf['server_url']}/api/v1/agent/config"
     r = requests.get(
-        f"{conf['server_url']}/api/v1/agent/config",
+        url,
         headers=headers,
         timeout=30,
         verify=False,
     )
     r.raise_for_status()
-    return r.json()
+    try:
+        return r.json()
+    except ValueError as e:
+        logging.error(f"Resposta do servidor nao é um JSON valido. Verifique a URL do servidor e a porta.")
+        logging.error(f"URL acessada: {url}")
+        logging.error(f"Status Code: {r.status_code}")
+        logging.error(f"Conteudo recebido: {r.text[:200]}")
+        raise RuntimeError("Servidor retornou uma resposta invalida (provavelmente HTML em vez de JSON).") from e
 
 def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 resultados: list, trigger: str) -> str | None:
@@ -44,7 +52,13 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
             json=payload, headers=headers, timeout=30, verify=False,
         )
         r.raise_for_status()
-        backup_id = r.json()["backup_id"]
+        try:
+            resp_data = r.json()
+            backup_id = resp_data["backup_id"]
+        except ValueError:
+            logging.error(f"  Resposta nao-JSON ao enviar relatorio. Conteudo: {r.text[:200]}")
+            return None
+            
         logging.info(f"  Relatorio enviado. backup_id={backup_id}")
         return backup_id
     except Exception as e:
@@ -64,7 +78,11 @@ def upload_zip(conf: dict, backup_id: str, zip_path: Path, device_type: str = "N
                 verify=False,
             )
         r.raise_for_status()
-        logging.info(f"  ZIP ({device_type}) enviado ao servidor. Resposta: {r.json()}")
+        try:
+            resp_json = r.json()
+        except ValueError:
+            resp_json = r.text[:100]
+        logging.info(f"  ZIP ({device_type}) enviado ao servidor. Resposta: {resp_json}")
         return True
     except Exception as e:
         logging.error(f"  Erro ao enviar ZIP ({device_type}): {e}")

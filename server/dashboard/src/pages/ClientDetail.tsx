@@ -11,7 +11,7 @@ import { useToast } from "../components/Toast";
 import {
   ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
-  Wifi, WifiOff, Video, FolderOpen, ChevronRight
+  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone
 } from "lucide-react";
 
 function fmtDate(s: string | null) {
@@ -86,10 +86,10 @@ function EqCard({ eq, onDelete, onViewRecording }: {
   onViewRecording: () => void;
 }) {
   const TIPO_ICONE: Record<string, React.ReactNode> = {
-    NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />,
+    NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />
   };
   const TIPO_COLOR: Record<string, string> = {
-    NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b",
+    NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6"
   };
   const color = TIPO_COLOR[eq.tipo] || "var(--text-muted)";
 
@@ -169,8 +169,8 @@ export default function ClientDetail() {
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
 
-  const TIPOS: TipoEquipamento[] = ["NVR", "OLT"];
-  const TIPO_ICONE: Record<string, string> = { NVR: "📹", OLT: "🔌" };
+  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX"];
+  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞" };
 
   const load = async () => {
     if (!id) return;
@@ -186,8 +186,8 @@ export default function ClientDetail() {
 
   const handleAddEquipamento = async () => {
     if (!eqForm.name) { toast("Preencha o nome do equipamento.", "error"); return; }
-    if (eqForm.tipo === "NVR" && (!eqForm.ip || !eqForm.username || !eqForm.password)) {
-      toast("Para NVR, preencha IP, usuário e senha.", "error"); return;
+    if ((eqForm.tipo === "NVR" || eqForm.tipo === "PABX") && (!eqForm.ip || !eqForm.username || !eqForm.password)) {
+      toast(`Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.`, "error"); return;
     }
     if (eqForm.tipo === "OLT" && !eqForm.fabricante_olt) {
       toast("Selecione o sistema da OLT.", "error");
@@ -209,7 +209,7 @@ export default function ClientDetail() {
       await createEquipamento(id!, {
         tipo: eqForm.tipo,
         name: eqForm.name,
-        ip: eqForm.tipo === "NVR" ? eqForm.ip : (
+        ip: (eqForm.tipo === "NVR" || eqForm.tipo === "PABX") ? eqForm.ip : (
           eqForm.fabricante_olt === "VSOL" ? eqForm.pasta_origem : eqForm.ip
         ),
         username: eqForm.username,
@@ -431,7 +431,7 @@ export default function ClientDetail() {
             <label className="form-label">Tipo de Equipamento *</label>
             <select className="form-input" value={eqForm.tipo}
               onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: "", fabricante_olt: "UNM2000" })}>
-              {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE[t]} {t}</option>)}
+              {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE_EMOJI[t]} {t}</option>)}
             </select>
           </div>
           <div className="form-group">
@@ -440,11 +440,11 @@ export default function ClientDetail() {
               placeholder={`${eqForm.tipo}_Cliente1`}
               value={eqForm.name} onChange={e => setEqForm({ ...eqForm, name: e.target.value })} />
           </div>
-          {eqForm.tipo === "NVR" && (
+          {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX") && (
             <>
               <div className="form-group">
-                <label className="form-label">Endereço IP *</label>
-                <input className="form-input" type="text" placeholder="192.168.1.100"
+                <label className="form-label">Endereço IP ou Host *</label>
+                <input className="form-input" type="text" placeholder={eqForm.tipo === "PABX" ? "https://192.168.12.2" : "192.168.1.100"}
                   value={eqForm.ip} onChange={e => setEqForm({ ...eqForm, ip: e.target.value })} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
