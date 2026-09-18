@@ -11,7 +11,7 @@ import { useToast } from "../components/Toast";
 import {
   ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
-  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone
+  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network
 } from "lucide-react";
 
 function fmtDate(s: string | null) {
@@ -86,10 +86,10 @@ function EqCard({ eq, onDelete, onViewRecording }: {
   onViewRecording: () => void;
 }) {
   const TIPO_ICONE: Record<string, React.ReactNode> = {
-    NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />
+    NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />, MIKROTIK: <Network size={18} />
   };
   const TIPO_COLOR: Record<string, string> = {
-    NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6"
+    NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6", MIKROTIK: "#3b82f6"
   };
   const color = TIPO_COLOR[eq.tipo] || "var(--text-muted)";
 
@@ -169,8 +169,8 @@ export default function ClientDetail() {
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
 
-  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX"];
-  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞" };
+  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK"];
+  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐" };
 
   const load = async () => {
     if (!id) return;
@@ -186,7 +186,7 @@ export default function ClientDetail() {
 
   const handleAddEquipamento = async () => {
     if (!eqForm.name) { toast("Preencha o nome do equipamento.", "error"); return; }
-    if ((eqForm.tipo === "NVR" || eqForm.tipo === "PABX") && (!eqForm.ip || !eqForm.username || !eqForm.password)) {
+    if ((eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") && (!eqForm.ip || !eqForm.username || !eqForm.password)) {
       toast(`Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.`, "error"); return;
     }
     if (eqForm.tipo === "OLT" && !eqForm.fabricante_olt) {
@@ -209,7 +209,7 @@ export default function ClientDetail() {
       await createEquipamento(id!, {
         tipo: eqForm.tipo,
         name: eqForm.name,
-        ip: (eqForm.tipo === "NVR" || eqForm.tipo === "PABX") ? eqForm.ip : (
+        ip: (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") ? eqForm.ip : (
           eqForm.fabricante_olt === "VSOL" ? eqForm.pasta_origem : eqForm.ip
         ),
         username: eqForm.username,
@@ -440,7 +440,7 @@ export default function ClientDetail() {
               placeholder={`${eqForm.tipo}_Cliente1`}
               value={eqForm.name} onChange={e => setEqForm({ ...eqForm, name: e.target.value })} />
           </div>
-          {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX") && (
+          {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") && (
             <>
               <div className="form-group">
                 <label className="form-label">Endereço IP ou Host *</label>
