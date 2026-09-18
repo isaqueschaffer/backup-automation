@@ -252,12 +252,8 @@ def run_backup(trigger: str = "scheduled"):
         pasta_dados = pasta_eq / nome_safe
         pasta_alvo = pasta_dados if pasta_dados.exists() else pasta_eq
 
-        arquivos = [f for f in pasta_alvo.rglob("*") if f.is_file() and f.name != f"backup_{nome_safe.lower()}.zip"]
-        if arquivos:
-            zip_filename = f"backup_{nome_safe.lower()}.zip"
-            zip_path = criar_zip(pasta_alvo, zip_filename, zip_password)
-            if zip_path:
-                zips_para_upload.append((tipo, zip_path))
+        # Não criamos mais zips individuais aqui. Os arquivos ficarão na pasta
+        # e serão agrupados em um único pacote de backup no final.
 
     finished_at = datetime.now()
 
@@ -274,17 +270,13 @@ def run_backup(trigger: str = "scheduled"):
 
     backup_id = post_report(conf, started_at, finished_at, resultados, trigger)
     if backup_id:
-        if zips_para_upload:
-            for tipo_eq, zip_path in zips_para_upload:
-                logging.info(f"  Enviando ZIP [{tipo_eq}]: {zip_path.name}")
-                upload_zip(conf, backup_id, zip_path, device_type=tipo_eq)
-        else:
-            # Fallback se nenhum equipamento gerou zip individual (mas houve arquivos gerais)
-            todos_arquivos = [f for f in TEMP_DIR.rglob("*") if f.is_file() and f.suffix != ".zip"]
-            if todos_arquivos:
-                zip_path = criar_zip(TEMP_DIR, client_name, zip_password)
-                if zip_path:
-                    upload_zip(conf, backup_id, zip_path, device_type="NVR")
+        # Agrupa tudo em um único ZIP para o cliente inteiro (Master ZIP)
+        todos_arquivos = [f for f in TEMP_DIR.rglob("*") if f.is_file() and f.suffix != ".zip"]
+        if todos_arquivos:
+            zip_path = criar_zip(TEMP_DIR, client_name, zip_password)
+            if zip_path:
+                logging.info(f"  Enviando pacote unico de backup: {zip_path.name}")
+                upload_zip(conf, backup_id, zip_path, device_type="NVR")
 
     shutil.rmtree(TEMP_DIR, ignore_errors=True)
     logging.info(f"\nBackup concluido em {(finished_at - started_at).total_seconds():.1f}s")
