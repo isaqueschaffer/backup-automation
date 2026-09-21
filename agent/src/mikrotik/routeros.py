@@ -1,3 +1,4 @@
+from paramiko import ssh_exception
 import paramiko
 import time
 import logging
@@ -20,6 +21,9 @@ def realizar_backup_mikrotik(equipamento: dict, pasta_destino: Path) -> dict:
     
     try:
         logging.info(f"[MIKROTIK] Conectando via SSH em {ip}...")
+        logging.info(f"[MIKROTIK] Usuário: {username}")
+        logging.info(f"[MIKROTIK] Senha recebida: {'SIM' if password else 'NAO'}")
+        logging.info(f"[MIKROTIK] Tamanho da senha: {len(password) if password else 0}")
         ssh.connect(ip, port=22, username=username, password=password, timeout=10)
         
         # O nome do arquivo no roteador
