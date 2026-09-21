@@ -50,16 +50,15 @@ def save_zip(
     return target
 
 
-def get_zip_path(client_id: UUID, client_name: str, zip_filename: str) -> Path | None:
+def get_zip_path(client_id: UUID, client_name: str, zip_filename: str, date_str: str = None) -> Path | None:
     """Encontra o arquivo ZIP armazenado para um dado cliente.
 
-    Procura recursivamente dentro da pasta do cliente (incluindo NVR/, OLT/, ONU/, PABX/),
-    com compatibilidade para estruturas legadas.
+    Procura primeiramente na pasta específica da data (se fornecida).
+    Depois, procura recursivamente dentro da pasta do cliente, com compatibilidade para estruturas legadas.
     """
     storage_base = Path(settings.BACKUP_STORAGE_PATH)
     clean_name = _sanitize_name(client_name)
 
-    # Pastas candidatas em ordem de prioridade
     candidate_dirs = [
         storage_base / _get_client_dir_name(client_id, client_name),
         storage_base / f"{clean_name}_{client_id}",
@@ -68,6 +67,18 @@ def get_zip_path(client_id: UUID, client_name: str, zip_filename: str) -> Path |
     ]
 
     checked = set()
+    
+    # 1. Se tivermos a data, tentamos buscar diretamente na pasta da data
+    if date_str:
+        for base in candidate_dirs:
+            if base.exists() and base.is_dir():
+                date_dir = base / f"backup_{date_str}"
+                if date_dir.exists() and date_dir.is_dir():
+                    for candidate in date_dir.rglob(zip_filename):
+                        if candidate.is_file():
+                            return candidate
+
+    # 2. Fallback: procura recursivamente (pode retornar backup de outra data se nomes colidirem)
     for base in candidate_dirs:
         if base.exists() and base.is_dir() and base not in checked:
             checked.add(base)
@@ -75,7 +86,7 @@ def get_zip_path(client_id: UUID, client_name: str, zip_filename: str) -> Path |
                 if candidate.is_file():
                     return candidate
 
-    # Fallback: procura em qualquer pasta que contenha o UUID do cliente
+    # 3. Fallback final: procura em qualquer pasta que contenha o UUID do cliente
     if storage_base.exists():
         for d in storage_base.iterdir():
             if d.is_dir() and str(client_id) in d.name and d not in checked:

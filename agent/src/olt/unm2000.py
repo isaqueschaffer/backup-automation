@@ -46,6 +46,11 @@ def novo_nome(nome_original: str) -> str:
     padrao = r'(\d{8})_(\d{6})'
     resultado = re.search(padrao, nome_original)
     if not resultado:
+        padrao_digifort = r'^(\d{8})$'
+        resultado_digifort = re.match(padrao_digifort, nome_original)
+        if resultado_digifort:
+            data_backup = datetime.datetime.strptime(resultado_digifort.group(1), "%Y%m%d")
+            return data_backup.strftime("%d-%m-%Y.zip")
         raise ValueError(f"Formato de backup desconhecido: {nome_original}")
     data_str = resultado.group(1)
     hora_str = resultado.group(2)
@@ -71,6 +76,16 @@ def encontrar_backups(pasta_origem: str) -> list:
 
     for nome in os.listdir(pasta_origem):
         caminho = os.path.join(pasta_origem, nome)
+        
+        if os.path.isdir(caminho):
+            if re.match(r'^\d{8}$', nome):
+                try:
+                    data_backup = datetime.datetime.strptime(nome, "%Y%m%d")
+                    backups.append({"nome": nome, "caminho": caminho, "data": data_backup, "tipo": "digifort"})
+                except ValueError:
+                    pass
+            continue
+            
         if not os.path.isfile(caminho):
             continue
         if os.path.splitext(nome)[1].lower() not in extensoes_aceitas:
@@ -78,7 +93,7 @@ def encontrar_backups(pasta_origem: str) -> list:
         data_backup = extrair_data_backup(nome)
         if data_backup is None:
             continue
-        backups.append({"nome": nome, "caminho": caminho, "data": data_backup})
+        backups.append({"nome": nome, "caminho": caminho, "data": data_backup, "tipo": "unm"})
 
     backups.sort(key=lambda x: x["data"], reverse=True)
     return backups
@@ -138,18 +153,25 @@ def realizar_backup_olt(equipamento: dict, pasta_destino: Path) -> dict:
         logging.info(f"  [OLT] Todos os backups já existem no destino.")
         return {"nome": nome, "status": "JA_PROCESSADO", "cameras": None}
 
-    # Copia o arquivo
+    # Processa o arquivo ou pasta
     nome_destino = novo_nome(backup_pendente["nome"])
     arquivo_destino = pasta_eq / nome_destino
     arquivo_origem = backup_pendente["caminho"]
-    tamanho_mb = os.path.getsize(arquivo_origem) / (1024 * 1024)
+    tipo = backup_pendente.get("tipo", "unm")
 
     logging.info(f"  [OLT] Novo backup encontrado: {backup_pendente['nome']}")
-    logging.info(f"  [OLT] Copiando para: {arquivo_destino}")
+    
+    if tipo == "digifort" or os.path.isdir(arquivo_origem):
+        logging.info(f"  [OLT] Comprimindo pasta para: {arquivo_destino}")
+        base_name = str(arquivo_destino.with_suffix(''))
+        shutil.make_archive(base_name, 'zip', arquivo_origem)
+    else:
+        logging.info(f"  [OLT] Copiando para: {arquivo_destino}")
+        shutil.copy2(arquivo_origem, arquivo_destino)
 
-    shutil.copy2(arquivo_origem, arquivo_destino)
+    tamanho_mb = os.path.getsize(arquivo_destino) / (1024 * 1024)
 
-    logging.info(f"  [OLT] Backup copiado com sucesso. ({tamanho_mb:.2f} MB)")
+    logging.info(f"  [OLT] Backup processado com sucesso. ({tamanho_mb:.2f} MB)")
 
     return {
         "nome": nome,
