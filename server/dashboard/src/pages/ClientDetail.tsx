@@ -85,13 +85,19 @@ function EqCard({ eq, onDelete, onViewRecording }: {
   onDelete: () => void;
   onViewRecording: () => void;
 }) {
-  const TIPO_ICONE: Record<string, React.ReactNode> = {
-    NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />, MIKROTIK: <Network size={18} />
+  const getEqIcon = (tipo: string) => {
+    const m: any = {
+      NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />, MIKROTIK: <Network size={18} />, DIGIFORT: <Video size={18} />
+    };
+    return m[tipo] || <Video size={18} />;
   };
-  const TIPO_COLOR: Record<string, string> = {
-    NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6", MIKROTIK: "#3b82f6"
+  const getEqColor = (tipo: string) => {
+    const m: any = {
+      NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6", MIKROTIK: "#3b82f6", DIGIFORT: "#f43f5e"
+    };
+    return m[tipo] || "var(--text-muted)";
   };
-  const color = TIPO_COLOR[eq.tipo] || "var(--text-muted)";
+  const color = getEqColor(eq.tipo);
 
   return (
     <div style={{
@@ -109,7 +115,7 @@ function EqCard({ eq, onDelete, onViewRecording }: {
         background: `${color}18`, border: `1px solid ${color}40`,
         display: "flex", alignItems: "center", justifyContent: "center", color
       }}>
-        {TIPO_ICONE[eq.tipo] || <Server size={18} />}
+        {getEqIcon(eq.tipo)}
       </div>
 
       {/* Info */}
@@ -121,7 +127,7 @@ function EqCard({ eq, onDelete, onViewRecording }: {
           </span>
         </div>
         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12 }}>
-          {eq.tipo === "OLT" ? (
+          {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" ? (
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <FolderOpen size={12} /> {(eq.config_extra as any)?.pasta_origem || "—"}
             </span>
@@ -169,8 +175,8 @@ export default function ClientDetail() {
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
 
-  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK"];
-  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐" };
+  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT"];
+  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️" };
 
   const load = async () => {
     if (!id) return;
@@ -204,6 +210,11 @@ export default function ClientDetail() {
       return;
     }
 
+    if (eqForm.tipo === "DIGIFORT" && !eqForm.pasta_origem) {
+      toast("Para DIGIFORT, informe a pasta de origem.", "error");
+      return;
+    }
+
     setSaving(true);
     try {
       await createEquipamento(id!, {
@@ -214,14 +225,16 @@ export default function ClientDetail() {
         ),
         username: eqForm.username,
         password: eqForm.password,
-        config_extra: eqForm.tipo === "OLT"
-          ? {
-            ...((eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI")
-              ? { pasta_origem: eqForm.pasta_origem }
-              : {}),
-            fabricante_olt: eqForm.fabricante_olt
-          }
-          : null,
+        config_extra: eqForm.tipo === "DIGIFORT"
+          ? { pasta_origem: eqForm.pasta_origem }
+          : (eqForm.tipo === "OLT"
+            ? {
+              ...((eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI")
+                ? { pasta_origem: eqForm.pasta_origem }
+                : {}),
+              fabricante_olt: eqForm.fabricante_olt
+            }
+            : null),
       });
 
       toast("Equipamento adicionado!", "success");
@@ -567,6 +580,14 @@ export default function ClientDetail() {
                 </span>
               </div>
             </>
+          )}
+          {eqForm.tipo === "DIGIFORT" && (
+            <div className="form-group">
+              <label className="form-label">Pasta de Origem do Digifort *</label>
+              <input className="form-input" type="text"
+                placeholder="C:\Digifort\Backup"
+                value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+            </div>
           )}
           <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
             <button className="btn btn-secondary" onClick={() => setShowEqModal(false)}>Cancelar</button>

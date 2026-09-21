@@ -24,12 +24,9 @@ def get_backup_dir(client_id: UUID, client_name: str, date_str: str, device_type
 
     Estrutura: BACKUP_STORAGE_PATH / NOME_CLIENTE_UUID / backup_DD-MM-YYYY / DEVICE_TYPE
     """
-    clean_device_type = device_type.strip().upper()
     path = (
         Path(settings.BACKUP_STORAGE_PATH)
         / _get_client_dir_name(client_id, client_name)
-        / f"backup_{date_str}"
-        / clean_device_type
     )
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -68,7 +65,14 @@ def get_zip_path(client_id: UUID, client_name: str, zip_filename: str, date_str:
 
     checked = set()
     
-    # 1. Se tivermos a data, tentamos buscar diretamente na pasta da data
+    # 1. Busca arquivo direto na raiz do cliente (nova estrutura)
+    for base in candidate_dirs:
+        if base.exists() and base.is_dir():
+            target = base / zip_filename
+            if target.exists() and target.is_file():
+                return target
+
+    # 2. Se tivermos a data, tentamos buscar na estrutura antiga (pasta da data)
     if date_str:
         for base in candidate_dirs:
             if base.exists() and base.is_dir():
@@ -121,17 +125,13 @@ def delete_old_backups(client_id: UUID, client_name: str, keep_days: int) -> int
     for base in candidate_dirs:
         if base.exists() and base.is_dir() and base not in checked:
             checked.add(base)
-            for date_dir in base.iterdir():
-                if date_dir.is_dir():
-                    try:
-                        # Converte a pasta da data (ex: "backup_17-09-2026") para comparação
-                        date_str = date_dir.name.replace("backup_", "")
-                        dt = datetime.strptime(date_str, "%d-%m-%Y").replace(
-                            tzinfo=timezone.utc
-                        )
-                        if dt < cutoff:
-                            shutil.rmtree(date_dir)  # Apaga a pasta da data inteira
-                            deleted += 1
-                    except ValueError:
-                        pass
+            for file_zip in base.glob("backup_*.zip"):
+                try:
+                    date_str = file_zip.name.replace("backup_", "").replace(".zip", "")
+                    dt = datetime.strptime(date_str, "%d-%m-%Y").replace(tzinfo=timezone.utc)
+                    if dt < cutoff:
+                        file_zip.unlink()
+                        deleted += 1
+                except ValueError:
+                    pass
     return deleted

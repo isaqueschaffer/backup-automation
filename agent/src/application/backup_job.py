@@ -50,7 +50,7 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
     )
     logging.info(f"\n{'='*50}\n{nome} [NVR] (IP: {ip})\n{'='*50}")
 
-    pasta_nvr = pasta_data / nome.replace(" ", "_")
+    pasta_nvr = pasta_data
     pasta_nvr.mkdir(parents=True, exist_ok=True)
 
     retorno = verificar_gravacao_nvr(ip, user, pwd)
@@ -134,6 +134,9 @@ def processar_olt(
         elif "pasta_origem" in config_extra and config_extra.get("pasta_origem"):
             fabricante = "unm2000"
 
+    if tipo == "digifort":
+        fabricante = "unm2000"
+
     logging.info(
         f"[OLT] Tipo={tipo} | Fabricante={fabricante}"
     )
@@ -165,17 +168,13 @@ def processar_olt(
 
 
 def processar_pabx(equipamento: dict, pasta_data: Path) -> dict:
-    nome_safe = equipamento.get("name", "PABX").replace(" ", "_")
-    pasta_pabx = pasta_data / nome_safe
-    pasta_pabx.mkdir(parents=True, exist_ok=True)
-    return realizar_backup_issabel(equipamento, pasta_pabx)
+    pasta_data.mkdir(parents=True, exist_ok=True)
+    return realizar_backup_issabel(equipamento, pasta_data)
 
 
 def processar_mikrotik(equipamento: dict, pasta_data: Path) -> dict:
-    nome_safe = equipamento.get("name", "MIKROTIK").replace(" ", "_")
-    pasta_mtik = pasta_data / nome_safe
-    pasta_mtik.mkdir(parents=True, exist_ok=True)
-    return realizar_backup_mikrotik(equipamento, pasta_mtik)
+    pasta_data.mkdir(parents=True, exist_ok=True)
+    return realizar_backup_mikrotik(equipamento, pasta_data)
 
 
 def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path) -> dict:
@@ -189,7 +188,7 @@ def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path
     if tipo == "NVR":
         return processar_nvr(equipamento, zip_password, pasta_data)
 
-    if tipo == "OLT":
+    if tipo == "OLT" or tipo == "DIGIFORT":
         return processar_olt(equipamento, pasta_data)
 
     if tipo == "PABX":
@@ -238,33 +237,38 @@ def run_backup(trigger: str = "scheduled"):
     logging.info(f"Cliente      : {client_name}")
     logging.info(f"Equipamentos : {len(equipamentos)} total — " + ", ".join(f"{v} {k}" for k, v in por_tipo.items()))
 
-    if TEMP_DIR.exists():
-        shutil.rmtree(TEMP_DIR)
-    TEMP_DIR.mkdir(parents=True)
+    TEMP_DIR_WORK = DIR_AGENT / "tmp_backup_work"
+    TEMP_DIR_FINAL = DIR_AGENT / "tmp_backup_final"
+
+    shutil.rmtree(TEMP_DIR_WORK, ignore_errors=True)
+    shutil.rmtree(TEMP_DIR_FINAL, ignore_errors=True)
+    TEMP_DIR_WORK.mkdir(parents=True)
+    TEMP_DIR_FINAL.mkdir(parents=True)
 
     started_at = datetime.now()
     resultados = []
-    zips_para_upload = []
 
     for eq in equipamentos:
         tipo = (eq.get("tipo") or "NVR").upper()
         nome = eq.get("name", "equipamento")
         nome_safe = nome.replace(" ", "_")
 
-        # Diretório temporário isolado por equipamento
-        pasta_eq = TEMP_DIR / f"{tipo}_{nome_safe}"
-        pasta_eq.mkdir(parents=True, exist_ok=True)
+        # Diretório temporário de trabalho
+        pasta_trabalho = TEMP_DIR_WORK / f"{tipo}_{nome_safe}"
+        pasta_trabalho.mkdir(parents=True, exist_ok=True)
 
-        res = processar_equipamento(eq, zip_password, pasta_eq)
+        res = processar_equipamento(eq, zip_password, pasta_trabalho)
         res["tipo"] = tipo
         resultados.append(res)
 
-        # Os processadores criam a subpasta pasta_eq / nome_safe (ou salvam direto em pasta_eq)
-        pasta_dados = pasta_eq / nome_safe
-        pasta_alvo = pasta_dados if pasta_dados.exists() else pasta_eq
+        # Monta a estrutura final
+        pasta_final_eq = TEMP_DIR_FINAL / tipo / f"backup_{tipo.lower()}_{nome_safe}"
+        pasta_final_eq.mkdir(parents=True, exist_ok=True)
 
-        # Não criamos mais zips individuais aqui. Os arquivos ficarão na pasta
-        # e serão agrupados em um único pacote de backup no final.
+        # Cria o ZIP interno sem senha
+        zip_interno_path = pasta_final_eq / "backup.zip"
+        if any(pasta_trabalho.iterdir()):
+            criar_zip(pasta_trabalho, zip_interno_path, senha=None)
 
     finished_at = datetime.now()
 
@@ -281,13 +285,17 @@ def run_backup(trigger: str = "scheduled"):
 
     backup_id = post_report(conf, started_at, finished_at, resultados, trigger)
     if backup_id:
-        # Agrupa tudo em um único ZIP para o cliente inteiro (Master ZIP)
-        todos_arquivos = [f for f in TEMP_DIR.rglob("*") if f.is_file() and f.suffix != ".zip"]
+        todos_arquivos = [f for f in TEMP_DIR_FINAL.rglob("*") if f.is_file()]
         if todos_arquivos:
-            zip_path = criar_zip(TEMP_DIR, client_name, zip_password)
-            if zip_path:
-                logging.info(f"  Enviando pacote unico de backup: {zip_path.name}")
-                upload_zip(conf, backup_id, zip_path, device_type="NVR")
+            # Define o nome do ZIP global
+            data_str = datetime.now().strftime("%d_%m_%Y")
+            nome_zip_global = f"backup_{data_str}.zip"
 
-    shutil.rmtree(TEMP_DIR, ignore_errors=True)
+            zip_global_path = criar_zip(TEMP_DIR_FINAL, nome_zip_global, zip_password)
+            if zip_global_path:
+                logging.info(f"  Enviando pacote de backup global: {zip_global_path.name}")
+                upload_zip(conf, backup_id, zip_global_path, device_type="MIXED")
+
+    shutil.rmtree(TEMP_DIR_WORK, ignore_errors=True)
+    shutil.rmtree(TEMP_DIR_FINAL, ignore_errors=True)
     logging.info(f"\nBackup concluido em {(finished_at - started_at).total_seconds():.1f}s")

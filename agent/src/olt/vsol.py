@@ -351,7 +351,7 @@ def realizar_backup_vsol(equipamento: dict, pasta_destino: Path) -> dict:
         return {"nome": nome, "status": "ERRO", "cameras": None}
 
     # Diretório e Arquivo de Destino
-    pasta_eq = pasta_destino / nome.replace(" ", "_")
+    pasta_eq = pasta_destino
     pasta_eq.mkdir(parents=True, exist_ok=True)
 
     agora = datetime.datetime.now()

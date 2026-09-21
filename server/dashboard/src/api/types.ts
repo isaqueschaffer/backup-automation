@@ -1,4 +1,4 @@
-export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK";
+export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT";
 
 export interface NVR {
   id: string;

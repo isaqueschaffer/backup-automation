@@ -32,7 +32,7 @@ class FileManager:
         pasta_origem = Path(pasta_origem_str)
         
         # Garante pasta de destino para este equipamento
-        pasta_eq = pasta_destino / nome_safe
+        pasta_eq = pasta_destino
         pasta_eq.mkdir(parents=True, exist_ok=True)
 
         parser = self._get_parser(tipo_parser)
@@ -71,9 +71,11 @@ class FileManager:
             if is_huawei:
                 # OLT_HUAWEI_<NOME>_<DATA>_CONFIGURATION.txt
                 nome_destino = f"{prefixo}{nome_safe}_{grupo_recente.date.strftime('%Y%m%d_%H%M%S')}_{f.file_type}{f.path.suffix}"
+            elif f.file_type == "DIGIFORT_DIR":
+                nome_destino = f.path.name
             else:
-                # OLT_UNM2000_<NOME>_<DATA>.zip
-                nome_destino = f"{prefixo}{nome_safe}_{grupo_recente.date.strftime('%Y%m%d_%H%M%S')}{f.path.suffix}"
+                ext = f.path.suffix if f.path.is_file() else ""
+                nome_destino = f"{prefixo}{nome_safe}_{grupo_recente.date.strftime('%Y%m%d_%H%M%S')}{ext}"
                 
             caminho_destino = pasta_eq / nome_destino
             arquivos_para_copiar.append((f.path, caminho_destino))
