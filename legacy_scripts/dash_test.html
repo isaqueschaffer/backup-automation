@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OneDrive KPIs — Trilan NVR Backup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        /* ── Design Tokens (identical to project) ─────────────── */
+        :root {
+            --bg-base: #07070f;
+            --bg-surface: #0d0d1a;
+            --bg-elevated: #131324;
+            --bg-hover: #1a1a30;
+            --border: rgba(255, 255, 255, 0.06);
+            --border-accent: rgba(124, 58, 237, 0.4);
+
+            --accent: #7c3aed;
+            --accent-light: #9d6ef5;
+            --accent-glow: rgba(124, 58, 237, 0.25);
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.2);
+            --onedrive: #0078d4;
+            --onedrive-glow: rgba(0, 120, 212, 0.22);
+            --onedrive-bg: rgba(0, 120, 212, 0.1);
+
+            --ok: #10b981;
+            --ok-bg: rgba(16, 185, 129, 0.12);
+            --warn: #f59e0b;
+            --warn-bg: rgba(245, 158, 11, 0.12);
+            --err: #ef4444;
+            --err-bg: rgba(239, 68, 68, 0.12);
+
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #475569;
+
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+            --transition: 0.2s ease;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+            padding: 32px;
+        }
+
+        /* ── Page Header ──────────────────────────────────────── */
+        .page-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 28px;
+        }
+
+        .page-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .page-subtitle {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        /* ── Status pill ──────────────────────────────────────── */
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 14px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+        }
+
+        .status-pill.ok {
+            background: var(--ok-bg);
+            color: var(--ok);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .status-pill.warn {
+            background: var(--warn-bg);
+            color: var(--warn);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+        }
+
+        .status-pill.err {
+            background: var(--err-bg);
+            color: var(--err);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .dot.pulse {
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 0 0 currentColor;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+            }
+
+            70% {
+                box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+            }
+        }
+
+        /* ── Stat Cards ───────────────────────────────────────── */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 22px 20px;
+            position: relative;
+            overflow: hidden;
+            transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+            cursor: default;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            transition: opacity var(--transition);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .stat-card:hover::before {
+            opacity: 1;
+        }
+
+        .stat-card.blue {
+            box-shadow: 0 0 0 0 var(--onedrive-glow);
+        }
+
+        .stat-card.blue:hover {
+            box-shadow: 0 0 24px var(--onedrive-glow);
+            border-color: rgba(0, 120, 212, 0.4);
+        }
+
+        .stat-card.blue::before {
+            background: radial-gradient(circle at top right, rgba(0, 120, 212, 0.08), transparent 60%);
+        }
+
+        .stat-card.cyan:hover {
+            box-shadow: 0 0 24px var(--cyan-glow);
+            border-color: rgba(6, 182, 212, 0.4);
+        }
+
+        .stat-card.cyan::before {
+            background: radial-gradient(circle at top right, rgba(6, 182, 212, 0.08), transparent 60%);
+        }
+
+        .stat-card.green:hover {
+            box-shadow: 0 0 24px rgba(16, 185, 129, 0.2);
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .stat-card.green::before {
+            background: radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 60%);
+        }
+
+        .stat-card.purple:hover {
+            box-shadow: 0 0 24px var(--accent-glow);
+            border-color: rgba(124, 58, 237, 0.4);
+        }
+
+        .stat-card.purple::before {
+            background: radial-gradient(circle at top right, rgba(124, 58, 237, 0.08), transparent 60%);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+
+        .stat-value.blue {
+            color: var(--onedrive);
+        }
+
+        .stat-value.cyan {
+            color: var(--cyan);
+        }
+
+        .stat-value.green {
+            color: var(--ok);
+        }
+
+        .stat-value.purple {
+            color: var(--accent-light);
+        }
+
+        .stat-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .stat-icon {
+            position: absolute;
+            top: 18px;
+            right: 18px;
+            opacity: 0.15;
+        }
+
+        /* ── OneDrive logo SVG icon inline ─────────────────── */
+        .od-icon {
+            width: 28px;
+            height: 28px;
+        }
+
+        /* ── Section title ─────────────────────────────────── */
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 3px;
+            height: 14px;
+            background: var(--onedrive);
+            border-radius: 2px;
+        }
+
+        /* ── Quota card ────────────────────────────────────── */
+        .quota-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 22px 24px;
+            margin-bottom: 24px;
+            transition: box-shadow var(--transition);
+        }
+
+        .quota-card:hover {
+            box-shadow: 0 0 24px var(--onedrive-glow);
+            border-color: rgba(0, 120, 212, 0.3);
+        }
+
+        .quota-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 14px;
+        }
+
+        .quota-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .quota-nums {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .quota-nums span {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .progress-track {
+            height: 8px;
+            background: var(--bg-hover);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 99px;
+            background: linear-gradient(90deg, var(--onedrive), #2196f3);
+            transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 32px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
+            border-radius: 99px;
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            0% {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+
+            50% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateX(10px);
+            }
+        }
+
+        .quota-footer {
+            margin-top: 10px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* ── Table ─────────────────────────────────────────── */
+        .table-wrap {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead tr {
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            padding: 10px 16px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            white-space: nowrap;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid var(--border);
+            transition: background var(--transition);
+        }
+
+        tbody tr:last-child {
+            border-bottom: none;
+        }
+
+        tbody tr:hover {
+            background: var(--bg-hover);
+        }
+
+        td {
+            padding: 12px 16px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            vertical-align: middle;
+        }
+
+        td.bold {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* ── Badge ─────────────────────────────────────────── */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge.ok {
+            background: var(--ok-bg);
+            color: var(--ok);
+        }
+
+        .badge.warn {
+            background: var(--warn-bg);
+            color: var(--warn);
+        }
+
+        .badge.err {
+            background: var(--err-bg);
+            color: var(--err);
+        }
+
+        .badge.info {
+            background: var(--onedrive-bg);
+            color: var(--onedrive);
+        }
+
+        /* ── rclone status card ─────────────────────────────── */
+        .rclone-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+            transition: box-shadow var(--transition);
+        }
+
+        .rclone-card:hover {
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.12);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .rclone-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .rclone-terminal {
+            background: var(--bg-base);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 12px;
+            color: var(--ok);
+            flex: 1;
+            min-width: 280px;
+        }
+
+        .rclone-terminal .prompt {
+            color: var(--text-muted);
+        }
+
+        .rclone-terminal .cmd {
+            color: var(--cyan);
+        }
+
+        .rclone-terminal .arg {
+            color: var(--accent-light);
+        }
+
+        .rclone-terminal .output {
+            color: var(--ok);
+            margin-top: 4px;
+        }
+
+        .rclone-info {
+            font-size: 13px;
+        }
+
+        .rclone-info .rclone-label {
+            color: var(--text-muted);
+            font-size: 11px;
+            margin-bottom: 2px;
+        }
+
+        .rclone-info .rclone-val {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        /* ── Divider ───────────────────────────────────────── */
+        .divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 28px 0;
+        }
+
+        /* ── Fade-in animation ─────────────────────────────── */
+        .fade-in {
+            opacity: 0;
+            transform: translateY(12px);
+            animation: fadeIn 0.5s ease forwards;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        .fade-in:nth-child(1) {
+            animation-delay: 0.05s;
+        }
+
+        .fade-in:nth-child(2) {
+            animation-delay: 0.10s;
+        }
+
+        .fade-in:nth-child(3) {
+            animation-delay: 0.15s;
+        }
+
+        .fade-in:nth-child(4) {
+            animation-delay: 0.20s;
+        }
+
+        .fade-in:nth-child(5) {
+            animation-delay: 0.25s;
+        }
+
+        .fade-in:nth-child(6) {
+            animation-delay: 0.30s;
+        }
+
+        .fade-in:nth-child(7) {
+            animation-delay: 0.35s;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ── Page Header ──────────────────────────────────── -->
+    <div class="page-header fade-in">
+        <div>
+            <h1 class="page-title">
+                Visão Geral
+            </h1>
+            <p class="page-subtitle">Status em tempo real de todos os clientes</p>
+        </div>
+        <div class="status-pill ok">
+            <span class="dot pulse"></span>
+            Sincronizado
+        </div>
+    </div>
+
+    <!-- ── KPI Stat Cards ────────────────────────────────── -->
+    <div class="stats-grid">
+        <div class="stat-card purple fade-in">
+            <div class="stat-label">Clientes Totais</div>
+            <div class="stat-value purple">2</div>
+            <div class="stat-sub">clientes cadastrados</div>
+            <svg class="stat-icon" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="var(--accent-light)"
+                stroke-width="1.5">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke-linecap="round" stroke-linejoin="round" />
+                <circle cx="9" cy="7" r="4" stroke="var(--accent-light)" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+        </div>
+
+        <div class="stat-card cyan fade-in">
+            <div class="stat-label">Ativos</div>
+            <div class="stat-value cyan">2</div>
+            <div class="stat-sub">clientes com backup ativo</div>
+            <svg class="stat-icon" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="var(--cyan)"
+                stroke-width="1.5">
+                <circle cx="12" cy="12" r="9" stroke="var(--cyan)" />
+                <path d="M9 12l2 2 4-4" stroke="var(--cyan)" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+        </div>
+
+        <div class="stat-card blue fade-in">
+            <div class="stat-label">Status da Sync</div>
+            <div class="stat-value blue" style="font-size:20px;margin-top:6px;">✅ OK</div>
+            <div class="stat-sub" style="margin-top:6px;">Última execução bem-sucedida</div>
+        </div>
+
+        <div class="stat-card cyan fade-in">
+            <div class="stat-label">Última Sincronização</div>
+            <div class="stat-value cyan" style="font-size:22px;margin-top:4px;">02:17</div>
+            <div class="stat-sub">Hoje, 14/08/2026</div>
+            <svg class="stat-icon" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                stroke-width="1.5" color="var(--cyan)">
+                <circle cx="12" cy="12" r="9" stroke="var(--cyan)" />
+                <path d="M12 7v5l3 3" stroke="var(--cyan)" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+        </div>
+
+        <div class="stat-card green fade-in">
+            <div class="stat-label">Arquivos Enviados Hoje</div>
+            <div class="stat-value green">21</div>
+            <div class="stat-sub">arquivos .zip / .bin / .xls</div>
+            <svg class="stat-icon" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="var(--ok)"
+                stroke-width="1.5">
+                <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round" />
+                <polyline points="16 12 12 8 8 12" stroke="var(--ok)" stroke-linecap="round" stroke-linejoin="round" />
+                <line x1="12" y1="8" x2="12" y2="20" stroke="var(--ok)" stroke-linecap="round" />
+            </svg>
+        </div>
+
+        <div class="stat-card purple fade-in">
+            <div class="stat-label">Total Transferido Hoje</div>
+            <div class="stat-value purple">1.4 GB</div>
+            <div class="stat-sub">em 3m 42s</div>
+            <svg class="stat-icon" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="var(--accent-light)"
+                stroke-width="1.5">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <path d="M8 21h8M12 17v4" stroke-linecap="round" />
+            </svg>
+        </div>
+
+        <div class="stat-card green fade-in">
+            <div class="stat-label">Backups OK Mensal</div>
+            <div class="stat-value green">28</div>
+            <div class="stat-sub">de 31 dias — Ago/2026</div>
+            <svg class="stat-icon" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="var(--ok)"
+                stroke-width="1.5">
+                <rect x="3" y="4" width="18" height="18" rx="2" stroke="var(--ok)" />
+                <path d="M3 9h18" stroke="var(--ok)" stroke-linecap="round" />
+                <path d="M8 2v4M16 2v4" stroke="var(--ok)" stroke-linecap="round" />
+                <path d="M8 14l2.5 2.5L16 11" stroke="var(--ok)" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+        </div>
+    </div>
+
+    <!-- ── Quota / Espaço ─────────────────────────────────── -->
+    <div class="section-title fade-in">Quota OneDrive</div>
+    <div class="quota-card fade-in">
+        <div class="quota-header">
+            <div>
+                <div class="quota-title">Espaço utilizado na conta</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Conta: backup@trilan.com.br</div>
+            </div>
+            <div class="quota-nums"><span>34.7 GB</span> de 100 GB</div>
+        </div>
+        <div class="progress-track">
+            <div class="progress-fill" style="width: 34.7%"></div>
+        </div>
+        <div class="quota-footer">
+            <span>34.7 GB usados</span>
+            <span style="color:var(--ok);">65.3 GB livres</span>
+            <span>34,7% utilizado</span>
+        </div>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ── Últimos uploads ─────────────────────────────────── -->
+    <div class="section-title fade-in">Últimos Uploads</div>
+    <div class="table-wrap fade-in">
+        <table>
+            <thead>
+                <tr>
+                    <th>Arquivo</th>
+                    <th>Cliente</th>
+                    <th>Tamanho</th>
+                    <th>Enviado em</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="bold">BACKUP_GEORGINA_14-08-2026.zip</td>
+                    <td>Georgina</td>
+                    <td>18.4 MB</td>
+                    <td>02:17 — hoje</td>
+                    <td><span class="badge ok">✔ Sincronizado</span></td>
+                </tr>
+                <tr>
+                    <td class="bold">BACKUP_GEORGINA_13-08-2026.zip</td>
+                    <td>Georgina</td>
+                    <td>17.9 MB</td>
+                    <td>02:14 — ontem</td>
+                    <td><span class="badge ok">✔ Sincronizado</span></td>
+                </tr>
+                <tr>
+                    <td class="bold">BACKUP_GEORGINA_12-08-2026.zip</td>
+                    <td>Georgina</td>
+                    <td>18.1 MB</td>
+                    <td>02:18 — 12/08</td>
+                    <td><span class="badge ok">✔ Sincronizado</span></td>
+                </tr>
+                <tr>
+                    <td class="bold">BACKUP_GEORGINA_11-08-2026.zip</td>
+                    <td>Georgina</td>
+                    <td>17.6 MB</td>
+                    <td>02:21 — 11/08</td>
+                    <td><span class="badge warn">⚠ Parcial</span></td>
+                </tr>
+                <tr>
+                    <td class="bold">BACKUP_GEORGINA_10-08-2026.zip</td>
+                    <td>Georgina</td>
+                    <td>—</td>
+                    <td>02:05 — 10/08</td>
+                    <td><span class="badge err">✕ Falhou</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ── rclone status ───────────────────────────────────── -->
+    <div class="section-title fade-in">Comando rclone Ativo</div>
+    <div class="rclone-card fade-in">
+        <div class="rclone-left">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+                <rect width="36" height="36" rx="10" fill="rgba(16,185,129,0.12)" />
+                <text x="18" y="24" text-anchor="middle" font-size="18" fill="#10b981">$</text>
+            </svg>
+            <div class="rclone-terminal">
+                <div>
+                    <span class="prompt">server@trilan:~$ </span>
+                    <span class="cmd">rclone copy</span>
+                    <span class="arg"> /BKP_NVR onedrive:Backups_NVR</span>
+                </div>
+                <div class="output">✔ Transferred: 1.4G / 1.4G, 100%, 6.2 Mbps</div>
+                <div class="output">✔ Checks: 21 / 21, 100%</div>
+            </div>
+        </div>
+        <div style="display:flex;gap:32px;flex-wrap:wrap;">
+            <div class="rclone-info">
+                <div class="rclone-label">Versão rclone</div>
+                <div class="rclone-val">v1.67.0</div>
+            </div>
+            <div class="rclone-info">
+                <div class="rclone-label">Velocidade média</div>
+                <div class="rclone-val">6.2 Mbps</div>
+            </div>
+            <div class="rclone-info">
+                <div class="rclone-label">Duração</div>
+                <div class="rclone-val">3m 42s</div>
+            </div>
+            <div class="rclone-info">
+                <div class="rclone-label">Remote</div>
+                <div class="rclone-val" style="color:var(--onedrive)">onedrive:Backups_NVR</div>
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>

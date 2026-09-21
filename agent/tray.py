@@ -1,4 +1,4 @@
-﻿"""
+"""
 Trilan NVR Backup Agent — System Tray App
 Run with: pythonw tray.py
 """
@@ -17,7 +17,8 @@ from pystray import MenuItem as item
 
 DIRETORIO = Path(__file__).resolve().parent
 SERVICO = "TrilanAgentNVR"
-ARQUIVO_LOG = DIRETORIO / "logs" / "servico.log"
+PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
+ARQUIVO_LOG = PASTA_LOG / "servico.log"
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
 

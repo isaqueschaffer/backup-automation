@@ -44,7 +44,7 @@ begin
   ConfigPage.Add('Client ID:', False);
   ConfigPage.Add('API Key:', False);
 
-  ConfigPage.Values[0] := 'http://';
+  ConfigPage.Values[0] := 'http://hd208ec5kxz.sn.mynetname.net:7001';
   ConfigPage.Values[1] := '';
   ConfigPage.Values[2] := '';
 end;
