@@ -25,8 +25,12 @@ class BackupFile:
     
     @property
     def size_bytes(self) -> int:
-        if self.path.exists():
+        if not self.path.exists():
+            return 0
+        if self.path.is_file():
             return self.path.stat().st_size
+        if self.path.is_dir():
+            return sum(f.stat().st_size for f in self.path.rglob('*') if f.is_file())
         return 0
 
 @dataclass

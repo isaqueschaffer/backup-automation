@@ -23,38 +23,43 @@ class SafeCopier:
     def copy_file(self, origem: Path, destino: Path) -> Tuple[bool, BackupStatus]:
         """
         Copia de forma segura:
-        1. Copia para destino.tmp
-        2. Verifica integridade (tamanho e opcionalmente SHA256)
+        1. Copia para destino.tmp (ou zipa para destino.tmp se for diretório)
+        2. Verifica integridade (tamanho e opcionalmente SHA256) - apenas para arquivos
         3. Renomeia para destino
         """
         destino_tmp = destino.with_suffix(destino.suffix + ".tmp")
         
         try:
             # 1. Copia para o temporário
-            logging.debug(f"    Copiando {origem.name} -> {destino_tmp.name}...")
-            shutil.copy2(origem, destino_tmp)
+            if origem.is_dir():
+                logging.debug(f"    Copiando diretório {origem.name} -> {destino_tmp.name}...")
+                shutil.copytree(origem, destino_tmp, dirs_exist_ok=True)
+            else:
+                logging.debug(f"    Copiando {origem.name} -> {destino_tmp.name}...")
+                shutil.copy2(origem, destino_tmp)
             
             # 2. Valida Tamanho
-            tamanho_origem = origem.stat().st_size
-            tamanho_tmp = destino_tmp.stat().st_size
-            
-            if tamanho_origem != tamanho_tmp:
-                logging.error(f"    Tamanho divergente após cópia de {origem.name}")
-                if destino_tmp.exists():
-                    destino_tmp.unlink()
-                return False, BackupStatus.CORROMPIDO
+            if origem.is_file():
+                tamanho_origem = origem.stat().st_size
+                tamanho_tmp = destino_tmp.stat().st_size
                 
-            # Valida Hash
-            if self.check_hash:
-                logging.debug(f"    Calculando SHA-256 para {origem.name}...")
-                hash_origem = calculate_sha256(origem)
-                hash_tmp = calculate_sha256(destino_tmp)
-                
-                if hash_origem != hash_tmp:
-                    logging.error(f"    SHA-256 divergente após cópia de {origem.name}")
+                if tamanho_origem != tamanho_tmp:
+                    logging.error(f"    Tamanho divergente após cópia de {origem.name}")
                     if destino_tmp.exists():
                         destino_tmp.unlink()
                     return False, BackupStatus.CORROMPIDO
+                    
+                # Valida Hash
+                if self.check_hash:
+                    logging.debug(f"    Calculando SHA-256 para {origem.name}...")
+                    hash_origem = calculate_sha256(origem)
+                    hash_tmp = calculate_sha256(destino_tmp)
+                    
+                    if hash_origem != hash_tmp:
+                        logging.error(f"    SHA-256 divergente após cópia de {origem.name}")
+                        if destino_tmp.exists():
+                            destino_tmp.unlink()
+                        return False, BackupStatus.CORROMPIDO
 
             # 3. Renomeia para o arquivo final
             if destino.exists():

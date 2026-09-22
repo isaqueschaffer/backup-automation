@@ -74,7 +74,8 @@ def download_backup_zip(backup_id: UUID, db: Session = Depends(get_db)):
     if not b.zip_filename:
         raise HTTPException(status_code=404, detail="ZIP nao disponivel para este backup")
 
-    path = get_zip_path(b.client_id, b.client.name, b.zip_filename)
+    date_str = (b.started_at or b.created_at).strftime("%d-%m-%Y")
+    path = get_zip_path(b.client_id, b.client.name, b.zip_filename, date_str=date_str)
     if not path:
         from pathlib import Path
         from config import settings
@@ -101,7 +102,8 @@ def public_download_backup_zip(backup_id: UUID, db: Session = Depends(get_db)):
     if not b.zip_filename:
         raise HTTPException(status_code=404, detail="ZIP nao disponivel para este backup")
 
-    path = get_zip_path(b.client_id, b.client.name, b.zip_filename)
+    date_str = (b.started_at or b.created_at).strftime("%d-%m-%Y")
+    path = get_zip_path(b.client_id, b.client.name, b.zip_filename, date_str=date_str)
     if not path:
         raise HTTPException(status_code=404, detail="Arquivo ZIP nao encontrado no servidor.")
 

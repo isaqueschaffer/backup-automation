@@ -45,6 +45,15 @@ def parse_backup_date(data_str: str) -> datetime:
         except ValueError:
             pass
 
+    # Tenta padrão Digifort (ex: 20260921)
+    padrao_digifort = r'^(\d{8})$'
+    res_digifort = re.match(padrao_digifort, data_str)
+    if res_digifort:
+        try:
+            return datetime.strptime(data_str, "%Y%m%d")
+        except ValueError:
+            pass
+
     return None
 
 def get_agent_date() -> datetime:

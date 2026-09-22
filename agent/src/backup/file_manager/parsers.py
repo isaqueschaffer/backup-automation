@@ -14,7 +14,7 @@ class BaseParser:
 class UNM2000Parser(BaseParser):
     def find_backups(self, pasta_origem: Path) -> List[BackupGroup]:
         """
-        Encontra backups do UNM2000. Formato comum: YYYYMMDD_HHMMSS
+        Encontra backups do UNM2000 (YYYYMMDD_HHMMSS) e Digifort (diretórios YYYYMMDD).
         """
         extensoes_aceitas = {".zip", ".tar", ".gz", ".7z"}
         grupos = []
@@ -24,6 +24,18 @@ class UNM2000Parser(BaseParser):
             return grupos
 
         for arquivo in pasta_origem.iterdir():
+            if arquivo.is_dir():
+                # Verifica formato Digifort (YYYYMMDD)
+                match = re.match(r'^(\d{8})$', arquivo.name)
+                if match:
+                    data_str = match.group(1)
+                    data_obj = parse_backup_date(data_str)
+                    if data_obj:
+                        bf = BackupFile(path=arquivo, file_type="DIGIFORT_DIR")
+                        bg = BackupGroup(date=data_obj, files=[bf], group_id=data_str)
+                        grupos.append(bg)
+                continue
+
             if not arquivo.is_file():
                 continue
             if arquivo.suffix.lower() not in extensoes_aceitas:
