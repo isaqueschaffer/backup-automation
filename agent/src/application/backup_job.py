@@ -147,7 +147,14 @@ def processar_olt(
             pasta_data
         )
 
-    if fabricante in ("unm", "unm2000", "huawei"):
+    if fabricante == "huawei":
+        from src.olt.huawei_active import realizar_backup_huawei_ativo
+        return realizar_backup_huawei_ativo(
+            equipamento,
+            pasta_data
+        )
+
+    if fabricante in ("unm", "unm2000"):
         return realizar_backup_olt(
             equipamento,
             pasta_data
