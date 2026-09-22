@@ -88,31 +88,22 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         if str(DIRETORIO) not in sys.path:
             sys.path.insert(0, str(DIRETORIO))
 
-        import configparser
-        import requests
+        from src.core.config import load_conf
+        from src.application.api_client import fetch_server_config
 
-        conf_file = DIRETORIO / "agent.conf"
-        log(f"Lendo configuracoes de: {conf_file}")
-        if not conf_file.exists():
-            log(f"ERRO FATAL: Arquivo de configuracao {conf_file} nao encontrado!", is_error=True)
+        log(f"Lendo configuracoes de: {DIRETORIO / 'agent.conf'}")
+        try:
+            conf = load_conf()
+        except SystemExit as e:
+            log(str(e), is_error=True)
             return
 
-        cfg = configparser.ConfigParser()
-        cfg.read(conf_file, encoding="utf-8-sig")
-        server_url = cfg["server"]["url"].rstrip("/")
-        client_id = cfg["auth"]["client_id"]
-        api_key = cfg["auth"]["api_key"]
+        log(f"Servidor configurado: {conf['server_url']}")
+        log(f"Client ID: {conf['client_id']}")
 
-        log(f"Servidor configurado: {server_url}")
-        log(f"Client ID: {client_id}")
-
-        headers = {"X-Client-ID": client_id, "X-API-Key": api_key}
-        log(f"Testando comunicacao com o servidor: {server_url}/api/v1/agent/config ...")
+        log(f"Testando comunicacao com o servidor: {conf['server_url']}/api/v1/agent/config ...")
         try:
-            r = requests.get(f"{server_url}/api/v1/agent/config", headers=headers,
-                             timeout=30, verify=False)
-            r.raise_for_status()
-            server_cfg = r.json()
+            server_cfg = fetch_server_config(conf)
             hora = int(server_cfg.get("backup_hour", 2))
             minuto = int(server_cfg.get("backup_minute", 0))
             log("COMUNICACAO BEM SUCEDIDA! Configuracoes do servidor recebidas.")
@@ -121,7 +112,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             log("Usando horario padrao 02:00 para o proximo backup.")
             hora, minuto = 2, 0
 
-        self._run_loop(hora, minuto, server_url, headers)
+        headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+        self._run_loop(hora, minuto, conf["server_url"], headers)
 
     def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict):
         import agent as agent_mod

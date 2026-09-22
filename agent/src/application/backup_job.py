@@ -1,5 +1,7 @@
+import json
 import logging
 import shutil
+import sys
 import requests
 from datetime import datetime
 from pathlib import Path
@@ -31,7 +33,6 @@ def setup_logging():
         fh = logging.FileHandler(log_dir / "agent.log", encoding="utf-8")
         fh.setFormatter(fmt)
         logger.addHandler(fh)
-        import sys
         if sys.stdout is not None:
             ch = logging.StreamHandler(sys.stdout)
             ch.setFormatter(logging.Formatter("%(message)s"))
@@ -96,7 +97,7 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
 
             status = "OK" if sucessos == 2 else "PARCIAL"
         except Exception:
-            logging.info("  API ISAPI falhou. Backup de arquivos pulado.")
+            logging.warning("  API ISAPI falhou. Backup de arquivos pulado.", exc_info=True)
             status = "PARCIAL"
 
     return {"nome": nome, "status": status, "cameras": cameras_status}
@@ -112,7 +113,6 @@ def processar_olt(
     config_extra = equipamento.get("config_extra") or {}
     if isinstance(config_extra, str):
         try:
-            import json
             config_extra = json.loads(config_extra)
         except Exception:
             config_extra = {}
@@ -221,7 +221,9 @@ def run_backup(trigger: str = "scheduled"):
 
     # Aceita tanto o campo novo (equipamentos) quanto o legado (nvrs)
     equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
-    zip_password = server_cfg.get("zip_password") or "Tr1l@n133"
+    zip_password = server_cfg.get("zip_password")
+    if not zip_password:
+        logging.warning("AVISO DE SEGURANCA: zip_password nao configurado no servidor para este cliente. O ZIP sera criado sem senha.")
     client_name = server_cfg["client_name"]
 
     if not equipamentos:

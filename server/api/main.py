@@ -8,6 +8,7 @@ from database import Base, engine, get_db
 from models import Client, Backup
 from schemas import StatsResponse
 from auth import verify_admin_token
+from config import settings
 from routers import auth_router, clients, nvrs, backups, agent, settings_router, equipamentos
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -54,9 +55,11 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()] or ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
