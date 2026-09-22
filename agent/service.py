@@ -113,11 +113,11 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             hora, minuto = 2, 0
 
         headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
-        self._run_loop(hora, minuto, conf["server_url"], headers)
+        self._run_loop(hora, minuto, conf["server_url"], headers, conf)
 
-    def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict):
+    def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict, conf: dict):
         import agent as agent_mod
-        import requests
+        from src.application.api_client import ping_server
         import time
 
         last_ping_time = 0
@@ -135,13 +135,10 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 # Envia ping a cada 5 minutos (300 segundos) para manter status "Online"
                 if time.time() - last_ping_time >= 300:
                     try:
-                        ping_resp = requests.post(
-                            f"{server_url}/api/v1/agent/ping",
-                            headers=headers, timeout=10, verify=False,
-                        )
+                        ping_resp = ping_server(conf)
                         last_ping_time = time.time()
                         # Verifica se o servidor solicitou reinicio
-                        if ping_resp.ok and ping_resp.json().get("restart"):
+                        if ping_resp and ping_resp.get("restart"):
                             log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
                             # Spawna processo detached: aguarda o servico parar (3s) e reinicia
                             import subprocess
