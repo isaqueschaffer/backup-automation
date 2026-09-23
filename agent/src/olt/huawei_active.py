@@ -70,7 +70,8 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         porta = equipamento.get("porta") or equipamento.get("port") or 22
         porta = int(porta)
         logging.info(f"[HUAWEI] Conectando via SSH em {ip}:{porta}...")
-        # Para forçar o Paramiko a usar ssh-rsa antigo, precisamos desabilitar os sha2 novos
+        # 'keys' desabilita os algoritmos SHA2 para a host key do SERVIDOR,
+        # forçando o fallback para ssh-rsa legado da Huawei MA5800
         ssh.connect(
             ip, 
             port=porta, 
@@ -79,7 +80,7 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
             timeout=20, 
             look_for_keys=False, 
             allow_agent=False,
-            disabled_algorithms={'pubkeys': ['rsa-sha2-512', 'rsa-sha2-256']}
+            disabled_algorithms={'keys': ['rsa-sha2-512', 'rsa-sha2-256']}
         )
         
         # Iniciar shell interativo porque a Huawei precisa do enable e scroll manual
