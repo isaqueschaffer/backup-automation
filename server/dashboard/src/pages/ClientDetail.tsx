@@ -205,8 +205,8 @@ export default function ClientDetail() {
       return;
     }
 
-    if (eqForm.tipo === "OLT" && eqForm.fabricante_olt === "VSOL" && (!eqForm.pasta_origem || !eqForm.username || !eqForm.password)) {
-      toast("Para VSOL, preencha IP, usuário e senha.", "error");
+    if (eqForm.tipo === "OLT" && (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") && (!eqForm.ip || !eqForm.username || !eqForm.password)) {
+      toast(`Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.`, "error");
       return;
     }
 
@@ -221,7 +221,7 @@ export default function ClientDetail() {
         tipo: eqForm.tipo,
         name: eqForm.name,
         ip: (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") ? eqForm.ip : (
-          eqForm.fabricante_olt === "VSOL" ? eqForm.pasta_origem : eqForm.ip
+          (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") ? eqForm.ip : eqForm.pasta_origem
         ),
         username: eqForm.username,
         password: eqForm.password,
@@ -496,7 +496,7 @@ export default function ClientDetail() {
 
               <div className="form-group">
                 <label className="form-label">
-                  {eqForm.fabricante_olt === "VSOL"
+                  {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI")
                     ? "Endereço IP da OLT *"
                     : "Pasta de Origem dos Backups *"}
                 </label>
@@ -505,20 +505,25 @@ export default function ClientDetail() {
                   className="form-input"
                   type="text"
                   placeholder={
-                    eqForm.fabricante_olt === "VSOL"
+                    (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI")
                       ? "192.168.1.100"
                       : "C:\\Users\\Helena\\Documents"
                   }
-                  value={eqForm.pasta_origem}
-                  onChange={e =>
-                    setEqForm({
-                      ...eqForm,
-                      pasta_origem: e.target.value
-                    })
+                  value={
+                    (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") 
+                      ? eqForm.ip 
+                      : eqForm.pasta_origem
                   }
+                  onChange={e => {
+                    if (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") {
+                      setEqForm({ ...eqForm, ip: e.target.value })
+                    } else {
+                      setEqForm({ ...eqForm, pasta_origem: e.target.value })
+                    }
+                  }}
                 />
 
-                {eqForm.fabricante_olt === "VSOL" && (
+                {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") && (
                   <div
                     style={{
                       display: "grid",
@@ -573,9 +578,9 @@ export default function ClientDetail() {
                     display: "block"
                   }}
                 >
-                  {(eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI")
+                  {(eqForm.fabricante_olt === "UNM2000")
                     ? `Pasta onde o ${eqForm.fabricante_olt} exporta os arquivos de backup.`
-                    : "Endereço IP, usuário e senha utilizados para acessar a VSOL."
+                    : "Endereço IP, usuário e senha utilizados para acessar a OLT via SSH."
                   }
                 </span>
               </div>
