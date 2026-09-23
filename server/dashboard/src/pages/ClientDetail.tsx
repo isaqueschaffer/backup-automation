@@ -191,59 +191,95 @@ export default function ClientDetail() {
   useEffect(() => { load(); }, [id]);
 
   const handleAddEquipamento = async () => {
-    if (!eqForm.name) { toast("Preencha o nome do equipamento.", "error"); return; }
-    if ((eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") && (!eqForm.ip || !eqForm.username || !eqForm.password)) {
-      toast(`Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.`, "error"); return;
-    }
-    if (eqForm.tipo === "OLT" && !eqForm.fabricante_olt) {
-      toast("Selecione o sistema da OLT.", "error");
+    // 1. Validação básica de nome
+    if (!eqForm.name.trim()) {
+      toast("Preencha o nome do equipamento.", "error");
       return;
     }
 
-    if (eqForm.tipo === "OLT" && eqForm.fabricante_olt === "UNM2000" && !eqForm.pasta_origem) {
-      toast(`Para ${eqForm.fabricante_olt}, informe a pasta de origem dos backups.`, "error");
-      return;
+    // 2. Construção do Payload - base estruturada
+    const payload: any = {
+      tipo: eqForm.tipo,
+      name: eqForm.name.trim(),
+      ip: "",
+      username: "",
+      password: "",
+      config_extra: null,
+    };
+
+    // 3. Validação e extração de campos por TIPO
+    if (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") {
+      if (!eqForm.ip || !eqForm.username || !eqForm.password) {
+        toast(`Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.`, "error");
+        return;
+      }
+      payload.ip = eqForm.ip.trim();
+      payload.username = eqForm.username.trim();
+      payload.password = eqForm.password;
+
+    } else if (eqForm.tipo === "DIGIFORT") {
+      if (!eqForm.pasta_origem) {
+        toast("Para DIGIFORT, informe a pasta de origem.", "error");
+        return;
+      }
+      payload.ip = eqForm.pasta_origem.trim(); // O schema de dados usa a coluna IP para guardar a pasta
+      payload.username = "digifort"; // Bypass no schema que exige usuário
+      payload.password = "digifort"; // Bypass no schema que exige senha
+      payload.config_extra = { pasta_origem: eqForm.pasta_origem.trim() };
+
+    } else if (eqForm.tipo === "OLT") {
+      if (!eqForm.fabricante_olt) {
+        toast("Selecione o sistema da OLT.", "error");
+        return;
+      }
+      
+      payload.config_extra = { fabricante_olt: eqForm.fabricante_olt };
+
+      if (eqForm.fabricante_olt === "UNM2000") {
+        if (!eqForm.pasta_origem) {
+          toast("Para UNM2000, informe a pasta de origem dos backups.", "error");
+          return;
+        }
+        payload.ip = eqForm.pasta_origem.trim(); // O schema de dados usa IP
+        payload.username = "unm2000";
+        payload.password = "unm2000";
+        payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
+
+      } else if (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") {
+        if (!eqForm.ip || !eqForm.username || !eqForm.password) {
+          toast(`Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.`, "error");
+          return;
+        }
+        payload.ip = eqForm.ip.trim();
+        payload.username = eqForm.username.trim();
+        payload.password = eqForm.password;
+      }
     }
 
-    if (eqForm.tipo === "OLT" && (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") && (!eqForm.ip || !eqForm.username || !eqForm.password)) {
-      toast(`Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.`, "error");
-      return;
-    }
-
-    if (eqForm.tipo === "DIGIFORT" && !eqForm.pasta_origem) {
-      toast("Para DIGIFORT, informe a pasta de origem.", "error");
-      return;
-    }
-
+    // 4. Envio para o Backend
     setSaving(true);
     try {
-      await createEquipamento(id!, {
-        tipo: eqForm.tipo,
-        name: eqForm.name,
-        ip: (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") ? eqForm.ip : (
-          (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") ? eqForm.ip : eqForm.pasta_origem
-        ),
-        username: eqForm.username,
-        password: eqForm.password,
-        config_extra: eqForm.tipo === "DIGIFORT"
-          ? { pasta_origem: eqForm.pasta_origem }
-          : (eqForm.tipo === "OLT"
-            ? {
-              ...(eqForm.fabricante_olt === "UNM2000"
-                ? { pasta_origem: eqForm.pasta_origem }
-                : {}),
-              fabricante_olt: eqForm.fabricante_olt
-            }
-            : null),
-      });
-
+      await createEquipamento(id!, payload);
+      
       toast("Equipamento adicionado!", "success");
       setShowEqModal(false);
-      setEqForm({ tipo: "NVR", name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
+      
+      // Resetar form state
+      setEqForm({
+        tipo: "NVR",
+        name: "",
+        ip: "",
+        username: "",
+        password: "",
+        pasta_origem: "",
+        fabricante_olt: "UNM2000"
+      });
       load();
+    } catch { 
+      toast("Erro ao adicionar equipamento.", "error"); 
+    } finally { 
+      setSaving(false); 
     }
-    catch { toast("Erro ao adicionar equipamento.", "error"); }
-    finally { setSaving(false); }
   };
 
   const handleDeleteEquipamento = async (eqId: string, name: string) => {
