@@ -13,6 +13,19 @@ FTP_PORT = 2121
 FTP_USER = "trilan"
 FTP_PASS = "backup123"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CORREÇÃO CRÍTICA: Paramiko 3.x/5.x removeu 'ssh-rsa' dos algoritmos padrão.
+# OLTs Huawei (MA5800, etc.) antigas APENAS suportam 'ssh-rsa'.
+# Injetamos 'ssh-rsa' de volta na lista preferida GLOBALMENTE, uma vez,
+# antes de qualquer conexão. É seguro pois só afeta este processo.
+# ─────────────────────────────────────────────────────────────────────────────
+if "ssh-rsa" not in paramiko.Transport._preferred_keys:
+    paramiko.Transport._preferred_keys = ("ssh-rsa",) + paramiko.Transport._preferred_keys
+
+if "ssh-rsa" not in paramiko.Transport._preferred_pubkeys:
+    paramiko.Transport._preferred_pubkeys = ("ssh-rsa",) + paramiko.Transport._preferred_pubkeys
+
+
 def get_local_ip(target_ip: str) -> str:
     """Descobre qual IP local desta maquina tem rota para o IP da OLT."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -51,7 +64,6 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
     handler.authorizer = authorizer
     handler.banner = "Trilan Agent Temp FTP Ready."
     
-    # Tentaremos bindar em 0.0.0.0
     try:
         server = FTPServer(("0.0.0.0", FTP_PORT), handler)
         server.max_cons = 5
@@ -70,17 +82,14 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         porta = equipamento.get("porta") or equipamento.get("port") or 22
         porta = int(porta)
         logging.info(f"[HUAWEI] Conectando via SSH em {ip}:{porta}...")
-        # 'keys' desabilita os algoritmos SHA2 para a host key do SERVIDOR,
-        # forçando o fallback para ssh-rsa legado da Huawei MA5800
         ssh.connect(
-            ip, 
-            port=porta, 
-            username=username, 
-            password=password, 
-            timeout=20, 
-            look_for_keys=False, 
+            ip,
+            port=porta,
+            username=username,
+            password=password,
+            timeout=20,
+            look_for_keys=False,
             allow_agent=False,
-            disabled_algorithms={'keys': ['rsa-sha2-512', 'rsa-sha2-256']}
         )
         
         # Iniciar shell interativo porque a Huawei precisa do enable e scroll manual
@@ -107,7 +116,7 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         wait_prompt("#")
         
         # Desabilitar paginacao para o output nao travar com "--More--"
-        shell.send("undo smart\n") # 'undo smart' is more reliable on modern huawei
+        shell.send("undo smart\n")
         time.sleep(1)
         if shell.recv_ready():
             shell.recv(4096)
