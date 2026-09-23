@@ -116,10 +116,10 @@ async def upload_backup_zip(
         raise HTTPException(status_code=404, detail="Backup record not found")
 
     clean_device_type = device_type.strip().upper()
-    if clean_device_type not in TIPOS_EQUIPAMENTO:
+    if clean_device_type not in TIPOS_EQUIPAMENTO and clean_device_type != "MIXED":
         raise HTTPException(
             status_code=400,
-            detail=f"Tipo de equipamento inválido: '{clean_device_type}'. Tipos permitidos: {TIPOS_EQUIPAMENTO}",
+            detail=f"Tipo de equipamento inválido: '{clean_device_type}'. Tipos permitidos: {TIPOS_EQUIPAMENTO} ou MIXED",
         )
 
     date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
