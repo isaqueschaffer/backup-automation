@@ -358,6 +358,9 @@ export default function ClientDetail() {
             title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
             <RotateCcw size={15} /> Reiniciar Agent
           </button>
+          <button className="btn btn-primary" onClick={() => toast("Esse é o teste", "success")}>
+            Botão de Teste Dokploy
+          </button>
         </div>
       </div>
 
