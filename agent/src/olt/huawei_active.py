@@ -14,16 +14,21 @@ FTP_USER = "trilan"
 FTP_PASS = "backup123"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CORREÇÃO CRÍTICA: Paramiko 3.x/5.x removeu 'ssh-rsa' dos algoritmos padrão.
+# CORREÇÃO CRÍTICA: Paramiko 5.x removeu 'ssh-rsa' completamente:
+#   1) Da lista de algoritmos preferidos (_preferred_keys / _preferred_pubkeys)
+#   2) Do registro interno de handlers (_key_info)
 # OLTs Huawei (MA5800, etc.) antigas APENAS suportam 'ssh-rsa'.
-# Injetamos 'ssh-rsa' de volta na lista preferida GLOBALMENTE, uma vez,
-# antes de qualquer conexão. É seguro pois só afeta este processo.
+# Restauramos tudo de volta para que a conexão funcione.
 # ─────────────────────────────────────────────────────────────────────────────
 if "ssh-rsa" not in paramiko.Transport._preferred_keys:
     paramiko.Transport._preferred_keys = ("ssh-rsa",) + paramiko.Transport._preferred_keys
 
 if "ssh-rsa" not in paramiko.Transport._preferred_pubkeys:
     paramiko.Transport._preferred_pubkeys = ("ssh-rsa",) + paramiko.Transport._preferred_pubkeys
+
+# Registrar o handler RSAKey para 'ssh-rsa' no mapa interno de verificação
+if "ssh-rsa" not in paramiko.Transport._key_info:
+    paramiko.Transport._key_info["ssh-rsa"] = paramiko.RSAKey
 
 
 def get_local_ip(target_ip: str) -> str:
