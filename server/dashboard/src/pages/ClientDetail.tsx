@@ -200,7 +200,7 @@ export default function ClientDetail() {
       return;
     }
 
-    if (eqForm.tipo === "OLT" && (eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI") && !eqForm.pasta_origem) {
+    if (eqForm.tipo === "OLT" && eqForm.fabricante_olt === "UNM2000" && !eqForm.pasta_origem) {
       toast(`Para ${eqForm.fabricante_olt}, informe a pasta de origem dos backups.`, "error");
       return;
     }
@@ -229,7 +229,7 @@ export default function ClientDetail() {
           ? { pasta_origem: eqForm.pasta_origem }
           : (eqForm.tipo === "OLT"
             ? {
-              ...((eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI")
+              ...(eqForm.fabricante_olt === "UNM2000"
                 ? { pasta_origem: eqForm.pasta_origem }
                 : {}),
               fabricante_olt: eqForm.fabricante_olt
