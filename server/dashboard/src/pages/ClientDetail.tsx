@@ -246,8 +246,8 @@ export default function ClientDetail() {
         payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
 
       } else if (eqForm.fabricante_olt === "HUAWEI") {
-        if (!eqForm.ip || !eqForm.username || !eqForm.password || !eqForm.pasta_origem) {
-          toast(`Para HUAWEI, preencha IP, usuário, senha e pasta de origem dos backups.`, "error");
+        if (!eqForm.ip || !eqForm.username || !eqForm.password) {
+          toast(`Para HUAWEI, preencha IP, usuário e senha.`, "error");
           return;
         }
         payload.ip = eqForm.ip.trim();
