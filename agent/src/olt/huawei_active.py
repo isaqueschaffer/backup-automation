@@ -120,8 +120,8 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
             shell.send("y\n")
             
         # Aguardar sucesso ou falha (ignora o '#' porque a OLT cospe logs assincronos)
-        out = wait_prompt(["successful", "success", "failed", "failure"], timeout=60)
-        if "successful" in out.lower() or "success" in out.lower():
+        out = wait_prompt(["is successful", "failed"], timeout=60)
+        if "is successful" in out.lower() or "success" in out.lower():
             logging.info(f"[HUAWEI] Backup de configuracao reportou sucesso.")
         else:
             logging.warning(f"[HUAWEI] OLT nao reportou sucesso claro no backup de configuracao.")
@@ -137,7 +137,7 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
             shell.send("y\n")
             
         # Aguardar sucesso ou falha
-        out = wait_prompt(["successful", "success", "failed", "failure"], timeout=120)
+        out = wait_prompt(["is successful", "failed"], timeout=120)
         
         # ── COPIAR ARQUIVOS DO WFTPD PARA A PASTA DE DESTINO ─────────────
         cfg_source = pasta_origem_path / cfg_filename
