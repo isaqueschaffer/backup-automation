@@ -9,7 +9,7 @@ from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 # A porta que o agente vai usar temporariamente para subir o FTP
-FTP_PORT = 21
+FTP_PORT = 2121
 FTP_USER = "trilan"
 FTP_PASS = "backup123"
 
@@ -136,7 +136,7 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         # ── 4. BACKUP CONFIGURATION ─────────────────────────────────────
         cfg_filename = f"hw_config_{nome.lower()}.txt"
         logging.info(f"[HUAWEI] Enviando comando: backup configuration -> FTP {local_ip}:{FTP_PORT}")
-        shell.send(f"backup configuration ftp {local_ip} {cfg_filename} {FTP_USER} {FTP_PASS}\n")
+        shell.send(f"backup configuration ftp {local_ip} {FTP_PORT} {cfg_filename} {FTP_USER} {FTP_PASS}\n")
         
         out = wait_prompt("#", timeout=60)
         if "successfully" in out.lower() or "success" in out.lower():
@@ -147,7 +147,7 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         # ── 5. BACKUP DATA ───────────────────────────────────────────────
         data_filename = f"hw_data_{nome.lower()}.dat"
         logging.info(f"[HUAWEI] Enviando comando: backup data -> FTP {local_ip}:{FTP_PORT}")
-        shell.send(f"backup data ftp {local_ip} {data_filename} {FTP_USER} {FTP_PASS}\n")
+        shell.send(f"backup data ftp {local_ip} {FTP_PORT} {data_filename} {FTP_USER} {FTP_PASS}\n")
         
         out = wait_prompt("#", timeout=120)
         
