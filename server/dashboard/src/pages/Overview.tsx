@@ -14,6 +14,7 @@ function fmtSchedule(h: number, m: number) {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 }
 
+// Gatilho para build (Docploy)
 export default function Overview() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
