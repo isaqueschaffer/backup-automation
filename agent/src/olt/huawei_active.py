@@ -2,10 +2,16 @@ import os
 import time
 import socket
 import logging
-import shutil
+import threading
 from pathlib import Path
 from datetime import datetime
 import paramiko
+from pyftpdlib.authorizers import DummyAuthorizer
+from pyftpdlib.handlers import FTPHandler
+from pyftpdlib.servers import FTPServer
+
+# Usaremos a porta 21 padrao, agora que o WFTPD sera desinstalado
+FTP_PORT = 21
 
 
 def get_local_ip(target_ip: str) -> str:
@@ -21,18 +27,22 @@ def get_local_ip(target_ip: str) -> str:
     return ip
 
 
+def run_ftp_server(server: FTPServer):
+    """Roda o servidor FTP em uma thread separada."""
+    logging.info(f"[HUAWEI] Servidor FTP efemero iniciado em {server.address}")
+    server.serve_forever()
+
+
 def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict:
     """
-    Realiza backup ativo de uma OLT Huawei (MA5800 e similares) via SSH
-    usando o servidor FTP (WFTPD) ja existente na porta 21 da maquina.
+    Realiza backup ativo de uma OLT Huawei (MA5800 e similares) via SSH.
+    Como a OLT Huawei e engessada (nao permite porta customizada e as vezes falha com user/pass),
+    subimos um FTP efemero na porta 21 com acesso anonimo habilitado para escrita.
     """
     ip = equipamento.get("ip")
     username = equipamento.get("username")
     password = equipamento.get("password")
     nome = equipamento.get("name", "Huawei").replace(" ", "_")
-    
-    config_extra = equipamento.get("config_extra") or {}
-    pasta_origem = config_extra.get("pasta_origem")
     
     res = {"nome": nome, "status": "ERRO", "cameras": None}
     
@@ -40,17 +50,30 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         logging.error(f"[HUAWEI] {nome} — Faltam credenciais (ip/usuario/senha). Abortando.")
         return res
         
-    if not pasta_origem:
-        logging.error(f"[HUAWEI] {nome} — Pasta de origem (WFTPD) nao configurada. Configure no painel.")
-        return res
-        
-    pasta_origem_path = Path(pasta_origem)
-    if not pasta_origem_path.exists() or not pasta_origem_path.is_dir():
-        logging.error(f"[HUAWEI] A pasta do WFTPD informada nao existe ou e invalida: {pasta_origem}")
-        return res
-
     local_ip = get_local_ip(ip)
     logging.info(f"[HUAWEI] IP local detectado para rota ate {ip}: {local_ip}")
+    
+    # ── SUBIR SERVIDOR FTP TEMPORÁRIO (Porta 21, Anônimo) ────────────────
+    logging.info(f"[HUAWEI] Iniciando servidor FTP temporario na porta {FTP_PORT}...")
+    authorizer = DummyAuthorizer()
+    # Adiciona acesso anonimo com permissao de escrita na pasta destino
+    authorizer.add_anonymous(str(pasta_destino), perm="elradfmwMT")
+    
+    handler = FTPHandler
+    handler.authorizer = authorizer
+    handler.banner = "Trilan Agent Temp FTP Ready."
+    
+    try:
+        server = FTPServer(("0.0.0.0", FTP_PORT), handler)
+        server.max_cons = 5
+        server.max_cons_per_ip = 5
+    except Exception as e:
+        logging.error(f"[HUAWEI] FALHA ao subir FTP na porta {FTP_PORT}: {e}")
+        logging.error(f"[HUAWEI] Verifique se o WFTPD foi realmente desinstalado ou parado (porta 21 ocupada).")
+        return res
+        
+    ftp_thread = threading.Thread(target=run_ftp_server, args=(server,), daemon=True)
+    ftp_thread.start()
     
     # ── CONECTAR VIA SSH NA OLT ───────────────────────────────────────
     ssh = paramiko.SSHClient()
@@ -65,7 +88,7 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         porta = int(porta)
         logging.info(f"[HUAWEI] Conectando via SSH em {ip}:{porta} (usuario: {username})...")
         
-        # OLTs Huawei antigas (MA5800 etc.) usam apenas o algoritmo ssh-rsa (SHA-1).
+        # OLTs Huawei antigas usam apenas o algoritmo ssh-rsa (SHA-1).
         ssh.connect(
             ip,
             port=porta,
@@ -139,42 +162,24 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         # Aguardar sucesso ou falha
         out = wait_prompt(["is successful", "failed"], timeout=120)
         
-        # ── COPIAR ARQUIVOS DO WFTPD PARA A PASTA DE DESTINO ─────────────
-        cfg_source = pasta_origem_path / cfg_filename
-        data_source = pasta_origem_path / data_filename
-        
-        cfg_dest = pasta_destino / cfg_filename
-        data_dest = pasta_destino / data_filename
-        
-        # Dar um tempo para o disco/SO terminar de escrever
-        time.sleep(2)
+        # ── VERIFICAR ARQUIVOS RECEBIDOS NO FTP EFÊMERO ─────────────
+        cfg_path = pasta_destino / cfg_filename
+        data_path = pasta_destino / data_filename
         
         arquivos_recebidos = []
-        if cfg_source.exists():
-            shutil.copy2(cfg_source, cfg_dest)
-            arquivos_recebidos.append(f"{cfg_filename} ({cfg_dest.stat().st_size} bytes)")
-            # Tenta apagar da pasta de origem do wftpd
-            try:
-                os.remove(cfg_source)
-            except Exception:
-                pass
-                
-        if data_source.exists():
-            shutil.copy2(data_source, data_dest)
-            arquivos_recebidos.append(f"{data_filename} ({data_dest.stat().st_size} bytes)")
-            try:
-                os.remove(data_source)
-            except Exception:
-                pass
+        if cfg_path.exists():
+            arquivos_recebidos.append(f"{cfg_filename} ({cfg_path.stat().st_size} bytes)")
+        if data_path.exists():
+            arquivos_recebidos.append(f"{data_filename} ({data_path.stat().st_size} bytes)")
         
         if arquivos_recebidos:
-            logging.info(f"[HUAWEI] Arquivos copiados com sucesso do WFTPD:")
+            logging.info(f"[HUAWEI] Arquivos recebidos com sucesso via FTP temporario:")
             for arq in arquivos_recebidos:
                 logging.info(f"[HUAWEI]   -> {arq}")
             res["status"] = "OK"
         else:
-            logging.error(f"[HUAWEI] FALHA — Arquivos nao encontrados na pasta do WFTPD: {pasta_origem}")
-            logging.error(f"[HUAWEI] O arquivo {cfg_filename} deveria ter chegado la.")
+            logging.error(f"[HUAWEI] FALHA — Nenhum arquivo foi recebido no FTP temporario.")
+            logging.error(f"[HUAWEI] Verifique se a OLT consegue alcançar {local_ip}:21")
             
     except paramiko.ssh_exception.AuthenticationException as e:
         logging.error(f"[HUAWEI] FALHA DE AUTENTICACAO em {ip}:{porta} — Usuario ou senha incorretos.")
@@ -191,5 +196,7 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
             ssh.close()
         except Exception:
             pass
+        logging.info("[HUAWEI] Desligando servidor FTP temporario...")
+        server.close_all()
             
     return res

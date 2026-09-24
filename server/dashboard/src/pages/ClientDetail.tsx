@@ -569,19 +569,6 @@ export default function ClientDetail() {
                 />
               </div>
 
-              {eqForm.fabricante_olt === "HUAWEI" && (
-                <div className="form-group">
-                  <label className="form-label">Pasta local do WFTPD (Origem dos Backups) *</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    placeholder="C:\FTP\Backup\Huawei"
-                    value={eqForm.pasta_origem}
-                    onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })}
-                  />
-                </div>
-              )}
-
               {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") && (
                 <div
                   style={{
