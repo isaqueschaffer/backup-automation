@@ -642,7 +642,6 @@ export default function ClientDetail() {
                     : "Endereço IP, usuário e senha utilizados para acessar a OLT via SSH."
                   }
                 </span>
-              </div>
             </>
           )}
           {eqForm.tipo === "DIGIFORT" && (
