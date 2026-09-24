@@ -245,9 +245,18 @@ export default function ClientDetail() {
         payload.password = "unm2000";
         payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
 
-      } else if (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") {
+      } else if (eqForm.fabricante_olt === "HUAWEI") {
+        if (!eqForm.ip || !eqForm.username || !eqForm.password || !eqForm.pasta_origem) {
+          toast(`Para HUAWEI, preencha IP, usuário, senha e pasta de origem dos backups.`, "error");
+          return;
+        }
+        payload.ip = eqForm.ip.trim();
+        payload.username = eqForm.username.trim();
+        payload.password = eqForm.password;
+        payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
+      } else if (eqForm.fabricante_olt === "VSOL") {
         if (!eqForm.ip || !eqForm.username || !eqForm.password) {
-          toast(`Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.`, "error");
+          toast(`Para VSOL, preencha IP, usuário e senha.`, "error");
           return;
         }
         payload.ip = eqForm.ip.trim();
@@ -558,17 +567,31 @@ export default function ClientDetail() {
                     }
                   }}
                 />
+              </div>
 
-                {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") && (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: 12,
-                      marginTop: 12
-                    }}
-                  >
-                    <div className="form-group" style={{ margin: 0 }}>
+              {eqForm.fabricante_olt === "HUAWEI" && (
+                <div className="form-group">
+                  <label className="form-label">Pasta local do WFTPD (Origem dos Backups) *</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    placeholder="C:\FTP\Backup\Huawei"
+                    value={eqForm.pasta_origem}
+                    onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })}
+                  />
+                </div>
+              )}
+
+              {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") && (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 12,
+                    marginTop: 12
+                  }}
+                >
+                  <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label">
                         Usuário *
                       </label>
