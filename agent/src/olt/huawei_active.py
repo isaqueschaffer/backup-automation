@@ -9,7 +9,7 @@ from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 # A porta que o agente vai usar temporariamente para subir o FTP
-FTP_PORT = 2121
+FTP_PORT = 21
 FTP_USER = "trilan"
 FTP_PASS = "backup123"
 
