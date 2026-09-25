@@ -254,7 +254,7 @@ def run_backup(trigger: str = "scheduled"):
     TEMP_DIR_WORK.mkdir(parents=True)
     TEMP_DIR_FINAL.mkdir(parents=True)
 
-    started_at = datetime.now()
+    started_at = datetime.utcnow()
     resultados = []
 
     for eq in equipamentos:
@@ -279,7 +279,7 @@ def run_backup(trigger: str = "scheduled"):
         if any(pasta_trabalho.iterdir()):
             criar_zip(pasta_trabalho, zip_interno_path, senha=None)
 
-    finished_at = datetime.now()
+    finished_at = datetime.utcnow()
 
     for r in resultados:
         icone = {
