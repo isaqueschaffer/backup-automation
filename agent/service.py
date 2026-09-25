@@ -137,6 +137,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                     try:
                         ping_resp = ping_server(conf)
                         last_ping_time = time.time()
+                        log("Ping enviado ao servidor com sucesso.")
+                        
                         # Verifica se o servidor solicitou reinicio
                         if ping_resp and ping_resp.get("restart"):
                             log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
@@ -153,8 +155,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                         if ping_resp and ping_resp.get("backup"):
                             log("Geracao de backup manual solicitada pelo dashboard!")
                             self._executar_backup(agent_mod, "manual_dashboard")
-                    except Exception:
-                        pass  # Ignora falha no ping para nao travar o loop
+                    except Exception as e:
+                        log(f"Falha ao enviar ping para o servidor: {e}", is_error=True)
                 
                 segundos = (proximo - agora).total_seconds()
                 if segundos <= 0:
