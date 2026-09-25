@@ -34,9 +34,6 @@ export default function Overview() {
           <p className="page-subtitle">Status em tempo real de todos os clientes</p>
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={() => alert("Docploy deploy atualizado com sucesso (Validacao OLT)!")}>
-            Teste Docploy
-          </button>
           <button className="btn btn-primary" onClick={() => navigate("/clients")}>
             <Users size={15} /> Gerenciar Clientes
           </button>
