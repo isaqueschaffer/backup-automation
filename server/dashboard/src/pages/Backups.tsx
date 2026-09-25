@@ -21,7 +21,8 @@ async function extractBlobError(err: unknown): Promise<string> {
 
 function fmtDate(s: string | null) {
   if (!s) return "—";
-  return new Date(s).toLocaleString("pt-BR");
+  const str = s.endsWith("Z") ? s : s + "Z";
+  return new Date(str).toLocaleString("pt-BR");
 }
 
 function fmtSize(n: number | null) {

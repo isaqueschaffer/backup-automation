@@ -7,7 +7,8 @@ import { Users, CheckCircle, AlertCircle, Archive, Clock } from "lucide-react";
 
 function fmtDate(s: string | null) {
   if (!s) return "Nunca";
-  return new Date(s).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const str = s.endsWith("Z") ? s : s + "Z";
+  return new Date(str).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function fmtSchedule(h: number, m: number) {

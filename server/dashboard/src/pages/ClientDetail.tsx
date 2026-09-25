@@ -16,7 +16,8 @@ import {
 
 function fmtDate(s: string | null) {
   if (!s) return "—";
-  return new Date(s).toLocaleString("pt-BR");
+  const str = s.endsWith("Z") ? s : s + "Z";
+  return new Date(str).toLocaleString("pt-BR");
 }
 
 function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate: string | null }) {
@@ -301,7 +302,7 @@ const buildEqPayload = () => {
   };
 
   const isAgentOnline = client && client.active &&
-    (client.last_seen && new Date().getTime() - new Date(client.last_seen).getTime() < 15 * 60 * 1000);
+    (client.last_seen && new Date().getTime() - new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime() < 15 * 60 * 1000);
 
   const copyText = (t: string) => { navigator.clipboard.writeText(t); toast("Copiado!", "success"); };
 
