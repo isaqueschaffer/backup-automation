@@ -68,6 +68,7 @@ def ping_agent(client: Client = Depends(get_current_client), db: Session = Depen
         client.backup_requested = False   # Consume the flag
 
     db.commit()
+    print(f"[PING] Recebido de {client.name} (ID: {client.id}). Instruções pendentes: restart={should_restart}, backup={should_backup}")
     return PingResponse(status="ok", restart=should_restart, backup=should_backup)
 
 
