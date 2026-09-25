@@ -57,13 +57,18 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
 
 @router.post("/ping", response_model=PingResponse)
 def ping_agent(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
-    """Agent heartbeat to mark it as online. Returns restart flag if requested."""
+    """Agent heartbeat to mark it as online. Returns restart/backup flags if requested."""
     client.last_seen = datetime.utcnow()
     should_restart = bool(client.restart_requested)
+    should_backup = bool(client.backup_requested)
+    
     if should_restart:
         client.restart_requested = False  # Consume the flag — restart only once
+    if should_backup:
+        client.backup_requested = False   # Consume the flag
+
     db.commit()
-    return PingResponse(status="ok", restart=should_restart)
+    return PingResponse(status="ok", restart=should_restart, backup=should_backup)
 
 
 @router.post("/backup/report", response_model=BackupReportResponse, status_code=201)

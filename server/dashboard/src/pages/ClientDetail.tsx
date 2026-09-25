@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   fetchEquipamentos, createEquipamento, updateEquipamento, deleteEquipamento, updateClient,
-  rotateKey, fetchBackups, restartAgent
+  rotateKey, fetchBackups, restartAgent, triggerBackup
 } from "../api/client";
 import { Client, NVR, Backup, TipoEquipamento } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
@@ -11,7 +11,7 @@ import { useToast } from "../components/Toast";
 import {
   ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
-  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network
+  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning
 } from "lucide-react";
 
 function fmtDate(s: string | null) {
@@ -301,6 +301,14 @@ const buildEqPayload = () => {
     } catch { toast("Erro ao solicitar reinício.", "error"); }
   };
 
+  const handleTriggerBackup = async () => {
+    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (até 5 min).")) return;
+    try {
+      await triggerBackup(id!);
+      toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
+    } catch { toast("Erro ao solicitar backup.", "error"); }
+  };
+
   const isAgentOnline = client && client.active &&
     (client.last_seen && new Date().getTime() - new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime() < 15 * 60 * 1000);
 
@@ -334,6 +342,10 @@ const buildEqPayload = () => {
           </button>
           <button className="btn btn-secondary" onClick={handleRotateKey}>
             <RefreshCw size={15} /> Rodar API Key
+          </button>
+          <button className="btn btn-secondary" onClick={handleTriggerBackup}
+            title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
+            <CloudLightning size={15} /> Gerar Backup
           </button>
           <button className="btn btn-secondary" onClick={handleRestartAgent}
             title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>

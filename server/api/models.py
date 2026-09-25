@@ -26,6 +26,7 @@ class Client(Base):
     last_backup_status = Column(String(20), nullable=True)  # OK, PARTIAL, ERROR
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     restart_requested = Column(Boolean, default=False, nullable=False)
+    backup_requested = Column(Boolean, default=False, nullable=False)
 
     nvrs = relationship("NVR", back_populates="client", cascade="all, delete-orphan")
     equipamentos = relationship("NVR", back_populates="client", cascade="all, delete-orphan", overlaps="nvrs")

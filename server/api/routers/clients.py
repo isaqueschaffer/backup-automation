@@ -104,6 +104,15 @@ def rotate_api_key(client_id: UUID, db: Session = Depends(get_db)):
     return ClientWithKey.model_validate(client)
 
 
+@router.post("/{client_id}/trigger-backup", dependencies=[Depends(verify_admin_token)])
+def trigger_backup(client_id: UUID, db: Session = Depends(get_db)):
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    client.backup_requested = True
+    db.commit()
+    return {"status": "ok", "message": "Backup solicitado via dashboard"}
+
 @router.post("/{client_id}/restart-agent", dependencies=[Depends(verify_admin_token)])
 def request_agent_restart(client_id: UUID, db: Session = Depends(get_db)):
     """Signal the Windows agent to restart on next ping."""

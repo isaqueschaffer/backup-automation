@@ -46,6 +46,8 @@ export const rotateKey = (id: string) =>
   api.post(`/clients/${id}/rotate-key`).then((r) => r.data);
 export const restartAgent = (id: string) =>
   api.post(`/clients/${id}/restart-agent`).then((r) => r.data);
+export const triggerBackup = (id: string) =>
+  api.post(`/clients/${id}/trigger-backup`).then((r) => r.data);
 
 // ── Equipamentos (novo endpoint genérico) ────────────────────
 export const fetchEquipamentos = (clientId: string) =>

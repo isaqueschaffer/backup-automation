@@ -150,6 +150,9 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                             self.stop_requested = True
                             win32event.SetEvent(self.hWaitStop)
                             return
+                        if ping_resp and ping_resp.get("backup"):
+                            log("Geracao de backup manual solicitada pelo dashboard!")
+                            self._executar_backup(agent_mod, "manual_dashboard")
                     except Exception:
                         pass  # Ignora falha no ping para nao travar o loop
                 

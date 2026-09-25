@@ -33,6 +33,9 @@ try:
             
         if 'restart_requested' not in colunas_existentes:
             conn.execute(text("ALTER TABLE clients ADD COLUMN restart_requested BOOLEAN NOT NULL DEFAULT FALSE;"))
+
+        if 'backup_requested' not in colunas_existentes:
+            conn.execute(text("ALTER TABLE clients ADD COLUMN backup_requested BOOLEAN NOT NULL DEFAULT FALSE;"))
             
         if colunas_nvrs and 'last_recording_status' not in colunas_nvrs:
             conn.execute(text("ALTER TABLE nvrs ADD COLUMN last_recording_status JSON;"))

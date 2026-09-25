@@ -166,6 +166,7 @@ class AgentConfigResponse(BaseModel):
 class PingResponse(BaseModel):
     status: str
     restart: bool = False
+    backup: bool = False
 
 
 # ─────────────────────────────────────────────
