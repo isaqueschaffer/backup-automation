@@ -137,8 +137,12 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                     try:
                         ping_resp = ping_server(conf)
                         last_ping_time = time.time()
-                        log("Ping enviado ao servidor com sucesso.")
                         
+                        if ping_resp:
+                            log(f"Ping recebido pelo servidor. Instrucoes: {ping_resp}")
+                        else:
+                            log("Ping enviado, mas resposta vazia.")
+                            
                         # Verifica se o servidor solicitou reinicio
                         if ping_resp and ping_resp.get("restart"):
                             log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
