@@ -255,8 +255,9 @@ const buildEqPayload = () => {
 
   const handleToggleEquipamento = async (eq: NVR) => {
     try {
-      await updateEquipamento(id!, eq.id, { active: !eq.active });
-      toast(eq.active ? "Equipamento pausado." : "Equipamento retomado.", "success");
+      const isCurrentlyActive = eq.active !== false; // true if true or undefined
+      await updateEquipamento(id!, eq.id, { active: !isCurrentlyActive });
+      toast(isCurrentlyActive ? "Equipamento pausado." : "Equipamento retomado.", "success");
       load();
     } catch { toast("Erro ao alterar estado.", "error"); }
   };
