@@ -33,6 +33,22 @@ def run_ftp_server(server: FTPServer):
     server.serve_forever()
 
 
+class HuaweiAuthorizer(DummyAuthorizer):
+    """
+    Authorizer customizado que aceita QUALQUER usuario e senha.
+    A OLT Huawei frequentemente usa credenciais globais obscuras (ex: user '1').
+    """
+    def __init__(self, dest_dir: str):
+        super().__init__()
+        self.dest_dir = dest_dir
+        
+    def validate_authentication(self, username, password, handler):
+        # Se o usuario nao existe na tabela ainda, adiciona com a senha fornecida
+        if username not in self.user_table:
+            self.add_user(username, password, self.dest_dir, perm="elradfmwMT")
+        return super().validate_authentication(username, password, handler)
+
+
 def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict:
     """
     Realiza backup ativo de uma OLT Huawei (MA5800 e similares) via SSH.
@@ -53,10 +69,10 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
     local_ip = get_local_ip(ip)
     logging.info(f"[HUAWEI] IP local detectado para rota ate {ip}: {local_ip}")
     
-    # ── SUBIR SERVIDOR FTP TEMPORÁRIO (Porta 21, Anônimo) ────────────────
+    # ── SUBIR SERVIDOR FTP TEMPORÁRIO (Porta 21) ────────────────
     logging.info(f"[HUAWEI] Iniciando servidor FTP temporario na porta {FTP_PORT}...")
-    authorizer = DummyAuthorizer()
-    # Adiciona acesso anonimo com permissao de escrita na pasta destino
+    authorizer = HuaweiAuthorizer(str(pasta_destino))
+    # Mantem o anonimo por precaucao
     authorizer.add_anonymous(str(pasta_destino), perm="elradfmwMT")
     
     handler = FTPHandler
