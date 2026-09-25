@@ -24,18 +24,15 @@ def fetch_server_config(conf: dict) -> dict:
         logging.error(f"Conteudo recebido: {r.text[:200]}")
         raise RuntimeError("Servidor retornou uma resposta invalida (provavelmente HTML em vez de JSON).") from e
 
-def ping_server(conf: dict) -> dict | None:
+def ping_server(conf: dict) -> dict:
     """Envia um ping para o servidor para manter o status online."""
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
-    try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/ping",
-            headers=headers, timeout=10, verify=False,
-        )
-        r.raise_for_status()
-        return r.json()
-    except Exception:
-        return None
+    r = requests.post(
+        f"{conf['server_url']}/api/v1/agent/ping",
+        headers=headers, timeout=10, verify=False,
+    )
+    r.raise_for_status()
+    return r.json()
 
 def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 resultados: list, trigger: str) -> str | None:
