@@ -69,6 +69,7 @@ def create_equipamento(client_id: UUID, body: NVRCreate, db: Session = Depends(g
         username=body.username,
         password=encrypt(body.password),
         config_extra=body.config_extra,
+        active=body.active,
     )
     db.add(equipamento)
     db.commit()

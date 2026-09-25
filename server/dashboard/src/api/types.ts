@@ -9,6 +9,7 @@ export interface NVR {
   username: string;
   config_extra?: Record<string, unknown> | null;
   last_recording_status?: any;
+  active: boolean;
 }
 
 // Alias semântico

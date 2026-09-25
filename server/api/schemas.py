@@ -16,6 +16,7 @@ class NVRBase(BaseModel):
     ip: str
     username: str
     config_extra: Optional[Dict[str, Any]] = None
+    active: bool = True
 
 
 class NVRCreate(NVRBase):
@@ -29,12 +30,14 @@ class NVRUpdate(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     config_extra: Optional[Dict[str, Any]] = None
+    active: Optional[bool] = None
 
 
 class NVRResponse(NVRBase):
     id: UUID
     client_id: UUID
     last_recording_status: Optional[Any] = None
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 

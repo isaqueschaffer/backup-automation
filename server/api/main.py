@@ -43,6 +43,12 @@ try:
 
         if colunas_nvrs and 'config_extra' not in colunas_nvrs:
             conn.execute(text("ALTER TABLE nvrs ADD COLUMN config_extra JSON;"))
+            
+        if colunas_nvrs and 'active' not in colunas_nvrs:
+            conn.execute(text("ALTER TABLE nvrs ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE;"))
+            
+        if colunas_nvrs and 'updated_at' not in colunas_nvrs:
+            conn.execute(text("ALTER TABLE nvrs ADD COLUMN updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();"))
 except Exception as e:
     print(f"Erro ao executar migrações de colunas: {e}")
 

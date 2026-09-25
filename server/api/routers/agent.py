@@ -37,7 +37,7 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
             password=decrypt(nvr.password),
             config_extra=nvr.config_extra,
         )
-        for nvr in client.nvrs
+        for nvr in client.nvrs if nvr.active
     ]
     zip_pw = decrypt(client.zip_password) if client.zip_password else None
     

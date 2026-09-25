@@ -49,6 +49,8 @@ class NVR(Base):
     password = Column(Text, nullable=False)  # Fernet-encrypted
     config_extra = Column(JSON, nullable=True)  # configurações específicas de cada tipo
     last_recording_status = Column(JSON, nullable=True)
+    active = Column(Boolean, default=True, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     client = relationship("Client", back_populates="nvrs", overlaps="equipamentos")
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  fetchEquipamentos, createEquipamento, deleteEquipamento, updateClient,
+  fetchEquipamentos, createEquipamento, updateEquipamento, deleteEquipamento, updateClient,
   rotateKey, fetchBackups, restartAgent
 } from "../api/client";
 import { Client, NVR, Backup, TipoEquipamento } from "../api/types";
@@ -80,10 +80,12 @@ function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
 }
 
 // ── Equipment card component ─────────────────────────────────────
-function EqCard({ eq, onDelete, onViewRecording }: {
+function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
   eq: NVR;
   onDelete: () => void;
   onViewRecording: () => void;
+  onEdit: () => void;
+  onToggleActive: () => void;
 }) {
   const getEqIcon = (tipo: string) => {
     const m: any = {
@@ -104,7 +106,7 @@ function EqCard({ eq, onDelete, onViewRecording }: {
       background: "var(--surface-2, rgba(255,255,255,0.03))",
       border: "1px solid var(--border)", borderRadius: "var(--radius)",
       padding: "16px 20px", display: "flex", alignItems: "center", gap: 16,
-      transition: "border-color 0.15s"
+      transition: "border-color 0.15s", opacity: eq.active === false ? 0.6 : 1
     }}
       onMouseEnter={e => (e.currentTarget.style.borderColor = color)}
       onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}
@@ -125,6 +127,11 @@ function EqCard({ eq, onDelete, onViewRecording }: {
           <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: `${color}18`, color, border: `1px solid ${color}30` }}>
             {eq.tipo}
           </span>
+          {eq.active === false && (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: `var(--warn-bg)`, color: "var(--warn)", border: `1px solid rgba(245,158,11,0.3)` }}>
+              PAUSADO
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12 }}>
           {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" ? (
@@ -148,7 +155,13 @@ function EqCard({ eq, onDelete, onViewRecording }: {
             <Video size={13} /> Gravações
           </button>
         )}
-        <button className="btn-icon" style={{ color: "var(--err)" }} onClick={onDelete}>
+        <button className="btn-icon" title={eq.active === false ? "Retomar Backup" : "Pausar Backup"} onClick={onToggleActive}>
+          {eq.active === false ? <RefreshCw size={14} /> : <div style={{width:14, height:14, borderLeft:'3px solid currentColor', borderRight:'3px solid currentColor'}}/>}
+        </button>
+        <button className="btn-icon" title="Editar" onClick={onEdit}>
+          <Edit2 size={14} />
+        </button>
+        <button className="btn-icon" style={{ color: "var(--err)" }} title="Remover" onClick={onDelete}>
           <Trash2 size={14} />
         </button>
       </div>
@@ -172,6 +185,7 @@ export default function ClientDetail() {
   const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: any[] }>({ show: false, nvrName: "", cameras: [] });
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState({ tipo: "NVR" as TipoEquipamento, name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
+  const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
 
@@ -190,105 +204,61 @@ export default function ClientDetail() {
   };
   useEffect(() => { load(); }, [id]);
 
-  const handleAddEquipamento = async () => {
-    // 1. Validação básica de nome
-    if (!eqForm.name.trim()) {
-      toast("Preencha o nome do equipamento.", "error");
-      return;
-    }
+const buildEqPayload = () => {
+    if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
+    const payload: any = { tipo: eqForm.tipo, name: eqForm.name.trim(), ip: "", username: "", password: "", config_extra: null };
 
-    // 2. Construção do Payload - base estruturada
-    const payload: any = {
-      tipo: eqForm.tipo,
-      name: eqForm.name.trim(),
-      ip: "",
-      username: "",
-      password: "",
-      config_extra: null,
-    };
-
-    // 3. Validação e extração de campos por TIPO
     if (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") {
-      if (!eqForm.ip || !eqForm.username || !eqForm.password) {
-        toast(`Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.`, "error");
-        return;
-      }
-      payload.ip = eqForm.ip.trim();
-      payload.username = eqForm.username.trim();
-      payload.password = eqForm.password;
-
+      if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.` };
+      payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
     } else if (eqForm.tipo === "DIGIFORT") {
-      if (!eqForm.pasta_origem) {
-        toast("Para DIGIFORT, informe a pasta de origem.", "error");
-        return;
-      }
-      payload.ip = eqForm.pasta_origem.trim(); // O schema de dados usa a coluna IP para guardar a pasta
-      payload.username = "digifort"; // Bypass no schema que exige usuário
-      payload.password = "digifort"; // Bypass no schema que exige senha
-      payload.config_extra = { pasta_origem: eqForm.pasta_origem.trim() };
-
+      if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
+      payload.ip = eqForm.pasta_origem.trim(); payload.username = "digifort"; payload.password = "digifort"; payload.config_extra = { pasta_origem: eqForm.pasta_origem.trim() };
     } else if (eqForm.tipo === "OLT") {
-      if (!eqForm.fabricante_olt) {
-        toast("Selecione o sistema da OLT.", "error");
-        return;
-      }
-      
+      if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
       payload.config_extra = { fabricante_olt: eqForm.fabricante_olt };
-
       if (eqForm.fabricante_olt === "UNM2000") {
-        if (!eqForm.pasta_origem) {
-          toast("Para UNM2000, informe a pasta de origem dos backups.", "error");
-          return;
-        }
-        payload.ip = eqForm.pasta_origem.trim(); // O schema de dados usa IP
-        payload.username = "unm2000";
-        payload.password = "unm2000";
-        payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
-
-      } else if (eqForm.fabricante_olt === "HUAWEI") {
-        if (!eqForm.ip || !eqForm.username || !eqForm.password) {
-          toast(`Para HUAWEI, preencha IP, usuário e senha.`, "error");
-          return;
-        }
-        payload.ip = eqForm.ip.trim();
-        payload.username = eqForm.username.trim();
-        payload.password = eqForm.password;
-        payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
-      } else if (eqForm.fabricante_olt === "VSOL") {
-        if (!eqForm.ip || !eqForm.username || !eqForm.password) {
-          toast(`Para VSOL, preencha IP, usuário e senha.`, "error");
-          return;
-        }
-        payload.ip = eqForm.ip.trim();
-        payload.username = eqForm.username.trim();
-        payload.password = eqForm.password;
+        if (!eqForm.pasta_origem) return { error: "Para UNM2000, informe a pasta de origem dos backups." };
+        payload.ip = eqForm.pasta_origem.trim(); payload.username = "unm2000"; payload.password = "unm2000"; payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
+      } else if (eqForm.fabricante_olt === "HUAWEI" || eqForm.fabricante_olt === "VSOL") {
+        if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.` };
+        payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
+        if (eqForm.fabricante_olt === "HUAWEI") payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
       }
     }
+    // Remove blank passwords in edit mode so backend ignores them
+    if (editingEqId && !payload.password) delete payload.password;
+    return { payload };
+  };
 
-    // 4. Envio para o Backend
+  const handleSaveEquipamento = async () => {
+    const { error, payload } = buildEqPayload();
+    if (error) { toast(error, "error"); return; }
+    
     setSaving(true);
     try {
-      await createEquipamento(id!, payload);
-      
-      toast("Equipamento adicionado!", "success");
+      if (editingEqId) {
+        await updateEquipamento(id!, editingEqId, payload);
+        toast("Equipamento atualizado!", "success");
+      } else {
+        await createEquipamento(id!, payload);
+        toast("Equipamento adicionado!", "success");
+      }
       setShowEqModal(false);
-      
-      // Resetar form state
-      setEqForm({
-        tipo: "NVR",
-        name: "",
-        ip: "",
-        username: "",
-        password: "",
-        pasta_origem: "",
-        fabricante_olt: "UNM2000"
-      });
+      setEqForm({ tipo: "NVR", name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
+      setEditingEqId(null);
       load();
-    } catch { 
-      toast("Erro ao adicionar equipamento.", "error"); 
-    } finally { 
-      setSaving(false); 
-    }
+    } catch { toast("Erro ao salvar equipamento.", "error"); }
+    finally { setSaving(false); }
+  };
+
+
+  const handleToggleEquipamento = async (eq: NVR) => {
+    try {
+      await updateEquipamento(id!, eq.id, { active: !eq.active });
+      toast(eq.active ? "Equipamento pausado." : "Equipamento retomado.", "success");
+      load();
+    } catch { toast("Erro ao alterar estado.", "error"); }
   };
 
   const handleDeleteEquipamento = async (eqId: string, name: string) => {
@@ -415,7 +385,7 @@ export default function ClientDetail() {
               {equipamentos.length}
             </span>
           </div>
-          <button className="btn btn-secondary" onClick={() => setShowEqModal(true)}>
+          <button className="btn btn-secondary" onClick={() => { setEditingEqId(null); setEqForm({ tipo: "NVR", name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" }); setShowEqModal(true); }}>
             <Plus size={14} /> Adicionar
           </button>
         </div>
@@ -431,6 +401,20 @@ export default function ClientDetail() {
               <EqCard key={eq.id} eq={eq}
                 onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
                 onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
+                onEdit={() => {
+                  setEditingEqId(eq.id);
+                  setEqForm({
+                    tipo: eq.tipo,
+                    name: eq.name,
+                    ip: eq.tipo === "DIGIFORT" || (eq.tipo === "OLT" && (eq.config_extra as any)?.fabricante_olt === "UNM2000") ? "" : eq.ip,
+                    username: eq.username,
+                    password: "", // do not fetch password
+                    pasta_origem: (eq.config_extra as any)?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
+                    fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000"
+                  });
+                  setShowEqModal(true);
+                }}
+                onToggleActive={() => handleToggleEquipamento(eq)}
               />
             ))}
           </div>
@@ -484,7 +468,7 @@ export default function ClientDetail() {
 
       {/* ── Modal: Adicionar Equipamento ── */}
       {showEqModal && (
-        <Modal title="Adicionar Equipamento" onClose={() => setShowEqModal(false)}>
+        <Modal title={editingEqId ? "Editar Equipamento" : "Adicionar Equipamento"} onClose={() => setShowEqModal(false)}>
           <div className="form-group">
             <label className="form-label">Tipo de Equipamento *</label>
             <select className="form-input" value={eqForm.tipo}
@@ -512,7 +496,7 @@ export default function ClientDetail() {
                     value={eqForm.username} onChange={e => setEqForm({ ...eqForm, username: e.target.value })} />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Senha *</label>
+                  <label className="form-label">Senha {editingEqId ? <span style={{fontWeight:400, color:'var(--text-muted)'}}>(vazio = manter atual)</span> : '*'}</label>
                   <input className="form-input" type="password"
                     value={eqForm.password} onChange={e => setEqForm({ ...eqForm, password: e.target.value })} />
                 </div>
@@ -641,8 +625,8 @@ export default function ClientDetail() {
           )}
           <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
             <button className="btn btn-secondary" onClick={() => setShowEqModal(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={handleAddEquipamento} disabled={saving}>
-              {saving ? <span className="spinner spinner-sm" /> : <><Plus size={15} /> Adicionar</>}
+            <button className="btn btn-primary" onClick={handleSaveEquipamento} disabled={saving}>
+              {saving ? <span className="spinner spinner-sm" /> : (editingEqId ? "Salvar" : <><Plus size={15} /> Adicionar</>)}
             </button>
           </div>
         </Modal>
