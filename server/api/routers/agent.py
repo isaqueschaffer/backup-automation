@@ -67,8 +67,19 @@ def ping_agent(client: Client = Depends(get_current_client), db: Session = Depen
     if should_backup:
         client.backup_requested = False   # Consume the flag
 
+    from models import AgentLog
+    log_msg = f"Ping recebido. Instruções pendentes: restart={should_restart}, backup={should_backup}"
+    db.add(AgentLog(client_id=client.id, event_type="ping", message=log_msg))
+    
+    # Limita o histórico a 50 logs por cliente para não inchar o banco
+    from sqlalchemy import select, func
+    count = db.query(func.count(AgentLog.id)).filter(AgentLog.client_id == client.id).scalar()
+    if count > 50:
+        logs_to_delete = db.query(AgentLog).filter(AgentLog.client_id == client.id).order_by(AgentLog.created_at.asc()).limit(count - 50)
+        for lg in logs_to_delete:
+            db.delete(lg)
+
     db.commit()
-    print(f"[PING] Recebido de {client.name} (ID: {client.id}). Instruções pendentes: restart={should_restart}, backup={should_backup}")
     return PingResponse(status="ok", restart=should_restart, backup=should_backup)
 
 

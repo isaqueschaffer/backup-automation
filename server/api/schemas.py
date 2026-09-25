@@ -206,3 +206,16 @@ class StatsResponse(BaseModel):
     backups_today: int
     backups_ok: int
     backups_error: int
+
+
+# ─────────────────────────────────────────────
+# Agent Logs
+# ─────────────────────────────────────────────
+class AgentLogResponse(BaseModel):
+    id: UUID
+    client_id: UUID
+    event_type: str
+    message: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

@@ -31,6 +31,7 @@ class Client(Base):
     nvrs = relationship("NVR", back_populates="client", cascade="all, delete-orphan")
     equipamentos = relationship("NVR", back_populates="client", cascade="all, delete-orphan", overlaps="nvrs")
     backups = relationship("Backup", back_populates="client")
+    logs = relationship("AgentLog", back_populates="client", cascade="all, delete-orphan", order_by="desc(AgentLog.created_at)")
 
 
 class NVR(Base):
@@ -72,6 +73,18 @@ class Backup(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     client = relationship("Client", back_populates="backups")
+
+
+class AgentLog(Base):
+    __tablename__ = "agent_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    event_type = Column(String(50), nullable=False)  # ex: ping, backup_trigger, restart_trigger
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    client = relationship("Client", back_populates="logs")
 
 
 class Setting(Base):
