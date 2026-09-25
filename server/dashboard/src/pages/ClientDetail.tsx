@@ -193,17 +193,26 @@ export default function ClientDetail() {
   const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT"];
   const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️" };
 
-  const load = async () => {
+  const load = async (silent = false) => {
     if (!id) return;
+    if (!silent) setLoading(true);
     const [c, eqs, b] = await Promise.all([
       (await import("../api/client")).fetchClient(id),
       fetchEquipamentos(id),
       fetchBackups({ client_id: id, size: 10 }),
     ]);
     setClient(c); setEquipamentos(eqs); setBackups(b.items);
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
+  
   useEffect(() => { load(); }, [id]);
+
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t1 = setInterval(() => setNow(Date.now()), 1000);
+    const t2 = setInterval(() => { if (id) load(true); }, 10000);
+    return () => { clearInterval(t1); clearInterval(t2); };
+  }, [id]);
 
 const buildEqPayload = () => {
     if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
@@ -317,6 +326,17 @@ const buildEqPayload = () => {
   if (loading) return <div className="loading-state"><div className="spinner" /></div>;
   if (!client) return <div className="empty-state">Cliente não encontrado.</div>;
 
+  let nextPingStr = "—";
+  const isPendingAction = client.backup_requested || client.restart_requested;
+  if (client.last_seen && isAgentOnline) {
+    const lastSeenMs = new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime();
+    const nextPingMs = lastSeenMs + 5 * 60 * 1000;
+    const diff = Math.max(0, nextPingMs - now);
+    const mm = Math.floor(diff / 60000);
+    const ss = Math.floor((diff % 60000) / 1000);
+    nextPingStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  }
+
   return (
     <>
       {/* ── Header ── */}
@@ -354,6 +374,17 @@ const buildEqPayload = () => {
         </div>
       </div>
 
+      {/* ── Banner de Comando Pendente ── */}
+      {isPendingAction && (
+        <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 6, padding: "12px 16px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ color: "#f59e0b", display: "flex" }}><Clock size={18} /></div>
+          <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
+            <strong>Comando na fila!</strong> O {client.backup_requested ? "backup manual" : "reinício"} começará no próximo contato do agente 
+            {isAgentOnline && <span style={{ fontWeight: 600, color: "#f59e0b", marginLeft: 6 }}>({nextPingStr})</span>}.
+          </div>
+        </div>
+      )}
+
       {/* ── Layout de duas colunas ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
 
@@ -382,6 +413,8 @@ const buildEqPayload = () => {
               value={<StatusBadge status={isAgentOnline ? "ONLINE" : (client.active ? "OFFLINE" : "DESATIVADO")} />} />
             <InfoPill icon={<CalendarCheck size={11} />} label="Último contato"
               value={client.last_seen ? fmtDate(client.last_seen) : "Nunca"} />
+            <InfoPill icon={<Clock size={11} />} label="Próximo contato (estimado)"
+              value={isAgentOnline ? nextPingStr : "—"} />
             <InfoPill icon={<Archive size={11} />} label="Último Backup"
               value={<StatusBadge status={client.last_backup_status} />} />
             <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"

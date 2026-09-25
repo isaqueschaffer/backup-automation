@@ -81,6 +81,8 @@ class ClientResponse(ClientBase):
     last_backup_status: Optional[str] = None
     created_at: datetime
     nvr_count: int = 0
+    restart_requested: bool = False
+    backup_requested: bool = False
 
     model_config = {"from_attributes": True}
 
