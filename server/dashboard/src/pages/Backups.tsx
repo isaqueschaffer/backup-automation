@@ -38,6 +38,8 @@ export default function Backups() {
   const [page, setPage] = useState(1);
   const [clientFilter, setClientFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -45,10 +47,12 @@ export default function Backups() {
     const params: Record<string, unknown> = { page, size: 20 };
     if (clientFilter) params.client_id = clientFilter;
     if (statusFilter) params.status = statusFilter;
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
     const d = await fetchBackups(params);
     setData(d);
     setLoading(false);
-  }, [page, clientFilter, statusFilter]);
+  }, [page, clientFilter, statusFilter, dateFrom, dateTo]);
 
   useEffect(() => { fetchClients().then(setClients); }, []);
   useEffect(() => { load(); }, [load]);
@@ -86,7 +90,7 @@ export default function Backups() {
       </div>
 
       {/* Filters */}
-      <div className="filters-bar">
+      <div className="filters-bar" style={{ flexWrap: "wrap" }}>
         <select className="form-input" value={clientFilter} onChange={e => { setClientFilter(e.target.value); setPage(1); }}>
           <option value="">Todos os clientes</option>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -97,6 +101,20 @@ export default function Backups() {
           <option value="PARTIAL">Parcial</option>
           <option value="ERROR">Erro</option>
         </select>
+        <input 
+          type="date" 
+          className="form-input" 
+          value={dateFrom} 
+          onChange={e => { setDateFrom(e.target.value); setPage(1); }} 
+          title="Data Inicial"
+        />
+        <input 
+          type="date" 
+          className="form-input" 
+          value={dateTo} 
+          onChange={e => { setDateTo(e.target.value); setPage(1); }} 
+          title="Data Final"
+        />
         <button className="btn btn-secondary" onClick={() => load()}>
           <Search size={14} /> Atualizar
         </button>
