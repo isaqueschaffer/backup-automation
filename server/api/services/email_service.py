@@ -205,12 +205,12 @@ def send_backup_report(
     msg = EmailMessage()
     msg["From"] = smtp_email
     msg["To"] = ", ".join(recipients)
-    msg["Subject"] = f"TRILAN POP - Verificação de câmeras e Backup dos equipamentos — {client_name} — {date_str}"
+    msg["Subject"] = f"{client_name} POP - Verificação de câmeras e Backup dos equipamentos — {date_str}"
 
     # ── Header ──
     body = (
         f"{'═' * 50}\n"
-        f"  TRILAN POP - Verificação de câmeras e Backup dos equipamentos\n"
+        f"  {client_name} POP - Verificação de câmeras e Backup dos equipamentos\n"
         f"{'═' * 50}\n\n"
         f"Cliente: {client_name}\n"
         f"Data e hora: {date_hora_str}\n\n"
