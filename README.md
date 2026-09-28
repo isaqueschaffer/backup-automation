@@ -14,33 +14,33 @@ conectado a rede local dos NVRs.
 1. Copie toda a pasta gent/ para o PC do cliente.
 2. Instale as dependencias:
 
-   `
+   
    pip install -r requirements.txt
-   `
+   
 
 3. Copie gent.conf.example para gent.conf e preencha:
 
-   `ini
+   ini
    [server]
    url = https://hd208ec5kxz.sn.mynetname.net:7001
 
    [auth]
    client_id = COLE_O_ID_DO_PAINEL
    api_key   = sk_trilan_COLE_A_KEY_DO_PAINEL
-   `
+   
 
 4. Instale e inicie o servico (como Administrador):
 
-   `
+   
    python service.py install
    python service.py start
-   `
+   
 
 5. (Opcional) Execute o app da bandeja para controle visual:
 
-   `
+   
    pythonw tray.py
-   `
+   
 
 ## Configuracoes
 
@@ -49,13 +49,13 @@ O unico arquivo que precisa ser editado no cliente e o gent.conf.
 
 ## Comandos do servico
 
-`
+
 python service.py install   # Instala o servico
 python service.py start     # Inicia o servico
 python service.py stop      # Para o servico
 python service.py restart   # Reinicia o servico
 python service.py remove    # Remove o servico
-`
+
 
 ## Logs
 
