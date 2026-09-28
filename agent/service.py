@@ -154,7 +154,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                             # Spawna processo detached: aguarda o servico parar (3s) e reinicia
                             import subprocess
                             subprocess.Popen(
-                                ["cmd", "/c", "timeout /t 3 /nobreak >nul && sc start TrilanAgentNVR"],
+                                ["cmd", "/c", "ping 127.0.0.1 -n 4 >nul && sc start TrilanAgentNVR"],
                                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
                             )
                             # Para o servico de forma limpa (SCM vai receber o sinal de stop)

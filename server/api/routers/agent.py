@@ -2,7 +2,7 @@
 Agent-facing router.
 Windows agent authenticates with X-Client-ID + X-API-Key headers.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 
@@ -42,7 +42,7 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
     zip_pw = decrypt(client.zip_password) if client.zip_password else None
     
     # Update last_seen
-    client.last_seen = datetime.utcnow()
+    client.last_seen = datetime.now(timezone.utc)
     db.commit()
     
     return AgentConfigResponse(
@@ -58,7 +58,7 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
 @router.post("/ping", response_model=PingResponse)
 def ping_agent(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
     """Agent heartbeat to mark it as online. Returns restart flag if requested."""
-    client.last_seen = datetime.utcnow()
+    client.last_seen = datetime.now(timezone.utc)
     should_restart = bool(client.restart_requested)
     if should_restart:
         client.restart_requested = False  # Consume the flag — restart only once
@@ -122,7 +122,7 @@ async def upload_backup_zip(
             detail=f"Tipo de equipamento inválido: '{clean_device_type}'. Tipos permitidos: {TIPOS_EQUIPAMENTO}",
         )
 
-    date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
+    date_str = (backup.started_at or datetime.now(timezone.utc)).strftime("%d-%m-%Y")
     data = await file.read()
 
     filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"
