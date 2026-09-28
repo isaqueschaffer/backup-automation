@@ -112,15 +112,16 @@ function EquipamentosCell({ results }: { results: any[] | null }) {
       {showDetails && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999,
+          backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 9999,
           display: 'flex', alignItems: 'center', justifyContent: 'center'
         }} onClick={() => setShowDetails(false)}>
           <div style={{
-            backgroundColor: 'var(--bg-primary, #ffffff)', 
-            padding: '24px', borderRadius: '8px', 
+            backgroundColor: 'var(--bg-elevated, #131324)', 
+            padding: '24px', borderRadius: '12px', 
             maxWidth: '500px', width: '90%', maxHeight: '80vh', overflowY: 'auto',
-            boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-            color: 'var(--text-primary)'
+            boxShadow: 'var(--shadow-lg, 0 10px 30px rgba(0,0,0,0.5))',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)'
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Status dos Equipamentos</h3>
@@ -129,16 +130,16 @@ function EquipamentosCell({ results }: { results: any[] | null }) {
             
             {Object.entries(grouped).map(([tipo, stats]) => (
               <div key={tipo} style={{ marginBottom: '16px' }}>
-                <strong style={{ display: 'block', marginBottom: '8px', paddingBottom: '4px', borderBottom: '1px solid var(--border-color, #eaeaea)' }}>{tipo}</strong>
+                <strong style={{ display: 'block', marginBottom: '8px', paddingBottom: '4px', borderBottom: '1px solid var(--border)' }}>{tipo}</strong>
                 {stats.items.map((item, idx) => {
                   const color = getStatusColor(item.status);
                   return (
-                    <div key={idx} style={{ padding: '6px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dashed var(--border-color, #eaeaea)' }}>
+                    <div key={idx} style={{ padding: '6px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dashed var(--border)' }}>
                       <span style={{ color: 'var(--text-secondary)', fontSize: '13px', paddingRight: '12px' }}>{item.nome}</span>
                       <span style={{ 
                         backgroundColor: color.bg, color: color.text, 
                         padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 500,
-                        whiteSpace: 'nowrap', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.1)'
+                        whiteSpace: 'nowrap', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)'
                       }}>
                         {item.status.replace('_', ' ')}
                       </span>
