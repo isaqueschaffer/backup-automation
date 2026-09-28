@@ -25,11 +25,11 @@ def _build_backup_section(nvr_results: List[dict], overall: str) -> str:
     )
 
     return (
-        f"1. Backup dos Equipamentos\n"
+        f"\n2. Backup de Equipamentos (NVR, PABX, Mikrotik...)\n"
         f"{'─' * 40}\n"
         f"Backup automático de configurações\n"
         f"Total de equipamentos: {len(nvr_results)}\n"
-        f"Status: {overall}\n\n"
+        f"Status geral: {overall}\n\n"
         f"Resultado por equipamento:\n{lines}\n"
     )
 
@@ -80,7 +80,7 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
             problemas_por_nvr[nvr_nome] = problemas
 
     section = (
-        f"\n2. Verificação de Câmeras e Gravações (apenas CFTV)\n"
+        f"\n1. Verificação de Câmeras dos CFTVs\n"
         f"{'─' * 40}\n"
         f"Verificação das câmeras dos equipamentos compatíveis\n"
         f"Total de equipamentos verificados (com câmeras): {len(problemas_por_nvr) if problemas_por_nvr else (total_nvrs if total_cameras > 0 else 0)}\n"
@@ -218,7 +218,10 @@ def send_backup_report(
         f"Backup das configurações dos equipamentos de rede/CFTV e verificação de status operacional.\n\n"
     )
 
-    # ── Section 1: Backup ──
+    # ── Section 1: Câmeras e Gravações ──
+    body += _build_camera_section(nvr_results)
+
+    # ── Section 2: Backup ──
     body += _build_backup_section(nvr_results, overall)
 
     # ── Download links / attachment ──
@@ -243,8 +246,6 @@ def send_backup_report(
     elif zip_path and not attach:
         body += f"\n  Arquivado no servidor: {zip_path.name}\n"
 
-    # ── Section 2: Câmeras e Gravações ──
-    body += _build_camera_section(nvr_results)
 
     # ── Section 3: Resultado do Serviço ──
     body += _build_result_section(nvr_results)
