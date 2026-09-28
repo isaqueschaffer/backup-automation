@@ -99,34 +99,55 @@ function EquipamentosCell({ results }: { results: any[] | null }) {
       </div>
       
       <button 
-        onClick={() => setShowDetails(!showDetails)}
+        onClick={() => setShowDetails(true)}
         style={{ 
           background: 'none', border: 'none', color: 'var(--brand-primary)', 
           fontSize: '11px', cursor: 'pointer', textAlign: 'left', padding: 0,
           textDecoration: 'underline'
         }}
       >
-        {showDetails ? 'Ocultar detalhes' : 'Detalhes'}
+        Detalhes
       </button>
 
       {showDetails && (
-        <div style={{ 
-          marginTop: '4px', padding: '8px', backgroundColor: 'var(--bg-secondary)', 
-          borderRadius: '6px', fontSize: '11px' 
-        }}>
-          {Object.entries(grouped).map(([tipo, stats]) => (
-            <div key={tipo} style={{ marginBottom: '8px' }}>
-              <strong style={{ display: 'block', marginBottom: '4px' }}>{tipo}</strong>
-              {stats.items.map((item, idx) => {
-                const color = getStatusColor(item.status);
-                return (
-                  <div key={idx} style={{ paddingLeft: '8px', color: 'var(--text-secondary)' }}>
-                    • {item.nome}: {color.icon} {item.status.replace('_', ' ')}
-                  </div>
-                );
-              })}
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }} onClick={() => setShowDetails(false)}>
+          <div style={{
+            backgroundColor: 'var(--bg-primary, #ffffff)', 
+            padding: '24px', borderRadius: '8px', 
+            maxWidth: '500px', width: '90%', maxHeight: '80vh', overflowY: 'auto',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+            color: 'var(--text-primary)'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Status dos Equipamentos</h3>
+              <button onClick={() => setShowDetails(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✖</button>
             </div>
-          ))}
+            
+            {Object.entries(grouped).map(([tipo, stats]) => (
+              <div key={tipo} style={{ marginBottom: '16px' }}>
+                <strong style={{ display: 'block', marginBottom: '8px', paddingBottom: '4px', borderBottom: '1px solid var(--border-color, #eaeaea)' }}>{tipo}</strong>
+                {stats.items.map((item, idx) => {
+                  const color = getStatusColor(item.status);
+                  return (
+                    <div key={idx} style={{ padding: '6px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dashed var(--border-color, #eaeaea)' }}>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: '13px', paddingRight: '12px' }}>{item.nome}</span>
+                      <span style={{ 
+                        backgroundColor: color.bg, color: color.text, 
+                        padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 500,
+                        whiteSpace: 'nowrap', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.1)'
+                      }}>
+                        {item.status.replace('_', ' ')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
