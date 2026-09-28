@@ -90,10 +90,18 @@ def receive_backup_report(
     db: Session = Depends(get_db),
 ):
     """Agent posts the backup result. Server creates a Backup record."""
+    from datetime import datetime
+    
+    # Usa a hora real do servidor, ignorando o relógio do cliente
+    server_finished_at = datetime.utcnow()
+    # Subtrai o tempo que o cliente diz que levou para achar o "started_at" real do servidor
+    duration = body.finished_at - body.started_at
+    server_started_at = server_finished_at - duration
+
     backup = Backup(
         client_id=client.id,
-        started_at=body.started_at,
-        finished_at=body.finished_at,
+        started_at=server_started_at,
+        finished_at=server_finished_at,
         status=body.status,
         nvr_results=[r.model_dump() for r in body.nvr_results],
         trigger=body.trigger,
@@ -101,7 +109,7 @@ def receive_backup_report(
     db.add(backup)
 
     # Update client last backup info
-    client.last_backup_at = body.finished_at
+    client.last_backup_at = server_finished_at
     client.last_backup_status = body.status
 
     # Update NVRs with latest recording status
