@@ -33,14 +33,14 @@ function fmtSize(n: number | null) {
 
 function getStatusColor(status: string) {
   switch (status.toUpperCase()) {
-    case 'OK': return { bg: '#e8f5e9', text: '#2e7d32', icon: '🟢' };
+    case 'OK': return { bg: '#337a54', text: '#ffffff', icon: '🟢' }; 
     case 'PARCIAL': 
-    case 'PARTIAL': return { bg: '#fff3e0', text: '#ef6c00', icon: '🟡' };
+    case 'PARTIAL': return { bg: '#d97706', text: '#ffffff', icon: '🟡' }; 
     case 'ERROR':
-    case 'ERRO': return { bg: '#ffebee', text: '#c62828', icon: '🔴' };
+    case 'ERRO': return { bg: '#9f1239', text: '#ffffff', icon: '🔴' }; 
     case 'SEM_ARQUIVOS':
-    case 'BACKUP_ANTIGO': return { bg: '#fff3e0', text: '#ef6c00', icon: '🟡' };
-    default: return { bg: '#f5f5f5', text: '#616161', icon: '⚪' };
+    case 'BACKUP_ANTIGO': return { bg: '#9a3412', text: '#ffffff', icon: '🟡' }; 
+    default: return { bg: '#5A5A5A', text: '#ffffff', icon: '⚪' }; 
   }
 }
 
@@ -89,10 +89,10 @@ function EquipamentosCell({ results }: { results: any[] | null }) {
             <span key={tipo} style={{ 
               display: 'inline-flex', alignItems: 'center', gap: '4px',
               backgroundColor: color.bg, color: color.text, 
-              padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
-              border: `1px solid ${color.text}33`
+              padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 500,
+              boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.1)'
             }}>
-              {color.icon} {tipo}: {catStatus.replace('_', ' ')}
+              {tipo}: {catStatus.replace('_', ' ')}
             </span>
           );
         })}
