@@ -31,6 +31,108 @@ function fmtSize(n: number | null) {
   return `${(n / 1024).toFixed(0)} KB`;
 }
 
+function getStatusColor(status: string) {
+  switch (status.toUpperCase()) {
+    case 'OK': return { bg: '#e8f5e9', text: '#2e7d32', icon: '🟢' };
+    case 'PARCIAL': 
+    case 'PARTIAL': return { bg: '#fff3e0', text: '#ef6c00', icon: '🟡' };
+    case 'ERROR':
+    case 'ERRO': return { bg: '#ffebee', text: '#c62828', icon: '🔴' };
+    case 'SEM_ARQUIVOS':
+    case 'BACKUP_ANTIGO': return { bg: '#fff3e0', text: '#ef6c00', icon: '🟡' };
+    default: return { bg: '#f5f5f5', text: '#616161', icon: '⚪' };
+  }
+}
+
+function EquipamentosCell({ results }: { results: any[] | null }) {
+  const [showDetails, setShowDetails] = useState(false);
+  
+  if (!results || results.length === 0) return <span>—</span>;
+
+  const grouped: Record<string, { ok: number; error: number; old: number; partial: number; total: number, items: any[] }> = {};
+  
+  results.forEach(r => {
+    let tipo = r.tipo?.toUpperCase();
+    if (!tipo) {
+      if (r.nome.toUpperCase().includes('HUAWEI')) tipo = 'HUAWEI';
+      else if (r.nome.toUpperCase().includes('MIKROTIK')) tipo = 'MIKROTIK';
+      else if (r.nome.toUpperCase().includes('UNM')) tipo = 'UNM2000';
+      else if (r.nome.toUpperCase().includes('PABX')) tipo = 'PABX';
+      else tipo = 'NVR'; 
+    }
+    
+    if (!grouped[tipo]) grouped[tipo] = { ok: 0, error: 0, old: 0, partial: 0, total: 0, items: [] };
+    
+    grouped[tipo].items.push(r);
+    grouped[tipo].total++;
+    
+    const s = r.status.toUpperCase();
+    if (s === 'OK' || s === 'SEM_ARQUIVOS') grouped[tipo].ok++;
+    else if (s === 'ERRO' || s === 'ERROR') grouped[tipo].error++;
+    else if (s === 'PARCIAL' || s === 'PARTIAL') grouped[tipo].partial++;
+    else if (s === 'BACKUP_ANTIGO') grouped[tipo].old++;
+    else grouped[tipo].error++;
+  });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        {Object.entries(grouped).map(([tipo, stats]) => {
+          let catStatus = 'OK';
+          if (stats.error === stats.total) catStatus = 'ERRO';
+          else if (stats.error > 0 || stats.partial > 0) catStatus = 'PARCIAL';
+          else if (stats.old > 0) catStatus = 'BACKUP_ANTIGO';
+          
+          const color = getStatusColor(catStatus);
+          
+          return (
+            <span key={tipo} style={{ 
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              backgroundColor: color.bg, color: color.text, 
+              padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+              border: `1px solid ${color.text}33`
+            }}>
+              {color.icon} {tipo}: {catStatus.replace('_', ' ')}
+            </span>
+          );
+        })}
+      </div>
+      
+      <button 
+        onClick={() => setShowDetails(!showDetails)}
+        style={{ 
+          background: 'none', border: 'none', color: 'var(--brand-primary)', 
+          fontSize: '11px', cursor: 'pointer', textAlign: 'left', padding: 0,
+          textDecoration: 'underline'
+        }}
+      >
+        {showDetails ? 'Ocultar detalhes' : 'Detalhes'}
+      </button>
+
+      {showDetails && (
+        <div style={{ 
+          marginTop: '4px', padding: '8px', backgroundColor: 'var(--bg-secondary)', 
+          borderRadius: '6px', fontSize: '11px' 
+        }}>
+          {Object.entries(grouped).map(([tipo, stats]) => (
+            <div key={tipo} style={{ marginBottom: '8px' }}>
+              <strong style={{ display: 'block', marginBottom: '4px' }}>{tipo}</strong>
+              {stats.items.map((item, idx) => {
+                const color = getStatusColor(item.status);
+                return (
+                  <div key={idx} style={{ paddingLeft: '8px', color: 'var(--text-secondary)' }}>
+                    • {item.nome}: {color.icon} {item.status.replace('_', ' ')}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Backups() {
   const [data, setData] = useState<PaginatedBackups | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
@@ -149,10 +251,8 @@ export default function Backups() {
                     <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>{b.client_name}</td>
                     <td className="text-sm text-secondary">{fmtDate(b.started_at)}</td>
                     <td><StatusBadge status={b.status} /></td>
-                    <td className="text-secondary text-sm">
-                      {b.nvr_results
-                        ? b.nvr_results.map((r) => `${r.nome}: ${r.status}`).join(", ")
-                        : "—"}
+                    <td className="text-secondary text-sm" style={{ verticalAlign: 'top', minWidth: '220px' }}>
+                      <EquipamentosCell results={b.nvr_results} />
                     </td>
                     <td className="text-secondary text-sm">{fmtSize(b.zip_size)}</td>
                     <td>{b.email_sent ? "✅" : "—"}</td>

@@ -98,12 +98,24 @@ def receive_backup_report(
     duration = body.finished_at - body.started_at
     server_started_at = server_finished_at - duration
 
+    nvr_results_with_type = []
+    for r in body.nvr_results:
+        r_dict = r.model_dump()
+        nvr = db.query(NVR).filter(NVR.client_id == client.id, NVR.name == r.nome).first()
+        if nvr:
+            r_dict["tipo"] = nvr.tipo
+            if r.cameras is not None:
+                nvr.last_recording_status = r.cameras
+        else:
+            r_dict["tipo"] = "NVR" # default fallback se foi excluido
+        nvr_results_with_type.append(r_dict)
+
     backup = Backup(
         client_id=client.id,
         started_at=server_started_at,
         finished_at=server_finished_at,
         status=body.status,
-        nvr_results=[r.model_dump() for r in body.nvr_results],
+        nvr_results=nvr_results_with_type,
         trigger=body.trigger,
     )
     db.add(backup)
@@ -111,13 +123,6 @@ def receive_backup_report(
     # Update client last backup info
     client.last_backup_at = server_finished_at
     client.last_backup_status = body.status
-
-    # Update NVRs with latest recording status
-    for r in body.nvr_results:
-        if r.cameras is not None:
-            nvr = db.query(NVR).filter(NVR.client_id == client.id, NVR.name == r.nome).first()
-            if nvr:
-                nvr.last_recording_status = r.cameras
 
     db.commit()
     db.refresh(backup)
