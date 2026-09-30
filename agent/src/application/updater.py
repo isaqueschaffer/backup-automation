@@ -102,7 +102,7 @@ def check_and_apply_update(conf: dict) -> bool:
         logger.error("[OTA] Dados de atualização incompletos recebidos do servidor.")
         return False
 
-    logger.info(f"[OTA] Nova versão disponível: {new_version}. Iniciando atualização...")
+    logger.info(f"[OTA] Atualização encontrada! Versão atual: {CURRENT_VERSION} -> Nova versão disponível: {new_version}. Iniciando atualização...")
 
     # Baixa em pasta temporária
     tmp_dir = tempfile.mkdtemp(prefix="trilan_update_")

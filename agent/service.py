@@ -73,8 +73,15 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         win32event.SetEvent(self.hWaitStop)
 
     def SvcDoRun(self):
+        # Tenta carregar a versão do updater se possível
+        try:
+            from src.application.updater import get_current_version
+            v = get_current_version()
+        except:
+            v = "Desconhecida"
+
         log("=" * 60)
-        log("TRILAN AGENT NVR INICIADO")
+        log(f"TRILAN AGENT NVR INICIADO (Versão: {v})")
         log(f"Diretorio: {DIRETORIO}")
         try:
             self._load_schedule_and_run()
