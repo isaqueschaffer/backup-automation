@@ -9,6 +9,7 @@ from database import get_db
 from models import Client, Backup
 from schemas import ClientCreate, ClientUpdate, ClientResponse, ClientWithKey
 from services.crypto_service import encrypt
+from services.storage_service import move_client_to_trash
 
 router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
 
@@ -81,6 +82,9 @@ def delete_client(client_id: UUID, db: Session = Depends(get_db)):
         
     # Remove os backups associados no banco para evitar erro de Foreign Key
     db.query(Backup).filter(Backup.client_id == client_id).delete(synchronize_session=False)
+    
+    # Move a pasta de backups do cliente para a lixeira
+    move_client_to_trash(client.id, client.name)
     
     db.delete(client)
     db.commit()
