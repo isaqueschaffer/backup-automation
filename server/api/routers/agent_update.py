@@ -129,3 +129,25 @@ def delete_version(version_id: UUID, db: Session = Depends(get_db)):
     db.delete(version)
     db.commit()
     return {"status": "ok"}
+
+@admin_router.put(
+    "/agent-version/{version_id}",
+    response_model=AgentVersionResponse,
+    dependencies=[Depends(verify_admin_token)],
+)
+def edit_version(version_id: UUID, payload: dict, db: Session = Depends(get_db)):
+    """Edita uma versão."""
+    version = db.query(AgentVersion).filter(AgentVersion.id == version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="Versão não encontrada.")
+    
+    if "version" in payload:
+        version.version = payload["version"]
+    if "url_service" in payload:
+        version.url_service = payload["url_service"]
+    if "sha256_service" in payload:
+        version.sha256_service = payload["sha256_service"]
+    
+    db.commit()
+    db.refresh(version)
+    return version

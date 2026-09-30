@@ -27,17 +27,35 @@ function OtaManager() {
     } catch { toast("Erro ao alterar.", "error"); }
   };
 
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ version: "", url_service: "", sha256_service: "" });
+
+  const startEdit = (v: any) => {
+    setEditingId(v.id);
+    setEditForm({ version: v.version, url_service: v.url_service, sha256_service: v.sha256_service });
+  };
+
+  const handleEditSave = async (id: string) => {
+    try {
+      await editAgentVersion(id, editForm);
+      toast("Versão atualizada!", "success");
+      setEditingId(null);
+      loadVersions();
+    } catch { toast("Erro ao editar.", "error"); }
+  };
+
   return (
-    <div className="card mt-4">
+    <div className="card mt-4" style={{ overflowX: 'auto' }}>
       <div className="section-title"><UploadCloud size={15} />Gerenciador de Versões OTA (Agent)</div>
       {versions.length === 0 ? (
         <p className="text-sm text-muted">Nenhuma versão publicada no banco de dados.</p>
       ) : (
-        <table className="table" style={{ marginTop: 10 }}>
+        <table className="table" style={{ marginTop: 10, minWidth: 800 }}>
           <thead>
             <tr>
               <th>Versão</th>
               <th>SHA256 (Hash)</th>
+              <th>URL do Executável</th>
               <th>Status</th>
               <th>Ações</th>
             </tr>
@@ -45,25 +63,48 @@ function OtaManager() {
           <tbody>
             {versions.map(v => (
               <tr key={v.id}>
-                <td><strong>{v.version}</strong></td>
-                <td style={{ fontSize: 11, fontFamily: "monospace", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {v.sha256_service}
-                </td>
-                <td>
-                  <span className={`badge ${v.active ? 'badge-success' : 'badge-danger'}`}>
-                    {v.active ? "Ativa" : "Pausada"}
-                  </span>
-                </td>
-                <td>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleToggle(v.id)} className="btn btn-sm btn-secondary" title="Pausar/Ativar">
-                      {v.active ? <PowerOff size={14} /> : <Power size={14} />}
-                    </button>
-                    <button onClick={() => handleDelete(v.id)} className="btn btn-sm btn-danger" title="Apagar">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </td>
+                {editingId === v.id ? (
+                  <>
+                    <td><input className="input" value={editForm.version} onChange={e => setEditForm({...editForm, version: e.target.value})} /></td>
+                    <td><input className="input" value={editForm.sha256_service} onChange={e => setEditForm({...editForm, sha256_service: e.target.value})} /></td>
+                    <td><input className="input" value={editForm.url_service} onChange={e => setEditForm({...editForm, url_service: e.target.value})} /></td>
+                    <td>—</td>
+                    <td>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleEditSave(v.id)} className="btn btn-sm btn-primary">Salvar</button>
+                        <button onClick={() => setEditingId(null)} className="btn btn-sm btn-secondary">Cancelar</button>
+                      </div>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td><strong>{v.version}</strong></td>
+                    <td style={{ fontSize: 11, fontFamily: "monospace", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {v.sha256_service}
+                    </td>
+                    <td style={{ fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={v.url_service}>
+                      <a href={v.url_service} target="_blank" rel="noreferrer">Download EXE</a>
+                    </td>
+                    <td>
+                      <span className={`badge ${v.active ? 'badge-success' : 'badge-danger'}`}>
+                        {v.active ? "Ativa" : "Pausada"}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="flex gap-2">
+                        <button onClick={() => startEdit(v)} className="btn btn-sm btn-primary" title="Editar">
+                          Editar
+                        </button>
+                        <button onClick={() => handleToggle(v.id)} className="btn btn-sm btn-secondary" title="Pausar/Ativar">
+                          {v.active ? <PowerOff size={14} /> : <Power size={14} />}
+                        </button>
+                        <button onClick={() => handleDelete(v.id)} className="btn btn-sm btn-danger" title="Apagar">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>

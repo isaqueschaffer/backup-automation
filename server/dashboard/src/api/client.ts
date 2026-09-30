@@ -86,5 +86,7 @@ export const toggleAgentVersion = (id: string) =>
   api.put(`/admin/agent-version/${id}/toggle`).then((r) => r.data);
 export const deleteAgentVersion = (id: string) =>
   api.delete(`/admin/agent-version/${id}`).then((r) => r.data);
+export const editAgentVersion = (id: string, data: Record<string, string>) =>
+  api.put(`/admin/agent-version/${id}`, data).then((r) => r.data);
 
 export default api;
