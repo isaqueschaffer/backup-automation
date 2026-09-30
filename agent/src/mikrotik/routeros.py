@@ -1,3 +1,4 @@
+from paramiko import ssh_exception
 import paramiko
 import time
 import logging
@@ -19,8 +20,10 @@ def realizar_backup_mikrotik(equipamento: dict, pasta_destino: Path) -> dict:
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     
     try:
-        logging.info(f"[MIKROTIK] Conectando via SSH em {ip}...")
-        ssh.connect(ip, port=22, username=username, password=password, timeout=10)
+        porta = equipamento.get("porta") or equipamento.get("port") or 22
+        porta = int(porta)
+        logging.info(f"[MIKROTIK] Conectando via SSH em {ip}:{porta}...")
+        ssh.connect(ip, port=porta, username=username, password=password, timeout=20, look_for_keys=False, allow_agent=False)
         
         # O nome do arquivo no roteador
         file_base = f"backup_{nome.lower()}"

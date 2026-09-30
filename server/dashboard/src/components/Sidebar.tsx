@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   LayoutDashboard, Users, Archive, Settings, LogOut, Server
 } from "lucide-react";
+import pkg from "../../package.json";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Visão Geral" },
@@ -26,7 +27,7 @@ export default function Sidebar() {
           </div>
           <div className="sidebar-logo-text">
             <span className="sidebar-logo-title">TRILAN</span>
-            <span className="sidebar-logo-sub">BACKUPS</span>
+            <span className="sidebar-logo-sub">BACKUPS <span style={{ fontSize: '9px', backgroundColor: 'var(--primary)', color: 'white', padding: '1px 4px', borderRadius: '4px', marginLeft: '4px', fontWeight: 'bold', verticalAlign: 'middle' }}>V{pkg.version}</span></span>
           </div>
         </div>
       </div>

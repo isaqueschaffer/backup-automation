@@ -104,7 +104,7 @@ export default function Clients() {
                   <td>
                     <StatusBadge status={
                       !c.active ? "DESATIVADO" : 
-                      (c.last_seen && new Date().getTime() - new Date(c.last_seen).getTime() < 15 * 60 * 1000) 
+                      (c.last_seen && new Date().getTime() - new Date(c.last_seen.endsWith("Z") ? c.last_seen : c.last_seen + "Z").getTime() < 15 * 60 * 1000) 
                         ? "ONLINE" 
                         : "OFFLINE"
                     } />
@@ -114,7 +114,7 @@ export default function Clients() {
                     {String(c.backup_hour).padStart(2,"0")}:{String(c.backup_minute).padStart(2,"0")}
                   </td>
                   <td className="text-secondary text-sm">
-                    {c.last_backup_at ? new Date(c.last_backup_at).toLocaleString("pt-BR") : "—"}
+                    {c.last_backup_at ? new Date(c.last_backup_at.endsWith("Z") ? c.last_backup_at : c.last_backup_at + "Z").toLocaleString("pt-BR") : "—"}
                   </td>
                   <td>
                     <span className="font-mono text-xs text-muted">{c.api_key_prefix}…</span>

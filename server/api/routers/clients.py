@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from auth import verify_admin_token, generate_api_key
 from database import get_db
 from models import Client, Backup
-from schemas import ClientCreate, ClientUpdate, ClientResponse, ClientWithKey
+from schemas import ClientCreate, ClientUpdate, ClientResponse, ClientWithKey, AgentLogResponse
 from services.crypto_service import encrypt
 from services.storage_service import move_client_to_trash
 
@@ -63,11 +63,20 @@ def update_client(client_id: UUID, body: ClientUpdate, db: Session = Depends(get
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+        
+    time_changed = False
     for field, value in body.model_dump(exclude_none=True).items():
+        if field in ("backup_hour", "backup_minute") and getattr(client, field) != value:
+            time_changed = True
+            
         if field == "zip_password" and value:
             setattr(client, field, encrypt(value))
         else:
             setattr(client, field, value)
+            
+    if time_changed:
+        client.restart_requested = True
+        
     db.commit()
     db.refresh(client)
     return _to_response(client)
@@ -108,6 +117,15 @@ def rotate_api_key(client_id: UUID, db: Session = Depends(get_db)):
     return ClientWithKey.model_validate(client)
 
 
+@router.post("/{client_id}/trigger-backup", dependencies=[Depends(verify_admin_token)])
+def trigger_backup(client_id: UUID, db: Session = Depends(get_db)):
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    client.backup_requested = True
+    db.commit()
+    return {"status": "ok", "message": "Backup solicitado via dashboard"}
+
 @router.post("/{client_id}/restart-agent", dependencies=[Depends(verify_admin_token)])
 def request_agent_restart(client_id: UUID, db: Session = Depends(get_db)):
     """Signal the Windows agent to restart on next ping."""
@@ -117,4 +135,15 @@ def request_agent_restart(client_id: UUID, db: Session = Depends(get_db)):
     client.restart_requested = True
     db.commit()
     return {"queued": True}
+
+
+@router.get("/{client_id}/logs", response_model=List[AgentLogResponse], dependencies=[Depends(verify_admin_token)])
+def get_client_logs(client_id: UUID, db: Session = Depends(get_db), limit: int = 50):
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    from models import AgentLog
+    logs = db.query(AgentLog).filter(AgentLog.client_id == client_id).order_by(AgentLog.created_at.desc()).limit(limit).all()
+    return logs
 

@@ -7,13 +7,15 @@ import { Users, CheckCircle, AlertCircle, Archive, Clock } from "lucide-react";
 
 function fmtDate(s: string | null) {
   if (!s) return "Nunca";
-  return new Date(s).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const str = s.endsWith("Z") ? s : s + "Z";
+  return new Date(str).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function fmtSchedule(h: number, m: number) {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 }
 
+// Gatilho para build (Docploy)
 export default function Overview() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
@@ -31,9 +33,11 @@ export default function Overview() {
           <h1 className="page-title">Visão Geral</h1>
           <p className="page-subtitle">Status em tempo real de todos os clientes</p>
         </div>
-        <button className="btn btn-primary" onClick={() => navigate("/clients")}>
-          <Users size={15} /> Gerenciar Clientes
-        </button>
+        <div className="flex gap-2">
+          <button className="btn btn-primary" onClick={() => navigate("/clients")}>
+            <Users size={15} /> Gerenciar Clientes
+          </button>
+        </div>
       </div>
 
       {/* Stats */}

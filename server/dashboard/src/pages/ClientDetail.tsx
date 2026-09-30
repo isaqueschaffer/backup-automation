@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  fetchEquipamentos, createEquipamento, deleteEquipamento, updateClient,
-  rotateKey, fetchBackups, restartAgent
+  fetchEquipamentos, createEquipamento, updateEquipamento, deleteEquipamento, updateClient,
+  rotateKey, fetchBackups, restartAgent, triggerBackup
 } from "../api/client";
 import { Client, NVR, Backup, TipoEquipamento } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
@@ -11,12 +11,13 @@ import { useToast } from "../components/Toast";
 import {
   ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
-  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network
+  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning
 } from "lucide-react";
 
 function fmtDate(s: string | null) {
   if (!s) return "—";
-  return new Date(s).toLocaleString("pt-BR");
+  const str = s.endsWith("Z") ? s : s + "Z";
+  return new Date(str).toLocaleString("pt-BR");
 }
 
 function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate: string | null }) {
@@ -80,10 +81,12 @@ function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
 }
 
 // ── Equipment card component ─────────────────────────────────────
-function EqCard({ eq, onDelete, onViewRecording }: {
+function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
   eq: NVR;
   onDelete: () => void;
   onViewRecording: () => void;
+  onEdit: () => void;
+  onToggleActive: () => void;
 }) {
   const getEqIcon = (tipo: string) => {
     const m: any = {
@@ -104,7 +107,7 @@ function EqCard({ eq, onDelete, onViewRecording }: {
       background: "var(--surface-2, rgba(255,255,255,0.03))",
       border: "1px solid var(--border)", borderRadius: "var(--radius)",
       padding: "16px 20px", display: "flex", alignItems: "center", gap: 16,
-      transition: "border-color 0.15s"
+      transition: "border-color 0.15s", opacity: eq.active === false ? 0.6 : 1
     }}
       onMouseEnter={e => (e.currentTarget.style.borderColor = color)}
       onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}
@@ -125,6 +128,11 @@ function EqCard({ eq, onDelete, onViewRecording }: {
           <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: `${color}18`, color, border: `1px solid ${color}30` }}>
             {eq.tipo}
           </span>
+          {eq.active === false && (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: `var(--warn-bg)`, color: "var(--warn)", border: `1px solid rgba(245,158,11,0.3)` }}>
+              PAUSADO
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12 }}>
           {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" ? (
@@ -148,7 +156,13 @@ function EqCard({ eq, onDelete, onViewRecording }: {
             <Video size={13} /> Gravações
           </button>
         )}
-        <button className="btn-icon" style={{ color: "var(--err)" }} onClick={onDelete}>
+        <button className="btn-icon" title={eq.active === false ? "Retomar Backup" : "Pausar Backup"} onClick={onToggleActive}>
+          {eq.active === false ? <RefreshCw size={14} /> : <div style={{width:14, height:14, borderLeft:'3px solid currentColor', borderRight:'3px solid currentColor'}}/>}
+        </button>
+        <button className="btn-icon" title="Editar" onClick={onEdit}>
+          <Edit2 size={14} />
+        </button>
+        <button className="btn-icon" style={{ color: "var(--err)" }} title="Remover" onClick={onDelete}>
           <Trash2 size={14} />
         </button>
       </div>
@@ -165,6 +179,7 @@ export default function ClientDetail() {
   const [client, setClient] = useState<Client | null>(null);
   const [equipamentos, setEquipamentos] = useState<NVR[]>([]);
   const [backups, setBackups] = useState<Backup[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [showEqModal, setShowEqModal] = useState(false);
@@ -172,78 +187,91 @@ export default function ClientDetail() {
   const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: any[] }>({ show: false, nvrName: "", cameras: [] });
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState({ tipo: "NVR" as TipoEquipamento, name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
+  const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
 
   const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT"];
   const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️" };
 
-  const load = async () => {
+  const load = async (silent = false) => {
     if (!id) return;
-    const [c, eqs, b] = await Promise.all([
+    if (!silent) setLoading(true);
+    const [c, eqs, b, lg] = await Promise.all([
       (await import("../api/client")).fetchClient(id),
       fetchEquipamentos(id),
       fetchBackups({ client_id: id, size: 10 }),
+      (await import("../api/client")).fetchClientLogs(id),
     ]);
-    setClient(c); setEquipamentos(eqs); setBackups(b.items);
-    setLoading(false);
+    setClient(c); setEquipamentos(eqs); setBackups(b.items); setLogs(lg);
+    if (!silent) setLoading(false);
   };
+  
   useEffect(() => { load(); }, [id]);
 
-  const handleAddEquipamento = async () => {
-    if (!eqForm.name) { toast("Preencha o nome do equipamento.", "error"); return; }
-    if ((eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") && (!eqForm.ip || !eqForm.username || !eqForm.password)) {
-      toast(`Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.`, "error"); return;
-    }
-    if (eqForm.tipo === "OLT" && !eqForm.fabricante_olt) {
-      toast("Selecione o sistema da OLT.", "error");
-      return;
-    }
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t1 = setInterval(() => setNow(Date.now()), 1000);
+    const t2 = setInterval(() => { if (id) load(true); }, 10000);
+    return () => { clearInterval(t1); clearInterval(t2); };
+  }, [id]);
 
-    if (eqForm.tipo === "OLT" && (eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI") && !eqForm.pasta_origem) {
-      toast(`Para ${eqForm.fabricante_olt}, informe a pasta de origem dos backups.`, "error");
-      return;
-    }
+const buildEqPayload = () => {
+    if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
+    const payload: any = { tipo: eqForm.tipo, name: eqForm.name.trim(), ip: "", username: "", password: "", config_extra: null };
 
-    if (eqForm.tipo === "OLT" && eqForm.fabricante_olt === "VSOL" && (!eqForm.pasta_origem || !eqForm.username || !eqForm.password)) {
-      toast("Para VSOL, preencha IP, usuário e senha.", "error");
-      return;
+    if (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") {
+      if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.` };
+      payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
+    } else if (eqForm.tipo === "DIGIFORT") {
+      if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
+      payload.ip = eqForm.pasta_origem.trim(); payload.username = "digifort"; payload.password = "digifort"; payload.config_extra = { pasta_origem: eqForm.pasta_origem.trim() };
+    } else if (eqForm.tipo === "OLT") {
+      if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
+      payload.config_extra = { fabricante_olt: eqForm.fabricante_olt };
+      if (eqForm.fabricante_olt === "UNM2000") {
+        if (!eqForm.pasta_origem) return { error: "Para UNM2000, informe a pasta de origem dos backups." };
+        payload.ip = eqForm.pasta_origem.trim(); payload.username = "unm2000"; payload.password = "unm2000"; payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
+      } else if (eqForm.fabricante_olt === "HUAWEI" || eqForm.fabricante_olt === "VSOL") {
+        if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.` };
+        payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
+        if (eqForm.fabricante_olt === "HUAWEI") payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
+      }
     }
+    // Remove blank passwords in edit mode so backend ignores them
+    if (editingEqId && !payload.password) delete payload.password;
+    return { payload };
+  };
 
-    if (eqForm.tipo === "DIGIFORT" && !eqForm.pasta_origem) {
-      toast("Para DIGIFORT, informe a pasta de origem.", "error");
-      return;
-    }
-
+  const handleSaveEquipamento = async () => {
+    const { error, payload } = buildEqPayload();
+    if (error) { toast(error, "error"); return; }
+    
     setSaving(true);
     try {
-      await createEquipamento(id!, {
-        tipo: eqForm.tipo,
-        name: eqForm.name,
-        ip: (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") ? eqForm.ip : (
-          eqForm.fabricante_olt === "VSOL" ? eqForm.pasta_origem : eqForm.ip
-        ),
-        username: eqForm.username,
-        password: eqForm.password,
-        config_extra: eqForm.tipo === "DIGIFORT"
-          ? { pasta_origem: eqForm.pasta_origem }
-          : (eqForm.tipo === "OLT"
-            ? {
-              ...((eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI")
-                ? { pasta_origem: eqForm.pasta_origem }
-                : {}),
-              fabricante_olt: eqForm.fabricante_olt
-            }
-            : null),
-      });
-
-      toast("Equipamento adicionado!", "success");
+      if (editingEqId) {
+        await updateEquipamento(id!, editingEqId, payload);
+        toast("Equipamento atualizado!", "success");
+      } else {
+        await createEquipamento(id!, payload);
+        toast("Equipamento adicionado!", "success");
+      }
       setShowEqModal(false);
       setEqForm({ tipo: "NVR", name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
+      setEditingEqId(null);
       load();
-    }
-    catch { toast("Erro ao adicionar equipamento.", "error"); }
+    } catch { toast("Erro ao salvar equipamento.", "error"); }
     finally { setSaving(false); }
+  };
+
+
+  const handleToggleEquipamento = async (eq: NVR) => {
+    try {
+      const isCurrentlyActive = eq.active !== false; // true if true or undefined
+      await updateEquipamento(id!, eq.id, { active: !isCurrentlyActive });
+      toast(isCurrentlyActive ? "Equipamento pausado." : "Equipamento retomado.", "success");
+      load();
+    } catch { toast("Erro ao alterar estado.", "error"); }
   };
 
   const handleDeleteEquipamento = async (eqId: string, name: string) => {
@@ -284,13 +312,32 @@ export default function ClientDetail() {
     } catch { toast("Erro ao solicitar reinício.", "error"); }
   };
 
+  const handleTriggerBackup = async () => {
+    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (até 5 min).")) return;
+    try {
+      await triggerBackup(id!);
+      toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
+    } catch { toast("Erro ao solicitar backup.", "error"); }
+  };
+
   const isAgentOnline = client && client.active &&
-    (client.last_seen && new Date().getTime() - new Date(client.last_seen).getTime() < 15 * 60 * 1000);
+    (client.last_seen && new Date().getTime() - new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime() < 15 * 60 * 1000);
 
   const copyText = (t: string) => { navigator.clipboard.writeText(t); toast("Copiado!", "success"); };
 
   if (loading) return <div className="loading-state"><div className="spinner" /></div>;
   if (!client) return <div className="empty-state">Cliente não encontrado.</div>;
+
+  let nextPingStr = "—";
+  const isPendingAction = client.backup_requested || client.restart_requested;
+  if (client.last_seen && isAgentOnline) {
+    const lastSeenMs = new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime();
+    const nextPingMs = lastSeenMs + 5 * 60 * 1000;
+    const diff = Math.max(0, nextPingMs - now);
+    const mm = Math.floor(diff / 60000);
+    const ss = Math.floor((diff % 60000) / 1000);
+    nextPingStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  }
 
   return (
     <>
@@ -318,12 +365,27 @@ export default function ClientDetail() {
           <button className="btn btn-secondary" onClick={handleRotateKey}>
             <RefreshCw size={15} /> Rodar API Key
           </button>
+          <button className="btn btn-secondary" onClick={handleTriggerBackup}
+            title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
+            <CloudLightning size={15} /> Gerar Backup
+          </button>
           <button className="btn btn-secondary" onClick={handleRestartAgent}
             title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
             <RotateCcw size={15} /> Reiniciar Agent
           </button>
         </div>
       </div>
+
+      {/* ── Banner de Comando Pendente ── */}
+      {isPendingAction && (
+        <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 6, padding: "12px 16px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ color: "#f59e0b", display: "flex" }}><Clock size={18} /></div>
+          <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
+            <strong>Comando na fila!</strong> O {client.backup_requested ? "backup manual" : "reinício"} começará no próximo contato do agente 
+            {isAgentOnline && <span style={{ fontWeight: 600, color: "#f59e0b", marginLeft: 6 }}>({nextPingStr})</span>}.
+          </div>
+        </div>
+      )}
 
       {/* ── Layout de duas colunas ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
@@ -353,6 +415,8 @@ export default function ClientDetail() {
               value={<StatusBadge status={isAgentOnline ? "ONLINE" : (client.active ? "OFFLINE" : "DESATIVADO")} />} />
             <InfoPill icon={<CalendarCheck size={11} />} label="Último contato"
               value={client.last_seen ? fmtDate(client.last_seen) : "Nunca"} />
+            <InfoPill icon={<Clock size={11} />} label="Próximo contato (estimado)"
+              value={isAgentOnline ? nextPingStr : "—"} />
             <InfoPill icon={<Archive size={11} />} label="Último Backup"
               value={<StatusBadge status={client.last_backup_status} />} />
             <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
@@ -370,7 +434,7 @@ export default function ClientDetail() {
               {equipamentos.length}
             </span>
           </div>
-          <button className="btn btn-secondary" onClick={() => setShowEqModal(true)}>
+          <button className="btn btn-secondary" onClick={() => { setEditingEqId(null); setEqForm({ tipo: "NVR", name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" }); setShowEqModal(true); }}>
             <Plus size={14} /> Adicionar
           </button>
         </div>
@@ -386,6 +450,20 @@ export default function ClientDetail() {
               <EqCard key={eq.id} eq={eq}
                 onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
                 onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
+                onEdit={() => {
+                  setEditingEqId(eq.id);
+                  setEqForm({
+                    tipo: eq.tipo,
+                    name: eq.name,
+                    ip: eq.tipo === "DIGIFORT" || (eq.tipo === "OLT" && (eq.config_extra as any)?.fabricante_olt === "UNM2000") ? "" : eq.ip,
+                    username: eq.username,
+                    password: "", // do not fetch password
+                    pasta_origem: (eq.config_extra as any)?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
+                    fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000"
+                  });
+                  setShowEqModal(true);
+                }}
+                onToggleActive={() => handleToggleEquipamento(eq)}
               />
             ))}
           </div>
@@ -437,9 +515,51 @@ export default function ClientDetail() {
         )}
       </div>
 
+      {/* ── Histórico de Eventos do Agente ── */}
+      <div style={{ marginTop: 20 }}>
+        <div className="section-title">
+          <CloudLightning size={15} /> Eventos do Agente (Pings e Instruções)
+          <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
+            últimos {logs.length}
+          </span>
+        </div>
+        {logs.length === 0 ? (
+          <div className="empty-state" style={{ padding: "32px" }}>
+            <div className="empty-icon">📡</div>
+            <div>Nenhum evento registrado ainda. O agente deve enviar pings a cada 5 minutos.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 300, overflowY: "auto", paddingRight: 8 }}>
+            {logs.map((log: any) => (
+              <div key={log.id} style={{
+                display: "grid", gridTemplateColumns: "140px auto 1fr",
+                alignItems: "center", gap: 12,
+                background: "var(--surface-2, rgba(255,255,255,0.02))",
+                border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+                padding: "10px 16px"
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+                  {fmtDate(log.created_at)}
+                </div>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, textTransform: "uppercase", padding: "2px 6px", borderRadius: 4,
+                  background: log.event_type === "ping" ? "rgba(16, 185, 129, 0.15)" : "rgba(59, 130, 246, 0.15)",
+                  color: log.event_type === "ping" ? "#10b981" : "#3b82f6"
+                }}>
+                  {log.event_type}
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
+                  {log.message}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* ── Modal: Adicionar Equipamento ── */}
       {showEqModal && (
-        <Modal title="Adicionar Equipamento" onClose={() => setShowEqModal(false)}>
+        <Modal title={editingEqId ? "Editar Equipamento" : "Adicionar Equipamento"} onClose={() => setShowEqModal(false)}>
           <div className="form-group">
             <label className="form-label">Tipo de Equipamento *</label>
             <select className="form-input" value={eqForm.tipo}
@@ -467,7 +587,7 @@ export default function ClientDetail() {
                     value={eqForm.username} onChange={e => setEqForm({ ...eqForm, username: e.target.value })} />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Senha *</label>
+                  <label className="form-label">Senha {editingEqId ? <span style={{fontWeight:400, color:'var(--text-muted)'}}>(vazio = manter atual)</span> : '*'}</label>
                   <input className="form-input" type="password"
                     value={eqForm.password} onChange={e => setEqForm({ ...eqForm, password: e.target.value })} />
                 </div>
@@ -496,7 +616,7 @@ export default function ClientDetail() {
 
               <div className="form-group">
                 <label className="form-label">
-                  {eqForm.fabricante_olt === "VSOL"
+                  {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI")
                     ? "Endereço IP da OLT *"
                     : "Pasta de Origem dos Backups *"}
                 </label>
@@ -505,29 +625,35 @@ export default function ClientDetail() {
                   className="form-input"
                   type="text"
                   placeholder={
-                    eqForm.fabricante_olt === "VSOL"
+                    (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI")
                       ? "192.168.1.100"
                       : "C:\\Users\\Helena\\Documents"
                   }
-                  value={eqForm.pasta_origem}
-                  onChange={e =>
-                    setEqForm({
-                      ...eqForm,
-                      pasta_origem: e.target.value
-                    })
+                  value={
+                    (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") 
+                      ? eqForm.ip 
+                      : eqForm.pasta_origem
                   }
+                  onChange={e => {
+                    if (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") {
+                      setEqForm({ ...eqForm, ip: e.target.value })
+                    } else {
+                      setEqForm({ ...eqForm, pasta_origem: e.target.value })
+                    }
+                  }}
                 />
+              </div>
 
-                {eqForm.fabricante_olt === "VSOL" && (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: 12,
-                      marginTop: 12
-                    }}
-                  >
-                    <div className="form-group" style={{ margin: 0 }}>
+              {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") && (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 12,
+                    marginTop: 12
+                  }}
+                >
+                  <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label">
                         Usuário *
                       </label>
@@ -573,12 +699,11 @@ export default function ClientDetail() {
                     display: "block"
                   }}
                 >
-                  {(eqForm.fabricante_olt === "UNM2000" || eqForm.fabricante_olt === "HUAWEI")
+                  {(eqForm.fabricante_olt === "UNM2000")
                     ? `Pasta onde o ${eqForm.fabricante_olt} exporta os arquivos de backup.`
-                    : "Endereço IP, usuário e senha utilizados para acessar a VSOL."
+                    : "Endereço IP, usuário e senha utilizados para acessar a OLT via SSH."
                   }
                 </span>
-              </div>
             </>
           )}
           {eqForm.tipo === "DIGIFORT" && (
@@ -591,8 +716,8 @@ export default function ClientDetail() {
           )}
           <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
             <button className="btn btn-secondary" onClick={() => setShowEqModal(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={handleAddEquipamento} disabled={saving}>
-              {saving ? <span className="spinner spinner-sm" /> : <><Plus size={15} /> Adicionar</>}
+            <button className="btn btn-primary" onClick={handleSaveEquipamento} disabled={saving}>
+              {saving ? <span className="spinner spinner-sm" /> : (editingEqId ? "Salvar" : <><Plus size={15} /> Adicionar</>)}
             </button>
           </div>
         </Modal>

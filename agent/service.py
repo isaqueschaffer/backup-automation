@@ -88,32 +88,23 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         if str(DIRETORIO) not in sys.path:
             sys.path.insert(0, str(DIRETORIO))
 
-        import configparser
-        import requests
+        from src.core.config import load_conf
+        from src.application.api_client import fetch_server_config
 
-        conf_file = DIRETORIO / "agent.conf"
-        log(f"Lendo configuracoes de: {conf_file}")
-        if not conf_file.exists():
-            log(f"ERRO FATAL: Arquivo de configuracao {conf_file} nao encontrado!", is_error=True)
+        log(f"Lendo configuracoes de: {DIRETORIO / 'agent.conf'}")
+        try:
+            conf = load_conf()
+        except SystemExit as e:
+            log(str(e), is_error=True)
             return
 
-        cfg = configparser.ConfigParser()
-        cfg.read(conf_file, encoding="utf-8-sig")
-        server_url = cfg["server"]["url"].rstrip("/")
-        client_id = cfg["auth"]["client_id"]
-        api_key = cfg["auth"]["api_key"]
+        log(f"Servidor configurado: {conf['server_url']}")
+        log(f"Client ID: {conf['client_id']}")
 
-        log(f"Servidor configurado: {server_url}")
-        log(f"Client ID: {client_id}")
-
-        headers = {"X-Client-ID": client_id, "X-API-Key": api_key}
-        log(f"Testando comunicacao com o servidor: {server_url}/api/v1/agent/config ...")
         config_loaded = True
+        log(f"Testando comunicacao com o servidor: {conf['server_url']}/api/v1/agent/config ...")
         try:
-            r = requests.get(f"{server_url}/api/v1/agent/config", headers=headers,
-                             timeout=30, verify=False)
-            r.raise_for_status()
-            server_cfg = r.json()
+            server_cfg = fetch_server_config(conf)
             hora = int(server_cfg.get("backup_hour", 2))
             minuto = int(server_cfg.get("backup_minute", 0))
             log("COMUNICACAO BEM SUCEDIDA! Configuracoes do servidor recebidas.")
@@ -123,7 +114,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             hora, minuto = 2, 0
             config_loaded = False
 
-        self._run_loop(hora, minuto, server_url, headers, config_loaded)
+        headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+        self._run_loop(hora, minuto, conf["server_url"], headers, conf, config_loaded)
 
     def _restart_service(self):
         import subprocess
@@ -134,9 +126,10 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.stop_requested = True
         win32event.SetEvent(self.hWaitStop)
 
-    def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict, config_loaded: bool = True):
+    def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict, conf: dict, config_loaded: bool = True):
         import agent as agent_mod
-        import requests
+        from src.application.api_client import ping_server
+        from src.application.updater import check_and_apply_update
         import time
 
         last_ping_time = 0
@@ -152,6 +145,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             while not self.stop_requested:
                 agora = datetime.now()
                 
+<<<<<<< HEAD
                 # Envia ping a cada 5 minutos (300s) se online, ou a cada 10 minutos (600s) se offline
                 intervalo_ping = 300 if (time.time() - last_successful_ping < 300) else 600
                 
@@ -175,14 +169,44 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                             self._restart_service()
                             return
                         
+=======
+                # Envia ping a cada 5 minutos (300 segundos) para manter status "Online"
+                if time.time() - last_ping_time >= 300:
+                    last_ping_time = time.time()
+                    try:
+                        ping_resp = ping_server(conf)
+                        
+                        if ping_resp:
+                            log(f"Ping recebido pelo servidor. Instrucoes: {ping_resp}")
+                        else:
+                            log("Ping enviado, mas resposta vazia.")
+                            
+>>>>>>> origin/integracao-equipamentos
                         # Verifica se o servidor solicitou reinicio
-                        if ping_resp.ok and ping_resp.json().get("restart"):
+                        if ping_resp and ping_resp.get("restart"):
                             log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
                             self._restart_service()
                             return
+<<<<<<< HEAD
                     except Exception as e:
                         log(f"Falha na conexao com o servidor (tentando novamente em 10 minutos): {e}", is_error=True)
                         last_ping_time = time.time()
+=======
+                        if ping_resp and ping_resp.get("backup"):
+                            log("Geracao de backup manual solicitada pelo dashboard!")
+                            self._executar_backup(agent_mod, "manual_dashboard")
+
+                        # ── Verifica OTA (uma vez por hora) ──────────────────────
+                        update_iniciado = check_and_apply_update(conf)
+                        if update_iniciado:
+                            log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
+                            self.stop_requested = True
+                            win32event.SetEvent(self.hWaitStop)
+                            return
+
+                    except Exception as e:
+                        log(f"Falha ao enviar ping para o servidor (tentara novamente em 5 min): {e}", is_error=True)
+>>>>>>> origin/integracao-equipamentos
                 
                 segundos = (proximo - agora).total_seconds()
                 if segundos <= 0:

@@ -9,6 +9,7 @@ export interface NVR {
   username: string;
   config_extra?: Record<string, unknown> | null;
   last_recording_status?: any;
+  active: boolean;
 }
 
 // Alias semântico
@@ -27,6 +28,8 @@ export interface Client {
   last_backup_status: string | null;
   created_at: string;
   nvr_count: number;
+  restart_requested?: boolean;
+  backup_requested?: boolean;
   api_key?: string; // only on create/rotate
 }
 
