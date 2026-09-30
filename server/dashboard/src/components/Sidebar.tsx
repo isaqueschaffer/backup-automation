@@ -26,7 +26,7 @@ export default function Sidebar() {
           </div>
           <div className="sidebar-logo-text">
             <span className="sidebar-logo-title">TRILAN</span>
-            <span className="sidebar-logo-sub">BACKUPS</span>
+            <span className="sidebar-logo-sub">BACKUPS <span style={{ fontSize: '9px', backgroundColor: 'var(--primary)', color: 'white', padding: '1px 4px', borderRadius: '4px', marginLeft: '4px', fontWeight: 'bold', verticalAlign: 'middle' }}>V1.0.0</span></span>
           </div>
         </div>
       </div>

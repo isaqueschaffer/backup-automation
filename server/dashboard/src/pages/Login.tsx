@@ -28,7 +28,7 @@ export default function Login() {
           <div className="login-logo-icon">
             <Server size={28} color="white" />
           </div>
-          <div className="login-logo-title">TRILAN BACKUPS</div>
+          <div className="login-logo-title">TRILAN BACKUPS <span style={{ fontSize: '0.4em', backgroundColor: 'var(--primary)', color: 'white', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px', fontWeight: 'bold', verticalAlign: 'middle' }}>V1.0.0</span></div>
           <div className="login-logo-sub">Painel de Gerenciamento de Equipamentos</div>
         </div>
 
