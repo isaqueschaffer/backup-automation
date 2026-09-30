@@ -6,7 +6,7 @@
 param(
     [Parameter(Mandatory=$true)]  [string]$Version,
     [Parameter(Mandatory=$true)]  [string]$ServerUrl,
-    [Parameter(Mandatory=$true)]  [string]$AdminToken,
+    [Parameter(Mandatory=$true)]  [string]$AdminPassword,
     [Parameter(Mandatory=$false)] [string]$Notes = "",
     [Parameter(Mandatory=$false)] [string]$UrlService = "",
     [Parameter(Mandatory=$false)] [string]$UrlTray = ""
@@ -57,9 +57,17 @@ if (-not $UrlService) {
     exit 0
 }
 
-# Registra a versão na API
-Write-Host "Registrando versão $Version na API do servidor..."
+Write-Host "Fazendo login na API..."
+$LoginBody = @{ password = $AdminPassword } | ConvertTo-Json
+try {
+    $LoginResp = Invoke-RestMethod -Uri "$ServerUrl/api/v1/auth/login" -Method POST -Body $LoginBody -Headers @{"Content-Type"="application/json"}
+    $Token = $LoginResp.access_token
+} catch {
+    Write-Error "Falha no login. Verifique a senha do painel e a URL."
+    exit 1
+}
 
+Write-Host "Registrando versão $Version na API do servidor..."
 $Body = @{
     version       = $Version
     notes         = $Notes
@@ -71,7 +79,7 @@ if ($UrlTray)  { $Body.url_tray    = $UrlTray }
 if ($HashTray) { $Body.sha256_tray = $HashTray }
 
 $Headers = @{
-    "Authorization" = "Bearer $AdminToken"
+    "Authorization" = "Bearer $Token"
     "Content-Type"  = "application/json"
 }
 
