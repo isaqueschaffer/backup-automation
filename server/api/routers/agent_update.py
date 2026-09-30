@@ -8,7 +8,7 @@ OTA Update router.
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 
 from auth import get_current_client, verify_admin_token
@@ -135,7 +135,7 @@ def delete_version(version_id: UUID, db: Session = Depends(get_db)):
     response_model=AgentVersionResponse,
     dependencies=[Depends(verify_admin_token)],
 )
-def edit_version(version_id: UUID, payload: dict, db: Session = Depends(get_db)):
+def edit_version(version_id: UUID, payload: dict = Body(...), db: Session = Depends(get_db)):
     """Edita uma versão."""
     version = db.query(AgentVersion).filter(AgentVersion.id == version_id).first()
     if not version:
