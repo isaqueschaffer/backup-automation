@@ -118,6 +118,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict, conf: dict):
         import agent as agent_mod
         from src.application.api_client import ping_server
+        from src.application.updater import check_and_apply_update
         import time
 
         last_ping_time = 0
@@ -159,6 +160,15 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                         if ping_resp and ping_resp.get("backup"):
                             log("Geracao de backup manual solicitada pelo dashboard!")
                             self._executar_backup(agent_mod, "manual_dashboard")
+
+                        # ── Verifica OTA (uma vez por hora) ──────────────────────
+                        update_iniciado = check_and_apply_update(conf)
+                        if update_iniciado:
+                            log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
+                            self.stop_requested = True
+                            win32event.SetEvent(self.hWaitStop)
+                            return
+
                     except Exception as e:
                         log(f"Falha ao enviar ping para o servidor (tentara novamente em 5 min): {e}", is_error=True)
                 

@@ -219,3 +219,40 @@ class AgentLogResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ─────────────────────────────────────────────
+# Agent OTA (Over The Air Updates)
+# ─────────────────────────────────────────────
+class AgentVersionCreate(BaseModel):
+    version: str                             # ex: "2.1.0"
+    notes: Optional[str] = None
+    url_service: str                         # URL pública do exe (ex: GitHub Release asset)
+    url_tray: Optional[str] = None
+    sha256_service: str                      # SHA256 do service.exe (64 chars hex)
+    sha256_tray: Optional[str] = None
+
+
+class AgentVersionResponse(BaseModel):
+    id: UUID
+    version: str
+    notes: Optional[str]
+    url_service: str
+    url_tray: Optional[str]
+    sha256_service: str
+    sha256_tray: Optional[str]
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UpdateCheckResponse(BaseModel):
+    """Resposta ao agente ao verificar se há nova versão disponível."""
+    has_update: bool
+    version: Optional[str] = None
+    url_service: Optional[str] = None
+    url_tray: Optional[str] = None
+    sha256_service: Optional[str] = None
+    sha256_tray: Optional[str] = None
+    notes: Optional[str] = None

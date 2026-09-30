@@ -92,3 +92,19 @@ class Setting(Base):
 
     key = Column(String(100), primary_key=True)
     value = Column(Text, nullable=True)
+
+
+class AgentVersion(Base):
+    """Controla versões do agente Windows para atualização OTA via GitHub Releases."""
+    __tablename__ = "agent_versions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    version = Column(String(20), nullable=False, unique=True)       # ex: "2.1.0"
+    notes = Column(Text, nullable=True)                              # release notes
+    url_service = Column(Text, nullable=False)                       # URL do TrilanAgentService.exe
+    url_tray = Column(Text, nullable=True)                           # URL do TrilanAgentTray.exe
+    sha256_service = Column(String(64), nullable=False)              # hash SHA256 do service exe
+    sha256_tray = Column(String(64), nullable=True)                  # hash SHA256 do tray exe
+    active = Column(Boolean, default=True, nullable=False)           # se False, não será distribuída
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
