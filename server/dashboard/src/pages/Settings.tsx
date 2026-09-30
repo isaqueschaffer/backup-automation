@@ -29,6 +29,7 @@ function OtaManager() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ version: "", url_service: "", sha256_service: "" });
+  const [createForm, setCreateForm] = useState({ version: "", url_service: "", sha256_service: "" });
 
   const startEdit = (v: any) => {
     setEditingId(v.id);
@@ -44,9 +45,28 @@ function OtaManager() {
     } catch { toast("Erro ao editar.", "error"); }
   };
 
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await createAgentVersion(createForm);
+      toast("Nova versão registrada com sucesso!", "success");
+      setCreateForm({ version: "", url_service: "", sha256_service: "" });
+      loadVersions();
+    } catch { toast("Erro ao criar versão.", "error"); }
+  };
+
   return (
     <div className="card mt-4" style={{ overflowX: 'auto' }}>
       <div className="section-title"><UploadCloud size={15} />Gerenciador de Versões OTA (Agent)</div>
+      
+      {/* Formulário de Criação */}
+      <form onSubmit={handleCreate} className="flex gap-2 mt-2 mb-4 align-items-center" style={{ flexWrap: 'wrap' }}>
+        <input className="input" placeholder="Versão (ex: 1.0.4)" required value={createForm.version} onChange={e => setCreateForm({...createForm, version: e.target.value})} />
+        <input className="input" placeholder="SHA256 Hash do .exe" required value={createForm.sha256_service} onChange={e => setCreateForm({...createForm, sha256_service: e.target.value})} style={{ minWidth: 250 }} />
+        <input className="input" placeholder="URL do GitHub (TrilanAgentService.exe)" type="url" required value={createForm.url_service} onChange={e => setCreateForm({...createForm, url_service: e.target.value})} style={{ minWidth: 300, flex: 1 }} />
+        <button type="submit" className="btn btn-primary">Registrar Nova Versão</button>
+      </form>
+
       {versions.length === 0 ? (
         <p className="text-sm text-muted">Nenhuma versão publicada no banco de dados.</p>
       ) : (
