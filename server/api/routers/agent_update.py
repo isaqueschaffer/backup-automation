@@ -116,3 +116,16 @@ def toggle_version(version_id: UUID, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(version)
     return version
+
+@admin_router.delete(
+    "/agent-version/{version_id}",
+    dependencies=[Depends(verify_admin_token)],
+)
+def delete_version(version_id: UUID, db: Session = Depends(get_db)):
+    """Deleta uma versão."""
+    version = db.query(AgentVersion).filter(AgentVersion.id == version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="Versão não encontrada.")
+    db.delete(version)
+    db.commit()
+    return {"status": "ok"}

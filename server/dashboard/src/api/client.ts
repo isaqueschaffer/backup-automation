@@ -78,4 +78,13 @@ export const fetchSettings = () => api.get("/settings").then((r) => r.data);
 export const updateSettings = (data: Record<string, string>) =>
   api.put("/settings", data).then((r) => r.data);
 
+// ── OTA Updates ───────────────────────────────────────────────
+export const fetchAgentVersions = () => api.get("/admin/agent-version").then((r) => r.data);
+export const createAgentVersion = (data: Record<string, unknown>) =>
+  api.post("/admin/agent-version", data).then((r) => r.data);
+export const toggleAgentVersion = (id: string) =>
+  api.put(`/admin/agent-version/${id}/toggle`).then((r) => r.data);
+export const deleteAgentVersion = (id: string) =>
+  api.delete(`/admin/agent-version/${id}`).then((r) => r.data);
+
 export default api;

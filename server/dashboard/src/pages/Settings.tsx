@@ -1,7 +1,80 @@
 import { useEffect, useState } from "react";
-import { fetchSettings, updateSettings } from "../api/client";
+import { fetchSettings, updateSettings, fetchAgentVersions, createAgentVersion, toggleAgentVersion, deleteAgentVersion } from "../api/client";
 import { useToast } from "../components/Toast";
-import { Save, Mail, Lock, Database } from "lucide-react";
+import { Save, Mail, Lock, Database, UploadCloud, Trash2, Power, PowerOff } from "lucide-react";
+
+function OtaManager() {
+  const [versions, setVersions] = useState<any[]>([]);
+  const { toast } = useToast();
+
+  const loadVersions = () => fetchAgentVersions().then(setVersions).catch(() => toast("Erro ao carregar OTA", "error"));
+
+  useEffect(() => { loadVersions(); }, []);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Deletar esta versão para sempre?")) return;
+    try {
+      await deleteAgentVersion(id);
+      toast("Versão apagada!", "success");
+      loadVersions();
+    } catch { toast("Erro ao apagar.", "error"); }
+  };
+
+  const handleToggle = async (id: string) => {
+    try {
+      await toggleAgentVersion(id);
+      loadVersions();
+    } catch { toast("Erro ao alterar.", "error"); }
+  };
+
+  return (
+    <div className="card mt-4">
+      <div className="section-title"><UploadCloud size={15} />Gerenciador de Versões OTA (Agent)</div>
+      {versions.length === 0 ? (
+        <p className="text-sm text-muted">Nenhuma versão publicada no banco de dados.</p>
+      ) : (
+        <table className="table" style={{ marginTop: 10 }}>
+          <thead>
+            <tr>
+              <th>Versão</th>
+              <th>SHA256 (Hash)</th>
+              <th>Status</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {versions.map(v => (
+              <tr key={v.id}>
+                <td><strong>{v.version}</strong></td>
+                <td style={{ fontSize: 11, fontFamily: "monospace", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {v.sha256_service}
+                </td>
+                <td>
+                  <span className={`badge ${v.active ? 'badge-success' : 'badge-danger'}`}>
+                    {v.active ? "Ativa" : "Pausada"}
+                  </span>
+                </td>
+                <td>
+                  <div className="flex gap-2">
+                    <button onClick={() => handleToggle(v.id)} className="btn btn-sm btn-secondary" title="Pausar/Ativar">
+                      {v.active ? <PowerOff size={14} /> : <Power size={14} />}
+                    </button>
+                    <button onClick={() => handleDelete(v.id)} className="btn btn-sm btn-danger" title="Apagar">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="text-sm text-muted mt-3">
+        Nota: A criação de novas versões continua sendo feita pelo script `publish_version.ps1` no terminal, pois ele precisa calcular o SHA256 do arquivo localmente antes de enviar para cá.
+      </p>
+    </div>
+  );
+}
 
 export default function Settings() {
   const [form, setForm] = useState({
@@ -101,6 +174,8 @@ export default function Settings() {
             Deixe em branco para não alterar a senha atual.
           </p>
         </div>
+
+        <OtaManager />
       </div>
     </>
   );
