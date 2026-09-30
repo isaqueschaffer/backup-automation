@@ -8,7 +8,7 @@ from pydantic import BaseModel, field_validator
 # ─────────────────────────────────────────────
 # Equipamento (antes chamado NVR)
 # ─────────────────────────────────────────────
-TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT"]
+TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED"]
 
 class NVRBase(BaseModel):
     tipo: str = "NVR"  # NVR, OLT, ONU, PABX
