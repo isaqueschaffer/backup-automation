@@ -62,11 +62,20 @@ def update_client(client_id: UUID, body: ClientUpdate, db: Session = Depends(get
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+        
+    time_changed = False
     for field, value in body.model_dump(exclude_none=True).items():
+        if field in ("backup_hour", "backup_minute") and getattr(client, field) != value:
+            time_changed = True
+            
         if field == "zip_password" and value:
             setattr(client, field, encrypt(value))
         else:
             setattr(client, field, value)
+            
+    if time_changed:
+        client.restart_requested = True
+        
     db.commit()
     db.refresh(client)
     return _to_response(client)

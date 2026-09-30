@@ -134,9 +134,9 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 
                 # Envia ping a cada 5 minutos (300 segundos) para manter status "Online"
                 if time.time() - last_ping_time >= 300:
+                    last_ping_time = time.time()
                     try:
                         ping_resp = ping_server(conf)
-                        last_ping_time = time.time()
                         
                         if ping_resp:
                             log(f"Ping recebido pelo servidor. Instrucoes: {ping_resp}")
@@ -160,7 +160,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                             log("Geracao de backup manual solicitada pelo dashboard!")
                             self._executar_backup(agent_mod, "manual_dashboard")
                     except Exception as e:
-                        log(f"Falha ao enviar ping para o servidor: {e}", is_error=True)
+                        log(f"Falha ao enviar ping para o servidor (tentara novamente em 5 min): {e}", is_error=True)
                 
                 segundos = (proximo - agora).total_seconds()
                 if segundos <= 0:
