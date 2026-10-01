@@ -60,11 +60,26 @@ function OtaManager() {
       <div className="section-title"><UploadCloud size={15} />Gerenciador de Versões OTA (Agent)</div>
       
       {/* Formulário de Criação */}
-      <form onSubmit={handleCreate} className="flex gap-2 mt-2 mb-4 align-items-center" style={{ flexWrap: 'wrap' }}>
-        <input className="input" placeholder="Versão (ex: 1.0.4)" required value={createForm.version} onChange={e => setCreateForm({...createForm, version: e.target.value})} />
-        <input className="input" placeholder="SHA256 Hash do .exe" required value={createForm.sha256_service} onChange={e => setCreateForm({...createForm, sha256_service: e.target.value})} style={{ minWidth: 250 }} />
-        <input className="input" placeholder="URL do GitHub (TrilanAgentService.exe)" type="url" required value={createForm.url_service} onChange={e => setCreateForm({...createForm, url_service: e.target.value})} style={{ minWidth: 300, flex: 1 }} />
-        <button type="submit" className="btn btn-primary">Registrar Nova Versão</button>
+      <form onSubmit={handleCreate} className="mt-2 mb-4" style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+        <div className="flex gap-3">
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="form-label">Versão</label>
+            <input className="form-input" placeholder="ex: 1.0.4" required value={createForm.version} onChange={e => setCreateForm({...createForm, version: e.target.value})} />
+          </div>
+          <div className="form-group" style={{ flex: 2 }}>
+            <label className="form-label">SHA256 Hash do .exe</label>
+            <input className="form-input" placeholder="Hash SHA256" required value={createForm.sha256_service} onChange={e => setCreateForm({...createForm, sha256_service: e.target.value})} />
+          </div>
+        </div>
+        <div className="flex gap-3 align-items-end">
+          <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+            <label className="form-label">URL do GitHub (TrilanAgentService.exe)</label>
+            <input className="form-input" placeholder="https://github.com/..." type="url" required value={createForm.url_service} onChange={e => setCreateForm({...createForm, url_service: e.target.value})} />
+          </div>
+          <button type="submit" className="btn btn-primary" style={{ height: '38px', padding: '0 20px' }}>
+            Registrar Nova Versão
+          </button>
+        </div>
       </form>
 
       {versions.length === 0 ? (
