@@ -3,7 +3,7 @@ import { fetchBackups, fetchClients } from "../api/client";
 import api from "../api/client";
 import { Backup, Client, PaginatedBackups } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
-import { Download, Search } from "lucide-react";
+import { Download, Search, Calendar } from "lucide-react";
 
 // Função auxiliar para formatar erros de blob
 async function extractBlobError(err: unknown): Promise<string> {
@@ -162,8 +162,11 @@ export default function Backups() {
   const [page, setPage] = useState(1);
   const [clientFilter, setClientFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  
+  const today = new Date().toISOString().split("T")[0];
+  const [dateFrom, setDateFrom] = useState(today);
+  const [dateTo, setDateTo] = useState(today);
+  
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -225,20 +228,28 @@ export default function Backups() {
           <option value="PARTIAL">Parcial</option>
           <option value="ERROR">Erro</option>
         </select>
-        <input 
-          type="date" 
-          className="form-input" 
-          value={dateFrom} 
-          onChange={e => { setDateFrom(e.target.value); setPage(1); }} 
-          title="Data Inicial"
-        />
-        <input 
-          type="date" 
-          className="form-input" 
-          value={dateTo} 
-          onChange={e => { setDateTo(e.target.value); setPage(1); }} 
-          title="Data Final"
-        />
+        <div className="flex align-items-center gap-2" style={{ background: 'var(--surface)', padding: '0 10px', borderRadius: '4px', border: '1px solid var(--border)' }}>
+          <Calendar size={14} className="text-muted" />
+          <span className="text-sm font-medium">Início:</span>
+          <input 
+            type="date" 
+            style={{ border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', color: 'var(--text-color)' }}
+            value={dateFrom} 
+            onChange={e => { setDateFrom(e.target.value); setPage(1); }} 
+            title="Data Inicial"
+          />
+        </div>
+        <div className="flex align-items-center gap-2" style={{ background: 'var(--surface)', padding: '0 10px', borderRadius: '4px', border: '1px solid var(--border)' }}>
+          <Calendar size={14} className="text-muted" />
+          <span className="text-sm font-medium">Fim:</span>
+          <input 
+            type="date" 
+            style={{ border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', color: 'var(--text-color)' }}
+            value={dateTo} 
+            onChange={e => { setDateTo(e.target.value); setPage(1); }} 
+            title="Data Final"
+          />
+        </div>
         <button className="btn btn-secondary" onClick={() => load()}>
           <Search size={14} /> Atualizar
         </button>

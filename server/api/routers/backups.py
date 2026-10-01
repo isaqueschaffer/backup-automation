@@ -42,9 +42,17 @@ def list_backups(
     if status_filter:
         q = q.filter(Backup.status == status_filter.upper())
     if date_from:
-        q = q.filter(cast(Backup.started_at, Date) >= date_from)
+        from datetime import datetime, time, timedelta
+        # Considera fuso do Brasil (UTC-3)
+        # O início do dia no Brasil (00:00:00) equivale a 03:00:00 do mesmo dia em UTC
+        start_utc = datetime.combine(date_from, time.min) + timedelta(hours=3)
+        q = q.filter(Backup.started_at >= start_utc)
+    
     if date_to:
-        q = q.filter(cast(Backup.started_at, Date) <= date_to)
+        from datetime import datetime, time, timedelta
+        # O fim do dia no Brasil (23:59:59) equivale a 02:59:59 do dia seguinte em UTC
+        end_utc = datetime.combine(date_to, time.max) + timedelta(hours=3)
+        q = q.filter(Backup.started_at <= end_utc)
 
     total = q.count()
     items = q.order_by(Backup.started_at.desc()).offset((page - 1) * size).limit(size).all()
