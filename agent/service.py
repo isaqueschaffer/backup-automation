@@ -108,6 +108,21 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             hora = int(server_cfg.get("backup_hour", 2))
             minuto = int(server_cfg.get("backup_minute", 0))
             log("COMUNICACAO BEM SUCEDIDA! Configuracoes do servidor recebidas.")
+            
+            # Start Webhook for Digifort if needed
+            for eq in server_cfg.get("equipamentos", []):
+                if eq.get("tipo", "").upper() == "DIGIFORT":
+                    cfg_ext = eq.get("config_extra", {})
+                    caminho_csv = cfg_ext.get("caminho_csv", "")
+                    caminho_log = cfg_ext.get("caminho_log_csv", "")
+                    
+                    try:
+                        from src.application.webhook_digifort import start_webhook
+                        start_webhook(caminho_csv, caminho_log)
+                        log("Agente Webhook Digifort integrado e iniciado com sucesso.")
+                    except Exception as e:
+                        log(f"Falha ao iniciar Agente Webhook Digifort: {e}", is_error=True)
+                    break
         except Exception as e:
             log(f"FALHA na comunicacao com o servidor: {e}", is_error=True)
             log("Usando horario padrao 02:00 para o proximo backup.")
@@ -145,68 +160,51 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             while not self.stop_requested:
                 agora = datetime.now()
                 
-<<<<<<< HEAD
                 # Envia ping a cada 5 minutos (300s) se online, ou a cada 10 minutos (600s) se offline
                 intervalo_ping = 300 if (time.time() - last_successful_ping < 300) else 600
                 
                 if time.time() - last_ping_time >= intervalo_ping:
                     try:
-                        ping_resp = requests.post(
-                            f"{server_url}/api/v1/agent/ping",
-                            headers=headers, timeout=10, verify=False,
-                        )
-                        ping_resp.raise_for_status()
-                        
-                        if time.time() - last_successful_ping > 300 and config_loaded:
-                            log("Servidor voltou a responder apos periodo de desconexao!")
-
-                        last_ping_time = time.time()
-                        last_successful_ping = time.time()
-                        
-                        # Se ligou sem internet/servidor, reinicia agora para baixar a config correta
-                        if not config_loaded:
-                            log("Servidor voltou a responder! Reiniciando servico para buscar configuracoes e horario corretos...")
-                            self._restart_service()
-                            return
-                        
-=======
-                # Envia ping a cada 5 minutos (300 segundos) para manter status "Online"
-                if time.time() - last_ping_time >= 300:
-                    last_ping_time = time.time()
-                    try:
                         ping_resp = ping_server(conf)
+                        last_ping_time = time.time()
                         
                         if ping_resp:
                             log(f"Ping recebido pelo servidor. Instrucoes: {ping_resp}")
+                            
+                            if time.time() - last_successful_ping > 300 and config_loaded:
+                                log("Servidor voltou a responder apos periodo de desconexao!")
+                                
+                            last_successful_ping = time.time()
+                            
+                            # Se ligou sem internet/servidor, reinicia agora para baixar a config correta
+                            if not config_loaded:
+                                log("Servidor voltou a responder! Reiniciando servico para buscar configuracoes e horario corretos...")
+                                self._restart_service()
+                                return
+
+                            # Verifica se o servidor solicitou reinicio
+                            if ping_resp.get("restart"):
+                                log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
+                                self._restart_service()
+                                return
+                                
+                            if ping_resp.get("backup"):
+                                log("Geracao de backup manual solicitada pelo dashboard!")
+                                self._executar_backup(agent_mod, "manual_dashboard")
+
+                            # ── Verifica OTA (uma vez por hora) ──────────────────────
+                            update_iniciado = check_and_apply_update(conf)
+                            if update_iniciado:
+                                log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
+                                self.stop_requested = True
+                                win32event.SetEvent(self.hWaitStop)
+                                return
                         else:
                             log("Ping enviado, mas resposta vazia.")
                             
->>>>>>> origin/integracao-equipamentos
-                        # Verifica se o servidor solicitou reinicio
-                        if ping_resp and ping_resp.get("restart"):
-                            log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
-                            self._restart_service()
-                            return
-<<<<<<< HEAD
                     except Exception as e:
-                        log(f"Falha na conexao com o servidor (tentando novamente em 10 minutos): {e}", is_error=True)
+                        log(f"Falha na conexao com o servidor (tentando novamente em {int(intervalo_ping/60)} minutos): {e}", is_error=True)
                         last_ping_time = time.time()
-=======
-                        if ping_resp and ping_resp.get("backup"):
-                            log("Geracao de backup manual solicitada pelo dashboard!")
-                            self._executar_backup(agent_mod, "manual_dashboard")
-
-                        # ── Verifica OTA (uma vez por hora) ──────────────────────
-                        update_iniciado = check_and_apply_update(conf)
-                        if update_iniciado:
-                            log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
-                            self.stop_requested = True
-                            win32event.SetEvent(self.hWaitStop)
-                            return
-
-                    except Exception as e:
-                        log(f"Falha ao enviar ping para o servidor (tentara novamente em 5 min): {e}", is_error=True)
->>>>>>> origin/integracao-equipamentos
                 
                 segundos = (proximo - agora).total_seconds()
                 if segundos <= 0:

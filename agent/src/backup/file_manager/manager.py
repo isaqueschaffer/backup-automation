@@ -103,6 +103,41 @@ class FileManager:
                 return {"nome": nome_original, "status": status_copia.value, "cameras": None}
             arquivos_copiados.append(destino.name)
 
+        status_cameras = None
+        if equipamento.get("tipo", "").upper() == "DIGIFORT":
+            logging.info("  [DIGIFORT] Buscando status de gravacoes e CSV do Agente Webhook...")
+            try:
+                import requests
+                # Puxa status
+                resp_status = requests.get("http://localhost:8080/status", timeout=5)
+                if resp_status.status_code == 200:
+                    status_dict = resp_status.json()
+                    status_cameras = []
+                    for nome_cam, st in status_dict.items():
+                        is_ok = (st == "OK")
+                        status_cameras.append({
+                            "canal": "N/A",
+                            "nome": nome_cam,
+                            "ip": "N/A",
+                            "online": is_ok,
+                            "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
+                            "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
+                            "total_dias": 1,
+                            "mapa": "█" if is_ok else "░"
+                        })
+                    logging.info("  [DIGIFORT] Status das cameras obtido com sucesso.")
+                
+                # Puxa CSV
+                resp_csv = requests.get("http://localhost:8080/csv", timeout=5)
+                if resp_csv.status_code == 200:
+                    caminho_csv = pasta_eq / "quedas_cameras.csv"
+                    with open(caminho_csv, 'wb') as f:
+                        f.write(resp_csv.content)
+                    arquivos_copiados.append("quedas_cameras.csv")
+                    logging.info("  [DIGIFORT] CSV adicionado ao backup.")
+            except Exception as e:
+                logging.warning(f"  [DIGIFORT] Falha ao comunicar com o agente webhook: {e}")
+
         logging.info(f"  Backup processado com sucesso. Arquivos: {', '.join(arquivos_copiados)}")
 
         return {
@@ -111,7 +146,7 @@ class FileManager:
             "arquivos": arquivos_copiados,
             "destino": str(pasta_eq),
             "tamanho_mb": grupo_recente.total_size_mb,
-            "cameras": None
+            "cameras": status_cameras
         }
 
     def _get_parser(self, tipo_parser: str) -> BaseParser:

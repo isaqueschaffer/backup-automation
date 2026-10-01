@@ -150,7 +150,7 @@ function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        {eq.tipo === "NVR" && (
+        {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT") && (
           <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Video size={13} /> Gravações
@@ -225,7 +225,14 @@ const buildEqPayload = () => {
       payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
     } else if (eqForm.tipo === "DIGIFORT") {
       if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
-      payload.ip = eqForm.pasta_origem.trim(); payload.username = "digifort"; payload.password = "digifort"; payload.config_extra = { pasta_origem: eqForm.pasta_origem.trim() };
+      payload.ip = eqForm.pasta_origem.trim(); 
+      payload.username = "digifort"; 
+      payload.password = "digifort"; 
+      payload.config_extra = { 
+        pasta_origem: eqForm.pasta_origem.trim(),
+        caminho_csv: (eqForm as any).caminho_csv?.trim() || "",
+        caminho_log_csv: (eqForm as any).caminho_log_csv?.trim() || ""
+      };
     } else if (eqForm.tipo === "OLT") {
       if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
       payload.config_extra = { fabricante_olt: eqForm.fabricante_olt };
@@ -459,8 +466,10 @@ const buildEqPayload = () => {
                     username: eq.username,
                     password: "", // do not fetch password
                     pasta_origem: (eq.config_extra as any)?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
-                    fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000"
-                  });
+                    fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000",
+                    caminho_csv: (eq.config_extra as any)?.caminho_csv || "",
+                    caminho_log_csv: (eq.config_extra as any)?.caminho_log_csv || ""
+                  } as any);
                   setShowEqModal(true);
                 }}
                 onToggleActive={() => handleToggleEquipamento(eq)}
@@ -707,12 +716,32 @@ const buildEqPayload = () => {
             </>
           )}
           {eqForm.tipo === "DIGIFORT" && (
-            <div className="form-group">
-              <label className="form-label">Pasta de Origem do Digifort *</label>
-              <input className="form-input" type="text"
-                placeholder="C:\Digifort\Backup"
-                value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
-            </div>
+            <>
+              <div className="form-group">
+                <label className="form-label">Pasta de Origem do Digifort *</label>
+                <input className="form-input" type="text"
+                  placeholder="C:\Digifort\Backup"
+                  value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Caminho do CSV Exportado (Opcional)</label>
+                <input className="form-input" type="text"
+                  placeholder="export_cameras.csv"
+                  value={(eqForm as any).caminho_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_csv: e.target.value } as any)} />
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Arquivo CSV com a descrição das câmeras gerado pelo Digifort.
+                </span>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Caminho do LOG de Gravações (Opcional)</label>
+                <input className="form-input" type="text"
+                  placeholder="C:\...\quedas_cameras.csv"
+                  value={(eqForm as any).caminho_log_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_log_csv: e.target.value } as any)} />
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Arquivo CSV onde o Agente Webhook salva/lê o histórico (quedas_cameras.csv).
+                </span>
+              </div>
+            </>
           )}
           <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
             <button className="btn btn-secondary" onClick={() => setShowEqModal(false)}>Cancelar</button>
