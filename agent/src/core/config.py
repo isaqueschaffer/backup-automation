@@ -8,10 +8,14 @@ CONF_FILE = DIR_AGENT / "agent.conf"
 def load_conf() -> dict:
     if not CONF_FILE.exists():
         sys.exit(f"ERRO: {CONF_FILE} nao encontrado. Copie agent.conf.example e configure.")
+    
     cfg = configparser.ConfigParser()
-    cfg.read(CONF_FILE, encoding="utf-8-sig")
-    return {
-        "server_url": cfg["server"]["url"].rstrip("/"),
-        "client_id": cfg["auth"]["client_id"],
-        "api_key": cfg["auth"]["api_key"],
-    }
+    try:
+        cfg.read(CONF_FILE, encoding="utf-8-sig")
+        return {
+            "server_url": cfg["server"]["url"].rstrip("/"),
+            "client_id": cfg["auth"]["client_id"],
+            "api_key": cfg["auth"]["api_key"],
+        }
+    except (configparser.Error, KeyError) as e:
+        sys.exit(f"ERRO FATAL: Arquivo agent.conf mal formatado ou faltando informacoes. Detalhe: {e}")

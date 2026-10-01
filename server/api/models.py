@@ -26,12 +26,16 @@ class Client(Base):
     last_backup_status = Column(String(20), nullable=True)  # OK, PARTIAL, ERROR
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     restart_requested = Column(Boolean, default=False, nullable=False)
+    backup_requested = Column(Boolean, default=False, nullable=False)
 
     nvrs = relationship("NVR", back_populates="client", cascade="all, delete-orphan")
+    equipamentos = relationship("NVR", back_populates="client", cascade="all, delete-orphan", overlaps="nvrs")
     backups = relationship("Backup", back_populates="client")
+    logs = relationship("AgentLog", back_populates="client", cascade="all, delete-orphan", order_by="desc(AgentLog.created_at)")
 
 
 class NVR(Base):
+    """Tabela de equipamentos (NVR, OLT, ONU, PABX). Mantém nome 'nvrs' no BD para compatibilidade."""
     __tablename__ = "nvrs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -40,13 +44,17 @@ class NVR(Base):
         ForeignKey("clients.id", ondelete="CASCADE"),
         nullable=False
     )
+    tipo = Column(String(20), nullable=False, default="NVR")  # NVR, OLT, ONU, PABX
     name = Column(String(255), nullable=False)
     ip = Column(String(50), nullable=False)
     username = Column(String(100), nullable=False)
     password = Column(Text, nullable=False)  # Fernet-encrypted
+    config_extra = Column(JSON, nullable=True)  # configurações específicas de cada tipo
     last_recording_status = Column(JSON, nullable=True)
+    active = Column(Boolean, default=True, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    client = relationship("Client", back_populates="nvrs")
+    client = relationship("Client", back_populates="nvrs", overlaps="equipamentos")
 
 
 class Backup(Base):
@@ -67,8 +75,36 @@ class Backup(Base):
     client = relationship("Client", back_populates="backups")
 
 
+class AgentLog(Base):
+    __tablename__ = "agent_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    event_type = Column(String(50), nullable=False)  # ex: ping, backup_trigger, restart_trigger
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    client = relationship("Client", back_populates="logs")
+
+
 class Setting(Base):
     __tablename__ = "settings"
 
     key = Column(String(100), primary_key=True)
     value = Column(Text, nullable=True)
+
+
+class AgentVersion(Base):
+    """Controla versões do agente Windows para atualização OTA via GitHub Releases."""
+    __tablename__ = "agent_versions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    version = Column(String(20), nullable=False, unique=True)       # ex: "2.1.0"
+    notes = Column(Text, nullable=True)                              # release notes
+    url_service = Column(Text, nullable=False)                       # URL do TrilanAgentService.exe
+    url_tray = Column(Text, nullable=True)                           # URL do TrilanAgentTray.exe
+    sha256_service = Column(String(64), nullable=False)              # hash SHA256 do service exe
+    sha256_tray = Column(String(64), nullable=True)                  # hash SHA256 do tray exe
+    active = Column(Boolean, default=True, nullable=False)           # se False, não será distribuída
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
