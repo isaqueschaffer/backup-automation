@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_client, verify_admin_token
 from database import get_db
 from models import AgentVersion, Client
-from schemas import AgentVersionCreate, AgentVersionResponse, UpdateCheckResponse
+from schemas import AgentVersionCreate, AgentVersionResponse, UpdateCheckResponse, AgentVersionUpdate
 
 # ── Router para o agente (autenticado por X-Client-ID + X-API-Key) ──────────
 agent_router = APIRouter(prefix="/api/v1/agent", tags=["agent-update"])
@@ -135,18 +135,18 @@ def delete_version(version_id: UUID, db: Session = Depends(get_db)):
     response_model=AgentVersionResponse,
     dependencies=[Depends(verify_admin_token)],
 )
-def edit_version(version_id: UUID, payload: dict = Body(...), db: Session = Depends(get_db)):
+def edit_version(version_id: UUID, payload: AgentVersionUpdate, db: Session = Depends(get_db)):
     """Edita uma versão."""
     version = db.query(AgentVersion).filter(AgentVersion.id == version_id).first()
     if not version:
         raise HTTPException(status_code=404, detail="Versão não encontrada.")
     
-    if "version" in payload:
-        version.version = payload["version"]
-    if "url_service" in payload:
-        version.url_service = payload["url_service"]
-    if "sha256_service" in payload:
-        version.sha256_service = payload["sha256_service"]
+    if payload.version is not None:
+        version.version = payload.version
+    if payload.url_service is not None:
+        version.url_service = payload.url_service
+    if payload.sha256_service is not None:
+        version.sha256_service = payload.sha256_service
     
     db.commit()
     db.refresh(version)

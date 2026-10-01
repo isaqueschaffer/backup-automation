@@ -233,6 +233,12 @@ class AgentVersionCreate(BaseModel):
     sha256_tray: Optional[str] = None
 
 
+class AgentVersionUpdate(BaseModel):
+    version: Optional[str] = None
+    url_service: Optional[str] = None
+    sha256_service: Optional[str] = None
+
+
 class AgentVersionResponse(BaseModel):
     id: UUID
     version: str
