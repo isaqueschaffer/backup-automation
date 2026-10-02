@@ -250,8 +250,8 @@ export default function Backups() {
             title="Data Final"
           />
         </div>
-        <button className="btn btn-secondary" onClick={() => load()}>
-          <Search size={14} /> Atualizar
+        <button className="btn btn-primary" onClick={() => load()} style={{ height: '36px', padding: '0 20px' }}>
+          <Search size={16} style={{ marginRight: 6 }} /> Buscar
         </button>
       </div>
 
