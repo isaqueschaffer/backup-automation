@@ -1,5 +1,3 @@
-import urllib.parse
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import datetime
 import csv
 import os
@@ -10,7 +8,6 @@ import threading
 # ==========================================
 # CONFIGURAÇÃO
 # ==========================================
-PORTA_HTTP = 8080
 PORTA_SNMP = 162
 ARQUIVO_CSV = r"C:\Relatorios_Digifort\quedas_cameras.csv"
 
@@ -23,7 +20,7 @@ def carregar_dicionario_cameras(caminho_arquivo):
     dicionario_ip = {}
     if os.path.isfile(caminho_arquivo):
         try:
-            with open(caminho_arquivo, mode='r', encoding='utf-8-sig') as f:
+            with open(caminho_arquivo, mode='r', encoding='utf-8-sig', errors='replace') as f:
                 reader = csv.DictReader(f, delimiter=';')
                 
                 colunas = reader.fieldnames or []
@@ -50,11 +47,11 @@ def carregar_dicionario_cameras(caminho_arquivo):
                             dicionario_nome[descricao.strip()] = info
                             dicionario_nome[numero] = info
                             
-            print(f"✅ Câmeras carregadas do arquivo {caminho_arquivo}")
+            print(f"[OK] Cameras carregadas do arquivo {caminho_arquivo}")
         except Exception as e:
-            print(f"❌ Erro ao ler {caminho_arquivo}: {e}")
+            print(f"[ERRO] ao ler {caminho_arquivo}: {e}")
     else:
-        print(f"⚠️ AVISO: Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
+        print(f"[AVISO] Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
         
     return dicionario_nome, dicionario_ip
 
@@ -76,82 +73,42 @@ def registrar_queda(nome_camera, nome_evento):
             
         writer.writerow([data, hora, nome_camera, nome_evento])
 
-# =============== SERVIDOR HTTP ===============
-class TrilanWebhookHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass  # Evita erro ao rodar como Windows Service (sys.stderr é None)
 
-    def do_GET(self):
-        parsed_path = urllib.parse.urlparse(self.path)
+def get_status_cameras(caminho_export="", caminho_log=""):
+    """Lê o histórico do CSV e retorna o dicionário com o status de cada câmera"""
+    
+    # Usa o cache se estiver vazio e o caminho foi passado
+    if caminho_export and not DICIONARIO_CAMERAS_NOME:
+        nomes, ips = carregar_dicionario_cameras(caminho_export)
+        DICIONARIO_CAMERAS_NOME.update(nomes)
+        DICIONARIO_CAMERAS_IP.update(ips)
         
-        if parsed_path.path == '/status':
-            self._handle_status()
-            return
+    status_cameras = {}
+    for nome in DICIONARIO_CAMERAS_NOME.keys():
+        if not nome.isdigit():
+            status_cameras[nome] = "OK"
             
-        if parsed_path.path == '/csv':
-            self._handle_csv()
-            return
-            
-        # Compatibilidade com webhook antigo (caso chamem via HTTP)
-        parametros = urllib.parse.parse_qs(parsed_path.query)
-        if 'c' in parametros or 'camera' in parametros:
-            numero_camera = parametros.get('c', parametros.get('camera', ['Desconhecida']))[0]
-            if 'r' in parametros:
-                nome_evento = 'Câmera Restaurada'
-            else:
-                nome_evento = 'Falha de Comunicação'
-                
-            info = DICIONARIO_CAMERAS_NOME.get(numero_camera)
-            nome_completo = info['Nome'] if info else numero_camera
-            
-            registrar_queda(nome_completo, nome_evento)
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(f"Registrado {nome_evento} na camera: {nome_completo}".encode("utf-8"))
-            return
+    arquivo_alvo = caminho_log if caminho_log else ARQUIVO_CSV
+        
+    if os.path.isfile(arquivo_alvo):
+        with open(arquivo_alvo, mode='r', encoding='utf-8-sig', errors='replace') as file:
+            reader = csv.DictReader(file, delimiter=';')
+            for row in reader:
+                camera = row.get('Camera')
+                evento = row.get('Evento')
+                if camera and evento:
+                    # 'Restaurada' in evento previne problemas com 'Câmera Restaurada' em CP1252 vs UTF8
+                    if 'Restaurada' in evento or 'Online' in evento:
+                        status_cameras[camera] = "OK"
+                    else:
+                        status_cameras[camera] = "FALHA"
+                        
+    return status_cameras
 
-        self.send_response(404)
-        self.end_headers()
+def get_caminho_csv(caminho_log=""):
+    """Retorna o caminho do arquivo de quedas"""
+    return caminho_log if caminho_log else ARQUIVO_CSV
 
-    def _handle_status(self):
-        status_cameras = {}
-        for nome in DICIONARIO_CAMERAS_NOME.keys():
-            if not nome.isdigit():
-                status_cameras[nome] = "OK"
-            
-        if os.path.isfile(ARQUIVO_CSV):
-            with open(ARQUIVO_CSV, mode='r', encoding='utf-8-sig') as file:
-                reader = csv.DictReader(file, delimiter=';')
-                for row in reader:
-                    camera = row.get('Camera')
-                    evento = row.get('Evento')
-                    if camera:
-                        if evento == 'Câmera Restaurada' or evento == 'Online':
-                            status_cameras[camera] = "OK"
-                        else:
-                            status_cameras[camera] = "FALHA"
-                            
-        self.send_response(200)
-        self.send_header("Content-type", "application/json")
-        self.end_headers()
-        import json
-        self.wfile.write(json.dumps(status_cameras).encode("utf-8"))
-
-    def _handle_csv(self):
-        if not os.path.isfile(ARQUIVO_CSV):
-            self.send_response(404)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"CSV nao encontrado")
-            return
-            
-        self.send_response(200)
-        self.send_header("Content-type", "text/csv")
-        self.send_header("Content-Disposition", "attachment; filename=quedas_cameras.csv")
-        self.end_headers()
-        with open(ARQUIVO_CSV, 'rb') as file:
-            self.wfile.write(file.read())
 
 # =============== SNIFFER SNMP ===============
 sniffer_socket = None
@@ -161,9 +118,9 @@ def rodar_sniffer_snmp():
     sniffer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sniffer_socket.bind(('0.0.0.0', PORTA_SNMP))
-        print(f"✅ Sniffer SNMP rodando na porta {PORTA_SNMP}...")
+        print(f"[OK] Sniffer SNMP rodando na porta {PORTA_SNMP}...")
     except Exception as e:
-        print(f"❌ Erro ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}")
+        print(f"[ERRO] ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}")
         return
 
     while True:
@@ -176,9 +133,9 @@ def rodar_sniffer_snmp():
         
         # OIDs Digifort
         if b'\x06\x0d\x2b\x06\x01\x04\x01\x82\xf7\x04\x01\x01\x64\x02\x04' in dados:
-            status_encontrado = "Falha de Comunicação"
+            status_encontrado = "Falha de Comunicacao"
         elif b'\x06\x0d\x2b\x06\x01\x04\x01\x82\xf7\x04\x01\x01\x64\x02\x05' in dados:
-            status_encontrado = "Câmera Restaurada"
+            status_encontrado = "Camera Restaurada"
         else:
             status_encontrado = "Outro Evento"
 
@@ -212,11 +169,15 @@ def rodar_sniffer_snmp():
             registrar_queda(camera_identificada['Nome'], status_encontrado)
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] SNMP TRAP: {camera_identificada['Nome']} | {status_encontrado}")
 
-httpd_server = None
+snmp_thread = None
 
 def start_webhook(caminho_csv_export: str, caminho_log: str):
-    global ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV, httpd_server
-    if httpd_server is not None:
+    """
+    Mantido o nome original 'start_webhook' para não quebrar o service.py,
+    mas agora inicia apenas o sniffer SNMP e não mais um servidor HTTP.
+    """
+    global ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV, snmp_thread
+    if snmp_thread is not None:
         return 
     
     ARQUIVO_EXPORT_CAMERAS = caminho_csv_export
@@ -228,26 +189,19 @@ def start_webhook(caminho_csv_export: str, caminho_log: str):
     DICIONARIO_CAMERAS_NOME.update(nomes)
     DICIONARIO_CAMERAS_IP.update(ips)
     
-    # Inicia Servidor HTTP na 8080 (Para o manager ler /status e /csv)
-    server_address = ('', PORTA_HTTP)
-    httpd_server = HTTPServer(server_address, TrilanWebhookHandler)
-    threading.Thread(target=httpd_server.serve_forever, daemon=True).start()
-    
     # Inicia o Sniffer SNMP na 162
-    threading.Thread(target=rodar_sniffer_snmp, daemon=True).start()
+    snmp_thread = threading.Thread(target=rodar_sniffer_snmp, daemon=True)
+    snmp_thread.start()
     
-    print(f"✅ Agente Digifort iniciado! HTTP na {PORTA_HTTP} e SNMP na {PORTA_SNMP}.")
+    print(f"[OK] Agente Digifort iniciado (Modo SNMP na {PORTA_SNMP}).")
 
 def stop_webhook():
-    global httpd_server, sniffer_socket
-    if httpd_server:
-        httpd_server.shutdown()
-        httpd_server.server_close()
-        httpd_server = None
+    global snmp_thread, sniffer_socket
     if sniffer_socket:
         sniffer_socket.close()
         sniffer_socket = None
-    print("🛑 Agente Digifort parado.")
+    snmp_thread = None
+    print("[PARADO] Agente Digifort SNMP parado.")
 
 def rodar_servidor():
     start_webhook(ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV)
@@ -261,7 +215,7 @@ def rodar_servidor():
 if __name__ == '__main__':
     import sys
     print("="*60)
-    print("  AGENTE DIGIFORT (HTTP + SNMP) - TRILAN NVR BACKUP")
+    print("  AGENTE DIGIFORT (SNMP ONLY) - TRILAN NVR BACKUP")
     print("="*60)
     
     if len(sys.argv) > 1:
@@ -276,7 +230,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 2:
         ARQUIVO_CSV = sys.argv[2]
     else:
-        caminho_log = input(f"Digite o caminho para salvar o CSV de histórico de quedas (ou Enter para o padrao '{ARQUIVO_CSV}'): ").strip()
+        caminho_log = input(f"Digite o caminho para salvar o CSV de historico de quedas (ou Enter para o padrao '{ARQUIVO_CSV}'): ").strip()
         if caminho_log:
             ARQUIVO_CSV = caminho_log
             

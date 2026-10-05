@@ -10,7 +10,7 @@ import threading
 # ==========================================
 # CONFIGURAÇÃO
 # ==========================================
-PORTA_HTTP = 8080
+PORTA_HTTP = 8081
 PORTA_SNMP = 162
 ARQUIVO_CSV = r"C:\Relatorios_Digifort\quedas_cameras.csv"
 
@@ -50,11 +50,11 @@ def carregar_dicionario_cameras(caminho_arquivo):
                             dicionario_nome[descricao.strip()] = info
                             dicionario_nome[numero] = info
                             
-            print(f"✅ Câmeras carregadas do arquivo {caminho_arquivo}")
+            print(f"[OK] Cameras carregadas do arquivo {caminho_arquivo}")
         except Exception as e:
-            print(f"❌ Erro ao ler {caminho_arquivo}: {e}")
+            print(f"[ERRO] ao ler {caminho_arquivo}: {e}")
     else:
-        print(f"⚠️ AVISO: Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
+        print(f"[AVISO] Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
         
     return dicionario_nome, dicionario_ip
 
@@ -79,37 +79,42 @@ def registrar_queda(nome_camera, nome_evento):
 # =============== SERVIDOR HTTP ===============
 class TrilanWebhookHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        parsed_path = urllib.parse.urlparse(self.path)
-        
-        if parsed_path.path == '/status':
-            self._handle_status()
-            return
+        try:
+            parsed_path = urllib.parse.urlparse(self.path)
             
-        if parsed_path.path == '/csv':
-            self._handle_csv()
-            return
-            
-        # Compatibilidade com webhook antigo (caso chamem via HTTP)
-        parametros = urllib.parse.parse_qs(parsed_path.query)
-        if 'c' in parametros or 'camera' in parametros:
-            numero_camera = parametros.get('c', parametros.get('camera', ['Desconhecida']))[0]
-            if 'r' in parametros:
-                nome_evento = 'Câmera Restaurada'
-            else:
-                nome_evento = 'Falha de Comunicação'
+            if parsed_path.path == '/status':
+                self._handle_status()
+                return
                 
-            info = DICIONARIO_CAMERAS_NOME.get(numero_camera)
-            nome_completo = info['Nome'] if info else numero_camera
-            
-            registrar_queda(nome_completo, nome_evento)
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(f"Registrado {nome_evento} na camera: {nome_completo}".encode("utf-8"))
-            return
+            if parsed_path.path == '/csv':
+                self._handle_csv()
+                return
+                
+            # Compatibilidade com webhook antigo (caso chamem via HTTP)
+            parametros = urllib.parse.parse_qs(parsed_path.query)
+            if 'c' in parametros or 'camera' in parametros:
+                numero_camera = parametros.get('c', parametros.get('camera', ['Desconhecida']))[0]
+                if 'r' in parametros:
+                    nome_evento = 'Câmera Restaurada'
+                else:
+                    nome_evento = 'Falha de Comunicação'
+                    
+                info = DICIONARIO_CAMERAS_NOME.get(numero_camera)
+                nome_completo = info['Nome'] if info else numero_camera
+                
+                registrar_queda(nome_completo, nome_evento)
+                self.send_response(200)
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                self.wfile.write(f"Registrado {nome_evento} na camera: {nome_completo}".encode("utf-8"))
+                return
 
-        self.send_response(404)
-        self.end_headers()
+            self.send_response(404)
+            self.end_headers()
+        except Exception as e:
+            import traceback
+            print(f"[ERRO NO HTTP GET]: {e}")
+            traceback.print_exc()
 
     def _handle_status(self):
         status_cameras = {}
@@ -158,9 +163,9 @@ def rodar_sniffer_snmp():
     sniffer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sniffer_socket.bind(('0.0.0.0', PORTA_SNMP))
-        print(f"✅ Sniffer SNMP rodando na porta {PORTA_SNMP}...")
+        print(f"[OK] Sniffer SNMP rodando na porta {PORTA_SNMP}...")
     except Exception as e:
-        print(f"❌ Erro ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}")
+        print(f"[ERRO] ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}")
         return
 
     while True:
@@ -233,7 +238,7 @@ def start_webhook(caminho_csv_export: str, caminho_log: str):
     # Inicia o Sniffer SNMP na 162
     threading.Thread(target=rodar_sniffer_snmp, daemon=True).start()
     
-    print(f"✅ Agente Digifort iniciado! HTTP na {PORTA_HTTP} e SNMP na {PORTA_SNMP}.")
+    print(f"[OK] Agente Digifort iniciado! HTTP na {PORTA_HTTP} e SNMP na {PORTA_SNMP}.")
 
 def stop_webhook():
     global httpd_server, sniffer_socket
@@ -244,7 +249,7 @@ def stop_webhook():
     if sniffer_socket:
         sniffer_socket.close()
         sniffer_socket = None
-    print("🛑 Agente Digifort parado.")
+    print("[PARADO] Agente Digifort parado.")
 
 def rodar_servidor():
     start_webhook(ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV)

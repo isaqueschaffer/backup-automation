@@ -105,38 +105,39 @@ class FileManager:
 
         status_cameras = None
         if equipamento.get("tipo", "").upper() == "DIGIFORT":
-            logging.info("  [DIGIFORT] Buscando status de gravacoes e CSV do Agente Webhook...")
+            logging.info("  [DIGIFORT] Buscando status de gravacoes e CSV localmente...")
             try:
-                import requests
-                # Puxa status
-                resp_status = requests.get("http://localhost:8080/status", timeout=5)
-                if resp_status.status_code == 200:
-                    status_dict = resp_status.json()
-                    status_cameras = []
-                    for nome_cam, st in status_dict.items():
-                        is_ok = (st == "OK")
-                        status_cameras.append({
-                            "canal": "N/A",
-                            "nome": nome_cam,
-                            "ip": "N/A",
-                            "online": is_ok,
-                            "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
-                            "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
-                            "total_dias": 1,
-                            "mapa": "█" if is_ok else "░"
-                        })
-                    logging.info("  [DIGIFORT] Status das cameras obtido com sucesso.")
+                from src.application.webhook_digifort import get_status_cameras, get_caminho_csv
                 
-                # Puxa CSV
-                resp_csv = requests.get("http://localhost:8080/csv", timeout=5)
-                if resp_csv.status_code == 200:
+                cfg_ext = equipamento.get("config_extra", {})
+                caminho_export = cfg_ext.get("caminho_csv", "")
+                caminho_log = cfg_ext.get("caminho_log_csv", "")
+                
+                status_dict = get_status_cameras(caminho_export, caminho_log)
+                status_cameras = []
+                for nome_cam, st in status_dict.items():
+                    is_ok = (st == "OK")
+                    status_cameras.append({
+                        "canal": "N/A",
+                        "nome": nome_cam,
+                        "ip": "N/A",
+                        "online": is_ok,
+                        "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
+                        "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
+                        "total_dias": 1,
+                        "mapa": "OK" if is_ok else "FALHA"
+                    })
+                logging.info("  [DIGIFORT] Status das cameras obtido com sucesso.")
+                
+                arquivo_log = get_caminho_csv(caminho_log)
+                import os, shutil
+                if os.path.isfile(arquivo_log):
                     caminho_csv = pasta_eq / "quedas_cameras.csv"
-                    with open(caminho_csv, 'wb') as f:
-                        f.write(resp_csv.content)
+                    shutil.copy2(arquivo_log, caminho_csv)
                     arquivos_copiados.append("quedas_cameras.csv")
                     logging.info("  [DIGIFORT] CSV adicionado ao backup.")
             except Exception as e:
-                logging.warning(f"  [DIGIFORT] Falha ao comunicar com o agente webhook: {e}")
+                logging.warning(f"  [DIGIFORT] Falha ao processar status: {e}")
 
         logging.info(f"  Backup processado com sucesso. Arquivos: {', '.join(arquivos_copiados)}")
 
