@@ -191,8 +191,8 @@ export default function ClientDetail() {
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
 
-  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT"];
-  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️" };
+  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT", "DEFENSE"];
+  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️", DEFENSE: "🛡️" };
 
   const load = async (silent = false) => {
     if (!id) return;
@@ -244,6 +244,14 @@ const buildEqPayload = () => {
         payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
         if (eqForm.fabricante_olt === "HUAWEI") payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
       }
+    } else if (eqForm.tipo === "DEFENSE") {
+      if (!eqForm.pasta_origem) return { error: "Para DEFENSE, informe a pasta de origem." };
+      payload.ip = "127.0.0.1";
+      payload.username = "defense";
+      payload.password = "defense";
+      payload.config_extra = {
+        pasta_origem: eqForm.pasta_origem.trim()
+      };
     }
     // Remove blank passwords in edit mode so backend ignores them
     if (editingEqId && !payload.password) delete payload.password;
@@ -572,7 +580,7 @@ const buildEqPayload = () => {
           <div className="form-group">
             <label className="form-label">Tipo de Equipamento *</label>
             <select className="form-input" value={eqForm.tipo}
-              onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: "", fabricante_olt: "UNM2000" })}>
+              onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: e.target.value === "DEFENSE" ? "C:\\Intelbras Defense IA\\Intelbras Defense IA Server\\bak\\db_backup" : "", fabricante_olt: "UNM2000" })}>
               {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE_EMOJI[t]} {t}</option>)}
             </select>
           </div>
@@ -742,6 +750,17 @@ const buildEqPayload = () => {
                 </span>
               </div>
             </>
+          )}
+          {eqForm.tipo === "DEFENSE" && (
+            <div className="form-group">
+              <label className="form-label">Pasta de Origem do Backup *</label>
+              <input className="form-input" type="text"
+                placeholder="C:\Intelbras Defense IA\...\db_backup"
+                value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                Pasta onde o Defense IA salva os arquivos gerados no backup automático.
+              </span>
+            </div>
           )}
           <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
             <button className="btn btn-secondary" onClick={() => setShowEqModal(false)}>Cancelar</button>
