@@ -42,7 +42,7 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
     zip_pw = decrypt(client.zip_password) if client.zip_password else None
     
     # Update last_seen
-    client.last_seen = datetime.now(timezone.utc)
+    client.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     
     return AgentConfigResponse(
@@ -58,7 +58,7 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
 @router.post("/ping", response_model=PingResponse)
 def ping_agent(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
     """Agent heartbeat to mark it as online. Returns restart/backup flags if requested."""
-    client.last_seen = datetime.now(timezone.utc)
+    client.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
     should_restart = bool(client.restart_requested)
     should_backup = bool(client.backup_requested)
     
@@ -119,7 +119,7 @@ def receive_backup_report(
     from datetime import datetime
     
     # Usa a hora real do servidor, ignorando o relógio do cliente
-    server_finished_at = datetime.utcnow()
+    server_finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
     # Subtrai o tempo que o cliente diz que levou para achar o "started_at" real do servidor
     duration = body.finished_at - body.started_at
     server_started_at = server_finished_at - duration
@@ -178,7 +178,7 @@ async def upload_backup_zip(
             detail=f"Tipo de equipamento inválido: '{clean_device_type}'. Tipos permitidos: {TIPOS_EQUIPAMENTO} ou MIXED",
         )
 
-    date_str = (backup.started_at or datetime.now(timezone.utc)).strftime("%d-%m-%Y")
+    date_str = (backup.started_at or datetime.now(timezone.utc).replace(tzinfo=None)).strftime("%d-%m-%Y")
     data = await file.read()
 
     filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"

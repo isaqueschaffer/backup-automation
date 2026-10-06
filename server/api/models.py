@@ -24,7 +24,7 @@ class Client(Base):
     last_seen = Column(DateTime, nullable=True)
     last_backup_at = Column(DateTime, nullable=True)
     last_backup_status = Column(String(20), nullable=True)  # OK, PARTIAL, ERROR
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     restart_requested = Column(Boolean, default=False, nullable=False)
     backup_requested = Column(Boolean, default=False, nullable=False)
 
@@ -52,7 +52,7 @@ class NVR(Base):
     config_extra = Column(JSON, nullable=True)  # configurações específicas de cada tipo
     last_recording_status = Column(JSON, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     client = relationship("Client", back_populates="nvrs", overlaps="equipamentos")
 
@@ -70,7 +70,7 @@ class Backup(Base):
     zip_size = Column(BigInteger, nullable=True)
     email_sent = Column(Boolean, default=False)
     trigger = Column(String(50), default="scheduled")  # scheduled | manual
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     client = relationship("Client", back_populates="backups")
 
@@ -82,7 +82,7 @@ class AgentLog(Base):
     client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     event_type = Column(String(50), nullable=False)  # ex: ping, backup_trigger, restart_trigger
     message = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     client = relationship("Client", back_populates="logs")
 
@@ -106,5 +106,5 @@ class AgentVersion(Base):
     sha256_service = Column(String(64), nullable=False)              # hash SHA256 do service exe
     sha256_tray = Column(String(64), nullable=True)                  # hash SHA256 do tray exe
     active = Column(Boolean, default=True, nullable=False)           # se False, não será distribuída
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
