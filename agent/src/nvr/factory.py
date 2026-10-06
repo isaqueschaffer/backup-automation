@@ -10,15 +10,25 @@ from src.nvr.hikvision.recordings import tem_gravacao_no_dia
 DIAS_VERIFICAR = 15
 
 def buscar_cameras(nvr_ip, usuario, senha):
-    cameras = buscar_cameras_nvr(nvr_ip, usuario, senha)
-    if cameras: return cameras, "NVR", None
-    
-    cameras = buscar_cameras_dvr(nvr_ip, usuario, senha)
-    if cameras: return cameras, "DVR", None
-    
+    cameras_nvr = buscar_cameras_nvr(nvr_ip, usuario, senha)
+    cameras_dvr = buscar_cameras_dvr(nvr_ip, usuario, senha)
+
+    # NVR Híbrido: possui câmeras IP e analógicas ao mesmo tempo — mescla ambos
+    if cameras_nvr and cameras_dvr:
+        logging.info(f"  [{nvr_ip}] NVR híbrido detectado: {len(cameras_nvr)} câmera(s) IP + {len(cameras_dvr)} canal(is) analógico(s).")
+        cameras_nvr.update(cameras_dvr)
+        return cameras_nvr, "NVR", None
+
+    if cameras_nvr:
+        return cameras_nvr, "NVR", None
+
+    if cameras_dvr:
+        return cameras_dvr, "DVR", None
+
     cameras, sessao = buscar_cameras_motorola(nvr_ip, usuario, senha)
-    if cameras: return cameras, "MOTOROLA", sessao
-    
+    if cameras:
+        return cameras, "MOTOROLA", sessao
+
     return {}, "DESCONHECIDO", None
 
 def gerar_mapa_dias(dias_com_gravacao):
