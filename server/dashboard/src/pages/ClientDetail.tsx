@@ -150,7 +150,7 @@ function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        {eq.tipo === "NVR" && (
+        {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT") && (
           <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Video size={13} /> Gravações
@@ -191,8 +191,8 @@ export default function ClientDetail() {
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
 
-  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT"];
-  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️" };
+  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT", "DEFENSE"];
+  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️", DEFENSE: "🛡️" };
 
   const load = async (silent = false) => {
     if (!id) return;
@@ -225,7 +225,14 @@ const buildEqPayload = () => {
       payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
     } else if (eqForm.tipo === "DIGIFORT") {
       if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
-      payload.ip = eqForm.pasta_origem.trim(); payload.username = "digifort"; payload.password = "digifort"; payload.config_extra = { pasta_origem: eqForm.pasta_origem.trim() };
+      payload.ip = eqForm.pasta_origem.trim(); 
+      payload.username = "digifort"; 
+      payload.password = "digifort"; 
+      payload.config_extra = { 
+        pasta_origem: eqForm.pasta_origem.trim(),
+        caminho_csv: (eqForm as any).caminho_csv?.trim() || "",
+        caminho_log_csv: (eqForm as any).caminho_log_csv?.trim() || ""
+      };
     } else if (eqForm.tipo === "OLT") {
       if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
       payload.config_extra = { fabricante_olt: eqForm.fabricante_olt };
@@ -237,6 +244,14 @@ const buildEqPayload = () => {
         payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
         if (eqForm.fabricante_olt === "HUAWEI") payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
       }
+    } else if (eqForm.tipo === "DEFENSE") {
+      if (!eqForm.pasta_origem) return { error: "Para DEFENSE, informe a pasta de origem." };
+      payload.ip = "127.0.0.1";
+      payload.username = "defense";
+      payload.password = "defense";
+      payload.config_extra = {
+        pasta_origem: eqForm.pasta_origem.trim()
+      };
     }
     // Remove blank passwords in edit mode so backend ignores them
     if (editingEqId && !payload.password) delete payload.password;
@@ -459,8 +474,10 @@ const buildEqPayload = () => {
                     username: eq.username,
                     password: "", // do not fetch password
                     pasta_origem: (eq.config_extra as any)?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
-                    fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000"
-                  });
+                    fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000",
+                    caminho_csv: (eq.config_extra as any)?.caminho_csv || "",
+                    caminho_log_csv: (eq.config_extra as any)?.caminho_log_csv || ""
+                  } as any);
                   setShowEqModal(true);
                 }}
                 onToggleActive={() => handleToggleEquipamento(eq)}
@@ -563,7 +580,7 @@ const buildEqPayload = () => {
           <div className="form-group">
             <label className="form-label">Tipo de Equipamento *</label>
             <select className="form-input" value={eqForm.tipo}
-              onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: "", fabricante_olt: "UNM2000" })}>
+              onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: e.target.value === "DEFENSE" ? "C:\\Intelbras Defense IA\\Intelbras Defense IA Server\\bak\\db_backup" : "", fabricante_olt: "UNM2000" })}>
               {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE_EMOJI[t]} {t}</option>)}
             </select>
           </div>
@@ -707,11 +724,42 @@ const buildEqPayload = () => {
             </>
           )}
           {eqForm.tipo === "DIGIFORT" && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Pasta de Origem do Digifort *</label>
+                <input className="form-input" type="text"
+                  placeholder="C:\Digifort\Backup"
+                  value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Caminho do CSV Exportado (Opcional)</label>
+                <input className="form-input" type="text"
+                  placeholder="export_cameras.csv"
+                  value={(eqForm as any).caminho_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_csv: e.target.value } as any)} />
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Arquivo CSV com a descrição das câmeras gerado pelo Digifort.
+                </span>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Caminho do LOG de Gravações (Opcional)</label>
+                <input className="form-input" type="text"
+                  placeholder="C:\...\quedas_cameras.csv"
+                  value={(eqForm as any).caminho_log_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_log_csv: e.target.value } as any)} />
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Arquivo CSV onde o Agente Webhook salva/lê o histórico (quedas_cameras.csv).
+                </span>
+              </div>
+            </>
+          )}
+          {eqForm.tipo === "DEFENSE" && (
             <div className="form-group">
-              <label className="form-label">Pasta de Origem do Digifort *</label>
+              <label className="form-label">Pasta de Origem do Backup *</label>
               <input className="form-input" type="text"
-                placeholder="C:\Digifort\Backup"
+                placeholder="C:\Intelbras Defense IA\...\db_backup"
                 value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                Pasta onde o Defense IA salva os arquivos gerados no backup automático.
+              </span>
             </div>
           )}
           <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>

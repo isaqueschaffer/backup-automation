@@ -135,3 +135,23 @@ def delete_old_backups(client_id: UUID, client_name: str, keep_days: int) -> int
                 except ValueError:
                     pass
     return deleted
+
+
+def move_client_to_trash(client_id: UUID, client_name: str) -> bool:
+    """Move a pasta de backups do cliente para a lixeira."""
+    storage_base = Path(settings.BACKUP_STORAGE_PATH)
+    client_dir = storage_base / _get_client_dir_name(client_id, client_name)
+    
+    if client_dir.exists() and client_dir.is_dir():
+        trash_base = storage_base / "lixeira"
+        trash_base.mkdir(parents=True, exist_ok=True)
+        
+        target_dir = trash_base / client_dir.name
+        
+        if target_dir.exists():
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            target_dir = trash_base / f"{client_dir.name}_{timestamp}"
+            
+        shutil.move(str(client_dir), str(target_dir))
+        return True
+    return False

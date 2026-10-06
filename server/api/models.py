@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Column, String, Integer, Boolean, DateTime,
     BigInteger, Text, JSON, ForeignKey
@@ -24,7 +24,7 @@ class Client(Base):
     last_seen = Column(DateTime, nullable=True)
     last_backup_at = Column(DateTime, nullable=True)
     last_backup_status = Column(String(20), nullable=True)  # OK, PARTIAL, ERROR
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     restart_requested = Column(Boolean, default=False, nullable=False)
     backup_requested = Column(Boolean, default=False, nullable=False)
 
@@ -70,7 +70,7 @@ class Backup(Base):
     zip_size = Column(BigInteger, nullable=True)
     email_sent = Column(Boolean, default=False)
     trigger = Column(String(50), default="scheduled")  # scheduled | manual
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     client = relationship("Client", back_populates="backups")
 
