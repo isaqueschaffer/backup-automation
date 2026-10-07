@@ -600,21 +600,34 @@ const buildEqPayload = () => {
             <button className="btn btn-secondary" onClick={() => { setEditingEqId(null); setEqForm({ tipo: "CAMERA", name: "", ip: "", username: "admin", password: "navarro@123", modelo: "Hikvision" } as any); setShowEqModal(true); }}>
               <Plus size={14} /> Adicionar Câmera
             </button>
-            <button className="btn btn-secondary" disabled={Object.values(testResults).filter(r => r.image_base64).length === 0} onClick={() => {
-              Object.entries(testResults).forEach(([camId, res], i) => {
-                if (res.image_base64) {
+            <button className="btn btn-secondary" disabled={Object.values(testResults).filter(r => r.image_base64).length === 0} onClick={async () => {
+              const successCams = Object.entries(testResults).filter(([_, res]) => res.image_base64);
+              if (successCams.length === 1) {
+                const [camId, res] = successCams[0];
+                const cam = equipamentos.find(e => e.id === camId);
+                const name = cam ? cam.name.replace(/\s+/g, '_') : camId;
+                const a = document.createElement("a");
+                a.href = `data:image/jpeg;base64,${res.image_base64}`;
+                a.download = `camera_${name}.jpg`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              } else if (successCams.length > 1) {
+                const JSZip = (await import("jszip")).default;
+                const zip = new JSZip();
+                successCams.forEach(([camId, res]) => {
                   const cam = equipamentos.find(e => e.id === camId);
                   const name = cam ? cam.name.replace(/\s+/g, '_') : camId;
-                  setTimeout(() => {
-                    const a = document.createElement("a");
-                    a.href = `data:image/jpeg;base64,${res.image_base64}`;
-                    a.download = `camera_${name}.jpg`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                  }, i * 300);
-                }
-              });
+                  zip.file(`camera_${name}.jpg`, res.image_base64!, { base64: true });
+                });
+                const blob = await zip.generateAsync({ type: "blob" });
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = `cameras_${client?.name?.replace(/\\s+/g, '_') || 'cliente'}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              }
             }}>
               Baixar Imagens
             </button>
