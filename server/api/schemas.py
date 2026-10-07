@@ -8,7 +8,7 @@ from pydantic import BaseModel, field_validator
 # ─────────────────────────────────────────────
 # Equipamento (antes chamado NVR)
 # ─────────────────────────────────────────────
-TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED", "DEFENSE"]
+TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED", "DEFENSE", "CAMERA"]
 
 class NVRBase(BaseModel):
     tipo: str = "NVR"  # NVR, OLT, ONU, PABX
@@ -262,3 +262,18 @@ class UpdateCheckResponse(BaseModel):
     sha256_service: Optional[str] = None
     sha256_tray: Optional[str] = None
     notes: Optional[str] = None
+
+
+# "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
+# Teste RTSP Automático
+# "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
+class RTSPTestRequest(BaseModel):
+    nome: str
+    ip: str
+    modelo: str
+    senha: str = "navarro@123"
+
+class RTSPTestResponse(BaseModel):
+    success: bool
+    error_message: Optional[str] = None
+    image_base64: Optional[str] = None

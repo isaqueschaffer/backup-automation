@@ -40,31 +40,38 @@ class DefenseWebhookHandler(BaseHTTPRequestHandler):
     Servidor HTTP leve para receber chamadas de URL do Defense IA.
     """
     def do_GET(self):
-        # Exemplo de URL que o Defense deve chamar:
-        # http://127.0.0.1:8181/evento?camera=Cam_Recepcao&status=falha
-        
         parsed_path = urllib.parse.urlparse(self.path)
+        print(f"\n[DEBUG] RECEBIDO GET EM: {self.path}")
+        print(f"[DEBUG] HEADERS: {self.headers}")
+        
         if parsed_path.path == '/evento':
             query = urllib.parse.parse_qs(parsed_path.query)
-            
             nome_camera = query.get('camera', ['Desconhecida'])[0]
             status_bruto = query.get('status', ['falha'])[0].lower()
             
             status_evento = "OK" if "restaura" in status_bruto or "online" in status_bruto or "ok" in status_bruto else "FALHA"
-            
             registrar_evento_defense(nome_camera, status_evento)
             
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            self.wfile.write(b"Evento registrado com sucesso.")
+            self.wfile.write(b"Evento GET registrado com sucesso.")
         else:
             self.send_response(404)
             self.end_headers()
 
-    # O Defense IA pode mandar POST tambm, ento preparamos para aceitar
     def do_POST(self):
-        self.do_GET()
+        print(f"\n[DEBUG] RECEBIDO POST EM: {self.path}")
+        print(f"[DEBUG] HEADERS: {self.headers}")
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length > 0:
+            post_data = self.rfile.read(content_length)
+            print(f"[DEBUG] BODY POST: {post_data.decode('utf-8', errors='ignore')}")
+            
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"Evento POST recebido (Debug).")
 
     def log_message(self, format, *args):
         # Desativa os logs de acesso padro no console para no poluir

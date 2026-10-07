@@ -8,6 +8,9 @@ import { Client, NVR, Backup, TipoEquipamento } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
+import api from "../api/client";
+import { useRef } from "react";
+import { Video } from "lucide-react";
 import {
   ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
@@ -15,18 +18,18 @@ import {
 } from "lucide-react";
 
 function fmtDate(s: string | null) {
-  if (!s) return "—";
+  if (!s) return "â€”";
   const str = s.endsWith("Z") ? s : s + "Z";
   return new Date(str).toLocaleString("pt-BR");
 }
 
 function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate: string | null }) {
-  if (!mapStr) return <span>—</span>;
+  if (!mapStr) return <span>â€”</span>;
   const refDate = referenceDate ? new Date(referenceDate) : new Date();
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "4px", width: "fit-content" }}>
       {mapStr.split("").map((char, i) => {
-        const isOk = char === "█";
+        const isOk = char === "â–ˆ";
         const daysAgo = (mapStr.length - 1) - i;
         const d = new Date(refDate);
         d.setDate(d.getDate() - daysAgo);
@@ -51,7 +54,7 @@ function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate
   );
 }
 
-// ── Info pill component ──────────────────────────────────────────
+// â”€â”€ Info pill component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
   icon: React.ReactNode; label: string; value: React.ReactNode;
   mono?: boolean; copyValue?: string; onCopy?: (v: string) => void;
@@ -80,7 +83,7 @@ function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
   );
 }
 
-// ── Equipment card component ─────────────────────────────────────
+// â”€â”€ Equipment card component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
   eq: NVR;
   onDelete: () => void;
@@ -137,12 +140,12 @@ function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12 }}>
           {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" ? (
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <FolderOpen size={12} /> {(eq.config_extra as any)?.pasta_origem || "—"}
+              <FolderOpen size={12} /> {(eq.config_extra as any)?.pasta_origem || "â€”"}
             </span>
           ) : (
             <>
               <span style={{ fontFamily: "monospace" }}>{eq.ip}</span>
-              {eq.username && <span style={{ display: "flex", alignItems: "center", gap: 3 }}>👤 {eq.username}</span>}
+              {eq.username && <span style={{ display: "flex", alignItems: "center", gap: 3 }}>ðŸ‘¤ {eq.username}</span>}
             </>
           )}
         </div>
@@ -153,7 +156,7 @@ function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
         {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT") && (
           <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Video size={13} /> Gravações
+            <Video size={13} /> GravaÃ§Ãµes
           </button>
         )}
         <button className="btn-icon" title={eq.active === false ? "Retomar Backup" : "Pausar Backup"} onClick={onToggleActive}>
@@ -170,7 +173,7 @@ function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
   );
 }
 
-// ── Main component ───────────────────────────────────────────────
+// â”€â”€ Main component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -182,6 +185,11 @@ export default function ClientDetail() {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, {status: string, error?: string, image_base64?: string}>>({});
+
+
   const [showEqModal, setShowEqModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: any[] }>({ show: false, nvrName: "", cameras: [] });
@@ -192,7 +200,7 @@ export default function ClientDetail() {
   const [saving, setSaving] = useState(false);
 
   const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT", "DEFENSE"];
-  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️", DEFENSE: "🛡️" };
+  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "ðŸ“¹", OLT: "ðŸ”Œ", PABX: "ðŸ“ž", MIKROTIK: "ðŸŒ", DIGIFORT: "ðŸ–¥ï¸", DEFENSE: "ðŸ›¡ï¸" };
 
   const load = async (silent = false) => {
     if (!id) return;
@@ -220,8 +228,9 @@ const buildEqPayload = () => {
     if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
     const payload: any = { tipo: eqForm.tipo, name: eqForm.name.trim(), ip: "", username: "", password: "", config_extra: null };
 
-    if (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") {
-      if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.` };
+    if (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA") {
+      if (eqForm.tipo === "CAMERA") payload.config_extra = { modelo: (eqForm as any).modelo || "Hikvision" };
+      if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.tipo}, preencha IP/Host, usuÃ¡rio e senha.` };
       payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
     } else if (eqForm.tipo === "DIGIFORT") {
       if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
@@ -240,7 +249,7 @@ const buildEqPayload = () => {
         if (!eqForm.pasta_origem) return { error: "Para UNM2000, informe a pasta de origem dos backups." };
         payload.ip = eqForm.pasta_origem.trim(); payload.username = "unm2000"; payload.password = "unm2000"; payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
       } else if (eqForm.fabricante_olt === "HUAWEI" || eqForm.fabricante_olt === "VSOL") {
-        if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.` };
+        if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.fabricante_olt}, preencha IP, usuÃ¡rio e senha.` };
         payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
         if (eqForm.fabricante_olt === "HUAWEI") payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
       }
@@ -313,25 +322,25 @@ const buildEqPayload = () => {
   };
 
   const handleRotateKey = async () => {
-    if (!confirm("Gerar nova API Key? A chave atual será invalidada.")) return;
+    if (!confirm("Gerar nova API Key? A chave atual serÃ¡ invalidada.")) return;
     const data = await rotateKey(id!);
     setRotatedKey(data.api_key);
     load();
   };
 
   const handleRestartAgent = async () => {
-    if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (até 5 min).")) return;
+    if (!confirm("Solicitar reinÃ­cio do agente? Ele serÃ¡ reiniciado no prÃ³ximo ping (atÃ© 5 min).")) return;
     try {
       await restartAgent(id!);
-      toast("Reinício agendado! O agente será reiniciado no próximo ping.", "success");
-    } catch { toast("Erro ao solicitar reinício.", "error"); }
+      toast("ReinÃ­cio agendado! O agente serÃ¡ reiniciado no prÃ³ximo ping.", "success");
+    } catch { toast("Erro ao solicitar reinÃ­cio.", "error"); }
   };
 
   const handleTriggerBackup = async () => {
-    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (até 5 min).")) return;
+    if (!confirm("Solicitar execuÃ§Ã£o imediata de backup? Ele comeÃ§arÃ¡ no prÃ³ximo ping (atÃ© 5 min).")) return;
     try {
       await triggerBackup(id!);
-      toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
+      toast("Backup agendado! ComeÃ§arÃ¡ automaticamente no prÃ³ximo ping.", "success");
     } catch { toast("Erro ao solicitar backup.", "error"); }
   };
 
@@ -341,9 +350,9 @@ const buildEqPayload = () => {
   const copyText = (t: string) => { navigator.clipboard.writeText(t); toast("Copiado!", "success"); };
 
   if (loading) return <div className="loading-state"><div className="spinner" /></div>;
-  if (!client) return <div className="empty-state">Cliente não encontrado.</div>;
+  if (!client) return <div className="empty-state">Cliente nÃ£o encontrado.</div>;
 
-  let nextPingStr = "—";
+  let nextPingStr = "â€”";
   const isPendingAction = client.backup_requested || client.restart_requested;
   if (client.last_seen && isAgentOnline) {
     const lastSeenMs = new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime();
@@ -356,7 +365,7 @@ const buildEqPayload = () => {
 
   return (
     <>
-      {/* ── Header ── */}
+      {/* â”€â”€ Header â”€â”€ */}
       <div className="page-header">
         <div className="flex items-center gap-3">
           <button className="btn-icon" onClick={() => navigate("/clients")} title="Voltar">
@@ -366,7 +375,7 @@ const buildEqPayload = () => {
             <h1 className="page-title">{client.name}</h1>
             <p className="page-subtitle flex items-center gap-2">
               <StatusBadge status={client.last_backup_status} />
-              {client.last_backup_at && `Último backup: ${fmtDate(client.last_backup_at)}`}
+              {client.last_backup_at && `Ãšltimo backup: ${fmtDate(client.last_backup_at)}`}
             </p>
           </div>
         </div>
@@ -381,72 +390,72 @@ const buildEqPayload = () => {
             <RefreshCw size={15} /> Rodar API Key
           </button>
           <button className="btn btn-secondary" onClick={handleTriggerBackup}
-            title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
+            title={!isAgentOnline ? "Agente offline â€” o backup comeÃ§arÃ¡ no prÃ³ximo ping" : "Solicitar backup manual agora"}>
             <CloudLightning size={15} /> Gerar Backup
           </button>
           <button className="btn btn-secondary" onClick={handleRestartAgent}
-            title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
+            title={!isAgentOnline ? "Agente offline â€” o reinÃ­cio serÃ¡ executado no prÃ³ximo ping" : "Reiniciar o agente Windows"}>
             <RotateCcw size={15} /> Reiniciar Agent
           </button>
         </div>
       </div>
 
-      {/* ── Banner de Comando Pendente ── */}
+      {/* â”€â”€ Banner de Comando Pendente â”€â”€ */}
       {isPendingAction && (
         <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 6, padding: "12px 16px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ color: "#f59e0b", display: "flex" }}><Clock size={18} /></div>
           <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
-            <strong>Comando na fila!</strong> O {client.backup_requested ? "backup manual" : "reinício"} começará no próximo contato do agente 
+            <strong>Comando na fila!</strong> O {client.backup_requested ? "backup manual" : "reinÃ­cio"} comeÃ§arÃ¡ no prÃ³ximo contato do agente 
             {isAgentOnline && <span style={{ fontWeight: 600, color: "#f59e0b", marginLeft: 6 }}>({nextPingStr})</span>}.
           </div>
         </div>
       )}
 
-      {/* ── Layout de duas colunas ── */}
+      {/* â”€â”€ Layout de duas colunas â”€â”€ */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
 
-        {/* Coluna 1 — Configuração */}
+        {/* Coluna 1 â€” ConfiguraÃ§Ã£o */}
         <div className="card" style={{ padding: "20px 24px" }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
-            <Server size={13} /> Configuração do Cliente
+            <Server size={13} /> ConfiguraÃ§Ã£o do Cliente
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <InfoPill icon={<KeyRound size={11} />} label="Client ID" value={client.id} mono copyValue={client.id} onCopy={copyText} />
-            <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${client.api_key_prefix}…`} mono />
-            <InfoPill icon={<Clock size={11} />} label="Horário do Backup"
-              value={`${String(client.backup_hour).padStart(2, "0")}:${String(client.backup_minute).padStart(2, "0")} (diário)`} />
-            <InfoPill icon={<Mail size={11} />} label="E-mails de Notificação"
-              value={(client.email_to || []).join(", ") || "—"} />
+            <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${client.api_key_prefix}â€¦`} mono />
+            <InfoPill icon={<Clock size={11} />} label="HorÃ¡rio do Backup"
+              value={`${String(client.backup_hour).padStart(2, "0")}:${String(client.backup_minute).padStart(2, "0")} (diÃ¡rio)`} />
+            <InfoPill icon={<Mail size={11} />} label="E-mails de NotificaÃ§Ã£o"
+              value={(client.email_to || []).join(", ") || "â€”"} />
           </div>
         </div>
 
-        {/* Coluna 2 — Status */}
+        {/* Coluna 2 â€” Status */}
         <div className="card" style={{ padding: "20px 24px" }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
             <Wifi size={13} /> Status do Agente
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <InfoPill icon={<Wifi size={11} />} label="Conexão"
+            <InfoPill icon={<Wifi size={11} />} label="ConexÃ£o"
               value={<StatusBadge status={isAgentOnline ? "ONLINE" : (client.active ? "OFFLINE" : "DESATIVADO")} />} />
-            <InfoPill icon={<CalendarCheck size={11} />} label="Último contato"
+            <InfoPill icon={<CalendarCheck size={11} />} label="Ãšltimo contato"
               value={client.last_seen ? fmtDate(client.last_seen) : "Nunca"} />
-            <InfoPill icon={<Clock size={11} />} label="Próximo contato (estimado)"
-              value={isAgentOnline ? nextPingStr : "—"} />
-            <InfoPill icon={<Archive size={11} />} label="Último Backup"
+            <InfoPill icon={<Clock size={11} />} label="PrÃ³ximo contato (estimado)"
+              value={isAgentOnline ? nextPingStr : "â€”"} />
+            <InfoPill icon={<Archive size={11} />} label="Ãšltimo Backup"
               value={<StatusBadge status={client.last_backup_status} />} />
-            <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
+            <InfoPill icon={<CalendarCheck size={11} />} label="Data do Ãšltimo Backup"
               value={fmtDate(client.last_backup_at)} />
           </div>
         </div>
       </div>
 
-      {/* ── Equipamentos ── */}
+      {/* â”€â”€ Equipamentos â”€â”€ */}
       <div style={{ marginBottom: 24 }}>
         <div className="flex items-center justify-between mb-3">
           <div className="section-title mb-0">
             <Server size={15} /> Equipamentos
             <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
-              {equipamentos.length}
+              {equipamentos.filter(e => e.tipo !== "CAMERA").length}
             </span>
           </div>
           <button className="btn btn-secondary" onClick={() => { setEditingEqId(null); setEqForm({ tipo: "NVR", name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" }); setShowEqModal(true); }}>
@@ -454,14 +463,14 @@ const buildEqPayload = () => {
           </button>
         </div>
 
-        {equipamentos.length === 0 ? (
+        {equipamentos.filter(e => e.tipo !== "CAMERA").length === 0 ? (
           <div className="empty-state" style={{ padding: "32px" }}>
-            <div className="empty-icon">🖥️</div>
+            <div className="empty-icon">ðŸ–¥ï¸</div>
             <div>Nenhum equipamento cadastrado.</div>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {equipamentos.map(eq => (
+            {equipamentos.filter(e => e.tipo !== "CAMERA").map(eq => (
               <EqCard key={eq.id} eq={eq}
                 onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
                 onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
@@ -487,17 +496,17 @@ const buildEqPayload = () => {
         )}
       </div>
 
-      {/* ── Histórico de Backups ── */}
+      {/* â”€â”€ HistÃ³rico de Backups â”€â”€ */}
       <div>
         <div className="section-title">
-          <Archive size={15} /> Histórico de Backups
+          <Archive size={15} /> HistÃ³rico de Backups
           <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
-            últimos 10
+            Ãºltimos 10
           </span>
         </div>
         {backups.length === 0 ? (
           <div className="empty-state" style={{ padding: "32px" }}>
-            <div className="empty-icon">📦</div>
+            <div className="empty-icon">ðŸ“¦</div>
             <div>Nenhum backup realizado ainda.</div>
           </div>
         ) : (
@@ -520,10 +529,10 @@ const buildEqPayload = () => {
                 </div>
                 <StatusBadge status={b.status} />
                 <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "right" }}>
-                  {b.zip_size ? `${(b.zip_size / 1024 / 1024).toFixed(1)} MB` : "—"}
+                  {b.zip_size ? `${(b.zip_size / 1024 / 1024).toFixed(1)} MB` : "â€”"}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }} title="E-mail enviado">
-                  {b.email_sent ? "✅ E-mail" : "—"}
+                  {b.email_sent ? "âœ… E-mail" : "â€”"}
                 </div>
                 <ChevronRight size={14} style={{ color: "var(--text-muted)", opacity: 0.4 }} />
               </div>
@@ -532,17 +541,17 @@ const buildEqPayload = () => {
         )}
       </div>
 
-      {/* ── Histórico de Eventos do Agente ── */}
+      {/* â”€â”€ HistÃ³rico de Eventos do Agente â”€â”€ */}
       <div style={{ marginTop: 20 }}>
         <div className="section-title">
-          <CloudLightning size={15} /> Eventos do Agente (Pings e Instruções)
+          <CloudLightning size={15} /> Eventos do Agente (Pings e InstruÃ§Ãµes)
           <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
-            últimos {logs.length}
+            Ãºltimos {logs.length}
           </span>
         </div>
         {logs.length === 0 ? (
           <div className="empty-state" style={{ padding: "32px" }}>
-            <div className="empty-icon">📡</div>
+            <div className="empty-icon">ðŸ“¡</div>
             <div>Nenhum evento registrado ainda. O agente deve enviar pings a cada 5 minutos.</div>
           </div>
         ) : (
@@ -574,15 +583,19 @@ const buildEqPayload = () => {
         )}
       </div>
 
-      {/* ── Modal: Adicionar Equipamento ── */}
+      {/* â”€â”€ Modal: Adicionar Equipamento â”€â”€ */}
       {showEqModal && (
         <Modal title={editingEqId ? "Editar Equipamento" : "Adicionar Equipamento"} onClose={() => setShowEqModal(false)}>
           <div className="form-group">
             <label className="form-label">Tipo de Equipamento *</label>
+            {eqForm.tipo === "CAMERA" ? (
+              <div style={{ padding: "10px", background: "rgba(255,255,255,0.05)", borderRadius: 6, marginBottom: 16 }}>📷 Câmera RTSP</div>
+            ) : (
             <select className="form-input" value={eqForm.tipo}
               onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: e.target.value === "DEFENSE" ? "C:\\Intelbras Defense IA\\Intelbras Defense IA Server\\bak\\db_backup" : "", fabricante_olt: "UNM2000" })}>
               {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE_EMOJI[t]} {t}</option>)}
             </select>
+            )}
           </div>
           <div className="form-group">
             <label className="form-label">Nome *</label>
@@ -590,16 +603,16 @@ const buildEqPayload = () => {
               placeholder={`${eqForm.tipo}_Cliente1`}
               value={eqForm.name} onChange={e => setEqForm({ ...eqForm, name: e.target.value })} />
           </div>
-          {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK") && (
+          {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA") && (
             <>
               <div className="form-group">
-                <label className="form-label">Endereço IP ou Host *</label>
+                <label className="form-label">EndereÃ§o IP ou Host *</label>
                 <input className="form-input" type="text" placeholder={eqForm.tipo === "PABX" ? "https://192.168.12.2" : "192.168.1.100"}
                   value={eqForm.ip} onChange={e => setEqForm({ ...eqForm, ip: e.target.value })} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Usuário *</label>
+                  <label className="form-label">UsuÃ¡rio *</label>
                   <input className="form-input" type="text"
                     value={eqForm.username} onChange={e => setEqForm({ ...eqForm, username: e.target.value })} />
                 </div>
@@ -609,6 +622,18 @@ const buildEqPayload = () => {
                     value={eqForm.password} onChange={e => setEqForm({ ...eqForm, password: e.target.value })} />
                 </div>
               </div>
+
+              {eqForm.tipo === "CAMERA" && (
+                <div className="form-group" style={{ marginTop: 12 }}>
+                  <label className="form-label">Modelo / Fabricante</label>
+                  <select className="form-input" value={(eqForm as any).modelo || "Hikvision"} onChange={e => setEqForm({ ...eqForm, modelo: e.target.value } as any)}>
+                    <option value="Hikvision">Hikvision / Outro</option>
+                    <option value="Intelbras">Intelbras</option>
+                    <option value="Grandstream">Grandstream</option>
+                    <option value="ONVIF">ONVIF Genérico</option>
+                  </select>
+                </div>
+              )}
             </>
           )}
           {eqForm.tipo === "OLT" && (
@@ -625,16 +650,16 @@ const buildEqPayload = () => {
                     })
                   }
                 >
-                  <option value="UNM2000">🔵 UNM2000</option>
-                  <option value="HUAWEI">🔴 HUAWEI</option>
-                  <option value="VSOL">🟢 VSOL</option>
+                  <option value="UNM2000">ðŸ”µ UNM2000</option>
+                  <option value="HUAWEI">ðŸ”´ HUAWEI</option>
+                  <option value="VSOL">ðŸŸ¢ VSOL</option>
                 </select>
               </div>
 
               <div className="form-group">
                 <label className="form-label">
                   {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI")
-                    ? "Endereço IP da OLT *"
+                    ? "EndereÃ§o IP da OLT *"
                     : "Pasta de Origem dos Backups *"}
                 </label>
 
@@ -672,7 +697,7 @@ const buildEqPayload = () => {
                 >
                   <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label">
-                        Usuário *
+                        UsuÃ¡rio *
                       </label>
 
                       <input
@@ -718,7 +743,7 @@ const buildEqPayload = () => {
                 >
                   {(eqForm.fabricante_olt === "UNM2000")
                     ? `Pasta onde o ${eqForm.fabricante_olt} exporta os arquivos de backup.`
-                    : "Endereço IP, usuário e senha utilizados para acessar a OLT via SSH."
+                    : "EndereÃ§o IP, usuÃ¡rio e senha utilizados para acessar a OLT via SSH."
                   }
                 </span>
             </>
@@ -737,16 +762,16 @@ const buildEqPayload = () => {
                   placeholder="export_cameras.csv"
                   value={(eqForm as any).caminho_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_csv: e.target.value } as any)} />
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  Arquivo CSV com a descrição das câmeras gerado pelo Digifort.
+                  Arquivo CSV com a descriÃ§Ã£o das cÃ¢meras gerado pelo Digifort.
                 </span>
               </div>
               <div className="form-group">
-                <label className="form-label">Caminho do LOG de Gravações (Opcional)</label>
+                <label className="form-label">Caminho do LOG de GravaÃ§Ãµes (Opcional)</label>
                 <input className="form-input" type="text"
                   placeholder="C:\...\quedas_cameras.csv"
                   value={(eqForm as any).caminho_log_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_log_csv: e.target.value } as any)} />
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  Arquivo CSV onde o Agente Webhook salva/lê o histórico (quedas_cameras.csv).
+                  Arquivo CSV onde o Agente Webhook salva/lÃª o histÃ³rico (quedas_cameras.csv).
                 </span>
               </div>
             </>
@@ -758,7 +783,7 @@ const buildEqPayload = () => {
                 placeholder="C:\Intelbras Defense IA\...\db_backup"
                 value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
               <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                Pasta onde o Defense IA salva os arquivos gerados no backup automático.
+                Pasta onde o Defense IA salva os arquivos gerados no backup automÃ¡tico.
               </span>
             </div>
           )}
@@ -771,7 +796,7 @@ const buildEqPayload = () => {
         </Modal>
       )}
 
-      {/* ── Modal: Editar Cliente ── */}
+      {/* â”€â”€ Modal: Editar Cliente â”€â”€ */}
       {showEditModal && (
         <Modal title="Editar Cliente" onClose={() => setShowEditModal(false)}>
           <div className="form-group">
@@ -780,7 +805,7 @@ const buildEqPayload = () => {
               onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
           </div>
           <div className="form-group">
-            <label className="form-label">Horário do Backup Automático</label>
+            <label className="form-label">HorÃ¡rio do Backup AutomÃ¡tico</label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
                 <label className="form-label" style={{ fontSize: 11 }}>Hora (0-23)</label>
@@ -795,7 +820,7 @@ const buildEqPayload = () => {
             </div>
           </div>
           <div className="form-group">
-            <label className="form-label">E-mails de Notificação (separados por vírgula)</label>
+            <label className="form-label">E-mails de NotificaÃ§Ã£o (separados por vÃ­rgula)</label>
             <input className="form-input" value={editForm.email_to as unknown as string || ""}
               onChange={e => setEditForm({ ...editForm, email_to: e.target.value as unknown as string[] })} />
           </div>
@@ -813,7 +838,7 @@ const buildEqPayload = () => {
         </Modal>
       )}
 
-      {/* ── Modal: Nova API Key ── */}
+      {/* â”€â”€ Modal: Nova API Key â”€â”€ */}
       {rotatedKey && (
         <Modal title="Nova API Key gerada" onClose={() => setRotatedKey(null)}>
           <div style={{
@@ -821,7 +846,7 @@ const buildEqPayload = () => {
             borderRadius: "var(--radius-sm)", padding: "12px 16px", marginBottom: 20,
             color: "var(--warn)", fontSize: 13
           }}>
-            ⚠️ Copie agora. Não será exibida novamente. Atualize o agent.conf no cliente.
+            âš ï¸ Copie agora. NÃ£o serÃ¡ exibida novamente. Atualize o agent.conf no cliente.
           </div>
           <div className="api-key-display" style={{ borderColor: "rgba(245,158,11,0.4)" }}>
             <span className="api-key-value" style={{ color: "var(--warn)" }}>{rotatedKey}</span>
@@ -832,20 +857,20 @@ const buildEqPayload = () => {
         </Modal>
       )}
 
-      {/* ── Modal: Status de Gravação ── */}
+      {/* â”€â”€ Modal: Status de GravaÃ§Ã£o â”€â”€ */}
       {showRecordingModal.show && (
-        <Modal wide={true} title={`Gravação — ${showRecordingModal.nvrName} (${fmtDate(client.last_backup_at)})`}
+        <Modal wide={true} title={`GravaÃ§Ã£o â€” ${showRecordingModal.nvrName} (${fmtDate(client.last_backup_at)})`}
           onClose={() => setShowRecordingModal({ show: false, nvrName: "", cameras: [] })}>
           {showRecordingModal.cameras.length === 0 ? (
-            <div className="empty-state">Sem dados de gravação disponíveis.</div>
+            <div className="empty-state">Sem dados de gravaÃ§Ã£o disponÃ­veis.</div>
           ) : (
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Câmera</th>
+                    <th>CÃ¢mera</th>
                     <th>Rede</th>
-                    <th>Gravação</th>
+                    <th>GravaÃ§Ã£o</th>
                     <th>Dias Gravados</th>
                     <th>Mapa (15 dias)</th>
                   </tr>
@@ -856,7 +881,7 @@ const buildEqPayload = () => {
                     if (!rede) rede = cam.online ? "ONLINE" : (cam.online === false ? "OFFLINE" : "DESCONHECIDO");
                     let gravacao = cam.status_gravacao;
                     if (!gravacao) {
-                      const gravouHoje = cam.mapa ? cam.mapa.endsWith("█") : cam.total_dias > 0;
+                      const gravouHoje = cam.mapa ? cam.mapa.endsWith("â–ˆ") : cam.total_dias > 0;
                       gravacao = gravouHoje ? "COM_GRAVACAO" : "SEM_GRAVACAO";
                     }
                     return (
