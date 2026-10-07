@@ -116,9 +116,10 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             minuto = int(server_cfg.get("backup_minute", 0))
             log("COMUNICACAO BEM SUCEDIDA! Configuracoes do servidor recebidas.")
             
-            # Start Webhook for Digifort if needed
+            # Start Webhook for Digifort/Defense if needed
             for eq in server_cfg.get("equipamentos", []):
-                if eq.get("tipo", "").upper() == "DIGIFORT":
+                tipo = eq.get("tipo", "").upper()
+                if tipo == "DIGIFORT":
                     cfg_ext = eq.get("config_extra", {})
                     caminho_csv = cfg_ext.get("caminho_csv", "")
                     caminho_log = cfg_ext.get("caminho_log_csv", "")
@@ -129,7 +130,14 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                         log("Agente Webhook Digifort integrado e iniciado com sucesso.")
                     except Exception as e:
                         log(f"Falha ao iniciar Agente Webhook Digifort: {e}", is_error=True)
-                    break
+                
+                elif tipo == "DEFENSE":
+                    try:
+                        from src.application.webhook_defense import start_webhook_defense
+                        start_webhook_defense()
+                        log("Agente Webhook Defense IA iniciado com sucesso na porta 8181.")
+                    except Exception as e:
+                        log(f"Falha ao iniciar Agente Webhook Defense IA: {e}", is_error=True)
         except Exception as e:
             log(f"FALHA na comunicacao com o servidor: {e}", is_error=True)
             log("Usando horario padrao 02:00 para o proximo backup.")

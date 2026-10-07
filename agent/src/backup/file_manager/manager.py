@@ -138,6 +138,35 @@ class FileManager:
                     logging.info("  [DIGIFORT] CSV adicionado ao backup.")
             except Exception as e:
                 logging.warning(f"  [DIGIFORT] Falha ao processar status: {e}")
+                
+        elif equipamento.get("tipo", "").upper() == "DEFENSE":
+            logging.info("  [DEFENSE] Buscando status de gravacoes via Webhook CSV...")
+            try:
+                from src.application.webhook_defense import get_status_cameras_defense
+                
+                cfg_ext = equipamento.get("config_extra", {})
+                caminho_log = cfg_ext.get("pasta_origem", "")
+                
+                status_dict = get_status_cameras_defense(caminho_log)
+                if status_dict:
+                    status_cameras = []
+                    for nome_cam, st in status_dict.items():
+                        is_ok = (st == "OK")
+                        status_cameras.append({
+                            "canal": "N/A",
+                            "nome": nome_cam,
+                            "ip": "N/A",
+                            "online": is_ok,
+                            "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
+                            "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
+                            "total_dias": 1,
+                            "mapa": "OK" if is_ok else "FALHA"
+                        })
+                    logging.info("  [DEFENSE] Status das cameras obtido com sucesso via Webhook.")
+                else:
+                    logging.info("  [DEFENSE] Nenhum status de camera encontrado no arquivo do Webhook.")
+            except Exception as e:
+                logging.warning(f"  [DEFENSE] Falha ao processar status do Webhook: {e}")
 
         logging.info(f"  Backup processado com sucesso. Arquivos: {', '.join(arquivos_copiados)}")
 
