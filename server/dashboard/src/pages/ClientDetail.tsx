@@ -600,6 +600,24 @@ const buildEqPayload = () => {
             <button className="btn btn-secondary" onClick={() => { setEditingEqId(null); setEqForm({ tipo: "CAMERA", name: "", ip: "", username: "admin", password: "navarro@123", modelo: "Hikvision" } as any); setShowEqModal(true); }}>
               <Plus size={14} /> Adicionar Câmera
             </button>
+            <button className="btn btn-secondary" disabled={Object.values(testResults).filter(r => r.image_base64).length === 0} onClick={() => {
+              Object.entries(testResults).forEach(([camId, res], i) => {
+                if (res.image_base64) {
+                  const cam = equipamentos.find(e => e.id === camId);
+                  const name = cam ? cam.name.replace(/\s+/g, '_') : camId;
+                  setTimeout(() => {
+                    const a = document.createElement("a");
+                    a.href = `data:image/jpeg;base64,${res.image_base64}`;
+                    a.download = `camera_${name}.jpg`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                  }, i * 300);
+                }
+              });
+            }}>
+              Baixar Imagens
+            </button>
             <button className="btn btn-success" disabled={loading || isTesting || equipamentos.filter(e => e.tipo === "CAMERA").length === 0} onClick={async () => {
               const cams = equipamentos.filter(e => e.tipo === "CAMERA");
               if (cams.length === 0) return;
@@ -660,7 +678,12 @@ const buildEqPayload = () => {
                     </td>
                     <td style={{ padding: '12px 16px' }}>
                       {res?.image_base64 && (
-                        <img src={`data:image/jpeg;base64,${res.image_base64}`} alt="Preview" style={{ maxHeight: '60px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <img src={`data:image/jpeg;base64,${res.image_base64}`} alt="Preview" style={{ maxHeight: '60px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                          <a href={`data:image/jpeg;base64,${res.image_base64}`} download={`camera_${cam.name.replace(/\\s+/g, '_')}.jpg`} title="Baixar Imagem" style={{ cursor: 'pointer', background: 'var(--surface-2)', padding: '6px', borderRadius: '4px', border: '1px solid var(--border)', textDecoration: 'none' }}>
+                            📥
+                          </a>
+                        </div>
                       )}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'right' }}>
