@@ -146,7 +146,11 @@ def edit_version(version_id: UUID, payload: AgentVersionUpdate, db: Session = De
     if payload.url_service is not None:
         version.url_service = payload.url_service
     if payload.sha256_service is not None:
-        version.sha256_service = payload.sha256_service
+        version.sha256_service = payload.sha256_service.lower()
+    if payload.url_tray is not None:
+        version.url_tray = payload.url_tray
+    if payload.sha256_tray is not None:
+        version.sha256_tray = payload.sha256_tray.lower()
     
     db.commit()
     db.refresh(version)

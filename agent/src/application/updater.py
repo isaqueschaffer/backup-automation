@@ -20,7 +20,7 @@ import requests
 
 logger = logging.getLogger("trilan.updater")
 
-CURRENT_VERSION = "1.0.5"   # <-- Atualizar manualmente a cada build
+CURRENT_VERSION = "1.0.6"   # <-- Atualizar manualmente a cada build
 _UPDATE_CHECK_INTERVAL = 3600  # segundos entre verificações de update (1h)
 _last_update_check: float = 0.0
 
@@ -97,6 +97,9 @@ def check_and_apply_update(conf: dict) -> bool:
     new_version = data.get("version", "?")
     url_service = data.get("url_service")
     expected_hash = data.get("sha256_service", "").lower()
+    
+    url_tray = data.get("url_tray")
+    expected_tray_hash = data.get("sha256_tray", "").lower() if data.get("sha256_tray") else ""
 
     if not url_service or not expected_hash:
         logger.error("[OTA] Dados de atualização incompletos recebidos do servidor.")
@@ -107,38 +110,63 @@ def check_and_apply_update(conf: dict) -> bool:
     # Baixa em pasta temporária
     tmp_dir = tempfile.mkdtemp(prefix="trilan_update_")
     tmp_exe = os.path.join(tmp_dir, "TrilanAgentService_new.exe")
+    tmp_tray_exe = os.path.join(tmp_dir, "TrilanAgentTray_new.exe")
 
     if not _download_file(url_service, tmp_exe):
         logger.error("[OTA] Download falhou. Atualização cancelada.")
         return False
 
-    # Verifica integridade SHA256
+    # Verifica integridade SHA256 do Service
     actual_hash = _sha256_file(tmp_exe)
     if actual_hash != expected_hash:
         logger.error(
-            f"[OTA] FALHA DE INTEGRIDADE! "
+            f"[OTA] FALHA DE INTEGRIDADE NO SERVICE! "
             f"Esperado: {expected_hash} | Recebido: {actual_hash}. "
             "Atualização cancelada por segurança."
         )
         os.remove(tmp_exe)
         return False
+        
+    # Download e verificação do Tray (opcional)
+    has_tray_update = False
+    if url_tray and expected_tray_hash:
+        logger.info("[OTA] Atualização de Tray encontrada. Iniciando download do Tray...")
+        if _download_file(url_tray, tmp_tray_exe):
+            actual_tray_hash = _sha256_file(tmp_tray_exe)
+            if actual_tray_hash == expected_tray_hash:
+                has_tray_update = True
+                logger.info(f"[OTA] Hash do Tray verificado com sucesso.")
+            else:
+                logger.warning(f"[OTA] Falha de integridade no Tray (Esperado: {expected_tray_hash} | Recebido: {actual_tray_hash}). O Tray não será atualizado.")
+        else:
+            logger.warning("[OTA] Download do Tray falhou. Apenas o serviço será atualizado.")
 
-    logger.info(f"[OTA] Hash verificado com sucesso: {actual_hash}")
+    logger.info(f"[OTA] Verificações concluídas com sucesso. Construindo script de deploy...")
 
-    # Caminho do executável atual
+    # Caminho do executável atual (Service)
     current_exe = sys.executable
+    base_dir = os.path.dirname(current_exe)
+    tray_exe = os.path.join(base_dir, "TrilanAgentTray.exe")
 
     # Script batch para substituir o exe e reiniciar o serviço
-    # Roda FORA do processo do serviço (detached) para poder substituir o arquivo em uso
-    bat_content = f"""@echo off
-timeout /t 4 /nobreak >nul
-sc stop TrilanAgentNVR >nul 2>&1
-timeout /t 3 /nobreak >nul
-copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1
-timeout /t 2 /nobreak >nul
-sc start TrilanAgentNVR >nul 2>&1
-del "%~f0"
-"""
+    # Roda FORA do processo do serviço (detached) para poder substituir arquivos em uso
+    bat_content = f"@echo off\n"
+    bat_content += "timeout /t 4 /nobreak >nul\n"
+    bat_content += "sc stop TrilanAgentNVR >nul 2>&1\n"
+    
+    if has_tray_update:
+        # Mata o Tray para destravar o arquivo e permitir a substituição
+        bat_content += "taskkill /F /IM TrilanAgentTray.exe >nul 2>&1\n"
+        
+    bat_content += "timeout /t 3 /nobreak >nul\n"
+    bat_content += f'copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1\n'
+    
+    if has_tray_update:
+        bat_content += f'copy /y "{tmp_tray_exe}" "{tray_exe}" >nul 2>&1\n'
+        
+    bat_content += "timeout /t 2 /nobreak >nul\n"
+    bat_content += "sc start TrilanAgentNVR >nul 2>&1\n"
+    bat_content += 'del "%~f0"\n'
     bat_path = os.path.join(tmp_dir, "apply_update.bat")
     with open(bat_path, "w") as f:
         f.write(bat_content)
