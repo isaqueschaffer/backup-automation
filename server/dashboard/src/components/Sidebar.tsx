@@ -10,7 +10,6 @@ const navItems = [
   { to: "/clients", icon: Users, label: "Clientes" },
   { to: "/backups", icon: Archive, label: "Backups" },
   { to: "/settings", icon: Settings, label: "Configurações" },
-  { to: "/rtsp-test", icon: Video, label: "Teste RTSP" },
 ];
 
 export default function Sidebar() {

@@ -8,7 +8,6 @@ import Clients from "./pages/Clients";
 import ClientDetail from "./pages/ClientDetail";
 import Backups from "./pages/Backups";
 import Settings from "./pages/Settings";
-import RTSPTest from "./pages/RTSPTest";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -25,7 +24,6 @@ function AppRoutes() {
       <Route path="/clients/:id" element={<ProtectedRoute><Layout><ClientDetail /></Layout></ProtectedRoute>} />
       <Route path="/backups" element={<ProtectedRoute><Layout><Backups /></Layout></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
-      <Route path="/rtsp-test" element={<ProtectedRoute><Layout><RTSPTest /></Layout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
