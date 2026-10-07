@@ -28,17 +28,22 @@ function OtaManager() {
   };
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ version: "", url_service: "", sha256_service: "" });
-  const [createForm, setCreateForm] = useState({ version: "", url_service: "", sha256_service: "" });
+  const [editForm, setEditForm] = useState({ version: "", url_service: "", sha256_service: "", url_tray: "", sha256_tray: "" });
+  const [createForm, setCreateForm] = useState({ version: "", url_service: "", sha256_service: "", url_tray: "", sha256_tray: "" });
 
   const startEdit = (v: any) => {
     setEditingId(v.id);
-    setEditForm({ version: v.version, url_service: v.url_service, sha256_service: v.sha256_service });
+    setEditForm({ version: v.version, url_service: v.url_service, sha256_service: v.sha256_service, url_tray: v.url_tray || "", sha256_tray: v.sha256_tray || "" });
   };
 
   const handleEditSave = async (id: string) => {
     try {
-      await editAgentVersion(id, editForm);
+      // Aqui usamos a rota/função correspondente, garantindo envio dos novos campos
+      await fetch(`/api/v1/admin/agent-versions/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + localStorage.getItem("trilan_token") },
+        body: JSON.stringify(editForm)
+      });
       toast("Versão atualizada!", "success");
       setEditingId(null);
       loadVersions();
@@ -50,7 +55,7 @@ function OtaManager() {
     try {
       await createAgentVersion(createForm);
       toast("Nova versão registrada com sucesso!", "success");
-      setCreateForm({ version: "", url_service: "", sha256_service: "" });
+      setCreateForm({ version: "", url_service: "", sha256_service: "", url_tray: "", sha256_tray: "" });
       loadVersions();
     } catch { toast("Erro ao criar versão.", "error"); }
   };
@@ -67,16 +72,25 @@ function OtaManager() {
             <input className="form-input" placeholder="ex: 1.0.4" required value={createForm.version} onChange={e => setCreateForm({...createForm, version: e.target.value})} />
           </div>
           <div className="form-group" style={{ flex: 2 }}>
-            <label className="form-label">SHA256 Hash do .exe</label>
-            <input className="form-input" placeholder="Hash SHA256" required value={createForm.sha256_service} onChange={e => setCreateForm({...createForm, sha256_service: e.target.value})} />
+            <label className="form-label">Service SHA256 (Service)</label>
+            <input className="form-input" placeholder="Hash do TrilanAgentService.exe" required value={createForm.sha256_service} onChange={e => setCreateForm({...createForm, sha256_service: e.target.value})} />
+          </div>
+          <div className="form-group" style={{ flex: 2 }}>
+            <label className="form-label">URL (Service)</label>
+            <input className="form-input" placeholder="https://...TrilanAgentService.exe" type="url" required value={createForm.url_service} onChange={e => setCreateForm({...createForm, url_service: e.target.value})} />
           </div>
         </div>
+        
         <div className="flex gap-3 align-items-end">
-          <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-            <label className="form-label">URL do GitHub (TrilanAgentService.exe)</label>
-            <input className="form-input" placeholder="https://github.com/..." type="url" required value={createForm.url_service} onChange={e => setCreateForm({...createForm, url_service: e.target.value})} />
+          <div className="form-group" style={{ flex: 2 }}>
+            <label className="form-label">Tray SHA256 (Opcional)</label>
+            <input className="form-input" placeholder="Hash do TrilanAgentTray.exe" value={createForm.sha256_tray} onChange={e => setCreateForm({...createForm, sha256_tray: e.target.value})} />
           </div>
-          <button type="submit" className="btn btn-primary" style={{ height: '38px', padding: '0 20px' }}>
+          <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+            <label className="form-label">URL (Tray) (Opcional)</label>
+            <input className="form-input" placeholder="https://...TrilanAgentTray.exe" type="url" value={createForm.url_tray} onChange={e => setCreateForm({...createForm, url_tray: e.target.value})} />
+          </div>
+          <button type="submit" className="btn btn-primary" style={{ height: '38px', padding: '0 20px', flexShrink: 0 }}>
             Registrar Nova Versão
           </button>
         </div>
@@ -85,11 +99,11 @@ function OtaManager() {
       {versions.length === 0 ? (
         <p className="text-sm text-muted">Nenhuma versão publicada no banco de dados.</p>
       ) : (
-        <table className="table" style={{ marginTop: 10, minWidth: 800 }}>
+        <table className="table" style={{ marginTop: 10, minWidth: 900 }}>
           <thead>
             <tr>
               <th>Versão</th>
-              <th>SHA256 (Hash)</th>
+              <th>SHA256 (Service / Tray)</th>
               <th>URL do Executável</th>
               <th>Status</th>
               <th>Ações</th>
@@ -101,8 +115,14 @@ function OtaManager() {
                 {editingId === v.id ? (
                   <>
                     <td><input className="input" value={editForm.version} onChange={e => setEditForm({...editForm, version: e.target.value})} /></td>
-                    <td><input className="input" value={editForm.sha256_service} onChange={e => setEditForm({...editForm, sha256_service: e.target.value})} /></td>
-                    <td><input className="input" value={editForm.url_service} onChange={e => setEditForm({...editForm, url_service: e.target.value})} /></td>
+                    <td>
+                      <input className="input" style={{marginBottom: 4}} placeholder="Hash Service" value={editForm.sha256_service} onChange={e => setEditForm({...editForm, sha256_service: e.target.value})} />
+                      <input className="input" placeholder="Hash Tray" value={editForm.sha256_tray} onChange={e => setEditForm({...editForm, sha256_tray: e.target.value})} />
+                    </td>
+                    <td>
+                      <input className="input" style={{marginBottom: 4}} placeholder="URL Service" value={editForm.url_service} onChange={e => setEditForm({...editForm, url_service: e.target.value})} />
+                      <input className="input" placeholder="URL Tray" value={editForm.url_tray} onChange={e => setEditForm({...editForm, url_tray: e.target.value})} />
+                    </td>
                     <td>—</td>
                     <td>
                       <div className="flex gap-2">
@@ -115,10 +135,12 @@ function OtaManager() {
                   <>
                     <td><strong>{v.version}</strong></td>
                     <td style={{ fontSize: 11, fontFamily: "monospace", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {v.sha256_service}
+                      S: {v.sha256_service}<br/>
+                      {v.sha256_tray && <span>T: {v.sha256_tray}</span>}
                     </td>
-                    <td style={{ fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={v.url_service}>
-                      <a href={v.url_service} target="_blank" rel="noreferrer">Download EXE</a>
+                    <td style={{ fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <a href={v.url_service} target="_blank" rel="noreferrer" title={v.url_service}>⬇ Service</a>
+                      {v.url_tray && <><br/><a href={v.url_tray} target="_blank" rel="noreferrer" title={v.url_tray}>⬇ Tray</a></>}
                     </td>
                     <td>
                       <span className={`badge ${v.active ? 'badge-success' : 'badge-danger'}`}>
