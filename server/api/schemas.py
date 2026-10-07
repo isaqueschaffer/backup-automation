@@ -237,6 +237,8 @@ class AgentVersionUpdate(BaseModel):
     version: Optional[str] = None
     url_service: Optional[str] = None
     sha256_service: Optional[str] = None
+    url_tray: Optional[str] = None
+    sha256_tray: Optional[str] = None
 
 
 class AgentVersionResponse(BaseModel):
