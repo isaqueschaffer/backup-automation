@@ -629,6 +629,8 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 | PABX | PABX | src/pabx/ | — |
 | Mikrotik | MIKROTIK | src/mikrotik/ | SSH/API |
 | Digifort | DIGIFORT | — | — |
+| Intelbras Defense | DEFENSE | src/vms/defense.py | API / HTTP |
+| Misto / Custom | MIXED | — | — |
 
 ---
 
@@ -722,6 +724,17 @@ de dados existentes, rollout gradual e plano de rollback.
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-07] — Merge Seletivo da Branch `helena` (Intelbras Defense)
+
+**Alteracao:** Adicionado suporte ao Intelbras Defense e scripts acessórios, além da função de Lixeira de clientes.
+**Antes:** A branch `helena` possuía quebras de contrato de banco (`docker-compose.yml`) e datetime que impossibilitavam o merge.
+**Depois:** Foi realizado um "cherry-pick" manual arquitetural. Arquivos perigosos de infra e modelos foram bloqueados de acordo com a REGRA-001 e a sanidade do Proxy. As features de VMS e Storage (Lixeira) foram incorporadas com segurança.
+**Arquivos Adicionados/Modificados:** `agent/src/vms/defense.py`, `server/api/schemas.py`, `server/api/services/storage_service.py`, `server/api/routers/clients.py`
+**Breaking Change:** Não.
+**Branch:** isaque
+
+---
 
 ### [2026-10-07] — OTA do TrilanAgentTray.exe
 
