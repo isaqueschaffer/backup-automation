@@ -631,6 +631,7 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 | Digifort | DIGIFORT | — | — |
 | Intelbras Defense | DEFENSE | src/vms/defense.py | API / HTTP |
 | Misto / Custom | MIXED | — | — |
+| Câmera IP (Teste RTSP)| CAMERA | server/api/routers/rtsp_test.py| RTSP (TCP) |
 
 ---
 
@@ -724,6 +725,17 @@ de dados existentes, rollout gradual e plano de rollback.
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-07] — Merge Seletivo da Branch `helena` (Câmeras RTSP)
+
+**Alteracao:** Adicionado suporte ao tipo `CAMERA` e roteador de testes de preview de imagem RTSP.
+**Antes:** A branch `helena` tentou alterar novamente o fuso horário para UTC no banco e alterar as portas/volumes do Docker, violando o ADR-001 e a REGRA-001.
+**Depois:** Foi realizado o "cherry-pick" manual focando apenas no Dashboard e nas rotas de teste RTSP. O banco permanece Naive e os Contratos intactos.
+**Arquivos Adicionados/Modificados:** `server/api/routers/rtsp_test.py`, `server/api/schemas.py`, `server/api/requirements.txt`, Componentes React (Frontend).
+**Breaking Change:** Não.
+**Branch:** isaque
+
+---
 
 ### [2026-10-07] — Merge Seletivo da Branch `helena` (Intelbras Defense)
 

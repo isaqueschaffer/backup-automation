@@ -9,7 +9,7 @@ from models import Client, Backup
 from schemas import StatsResponse
 from auth import verify_admin_token
 from config import settings
-from routers import auth_router, clients, nvrs, backups, agent, settings_router, equipamentos
+from routers import auth_router, clients, nvrs, backups, agent, settings_router, equipamentos, rtsp_test
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -104,6 +104,7 @@ app.include_router(agent.router)
 app.include_router(settings_router.router)
 app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
+app.include_router(rtsp_test.router)      # RTSP Test
 
 
 # ─── Stats endpoint ────────────────────────────────────────────────────────
