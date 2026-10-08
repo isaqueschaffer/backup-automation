@@ -29,20 +29,35 @@ def _get_telemetry() -> dict:
     try:
         import psutil
         
-        # Leitura inicial de rede
-        net_start = psutil.net_io_counters()
+        # Leitura inicial de rede (por placa)
+        net_start = psutil.net_io_counters(pernic=True)
         
         # Medição de CPU (espera 1 segundo)
         telemetry["cpu_percent"] = psutil.cpu_percent(interval=1)
         
         # Leitura final de rede após 1 segundo
-        net_end = psutil.net_io_counters()
+        net_end = psutil.net_io_counters(pernic=True)
+        stats = psutil.net_if_stats()
         
-        # Calcula Mbps (Megabits por segundo)
-        bytes_sent_sec = net_end.bytes_sent - net_start.bytes_sent
-        bytes_recv_sec = net_end.bytes_recv - net_start.bytes_recv
-        telemetry["net_mbps_sent"] = round((bytes_sent_sec * 8) / 1_000_000, 2)
-        telemetry["net_mbps_recv"] = round((bytes_recv_sec * 8) / 1_000_000, 2)
+        networks = []
+        for nic, start_io in net_start.items():
+            if not stats.get(nic) or not stats[nic].isup:
+                continue
+            if "Loopback" in nic or "Pseudo" in nic:
+                continue
+            end_io = net_end.get(nic)
+            if not end_io: continue
+            
+            bytes_sent_sec = end_io.bytes_sent - start_io.bytes_sent
+            bytes_recv_sec = end_io.bytes_recv - start_io.bytes_recv
+            
+            networks.append({
+                "name": nic,
+                "mbps_sent": round((bytes_sent_sec * 8) / 1_000_000, 2),
+                "mbps_recv": round((bytes_recv_sec * 8) / 1_000_000, 2)
+            })
+        
+        telemetry["networks"] = networks
         
         mem = psutil.virtual_memory()
         telemetry["ram_percent"] = mem.percent

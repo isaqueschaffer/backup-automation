@@ -478,13 +478,14 @@ const buildEqPayload = () => {
                 <TelemetryBar label="CPU" percent={client.telemetry.cpu_percent || 0} info={`${client.telemetry.cpu_percent || 0}%`} />
                 <TelemetryBar label="RAM" percent={client.telemetry.ram_percent || 0} info={`${client.telemetry.ram_used_gb || 0} GB / ${client.telemetry.ram_total_gb || 0} GB`} />
                 <TelemetryBar label="Disco (C:)" percent={client.telemetry.disk_percent || 0} info={`${client.telemetry.disk_free_gb || 0} GB Livre`} />
-                {(client.telemetry.net_mbps_sent !== undefined) && (
+                {client.telemetry.networks && client.telemetry.networks.map((net: any, i: number) => (
                   <TelemetryBar 
-                    label="Rede (Atual)" 
-                    percent={Math.min(100, (((client.telemetry.net_mbps_sent || 0) + (client.telemetry.net_mbps_recv || 0)) / 1000) * 100)} 
-                    info={`↑ ${client.telemetry.net_mbps_sent} Mbps  ↓ ${client.telemetry.net_mbps_recv} Mbps`} 
+                    key={i}
+                    label={`Rede: ${net.name}`} 
+                    percent={Math.min(100, (((net.mbps_sent || 0) + (net.mbps_recv || 0)) / 1000) * 100)} 
+                    info={`↑ ${net.mbps_sent} Mbps  ↓ ${net.mbps_recv} Mbps`} 
                   />
-                )}
+                ))}
                 {client.telemetry.gpu_name && (
                   <TelemetryBar label="GPU" percent={client.telemetry.gpu_percent || 0} info={`${client.telemetry.gpu_name} (${client.telemetry.gpu_percent || 0}%)`} />
                 )}
