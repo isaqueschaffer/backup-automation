@@ -156,9 +156,13 @@ def receive_night_image(
     db: Session = Depends(get_db),
 ):
     """Agent posts the night image of an NVR channel."""
-    nvr = db.query(NVR).filter(NVR.client_id == client.id, NVR.name == body.nvr_name).first()
+    nvr = db.query(NVR).filter(
+        NVR.client_id == client.id, 
+        NVR.name == body.nvr_name,
+        NVR.active == True
+    ).first()
     if not nvr:
-        return {"status": "error", "message": "NVR não encontrado"}
+        return {"status": "error", "message": "NVR não encontrado ou inativo"}
 
     camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id, NVRCamera.canal == body.canal).first()
     if not camera:
