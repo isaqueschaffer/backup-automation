@@ -1,5 +1,6 @@
 from typing import List
 from uuid import UUID
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -17,6 +18,17 @@ router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
 def _to_response(client: Client) -> ClientResponse:
     data = ClientResponse.model_validate(client)
     data.nvr_count = len(client.nvrs)
+    now = datetime.utcnow()
+    data.current_server_time = now
+    
+    # Se o agente não envia ping há mais de 3 minutos (180s), consideramos offline.
+    # O agente envia pings a cada ~20s em condições normais.
+    if client.active and client.last_seen:
+        diff_seconds = (now - client.last_seen).total_seconds()
+        data.is_online = diff_seconds < 180
+    else:
+        data.is_online = False
+        
     return data
 
 
