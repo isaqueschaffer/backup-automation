@@ -29,7 +29,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     
     try:
         cmd = [
-            ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-stimeout", "5000000",
+            ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
             "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
         ]
         result = subprocess.run(cmd, capture_output=True, timeout=15)
@@ -60,7 +60,7 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
     
     try:
         cmd = [
-            ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-stimeout", "5000000",
+            ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
             "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
         ]
         result = subprocess.run(cmd, capture_output=True, timeout=15)
