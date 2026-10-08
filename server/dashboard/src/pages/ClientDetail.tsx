@@ -10,11 +10,10 @@ import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
 import api from "../api/client";
 import { useRef } from "react";
-import { Video } from "lucide-react";
 import {
   ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
-  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning
+  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning, Image
 } from "lucide-react";
 
 function fmtDate(s: string | null) {
