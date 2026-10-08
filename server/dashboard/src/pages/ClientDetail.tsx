@@ -552,47 +552,80 @@ const buildEqPayload = () => {
             </span>
           </div>
           <div className="flex gap-2">
-            <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
+            <input type="file" accept=".csv, .xlsx, .xls" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
               const file = e.target.files?.[0];
               if (!file) return;
-              const reader = new FileReader();
-              reader.onload = async (evt) => {
-                const text = evt.target?.result as string;
-                const lines = text.split("\n");
-                let count = 0;
-                setLoading(true);
-                try {
-                  for (let i = 1; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line) continue;
-                    const cols = line.split(";").map(c => c.replace(/^"|"$/g, "").trim());
-                    const desc = cols[1] || "";
-                    const mod = cols[2] || "Hikvision";
-                    const ender = cols[3] || "";
-                    const pass = cols[6] || "";
-
-                    if (desc && ender) {
-                      await api.post(`/clients/${id}/equipamentos`, {
-                        tipo: "CAMERA",
-                        name: desc,
-                        ip: ender,
-                        username: "admin",
-                        password: pass,
-                        config_extra: { modelo: mod }
-                      });
-                      count++;
-                    }
-                  }
-                  toast(`Importadas ${count} câmeras com sucesso!`, "success");
-                  load();
-                } catch (err) {
-                  toast("Erro ao importar câmeras.", "error");
-                } finally {
-                  setLoading(false);
-                  if (fileInputRef.current) fileInputRef.current.value = '';
+              setLoading(true);
+              try {
+                const XLSX = await import("xlsx");
+                const data = await file.arrayBuffer();
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                
+                if (rows.length < 2) {
+                  toast("Arquivo vazio", "error");
+                  return;
                 }
-              };
-              reader.readAsText(file, "ISO-8859-1");
+
+                // Header analysis
+                let headerRow = (rows[0] as any[]).map(c => String(c || '').trim().toLowerCase());
+                if (headerRow.length === 1 && headerRow[0].includes(';')) {
+                   headerRow = headerRow[0].split(';').map(c => c.replace(/^"|"$/g, "").trim());
+                }
+                const isDefense = headerRow.includes("nome do dispositivo") || headerRow.includes("nome do dispositivo"); // Excel sometimes adds spaces
+
+                let count = 0;
+                for (let i = 1; i < rows.length; i++) {
+                  let row = rows[i] as any[];
+                  if (!row || row.length === 0) continue;
+                  
+                  if (row.length === 1 && typeof row[0] === 'string' && row[0].includes(';')) {
+                     row = row[0].split(';').map(c => c.replace(/^"|"$/g, "").trim());
+                  }
+
+                  let desc = "";
+                  let mod = "Hikvision";
+                  let ender = "";
+                  let pass = "navarro@123";
+
+                  if (isDefense) {
+                    const nameIdx = headerRow.indexOf("nome do dispositivo");
+                    const ipIdx = headerRow.indexOf("ip do dispositivo");
+                    const typeIdx = headerRow.indexOf("tipo de dispositivo");
+                    
+                    if (nameIdx !== -1) desc = row[nameIdx] || "";
+                    if (ipIdx !== -1) ender = row[ipIdx] || "";
+                    if (typeIdx !== -1) mod = row[typeIdx] || "Intelbras";
+                    else mod = "Intelbras";
+                  } else {
+                    desc = row[1] || "";
+                    mod = row[2] || "Hikvision";
+                    ender = row[3] || "";
+                    pass = row[6] || "navarro@123";
+                  }
+
+                  if (desc && ender) {
+                    await api.post(`/clients/${id}/equipamentos`, {
+                      tipo: "CAMERA",
+                      name: String(desc).trim(),
+                      ip: String(ender).trim(),
+                      username: "admin",
+                      password: pass,
+                      config_extra: { modelo: mod }
+                    });
+                    count++;
+                  }
+                }
+                toast(`Importadas ${count} câmeras com sucesso!`, "success");
+                load();
+              } catch (err) {
+                console.error(err);
+                toast("Erro ao importar câmeras.", "error");
+              } finally {
+                setLoading(false);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }
             }} />
             <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} disabled={loading || isTesting}>
               <Plus size={14} /> Importar CSV
