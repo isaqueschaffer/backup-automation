@@ -465,6 +465,28 @@ const buildEqPayload = () => {
             <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
               value={fmtDate(client.last_backup_at)} />
           </div>
+          </div>
+        </div>
+
+        {/* Coluna 3 — Saúde da Máquina (Telemetria) */}
+        <div className="card" style={{ padding: "20px 24px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+            <Network size={13} /> Saúde do Servidor
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {client.telemetry ? (
+              <>
+                <TelemetryBar label="CPU" percent={client.telemetry.cpu_percent || 0} info={`${client.telemetry.cpu_percent || 0}%`} />
+                <TelemetryBar label="RAM" percent={client.telemetry.ram_percent || 0} info={`${client.telemetry.ram_used_gb || 0} GB / ${client.telemetry.ram_total_gb || 0} GB`} />
+                <TelemetryBar label="Disco (C:)" percent={client.telemetry.disk_percent || 0} info={`${client.telemetry.disk_free_gb || 0} GB Livre`} />
+                {client.telemetry.gpu_name && (
+                  <TelemetryBar label="GPU" percent={client.telemetry.gpu_percent || 0} info={`${client.telemetry.gpu_name} (${client.telemetry.gpu_percent || 0}%)`} />
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic" }}>Sem dados de telemetria</div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -848,7 +870,7 @@ const buildEqPayload = () => {
                 <input className="form-input" type="text" placeholder={eqForm.tipo === "PABX" ? "https://192.168.12.2" : "192.168.1.100"}
                   value={eqForm.ip} onChange={e => setEqForm({ ...eqForm, ip: e.target.value })} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">Usuário *</label>
                   <input className="form-input" type="text"
@@ -927,7 +949,7 @@ const buildEqPayload = () => {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+                    gridTemplateColumns: "1fr 1fr",
                     gap: 12,
                     marginTop: 12
                   }}
@@ -1043,7 +1065,7 @@ const buildEqPayload = () => {
           </div>
           <div className="form-group">
             <label className="form-label">Horário do Backup Automático</label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
                 <label className="form-label" style={{ fontSize: 11 }}>Hora (0-23)</label>
                 <input className="form-input" type="number" min={0} max={23} value={editForm.backup_hour ?? 2}
