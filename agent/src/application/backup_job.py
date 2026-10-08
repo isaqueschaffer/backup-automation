@@ -246,6 +246,9 @@ def run_backup(trigger: str = "scheduled"):
         logging.error("Nenhum equipamento configurado no servidor para este cliente.")
         return
 
+    # Ignora as câmeras (elas não fazem parte do backup principal automático)
+    equipamentos = [eq for eq in equipamentos if str(eq.get("tipo")).upper() != "CAMERA"]
+
     # Resumo por tipo
     por_tipo: dict = {}
     for eq in equipamentos:
