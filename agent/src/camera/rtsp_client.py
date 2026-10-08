@@ -24,9 +24,12 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
         ch_str = f"{canal}02" if canal else "102"
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}"
     
+    import imageio_ffmpeg
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    
     try:
         cmd = [
-            "ffmpeg", "-y", "-rtsp_transport", "tcp", "-stimeout", "5000000",
+            ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-stimeout", "5000000",
             "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
         ]
         result = subprocess.run(cmd, capture_output=True, timeout=15)
@@ -52,16 +55,23 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
     
     rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/tracks/{canal_str}?starttime={start_time}&endtime={end_time}"
     
+    import imageio_ffmpeg
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    
     try:
         cmd = [
-            "ffmpeg", "-y", "-rtsp_transport", "tcp", "-stimeout", "5000000",
+            ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-stimeout", "5000000",
             "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
         ]
         result = subprocess.run(cmd, capture_output=True, timeout=15)
         
         if result.returncode == 0 and len(result.stdout) > 1000:
             return base64.b64encode(result.stdout).decode('utf-8')
-    except Exception:
-        pass
+        else:
+            import logging
+            logging.warning(f"FFmpeg stdout len: {len(result.stdout)}, stderr: {result.stderr.decode('utf-8', errors='ignore')}")
+    except Exception as e:
+        import logging
+        logging.error(f"FFmpeg exception: {e}")
         
     return None
