@@ -163,10 +163,54 @@ def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, db: Session = D
     
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000"
     
+    import socket
+    def pre_check_rtsp(url: str) -> str:
+        try:
+            parsed = urllib.parse.urlparse(url)
+            ip_host = parsed.hostname
+            port = parsed.port or 554
+            user = parsed.username or ""
+            pwd = parsed.password or ""
+            
+            pwd_decoded = urllib.parse.unquote(pwd)
+            auth_b64 = base64.b64encode(f"{user}:{pwd_decoded}".encode()).decode()
+            
+            req = f"DESCRIBE {url} RTSP/1.0\r\nCSeq: 1\r\nAuthorization: Basic {auth_b64}\r\nUser-Agent: Python\r\nAccept: application/sdp\r\n\r\n"
+            
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3.0)
+            s.connect((ip_host, port))
+            s.sendall(req.encode())
+            resp = s.recv(1024).decode(errors='ignore')
+            s.close()
+            
+            if resp.startswith("RTSP/1.0 ") or resp.startswith("RTSP/1.1 "):
+                status_line = resp.split("\r\n")[0]
+                parts = status_line.split(" ", 2)
+                if len(parts) >= 2:
+                    code = parts[1]
+                    if code == "401":
+                        return "FALHA 401: Não Autorizado. A senha ou usuário estão incorretos."
+                    elif code == "404":
+                        return "FALHA 404: Não Encontrado. O caminho RTSP ou Modelo configurado estão incorretos."
+                    elif int(code) >= 400:
+                        return f"FALHA {code}: {parts[2] if len(parts)>2 else 'Erro retornado pela câmera'}."
+        except socket.timeout:
+            return "FALHA: Tempo limite excedido (Timeout). A câmera pode estar desligada, firewall bloqueando, ou IP inacessível."
+        except ConnectionRefusedError:
+            return "FALHA: Conexão recusada (Porta 554 fechada). A câmera pode não suportar RTSP."
+        except Exception as e:
+            pass
+        return None
+
+    detalhe_erro = pre_check_rtsp(rtsp_url)
+    if detalhe_erro:
+        return RTSPTestResponse(success=False, error_message=detalhe_erro)
+    
     cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
     
     if not cap.isOpened():
-        return RTSPTestResponse(success=False, error_message="FALHA (401/404): Nǜo foi possvel conectar ao RTSP (Verifique IP, Senha ou Caminho).")
+        return RTSPTestResponse(success=False, error_message="FALHA DESCONHECIDA: Não foi possível conectar ao RTSP ou ler o vídeo.")
     
     try:
         for _ in range(2):
