@@ -87,6 +87,7 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
   const [cameras, setCameras] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [zoomImage, setZoomImage] = useState<{ src: string, title: string } | null>(null);
+  const [selectedCamId, setSelectedCamId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchCams = async () => {
@@ -94,6 +95,9 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
       try {
         const res = await api.get(`/clients/${clientId}/equipamentos/${nvrId}/cameras`);
         setCameras(res.data);
+        if (res.data && res.data.length > 0) {
+          setSelectedCamId(res.data[0].id);
+        }
       } catch (e) {
         console.error("Error fetching cameras:", e);
       }
@@ -107,7 +111,6 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
   const capturePerfectImage = async (canal: number, nome: string) => {
     setTestingCanal(canal);
     try {
-      // 1. Testa RTSP pelo agente
       const resRtsp = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
       const dataRtsp = resRtsp.data;
       if (!dataRtsp.success || !dataRtsp.image_base64) {
@@ -116,7 +119,6 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
         return;
       }
       
-      // 2. Salva a imagem
       const resSave = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
         canal, nome, image_base64: dataRtsp.image_base64
       });
@@ -128,69 +130,138 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
     setTestingCanal(null);
   };
 
+  const selectedCam = cameras.find(c => c.id === selectedCamId);
+
   return (
     <>
-      <Modal title={`Câmeras do NVR: ${nvrName}`} onClose={onClose} width="900px">
+      <Modal title={`Câmeras do NVR: ${nvrName}`} onClose={onClose} width="1200px">
         {loading ? (
           <div style={{ padding: 40, textAlign: "center" }}>Carregando galeria...</div>
         ) : cameras.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>Nenhuma câmera sincronizada neste NVR ainda. Aguarde o próximo backup.</div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            {cameras.map(cam => (
-              <div key={cam.id} className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontWeight: 600, borderBottom: "1px solid var(--border)", paddingBottom: 8, marginBottom: 4 }}>
-                  {cam.nome || `Canal ${cam.canal}`}
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>PERFECT IMAGE (DIA)</div>
-                    {cam.perfect_image_base64 ? (
-                      <img 
-                        src={`data:image/jpeg;base64,${cam.perfect_image_base64}`} 
-                        alt="Perfect" 
-                        style={{ width: "100%", borderRadius: 4, aspectRatio: "16/9", objectFit: "cover", marginBottom: 8, cursor: "zoom-in", transition: "transform 0.2s" }} 
-                        onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.02)")}
-                        onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
-                        onClick={() => setZoomImage({ src: `data:image/jpeg;base64,${cam.perfect_image_base64}`, title: `${cam.nome || `Canal ${cam.canal}`} - PERFECT IMAGE` })}
-                      />
-                    ) : (
-                      <div style={{ width: "100%", aspectRatio: "16/9", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, fontSize: 11, color: "var(--text-muted)", border: "1px dashed var(--border)", marginBottom: 8 }}>Sem imagem</div>
-                    )}
-                    <button className="btn btn-secondary btn-sm" style={{ marginTop: "auto", fontSize: 11, width: "100%", justifyContent: "center" }} onClick={() => capturePerfectImage(cam.canal, cam.nome)} disabled={testingCanal === cam.canal}>
-                      {testingCanal === cam.canal ? "Capturando..." : "Capturar Imagem Perfeita"}
+          <div style={{ display: "flex", height: "75vh", margin: "-24px" }}>
+            {/* Sidebar with Channels */}
+            <div style={{ width: "260px", borderRight: "1px solid var(--border)", overflowY: "auto", padding: "16px 0", background: "var(--surface-50)" }}>
+              <div style={{ padding: "0 16px", marginBottom: 12, fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em" }}>
+                CANAIS GRAVADOS ({cameras.length})
+              </div>
+              {cameras.map(cam => {
+                const isSelected = selectedCamId === cam.id;
+                return (
+                  <div 
+                    key={cam.id} 
+                    style={{ 
+                      padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+                      background: isSelected ? "var(--primary-light)" : "transparent",
+                      borderLeft: `4px solid ${isSelected ? "var(--primary)" : "transparent"}`,
+                      transition: "all 0.2s"
+                    }}
+                    onClick={() => setSelectedCamId(cam.id)}
+                    onMouseEnter={(e) => { if(!isSelected) e.currentTarget.style.background = "var(--surface-hover)" }}
+                    onMouseLeave={(e) => { if(!isSelected) e.currentTarget.style.background = "transparent" }}
+                  >
+                    <Video size={16} color={isSelected ? "var(--primary)" : "var(--text-muted)"} />
+                    <span style={{ fontWeight: isSelected ? 600 : 500, color: isSelected ? "var(--primary-dark)" : "var(--text)" }}>
+                      {cam.nome || `Canal ${cam.canal}`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Main Content Area */}
+            <div style={{ flex: 1, padding: 32, overflowY: "auto", display: "flex", flexDirection: "column", gap: 24, background: "var(--background)" }}>
+              {selectedCam ? (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)", paddingBottom: 16 }}>
+                    <div>
+                      <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>{selectedCam.nome || `Canal ${selectedCam.canal}`}</h2>
+                      <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: 14 }}>
+                        Último backup: {selectedCam.night_image_date ? fmtDate(selectedCam.night_image_date) : "Desconhecido"}
+                      </p>
+                    </div>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={() => capturePerfectImage(selectedCam.canal, selectedCam.nome)} 
+                      disabled={testingCanal === selectedCam.canal}
+                      style={{ display: "flex", gap: 8, alignItems: "center" }}
+                    >
+                      <Image size={16} />
+                      {testingCanal === selectedCam.canal ? "Capturando..." : "Atualizar Imagem de Referência"}
                     </button>
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>ÚLTIMO BACKUP (NOITE)</div>
-                    {cam.night_image_base64 ? (
-                      <img 
-                        src={`data:image/jpeg;base64,${cam.night_image_base64}`} 
-                        alt="Night" 
-                        style={{ width: "100%", borderRadius: 4, aspectRatio: "16/9", objectFit: "cover", cursor: "zoom-in", transition: "transform 0.2s" }} 
-                        onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.02)")}
-                        onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
-                        onClick={() => setZoomImage({ src: `data:image/jpeg;base64,${cam.night_image_base64}`, title: `${cam.nome || `Canal ${cam.canal}`} - ÚLTIMO BACKUP` })}
-                      />
-                    ) : (
-                      <div style={{ width: "100%", aspectRatio: "16/9", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, fontSize: 11, color: "var(--text-muted)", border: "1px dashed var(--border)" }}>Sem imagem</div>
-                    )}
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                    {/* Perfect Image */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981" }}></div>
+                        REFERÊNCIA IDEAL (PERFECT IMAGE)
+                      </div>
+                      <div style={{ background: "var(--surface)", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "16/9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {selectedCam.perfect_image_base64 ? (
+                          <img 
+                            src={`data:image/jpeg;base64,${selectedCam.perfect_image_base64}`} 
+                            alt="Perfect" 
+                            style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in", transition: "transform 0.3s" }} 
+                            onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.03)")}
+                            onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                            onClick={() => setZoomImage({ src: `data:image/jpeg;base64,${selectedCam.perfect_image_base64}`, title: `${selectedCam.nome || `Canal ${selectedCam.canal}`} - REFERÊNCIA IDEAL` })}
+                          />
+                        ) : (
+                          <div style={{ color: "var(--text-muted)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                            <Image size={32} opacity={0.3} />
+                            <span>Sem imagem de referência</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Night Image */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--primary)" }}></div>
+                        ÚLTIMO BACKUP GRAVADO (NOITE)
+                      </div>
+                      <div style={{ background: "var(--surface)", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "16/9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {selectedCam.night_image_base64 ? (
+                          <img 
+                            src={`data:image/jpeg;base64,${selectedCam.night_image_base64}`} 
+                            alt="Night" 
+                            style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in", transition: "transform 0.3s" }} 
+                            onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.03)")}
+                            onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                            onClick={() => setZoomImage({ src: `data:image/jpeg;base64,${selectedCam.night_image_base64}`, title: `${selectedCam.nome || `Canal ${selectedCam.canal}`} - ÚLTIMO BACKUP` })}
+                          />
+                        ) : (
+                          <div style={{ color: "var(--text-muted)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                            <Image size={32} opacity={0.3} />
+                            <span>Sem imagem do último backup</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
+                </>
+              ) : (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", flexDirection: "column", gap: 16 }}>
+                  <Video size={48} opacity={0.2} />
+                  <span>Selecione um canal na lateral para visualizar as imagens</span>
                 </div>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
         )}
       </Modal>
 
       {zoomImage && (
         <div 
-          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.85)", zIndex: 999999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "zoom-out", padding: 40 }}
+          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.9)", zIndex: 999999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "zoom-out", padding: 40 }}
           onClick={() => setZoomImage(null)}
         >
-          <div style={{ color: "white", fontSize: 18, fontWeight: 600, marginBottom: 16 }}>{zoomImage.title}</div>
+          <div style={{ color: "white", fontSize: 20, fontWeight: 600, marginBottom: 20, letterSpacing: "0.02em" }}>{zoomImage.title}</div>
           <img src={zoomImage.src} style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }} />
-          <div style={{ color: "var(--text-muted)", fontSize: 14, marginTop: 16 }}>Clique em qualquer lugar para fechar</div>
         </div>
       )}
     </>
