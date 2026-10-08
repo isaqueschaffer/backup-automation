@@ -27,6 +27,7 @@ class Client(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     restart_requested = Column(Boolean, default=False, nullable=False)
     backup_requested = Column(Boolean, default=False, nullable=False)
+    telemetry = Column(JSON, nullable=True)  # Hardware stats (CPU, RAM, Disk, GPU)
 
     nvrs = relationship("NVR", back_populates="client", cascade="all, delete-orphan")
     equipamentos = relationship("NVR", back_populates="client", cascade="all, delete-orphan", overlaps="nvrs")

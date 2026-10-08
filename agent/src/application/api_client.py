@@ -24,12 +24,45 @@ def fetch_server_config(conf: dict) -> dict:
         logging.error(f"Conteudo recebido: {r.text[:200]}")
         raise RuntimeError("Servidor retornou uma resposta invalida (provavelmente HTML em vez de JSON).") from e
 
+def _get_telemetry() -> dict:
+    telemetry = {}
+    try:
+        import psutil
+        telemetry["cpu_percent"] = psutil.cpu_percent(interval=None)
+        
+        mem = psutil.virtual_memory()
+        telemetry["ram_percent"] = mem.percent
+        telemetry["ram_total_gb"] = round(mem.total / (1024 ** 3), 2)
+        telemetry["ram_used_gb"] = round(mem.used / (1024 ** 3), 2)
+        
+        disk = psutil.disk_usage('C:\\')
+        telemetry["disk_percent"] = disk.percent
+        telemetry["disk_total_gb"] = round(disk.total / (1024 ** 3), 2)
+        telemetry["disk_free_gb"] = round(disk.free / (1024 ** 3), 2)
+    except Exception as e:
+        logging.error(f"Erro ao coletar psutil: {e}")
+        
+    try:
+        import GPUtil
+        gpus = GPUtil.getGPUs()
+        if gpus:
+            gpu = gpus[0]
+            telemetry["gpu_percent"] = round(gpu.load * 100, 1)
+            telemetry["gpu_memory_total"] = gpu.memoryTotal
+            telemetry["gpu_memory_used"] = gpu.memoryUsed
+            telemetry["gpu_name"] = gpu.name
+    except Exception as e:
+        pass # Ignora se nao tiver GPUtil ou GPU
+        
+    return telemetry
+
 def ping_server(conf: dict) -> dict:
     """Envia um ping para o servidor para manter o status online."""
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    payload = {"telemetry": _get_telemetry()}
     r = requests.post(
         f"{conf['server_url']}/api/v1/agent/ping",
-        headers=headers, timeout=10, verify=False,
+        headers=headers, timeout=10, verify=False, json=payload
     )
     r.raise_for_status()
     return r.json()

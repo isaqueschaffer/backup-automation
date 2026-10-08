@@ -83,6 +83,7 @@ class ClientResponse(ClientBase):
     nvr_count: int = 0
     restart_requested: bool = False
     backup_requested: bool = False
+    telemetry: Optional[Dict[str, Any]] = None
 
     model_config = {"from_attributes": True}
 
@@ -169,6 +170,10 @@ class PingResponse(BaseModel):
     status: str
     restart: bool = False
     backup: bool = False
+
+
+class PingRequest(BaseModel):
+    telemetry: Optional[Dict[str, Any]] = None
 
 
 # ─────────────────────────────────────────────

@@ -55,6 +55,25 @@ function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate
 }
 
 // ── Info pill component ──────────────────────────────────────────
+
+function TelemetryBar({ label, percent, info }: { label: string, percent: number, info: string }) {
+  const isHigh = percent > 90;
+  const isWarn = percent > 75;
+  const color = isHigh ? "var(--err)" : (isWarn ? "var(--warn)" : "var(--ok)");
+  
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{label}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{info}</span>
+      </div>
+      <div style={{ width: "100%", height: 6, backgroundColor: "var(--surface-2)", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${percent}%`, height: "100%", backgroundColor: color, borderRadius: 3, transition: "width 0.3s ease" }}></div>
+      </div>
+    </div>
+  );
+}
+
 function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
   icon: React.ReactNode; label: string; value: React.ReactNode;
   mono?: boolean; copyValue?: string; onCopy?: (v: string) => void;
@@ -412,7 +431,7 @@ const buildEqPayload = () => {
       )}
 
       {/* ── Layout de duas colunas ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
 
         {/* Coluna 1 — Configuração */}
         <div className="card" style={{ padding: "20px 24px" }}>
@@ -829,7 +848,7 @@ const buildEqPayload = () => {
                 <input className="form-input" type="text" placeholder={eqForm.tipo === "PABX" ? "https://192.168.12.2" : "192.168.1.100"}
                   value={eqForm.ip} onChange={e => setEqForm({ ...eqForm, ip: e.target.value })} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">Usuário *</label>
                   <input className="form-input" type="text"
@@ -908,7 +927,7 @@ const buildEqPayload = () => {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
                     gap: 12,
                     marginTop: 12
                   }}
@@ -1024,7 +1043,7 @@ const buildEqPayload = () => {
           </div>
           <div className="form-group">
             <label className="form-label">Horário do Backup Automático</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
               <div>
                 <label className="form-label" style={{ fontSize: 11 }}>Hora (0-23)</label>
                 <input className="form-input" type="number" min={0} max={23} value={editForm.backup_hour ?? 2}

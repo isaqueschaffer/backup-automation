@@ -30,6 +30,7 @@ export interface Client {
   nvr_count: number;
   restart_requested?: boolean;
   backup_requested?: boolean;
+  telemetry?: Record<string, any> | null;
   api_key?: string; // only on create/rotate
 }
 

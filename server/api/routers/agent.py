@@ -15,6 +15,7 @@ from schemas import (
     BackupReportCreate,
     BackupReportResponse,
     PingResponse,
+    PingRequest,
     TIPOS_EQUIPAMENTO,
 )
 from services.crypto_service import decrypt
@@ -56,9 +57,17 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
 
 
 @router.post("/ping", response_model=PingResponse)
-def ping_agent(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
+def ping_agent(
+    body: PingRequest | None = None,
+    client: Client = Depends(get_current_client), 
+    db: Session = Depends(get_db)
+):
     """Agent heartbeat to mark it as online. Returns restart/backup flags if requested."""
     client.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
+    
+    if body and body.telemetry:
+        client.telemetry = body.telemetry
+
     should_restart = bool(client.restart_requested)
     should_backup = bool(client.backup_requested)
     
