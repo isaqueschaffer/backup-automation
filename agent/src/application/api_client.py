@@ -25,14 +25,27 @@ def fetch_server_config(conf: dict) -> dict:
         raise RuntimeError("Servidor retornou uma resposta invalida (provavelmente HTML em vez de JSON).") from e
 
 def ping_server(conf: dict) -> dict:
-    """Envia um ping para o servidor para manter o status online."""
+    """Envia um ping para o servidor para manter o status online. Usa long-polling."""
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     r = requests.post(
         f"{conf['server_url']}/api/v1/agent/ping",
-        headers=headers, timeout=10, verify=False,
+        headers=headers, timeout=40, verify=False,
     )
     r.raise_for_status()
     return r.json()
+
+def send_rtsp_result(conf: dict, result: dict) -> bool:
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/rtsp-result",
+            json=result, headers=headers, timeout=10, verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao enviar resultado RTSP: {e}")
+        return False
 
 def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 resultados: list, trigger: str) -> str | None:

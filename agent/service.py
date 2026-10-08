@@ -20,6 +20,10 @@ import win32serviceutil
 import servicemanager
 import win32security
 
+# Imports explicitos para o PyInstaller não perder dependências em imports dinâmicos
+import src.camera.rtsp_client
+import src.application.api_client
+
 DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
 
@@ -140,8 +144,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             while not self.stop_requested:
                 agora = datetime.now()
                 
-                # Envia ping a cada 5 minutos (300 segundos) para manter status "Online"
-                if time.time() - last_ping_time >= 300:
+                # Envia ping a cada 15 segundos para manter status e receber comandos rápidos
+                if time.time() - last_ping_time >= 15:
                     last_ping_time = time.time()
                     try:
                         ping_resp = ping_server(conf)
@@ -151,16 +155,28 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                         else:
                             log("Ping enviado, mas resposta vazia.")
                             
+                        # Verifica se o servidor solicitou teste RTSP
+                        if ping_resp and ping_resp.get("rtsp_task"):
+                            log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
+                            from src.camera.rtsp_client import test_rtsp_camera
+                            from src.application.api_client import send_rtsp_result
+                            import threading
+                            
+                            def run_and_send_rtsp():
+                                result = test_rtsp_camera(ping_resp["rtsp_task"])
+                                send_rtsp_result(conf, result)
+                                log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
+                                
+                            threading.Thread(target=run_and_send_rtsp, daemon=True).start()
+
                         # Verifica se o servidor solicitou reinicio
                         if ping_resp and ping_resp.get("restart"):
                             log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
-                            # Spawna processo detached: aguarda o servico parar (3s) e reinicia
                             import subprocess
                             subprocess.Popen(
                                 ["cmd", "/c", "timeout /t 3 /nobreak >nul && sc start TrilanAgentNVR"],
                                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
                             )
-                            # Para o servico de forma limpa (SCM vai receber o sinal de stop)
                             self.stop_requested = True
                             win32event.SetEvent(self.hWaitStop)
                             return
@@ -168,7 +184,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                             log("Geracao de backup manual solicitada pelo dashboard!")
                             self._executar_backup(agent_mod, "manual_dashboard")
 
-                        # ── Verifica OTA (uma vez por hora) ──────────────────────
+                        # ── Verifica OTA (apenas se nao houver task importante) ──────────────────────
                         update_iniciado = check_and_apply_update(conf)
                         if update_iniciado:
                             log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
@@ -177,7 +193,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                             return
 
                     except Exception as e:
-                        log(f"Falha ao enviar ping para o servidor (tentara novamente em 5 min): {e}", is_error=True)
+                        log(f"Falha ao enviar ping para o servidor (tentara novamente em 15s): {e}", is_error=True)
                 
                 segundos = (proximo - agora).total_seconds()
                 if segundos <= 0:
