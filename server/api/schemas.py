@@ -50,6 +50,34 @@ EquipamentoResponse = NVRResponse
 
 
 # ─────────────────────────────────────────────
+# Câmeras atreladas a um NVR
+# ─────────────────────────────────────────────
+class NVRCameraResponse(BaseModel):
+    id: UUID
+    nvr_id: UUID
+    canal: int
+    nome: str
+    perfect_image_base64: Optional[str] = None
+    night_image_base64: Optional[str] = None
+    night_image_date: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+class NVRCameraSetPerfect(BaseModel):
+    canal: int
+    nome: str
+    image_base64: str
+
+class NVRCameraNightImage(BaseModel):
+    nvr_name: str
+    canal: int
+    nome: str
+    image_base64: str
+    night_image_date: datetime
+
+
+# ─────────────────────────────────────────────
 # Client
 # ─────────────────────────────────────────────
 class ClientBase(BaseModel):
@@ -274,7 +302,9 @@ class RTSPTestRequest(BaseModel):
     nome: str
     ip: str
     modelo: str
+    usuario: str = "admin"
     senha: str = "navarro@123"
+    canal: Optional[int] = None
 
 class RTSPTestResponse(BaseModel):
     success: bool

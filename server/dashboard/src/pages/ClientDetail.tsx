@@ -83,11 +83,110 @@ function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
   );
 }
 
+// ── NVR Cameras Modal ──────────────────────────────────────────────
+function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientId: string, nvrId: string, nvrName: string, onClose: () => void }) {
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchCams = async () => {
+      setLoading(true);
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`/api/v1/clients/${clientId}/equipamentos/${nvrId}/cameras`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCameras(data);
+        }
+      } catch (e) {}
+      setLoading(false);
+    };
+    fetchCams();
+  }, [clientId, nvrId]);
+
+  const [testingCanal, setTestingCanal] = useState<number | null>(null);
+
+  const capturePerfectImage = async (canal: number, nome: string) => {
+    setTestingCanal(canal);
+    try {
+      const token = localStorage.getItem("token");
+      // 1. Testa RTSP pelo agente
+      const resRtsp = await fetch(`/api/v1/clients/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const dataRtsp = await resRtsp.json();
+      if (!resRtsp.ok || !dataRtsp.success || !dataRtsp.image_base64) {
+        alert(dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.");
+        setTestingCanal(null);
+        return;
+      }
+      
+      // 2. Salva a imagem
+      const resSave = await fetch(`/api/v1/clients/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ canal, nome, image_base64: dataRtsp.image_base64 })
+      });
+      if (resSave.ok) {
+        const savedCam = await resSave.json();
+        setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64 } : c));
+      }
+    } catch (e) {
+      alert("Erro ao comunicar com o servidor.");
+    }
+    setTestingCanal(null);
+  };
+
+  return (
+    <Modal title={`Câmeras do NVR: ${nvrName}`} onClose={onClose} width="900px">
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center" }}>Carregando galeria...</div>
+      ) : cameras.length === 0 ? (
+        <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>Nenhuma câmera sincronizada neste NVR ainda. Aguarde o próximo backup.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          {cameras.map(cam => (
+            <div key={cam.id} className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontWeight: 600, borderBottom: "1px solid var(--border)", paddingBottom: 8, marginBottom: 4 }}>
+                {cam.nome || `Canal ${cam.canal}`}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>PERFECT IMAGE (DIA)</div>
+                  {cam.perfect_image_base64 ? (
+                    <img src={`data:image/jpeg;base64,${cam.perfect_image_base64}`} alt="Perfect" style={{ width: "100%", borderRadius: 4, aspectRatio: "16/9", objectFit: "cover", marginBottom: 8 }} />
+                  ) : (
+                    <div style={{ width: "100%", aspectRatio: "16/9", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, fontSize: 11, color: "var(--text-muted)", border: "1px dashed var(--border)", marginBottom: 8 }}>Sem imagem</div>
+                  )}
+                  <button className="btn btn-secondary btn-sm" style={{ marginTop: "auto", fontSize: 11, width: "100%", justifyContent: "center" }} onClick={() => capturePerfectImage(cam.canal, cam.nome)} disabled={testingCanal === cam.canal}>
+                    {testingCanal === cam.canal ? "Capturando..." : "Capturar Imagem Perfeita"}
+                  </button>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>ÚLTIMO BACKUP (NOITE)</div>
+                  {cam.night_image_base64 ? (
+                    <img src={`data:image/jpeg;base64,${cam.night_image_base64}`} alt="Night" style={{ width: "100%", borderRadius: 4, aspectRatio: "16/9", objectFit: "cover" }} />
+                  ) : (
+                    <div style={{ width: "100%", aspectRatio: "16/9", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, fontSize: 11, color: "var(--text-muted)", border: "1px dashed var(--border)" }}>Sem imagem</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ── Equipment card component ─────────────────────────────────────
-function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
+function EqCard({ eq, onDelete, onViewRecording, onViewCameras, onEdit, onToggleActive }: {
   eq: NVR;
   onDelete: () => void;
   onViewRecording: () => void;
+  onViewCameras?: () => void;
   onEdit: () => void;
   onToggleActive: () => void;
 }) {
@@ -153,6 +252,12 @@ function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        {eq.tipo === "NVR" && onViewCameras && (
+          <button className="btn btn-secondary btn-sm" onClick={onViewCameras}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Image size={13} /> Galeria
+          </button>
+        )}
         {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT") && (
           <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -191,6 +296,7 @@ export default function ClientDetail() {
   const [showEqModal, setShowEqModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: any[] }>({ show: false, nvrName: "", cameras: [] });
+  const [showNVRCamerasModal, setShowNVRCamerasModal] = useState<{ show: boolean, nvrId: string, nvrName: string }>({ show: false, nvrId: "", nvrName: "" });
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState({ tipo: "NVR" as TipoEquipamento, name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
@@ -231,6 +337,8 @@ const buildEqPayload = () => {
       payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
       if (eqForm.tipo === "CAMERA") {
         payload.config_extra = { modelo: (eqForm as any).modelo || "Hikvision" };
+      } else if (eqForm.tipo === "NVR") {
+        payload.config_extra = { marca: (eqForm as any).marca || "Hikvision" };
       }
     } else if (eqForm.tipo === "DIGIFORT") {
       if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
@@ -474,6 +582,7 @@ const buildEqPayload = () => {
               <EqCard key={eq.id} eq={eq}
                 onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
                 onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
+                onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name })}
                 onEdit={() => {
                   setEditingEqId(eq.id);
                   setEqForm({
@@ -485,7 +594,8 @@ const buildEqPayload = () => {
                     pasta_origem: (eq.config_extra as any)?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
                     fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000",
                     caminho_csv: (eq.config_extra as any)?.caminho_csv || "",
-                    caminho_log_csv: (eq.config_extra as any)?.caminho_log_csv || ""
+                    caminho_log_csv: (eq.config_extra as any)?.caminho_log_csv || "",
+                    marca: (eq.config_extra as any)?.marca || "Hikvision"
                   } as any);
                   setShowEqModal(true);
                 }}
@@ -819,6 +929,15 @@ const buildEqPayload = () => {
                   </select>
                 </div>
               )}
+              {eqForm.tipo === "NVR" && (
+                <div className="form-group" style={{ marginTop: 12 }}>
+                  <label className="form-label">Marca do NVR</label>
+                  <select className="form-input" value={(eqForm as any).marca || "Hikvision"} onChange={e => setEqForm({ ...eqForm, marca: e.target.value } as any)}>
+                    <option value="Hikvision">Hikvision / Intelbras / Outros</option>
+                    <option value="Motorola">Motorola</option>
+                  </select>
+                </div>
+              )}
             </>
           )}
           {eqForm.tipo === "OLT" && (
@@ -1084,6 +1203,16 @@ const buildEqPayload = () => {
             </div>
           )}
         </Modal>
+      )}
+
+      {/* ── NVR Cameras Gallery Modal ── */}
+      {showNVRCamerasModal.show && (
+        <NVRCamerasGalleryModal
+          clientId={id!}
+          nvrId={showNVRCamerasModal.nvrId}
+          nvrName={showNVRCamerasModal.nvrName}
+          onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "" })}
+        />
       )}
     </>
   );

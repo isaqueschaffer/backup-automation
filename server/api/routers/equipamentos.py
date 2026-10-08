@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from auth import verify_admin_token
 from database import get_db
-from models import Client, NVR
-from schemas import NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO
+from models import Client, NVR, NVRCamera
+from schemas import NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse, NVRCameraSetPerfect
 from services.crypto_service import encrypt
 
 router = APIRouter(prefix="/api/v1/clients/{client_id}/equipamentos", tags=["equipamentos"])
@@ -130,7 +130,7 @@ from schemas import RTSPTestResponse
     response_model=RTSPTestResponse,
     dependencies=[Depends(verify_admin_token)],
 )
-async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, db: Session = Depends(get_db)):
+async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Optional[int] = Query(None), db: Session = Depends(get_db)):
     """Testa a conexao RTSP delegando a tarefa ao agente local via long-polling."""
     eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.client_id == client_id).first()
     if not eq:
@@ -154,6 +154,7 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, db: Sessi
         "modelo": (eq.config_extra or {}).get("modelo", ""),
         "username": eq.username or "admin",
         "password": senha_pura,
+        "canal": canal,
     }
 
     pending_rtsp_tasks[client_id_str] = {
@@ -180,3 +181,52 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, db: Sessi
         return RTSPTestResponse(success=False, error_message="FALHA: Agente respondeu, mas sem dados válidos.")
 
     return result
+
+
+# ─── NVR Cameras Gallery ───────────────────────────────────────────────────
+
+@router.get("/{id}/cameras", response_model=List[NVRCameraResponse])
+def get_nvr_cameras(
+    client_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """Retorna todas as câmeras de um NVR específico (com suas imagens)."""
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.client_id == client_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="NVR não encontrado")
+    
+    cameras = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).order_by(NVRCamera.canal).all()
+    return cameras
+
+
+@router.post("/{id}/cameras/perfect-image", response_model=NVRCameraResponse)
+def set_perfect_image(
+    client_id: UUID,
+    id: UUID,
+    payload: NVRCameraSetPerfect,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """Salva a 'Imagem Perfeita' de um canal específico."""
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.client_id == client_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="NVR não encontrado")
+
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == payload.canal).first()
+    if not camera:
+        camera = NVRCamera(
+            nvr_id=id,
+            canal=payload.canal,
+            nome=payload.nome,
+            perfect_image_base64=payload.image_base64
+        )
+        db.add(camera)
+    else:
+        camera.nome = payload.nome
+        camera.perfect_image_base64 = payload.image_base64
+
+    db.commit()
+    db.refresh(camera)
+    return camera

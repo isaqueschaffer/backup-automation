@@ -146,7 +146,37 @@ async def receive_rtsp_result(
         task_data["event"].set()
     return {"status": "ok"}
 
+from schemas import NVRCameraNightImage
+from models import NVRCamera
 
+@router.post("/nvr-cameras/night-image")
+def receive_night_image(
+    body: NVRCameraNightImage,
+    client: Client = Depends(get_current_client),
+    db: Session = Depends(get_db),
+):
+    """Agent posts the night image of an NVR channel."""
+    nvr = db.query(NVR).filter(NVR.client_id == client.id, NVR.name == body.nvr_name).first()
+    if not nvr:
+        return {"status": "error", "message": "NVR não encontrado"}
+
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id, NVRCamera.canal == body.canal).first()
+    if not camera:
+        camera = NVRCamera(
+            nvr_id=nvr.id,
+            canal=body.canal,
+            nome=body.nome,
+            night_image_base64=body.image_base64,
+            night_image_date=body.night_image_date
+        )
+        db.add(camera)
+    else:
+        camera.nome = body.nome
+        camera.night_image_base64 = body.image_base64
+        camera.night_image_date = body.night_image_date
+
+    db.commit()
+    return {"status": "ok"}
 
 @router.post("/backup/report", response_model=BackupReportResponse, status_code=201)
 def receive_backup_report(

@@ -55,7 +55,15 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
     pasta_nvr = pasta_data
     pasta_nvr.mkdir(parents=True, exist_ok=True)
 
-    retorno = verificar_gravacao_nvr(ip, user, pwd)
+    config_extra = equipamento.get("config_extra") or {}
+    if isinstance(config_extra, str):
+        try:
+            config_extra = json.loads(config_extra)
+        except Exception:
+            config_extra = {}
+    marca = config_extra.get("marca")
+
+    retorno = verificar_gravacao_nvr(ip, user, pwd, marca)
     if isinstance(retorno, tuple) and len(retorno) == 2:
         cameras_status, tipo_nvr = retorno
     else:
@@ -100,6 +108,42 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
         except Exception:
             logging.warning("  API ISAPI falhou. Backup de arquivos pulado.", exc_info=True)
             status = "PARCIAL"
+
+    # Captura a foto da madrugada para câmeras compatíveis
+    from src.application.api_client import upload_night_image
+    from src.core.config import load_conf
+    conf = load_conf()
+
+    if tipo_nvr != "MOTOROLA" and cameras_status:
+        from src.camera.rtsp_client import capture_night_image
+        logging.info("  Iniciando extração de imagens noturnas (Playback RTSP) para os canais gravados...")
+        for cam_st in cameras_status:
+            dias_gravacao = cam_st.get("dias_com_gravacao", [])
+            if dias_gravacao:
+                # Pega a data mais recente com gravação (o último item na lista, ou ordenamos só para garantir)
+                dias_ordenados = sorted(dias_gravacao)
+                data_alvo = dias_ordenados[-1]
+                
+                try:
+                    b64_img = capture_night_image(ip, user, pwd, cam_st["canal"], data_alvo)
+                    if b64_img:
+                        dt_iso = f"{data_alvo}T02:00:00"
+                        payload = {
+                            "nvr_name": nome,
+                            "canal": cam_st["canal"],
+                            "nome": cam_st["nome"],
+                            "image_base64": b64_img,
+                            "night_image_date": dt_iso
+                        }
+                        sucesso_up = upload_night_image(conf, payload)
+                        if sucesso_up:
+                            logging.info(f"    [OK] Imagem noturna do canal {cam_st['canal']} ({data_alvo}) enviada.")
+                        else:
+                            logging.warning(f"    [ERRO] Falha ao enviar imagem noturna do canal {cam_st['canal']} para o servidor.")
+                    else:
+                        logging.warning(f"    [FALHA] Não foi possível extrair o frame do canal {cam_st['canal']} (RTSP vazio).")
+                except Exception as e:
+                    logging.warning(f"    [ERRO] Exceção ao capturar imagem do canal {cam_st['canal']}: {e}")
 
     return {"nome": nome, "status": status, "cameras": cameras_status}
 

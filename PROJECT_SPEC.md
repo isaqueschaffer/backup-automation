@@ -778,3 +778,14 @@ de dados existentes, rollout gradual e plano de rollback.
 **Depois:** Codigo revertido ao estado estavel anterior
 **Breaking Change:** Sim (reverteu features da helena)
 **Branch:** isaque | **Commit:** da6dc80 (reset)
+
+---
+
+### [2026-10-08] — Galeria de Imagens de Câmeras (NVR) Lado a Lado
+
+**Alteracao:** Implementado sistema completo para salvar "Perfect Image" e extrair automaticamente "Night Image" das câmeras de NVR. Limitado para Hikvision/Intelbras para garantir estabilidade.
+**Antes:** As câmeras atreladas aos NVRs apenas recebiam mapeamento em texto dos dias gravados.
+**Depois:** Banco de dados recebe tabela `nvr_cameras`. UI do Dashboard agora possui a Galeria (Botão "Galeria" no Card do NVR). Agente extrai a imagem noturna usando o endpoint RTSP de Playback (02:00:00 da última gravação válida) logo após verificar as gravações do NVR.
+**Arquivos:** `server/api/models.py`, `server/api/schemas.py`, `server/api/routers/equipamentos.py`, `server/api/routers/agent.py`, `agent/src/camera/rtsp_client.py`, `agent/src/application/backup_job.py`, `server/dashboard/src/pages/ClientDetail.tsx`
+**Breaking Change:** Não
+**Branch:** isaque

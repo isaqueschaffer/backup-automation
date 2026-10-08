@@ -47,6 +47,19 @@ def send_rtsp_result(conf: dict, result: dict) -> bool:
         logging.error(f"Erro ao enviar resultado RTSP: {e}")
         return False
 
+def upload_night_image(conf: dict, payload: dict) -> bool:
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/nvr-cameras/night-image",
+            json=payload, headers=headers, timeout=20, verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao enviar night image: {e}")
+        return False
+
 def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 resultados: list, trigger: str) -> str | None:
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
