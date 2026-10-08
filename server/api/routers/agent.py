@@ -68,8 +68,8 @@ async def ping_agent(client: Client = Depends(get_current_client), db: Session =
     client.last_seen = datetime.utcnow()
     client_id_str = str(client.id)
     
-    # ── Wait for tasks (Long Polling up to 30s) ──
-    for _ in range(30):
+    # ── Wait for tasks (Long Polling up to 8s) ──
+    for _ in range(8):
         # Check if there is a pending RTSP task for this client
         if client_id_str in pending_rtsp_tasks and not pending_rtsp_tasks[client_id_str].get("sent", False):
             pending_rtsp_tasks[client_id_str]["sent"] = True

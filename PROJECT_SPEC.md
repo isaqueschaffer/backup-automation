@@ -789,3 +789,13 @@ de dados existentes, rollout gradual e plano de rollback.
 **Arquivos:** `server/api/models.py`, `server/api/schemas.py`, `server/api/routers/equipamentos.py`, `server/api/routers/agent.py`, `agent/src/camera/rtsp_client.py`, `agent/src/application/backup_job.py`, `server/dashboard/src/pages/ClientDetail.tsx`
 **Breaking Change:** Não
 **Branch:** isaque
+
+---
+
+## 9. Fluxo de Atualização de Versão (Release)
+
+Quando uma nova versão do Agente Trilan for lançada, certifique-se de atualizar o número da versão nos seguintes arquivos:
+
+1. **`server/dashboard/package.json`**: Propriedade `"version"`.
+2. **`agent/src/application/updater.py`**: Variável `CURRENT_VERSION`.
+3. **`agent/installer.iss`**: Propriedades `AppVersion` e `OutputBaseFilename` (para controle e nome do executável do InnoSetup).
