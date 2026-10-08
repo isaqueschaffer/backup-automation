@@ -74,7 +74,7 @@ def ping_agent(
     # ── Auto-recovery de backup perdido ──
     # Se já passou mais de 30 min do horário agendado E ainda não fez backup hoje, injetamos a ordem de backup
     if not should_backup and client.backup_hour is not None and client.backup_minute is not None:
-        from datetime import timedelta, timezone
+        from datetime import timedelta
         brt_tz = timezone(timedelta(hours=-3))
         now_brt = datetime.now(brt_tz)
         

@@ -465,7 +465,6 @@ const buildEqPayload = () => {
             <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
               value={fmtDate(client.last_backup_at)} />
           </div>
-          </div>
         </div>
 
         {/* Coluna 3 — Saúde da Máquina (Telemetria) */}
