@@ -91,15 +91,11 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
     const fetchCams = async () => {
       setLoading(true);
       try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(`/api/v1/clients/${clientId}/equipamentos/${nvrId}/cameras`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setCameras(data);
-        }
-      } catch (e) {}
+        const res = await api.get(`/clients/${clientId}/equipamentos/${nvrId}/cameras`);
+        setCameras(res.data);
+      } catch (e) {
+        console.error("Error fetching cameras:", e);
+      }
       setLoading(false);
     };
     fetchCams();
@@ -110,30 +106,23 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
   const capturePerfectImage = async (canal: number, nome: string) => {
     setTestingCanal(canal);
     try {
-      const token = localStorage.getItem("token");
       // 1. Testa RTSP pelo agente
-      const resRtsp = await fetch(`/api/v1/clients/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const dataRtsp = await resRtsp.json();
-      if (!resRtsp.ok || !dataRtsp.success || !dataRtsp.image_base64) {
+      const resRtsp = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
+      const dataRtsp = resRtsp.data;
+      if (!dataRtsp.success || !dataRtsp.image_base64) {
         alert(dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.");
         setTestingCanal(null);
         return;
       }
       
       // 2. Salva a imagem
-      const resSave = await fetch(`/api/v1/clients/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ canal, nome, image_base64: dataRtsp.image_base64 })
+      const resSave = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
+        canal, nome, image_base64: dataRtsp.image_base64
       });
-      if (resSave.ok) {
-        const savedCam = await resSave.json();
-        setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64 } : c));
-      }
-    } catch (e) {
-      alert("Erro ao comunicar com o servidor.");
+      const savedCam = resSave.data;
+      setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64 } : c));
+    } catch (e: any) {
+      alert(e.response?.data?.detail || "Erro ao comunicar com o servidor.");
     }
     setTestingCanal(null);
   };
