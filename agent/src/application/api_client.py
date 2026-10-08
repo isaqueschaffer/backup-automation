@@ -28,7 +28,7 @@ def _get_telemetry() -> dict:
     telemetry = {}
     try:
         import psutil
-        telemetry["cpu_percent"] = psutil.cpu_percent(interval=None)
+        telemetry["cpu_percent"] = psutil.cpu_percent(interval=1)
         
         mem = psutil.virtual_memory()
         telemetry["ram_percent"] = mem.percent
