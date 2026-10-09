@@ -578,15 +578,11 @@ const buildEqPayload = () => {
 
                   const headers = (rows[0] || []).map(h => String(h).trim().toLowerCase());
                   
-                  let idxDesc = -1;
-                  let idxIp = -1;
-                  let idxPass = -1;
-
-                  if (isCsv) {
-                    idxDesc = headers.findIndex(h => h.includes("desc") || h.includes("nome"));
-                    idxIp = headers.findIndex(h => h === "ip" || h.includes("endere"));
-                    idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
-                  }
+                  let idxDesc = headers.findIndex(h => h.includes("desc"));
+                  if (idxDesc === -1) idxDesc = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+                  
+                  let idxIp = headers.findIndex(h => h === "ip" || h.includes("endere"));
+                  let idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
 
                   let count = 0;
                   for (let i = 1; i < rows.length; i++) {
@@ -598,23 +594,23 @@ const buildEqPayload = () => {
                     let ender = "";
                     let pass = "";
 
-                    if (isCsv) {
+                    if (idxDesc >= 0 || idxIp >= 0) {
                       desc = idxDesc >= 0 ? String(cols[idxDesc] || "") : String(cols[0] || "");
                       ender = idxIp >= 0 ? String(cols[idxIp] || "") : String(cols[1] || "");
                       pass = idxPass >= 0 ? String(cols[idxPass] || "") : "";
-                      
-                      const rowStr = cols.join(" ").toUpperCase();
-                      if (rowStr.includes("HIKVISION")) mod = "Hikvision";
-                      else if (rowStr.includes("INTELBRAS")) mod = "Intelbras";
-                      else if (rowStr.includes("GRANDSTREAM")) mod = "Grandstream";
-                      else if (rowStr.includes("ONVIF")) mod = "ONVIF";
-                      else mod = "Hikvision";
                     } else {
+                      // Fallback absoluto caso não ache nenhum cabeçalho
                       desc = String(cols[1] || "");
-                      mod = String(cols[2] || "Hikvision");
                       ender = String(cols[3] || "");
                       pass = String(cols[6] || "");
                     }
+                      
+                    const rowStr = cols.join(" ").toUpperCase();
+                    if (rowStr.includes("HIKVISION")) mod = "Hikvision";
+                    else if (rowStr.includes("INTELBRAS")) mod = "Intelbras";
+                    else if (rowStr.includes("GRANDSTREAM")) mod = "Grandstream";
+                    else if (rowStr.includes("ONVIF")) mod = "ONVIF";
+                    else mod = "Hikvision";
 
                     if (desc && ender) {
                       await api.post(`/clients/${id}/equipamentos`, {
