@@ -16,6 +16,7 @@ import {
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
   Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning
 } from "lucide-react";
+import * as XLSX from "xlsx";
 
 function fmtDate(s: string | null) {
   if (!s) return "—";
@@ -555,16 +556,27 @@ const buildEqPayload = () => {
             <input type="file" accept=".csv,.xls,.xlsx" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
               const file = e.target.files?.[0];
               if (!file) return;
+              const isCsv = file.name.toLowerCase().endsWith(".csv");
               const reader = new FileReader();
               reader.onload = async (evt) => {
-                const text = evt.target?.result as string;
-                const lines = text.split("\n");
-                let count = 0;
                 setLoading(true);
                 try {
-                  const isCsv = file.name.toLowerCase().endsWith(".csv");
-                  const delimiter = lines[0].includes(";") ? ";" : ",";
-                  const headers = lines[0].split(delimiter).map(c => c.replace(/^"|"$/g, "").trim().toLowerCase());
+                  let rows: any[][] = [];
+                  
+                  if (isCsv) {
+                    const text = evt.target?.result as string;
+                    const lines = text.split("\n");
+                    const delimiter = lines[0].includes(";") ? ";" : ",";
+                    rows = lines.map(line => line.split(delimiter).map(c => c.replace(/^"|"$/g, "").trim()));
+                  } else {
+                    const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+                    const workbook = XLSX.read(data, { type: "array" });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+                  }
+
+                  const headers = (rows[0] || []).map(h => String(h).trim().toLowerCase());
                   
                   let idxDesc = -1;
                   let idxIp = -1;
@@ -576,10 +588,10 @@ const buildEqPayload = () => {
                     idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
                   }
 
-                  for (let i = 1; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line) continue;
-                    const cols = line.split(delimiter).map(c => c.replace(/^"|"$/g, "").trim());
+                  let count = 0;
+                  for (let i = 1; i < rows.length; i++) {
+                    const cols = rows[i];
+                    if (!cols || cols.length === 0 || (!cols[0] && !cols[1])) continue;
                     
                     let desc = "";
                     let mod = "Hikvision";
@@ -587,21 +599,21 @@ const buildEqPayload = () => {
                     let pass = "";
 
                     if (isCsv) {
-                      desc = idxDesc >= 0 ? cols[idxDesc] : (cols[0] || "");
-                      ender = idxIp >= 0 ? cols[idxIp] : (cols[1] || "");
-                      pass = idxPass >= 0 ? cols[idxPass] : "";
+                      desc = idxDesc >= 0 ? String(cols[idxDesc] || "") : String(cols[0] || "");
+                      ender = idxIp >= 0 ? String(cols[idxIp] || "") : String(cols[1] || "");
+                      pass = idxPass >= 0 ? String(cols[idxPass] || "") : "";
                       
-                      const rowStr = line.toUpperCase();
+                      const rowStr = cols.join(" ").toUpperCase();
                       if (rowStr.includes("HIKVISION")) mod = "Hikvision";
                       else if (rowStr.includes("INTELBRAS")) mod = "Intelbras";
                       else if (rowStr.includes("GRANDSTREAM")) mod = "Grandstream";
                       else if (rowStr.includes("ONVIF")) mod = "ONVIF";
                       else mod = "Hikvision";
                     } else {
-                      desc = cols[1] || "";
-                      mod = cols[2] || "Hikvision";
-                      ender = cols[3] || "";
-                      pass = cols[6] || "";
+                      desc = String(cols[1] || "");
+                      mod = String(cols[2] || "Hikvision");
+                      ender = String(cols[3] || "");
+                      pass = String(cols[6] || "");
                     }
 
                     if (desc && ender) {
@@ -619,13 +631,19 @@ const buildEqPayload = () => {
                   toast(`Importadas ${count} câmeras com sucesso!`, "success");
                   load();
                 } catch (err) {
+                  console.error(err);
                   toast("Erro ao importar câmeras.", "error");
                 } finally {
                   setLoading(false);
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }
               };
-              reader.readAsText(file, "ISO-8859-1");
+
+              if (isCsv) {
+                reader.readAsText(file, "ISO-8859-1");
+              } else {
+                reader.readAsArrayBuffer(file);
+              }
             }} />
             <button className="btn btn-secondary" style={{ color: "var(--danger)" }} onClick={async () => {
               const cameras = equipamentos.filter(e => e.tipo === "CAMERA");
