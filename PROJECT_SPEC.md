@@ -726,6 +726,17 @@ de dados existentes, rollout gradual e plano de rollback.
 
 ## 16. Architecture Changelog
 
+### [2026-10-09] — Agente 1.1.2: ping em cadência fixa + telemetria sem NaN
+
+**Alteracao:** Ping do agente movido para thread própria com cadência fixa de 15s (início a início); telemetria sanitizada; "Próximo contato (estimado)" sincronizado com o ping real.
+**Antes:** O ping só era verificado quando o loop principal acordava (espera de até 60s, e bloqueado durante backups), então saía a cada ~60s enquanto o dashboard contava 15s e ficava em 00:00. GPUtil devolvia NaN para campos `[N/A]` do nvidia-smi e o `requests` recusava serializar o JSON, derrubando todos os pings (cliente aparecia offline e não recebia OTA).
+**Depois:** `service.py` roda `_ping_loop` em thread (`PING_INTERVAL_S = 15`); as instruções do ping são enfileiradas e executadas no loop principal via evento `hPingResp`. `hWaitStop` virou manual-reset para as duas threads verem a parada. `api_client._json_safe` troca NaN/inf por null e falha de telemetria não impede o ping. Dashboard mostra "aguardando…" ao passar do horário e consulta o cliente a cada 1s por até 30s.
+**Arquivos:** agent/service.py, agent/src/application/api_client.py, agent/src/application/updater.py, agent/installer.iss, server/dashboard/src/pages/ClientDetail.tsx, server/dashboard/package.json
+**Breaking Change:** Não. Clientes na 1.1.1 com GPU que retorna NaN não pingam e portanto não recebem OTA: atualizar manualmente.
+**Branch:** isaque
+
+---
+
 ### [2026-10-09] — Versão do agente 1.1.1
 
 **Alteracao:** Versão do agente elevada para 1.1.1 (build com telemetria psutil/GPUtil do merge `helena`).

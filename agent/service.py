@@ -9,7 +9,10 @@ Remove:   python service.py remove
 """
 import json
 import os
+import queue
 import sys
+import threading
+import time
 import traceback
 import logging
 from datetime import datetime, timedelta
@@ -27,6 +30,8 @@ import src.application.api_client
 
 DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
+# O dashboard estima o "Próximo contato" como last_seen + este intervalo (AGENT_PING_INTERVAL_MS)
+PING_INTERVAL_S = 15
 
 # Usa ProgramData para logs — gravavel sem privilegios de admin
 PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
@@ -63,7 +68,10 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     def __init__(self, args):
         super().__init__(args)
         self.stop_requested = False
-        self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+        # Manual-reset: a thread de ping e o loop principal esperam no mesmo evento de parada
+        self.hWaitStop = win32event.CreateEvent(None, 1, 0, None)
+        self.hPingResp = win32event.CreateEvent(None, 0, 0, None)
+        self.ping_responses = queue.Queue()
 
         sec_desc = win32security.SECURITY_DESCRIPTOR()
         sec_desc.SetSecurityDescriptorDacl(1, None, 0)
@@ -167,14 +175,83 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.stop_requested = True
         win32event.SetEvent(self.hWaitStop)
 
+    def _ping_loop(self, conf: dict):
+        """Pinga em cadência fixa (início a início), independente de backups em andamento no loop principal."""
+        from src.application.api_client import ping_server
+
+        last_successful_ping = time.monotonic()
+        proximo_ping = time.monotonic()
+        while not self.stop_requested:
+            proximo_ping += PING_INTERVAL_S
+            try:
+                ping_resp = ping_server(conf)
+                if ping_resp:
+                    log(f"Ping recebido pelo servidor. Instrucoes: {ping_resp}")
+                    if time.monotonic() - last_successful_ping > 300:
+                        log("Servidor voltou a responder apos periodo de desconexao!")
+                    last_successful_ping = time.monotonic()
+                    self.ping_responses.put(ping_resp)
+                    win32event.SetEvent(self.hPingResp)
+                else:
+                    log("Ping enviado, mas resposta vazia.")
+            except Exception as e:
+                log(f"Falha ao enviar ping para o servidor (tentara novamente em {PING_INTERVAL_S}s): {e}", is_error=True)
+
+            espera = proximo_ping - time.monotonic()
+            if espera < 0:
+                # Ping demorou mais que o intervalo (timeout de rede): realinha a partir de agora
+                proximo_ping = time.monotonic()
+                espera = 0
+            if win32event.WaitForSingleObject(self.hWaitStop, int(espera * 1000)) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _process_ping_responses(self, agent_mod, conf: dict, config_loaded: bool) -> bool:
+        """Executa as instruções recebidas nos pings. Retorna True se o serviço deve encerrar."""
+        from src.application.updater import check_and_apply_update
+
+        while True:
+            try:
+                ping_resp = self.ping_responses.get_nowait()
+            except queue.Empty:
+                return False
+
+            # Se ligou sem internet/servidor, reinicia agora para baixar a config correta
+            if not config_loaded:
+                log("Servidor voltou a responder! Reiniciando servico para buscar configuracoes e horario corretos...")
+                self._restart_service()
+                return True
+
+            if ping_resp.get("rtsp_task"):
+                log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
+                from src.camera.rtsp_client import test_rtsp_camera
+                from src.application.api_client import send_rtsp_result
+
+                def run_and_send_rtsp(task=ping_resp["rtsp_task"]):
+                    result = test_rtsp_camera(task)
+                    send_rtsp_result(conf, result)
+                    log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
+
+                threading.Thread(target=run_and_send_rtsp, daemon=True).start()
+
+            if ping_resp.get("restart"):
+                log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
+                self._restart_service()
+                return True
+
+            if ping_resp.get("backup"):
+                log("Geracao de backup manual solicitada pelo dashboard!")
+                self._executar_backup(agent_mod, "manual_dashboard")
+
+            if check_and_apply_update(conf):
+                log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
+                self.stop_requested = True
+                win32event.SetEvent(self.hWaitStop)
+                return True
+
     def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict, conf: dict, config_loaded: bool = True):
         import agent as agent_mod
-        from src.application.api_client import ping_server
-        from src.application.updater import check_and_apply_update
-        import time
 
-        last_ping_time = 0
-        last_successful_ping = time.time()
+        threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:
             agora = datetime.now()
@@ -184,81 +261,22 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             log(f"Proximo backup: {proximo.strftime('%d/%m/%Y %H:%M')}")
 
             while not self.stop_requested:
-                agora = datetime.now()
-                
-                # Envia ping a cada 15 segundos para manter status e receber comandos rápidos
-                if time.time() - last_ping_time >= 15:
-                    last_ping_time = time.time()
-
-                    try:
-                        ping_resp = ping_server(conf)
-                        last_ping_time = time.time()
-                        
-                        if ping_resp:
-                            log(f"Ping recebido pelo servidor. Instrucoes: {ping_resp}")
-                            
-                            if time.time() - last_successful_ping > 300 and config_loaded:
-                                log("Servidor voltou a responder apos periodo de desconexao!")
-                                
-                            last_successful_ping = time.time()
-                            
-                            # Se ligou sem internet/servidor, reinicia agora para baixar a config correta
-                            if not config_loaded:
-                                log("Servidor voltou a responder! Reiniciando servico para buscar configuracoes e horario corretos...")
-                                self._restart_service()
-                                return
-
-                            # Verifica se o servidor solicitou teste RTSP
-                            if ping_resp.get("rtsp_task"):
-                                log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
-                                from src.camera.rtsp_client import test_rtsp_camera
-                                from src.application.api_client import send_rtsp_result
-                                import threading
-                                
-                                def run_and_send_rtsp():
-                                    result = test_rtsp_camera(ping_resp["rtsp_task"])
-                                    send_rtsp_result(conf, result)
-                                    log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
-                                    
-                                threading.Thread(target=run_and_send_rtsp, daemon=True).start()
-
-                            # Verifica se o servidor solicitou reinicio
-                            if ping_resp.get("restart"):
-                                log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
-                                self._restart_service()
-                                return
-                                
-                            if ping_resp.get("backup"):
-                                log("Geracao de backup manual solicitada pelo dashboard!")
-                                self._executar_backup(agent_mod, "manual_dashboard")
-
-                            # Verifica OTA
-                            update_iniciado = check_and_apply_update(conf)
-                            if update_iniciado:
-                                log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
-                                self.stop_requested = True
-                                win32event.SetEvent(self.hWaitStop)
-                                return
-                        else:
-                            log("Ping enviado, mas resposta vazia.")
-                            
-                    except Exception as e:
-                        log(f"Falha ao enviar ping para o servidor (tentara novamente em 15s): {e}", is_error=True)
-                        last_ping_time = time.time()
-                
-                segundos = (proximo - agora).total_seconds()
+                segundos = (proximo - datetime.now()).total_seconds()
                 if segundos <= 0:
                     self._executar_backup(agent_mod, "scheduled")
                     break
 
                 espera_ms = int(min(segundos, 60) * 1000)
                 resultado = win32event.WaitForMultipleObjects(
-                    [self.hWaitStop, self.hBackupManual], False, espera_ms
+                    [self.hWaitStop, self.hBackupManual, self.hPingResp], False, espera_ms
                 )
                 if resultado == win32event.WAIT_OBJECT_0:
                     return
                 elif resultado == win32event.WAIT_OBJECT_0 + 1:
                     self._executar_backup(agent_mod, "manual")
+                elif resultado == win32event.WAIT_OBJECT_0 + 2:
+                    if self._process_ping_responses(agent_mod, conf, config_loaded):
+                        return
 
     def _executar_backup(self, agent_mod, trigger: str):
         if self.stop_requested:

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  fetchEquipamentos, createEquipamento, updateEquipamento, deleteEquipamento, updateClient,
+  fetchClient, fetchEquipamentos, createEquipamento, updateEquipamento, deleteEquipamento, updateClient,
   rotateKey, fetchBackups, restartAgent, triggerBackup
 } from "../api/client";
 import { Client, NVR, Backup, TipoEquipamento } from "../api/types";
@@ -17,8 +17,13 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
-// Intervalo de ping do agente (agent/service.py)
+// Intervalo de ping do agente (PING_INTERVAL_S em agent/service.py)
 const AGENT_PING_INTERVAL_MS = 15 * 1000;
+// Após o horário previsto, consulta o cliente a cada 1s por este tempo para pegar o novo ping assim que chegar
+const OVERDUE_FAST_POLL_MS = 30 * 1000;
+
+// last_seen é naive em UTC (REGRA-001)
+const serverUtcMs = (iso: string) => new Date(/Z|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + "Z").getTime();
 
 function fmtDate(s: string | null) {
   if (!s) return "—";
@@ -441,6 +446,23 @@ export default function ClientDetail() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, [id]);
 
+  const nextPingMs = client?.last_seen && client.active && client.is_online
+    ? serverUtcMs(client.last_seen) + AGENT_PING_INTERVAL_MS
+    : null;
+  const overdueMs = nextPingMs === null ? -1 : now + serverSkewMs - nextPingMs;
+  const fastPoll = overdueMs >= 0 && overdueMs < OVERDUE_FAST_POLL_MS;
+  useEffect(() => {
+    if (!fastPoll || !id) return;
+    const t = setInterval(async () => {
+      try {
+        const c = await fetchClient(id);
+        setClient(c);
+        if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
+      } catch { /* próxima tentativa em 1s */ }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [fastPoll, id]);
+
 const buildEqPayload = () => {
     if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
     const payload: any = { tipo: eqForm.tipo, name: eqForm.name.trim(), ip: "", username: "", password: "", config_extra: null };
@@ -575,15 +597,13 @@ const buildEqPayload = () => {
 
   let nextPingStr = "—";
   const isPendingAction = client.backup_requested || client.restart_requested;
-  if (client.last_seen && isAgentOnline) {
-    // Relógio do servidor (via skew) avançando com o tick de 1s do navegador
-    const baseMs = now + serverSkewMs;
-    const lastSeenMs = new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime();
-    const nextPingMs = lastSeenMs + AGENT_PING_INTERVAL_MS;
-    const diff = Math.max(0, nextPingMs - baseMs);
-    const mm = Math.floor(diff / 60000);
-    const ss = Math.floor((diff % 60000) / 1000);
-    nextPingStr = `${String(mm).padStart(2, "00")}:${String(ss).padStart(2, "00")}`;
+  if (nextPingMs !== null) {
+    if (overdueMs >= 0) {
+      nextPingStr = "aguardando…";
+    } else {
+      const secs = Math.ceil(-overdueMs / 1000);
+      nextPingStr = `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+    }
   }
 
   return (
