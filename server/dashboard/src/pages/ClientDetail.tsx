@@ -539,30 +539,23 @@ const buildEqPayload = () => {
     } catch { toast("Erro ao solicitar backup.", "error"); }
   };
 
+  const isAgentOnline = client && client.active &&
+    (client.last_seen && new Date().getTime() - new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime() < 15 * 60 * 1000);
+
   const copyText = (t: string) => { navigator.clipboard.writeText(t); toast("Copiado!", "success"); };
 
   if (loading) return <div className="loading-state"><div className="spinner" /></div>;
   if (!client) return <div className="empty-state">Cliente não encontrado.</div>;
 
+  let nextPingStr = "—";
   const isPendingAction = client.backup_requested || client.restart_requested;
-
-  let lastSeenText = "Nunca";
-  if (client.last_seen && client.current_server_time) {
+  if (client.last_seen && isAgentOnline) {
     const lastSeenMs = new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime();
-    const serverTimeMs = new Date(client.current_server_time.endsWith("Z") ? client.current_server_time : client.current_server_time + "Z").getTime();
-    const diffSeconds = Math.max(0, Math.floor((serverTimeMs - lastSeenMs) / 1000));
-    
-    if (diffSeconds < 60) {
-      lastSeenText = `há ${diffSeconds} segundos`;
-    } else if (diffSeconds < 3600) {
-      lastSeenText = `há ${Math.floor(diffSeconds / 60)} minutos`;
-    } else if (diffSeconds < 86400) {
-      lastSeenText = `há ${Math.floor(diffSeconds / 3600)} horas`;
-    } else {
-      lastSeenText = fmtDate(client.last_seen);
-    }
-  } else if (client.last_seen) {
-     lastSeenText = fmtDate(client.last_seen);
+    const nextPingMs = lastSeenMs + 5 * 60 * 1000;
+    const diff = Math.max(0, nextPingMs - now);
+    const mm = Math.floor(diff / 60000);
+    const ss = Math.floor((diff % 60000) / 1000);
+    nextPingStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
   }
 
   return (
@@ -592,11 +585,11 @@ const buildEqPayload = () => {
             <RefreshCw size={15} /> Rodar API Key
           </button>
           <button className="btn btn-secondary" onClick={handleTriggerBackup}
-            title={!client.is_online ? "Agente offline — o backup começará assim que o agente se comunicar" : "Solicitar backup manual agora"}>
+            title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
             <CloudLightning size={15} /> Gerar Backup
           </button>
           <button className="btn btn-secondary" onClick={handleRestartAgent}
-            title={!client.is_online ? "Agente offline — o reinício será executado assim que o agente se comunicar" : "Reiniciar o agente Windows"}>
+            title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
             <RotateCcw size={15} /> Reiniciar Agent
           </button>
         </div>
@@ -607,7 +600,8 @@ const buildEqPayload = () => {
         <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 6, padding: "12px 16px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ color: "#f59e0b", display: "flex" }}><Clock size={18} /></div>
           <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
-            <strong>Comando na fila!</strong> O {client.backup_requested ? "backup manual" : "reinício"} começará assim que o agente se comunicar novamente com o servidor.
+            <strong>Comando na fila!</strong> O {client.backup_requested ? "backup manual" : "reinício"} começará no próximo contato do agente 
+            {isAgentOnline && <span style={{ fontWeight: 600, color: "#f59e0b", marginLeft: 6 }}>({nextPingStr})</span>}.
           </div>
         </div>
       )}
@@ -636,11 +630,13 @@ const buildEqPayload = () => {
             <Wifi size={13} /> Status do Agente
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <InfoPill icon={<Wifi size={11} />} label="Conexão do Agente"
-              value={<StatusBadge status={client.is_online ? "ONLINE" : (client.active ? "OFFLINE" : "DESATIVADO")} />} />
-            <InfoPill icon={<CalendarCheck size={11} />} label="Último contato (Ping)"
-              value={<span style={{ fontWeight: 600 }}>{lastSeenText}</span>} />
-            <InfoPill icon={<Archive size={11} />} label="Status do Último Backup"
+            <InfoPill icon={<Wifi size={11} />} label="Conexão"
+              value={<StatusBadge status={isAgentOnline ? "ONLINE" : (client.active ? "OFFLINE" : "DESATIVADO")} />} />
+            <InfoPill icon={<CalendarCheck size={11} />} label="Último contato"
+              value={client.last_seen ? fmtDate(client.last_seen) : "Nunca"} />
+            <InfoPill icon={<Clock size={11} />} label="Próximo contato (estimado)"
+              value={isAgentOnline ? nextPingStr : "—"} />
+            <InfoPill icon={<Archive size={11} />} label="Último Backup"
               value={<StatusBadge status={client.last_backup_status} />} />
             <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
               value={fmtDate(client.last_backup_at)} />
