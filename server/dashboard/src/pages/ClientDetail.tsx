@@ -562,6 +562,17 @@ const buildEqPayload = () => {
                 let count = 0;
                 setLoading(true);
                 try {
+                  const isCsv = file.name.toLowerCase().endsWith(".csv");
+                  const headers = lines[0].split(";").map(c => c.replace(/^"|"$/g, "").trim().toLowerCase());
+                  
+                  let idxDesc = -1;
+                  let idxIp = -1;
+
+                  if (isCsv) {
+                    idxDesc = headers.findIndex(h => h.includes("desc"));
+                    idxIp = headers.findIndex(h => h === "ip" || h.includes("endere"));
+                  }
+
                   for (let i = 1; i < lines.length; i++) {
                     const line = lines[i].trim();
                     if (!line) continue;
@@ -572,14 +583,17 @@ const buildEqPayload = () => {
                     let ender = "";
                     let pass = "";
 
-                    if (file.name.toLowerCase().endsWith(".csv")) {
-                      // Lógica nova para CSV puro
-                      desc = cols[0] || "";
-                      ender = cols[1] || "";
-                      mod = cols[2] || "Hikvision";
-                      pass = cols[3] || "";
+                    if (isCsv) {
+                      desc = idxDesc >= 0 ? cols[idxDesc] : (cols[0] || "");
+                      ender = idxIp >= 0 ? cols[idxIp] : (cols[1] || "");
+                      
+                      const rowStr = line.toUpperCase();
+                      if (rowStr.includes("HIKVISION")) mod = "Hikvision";
+                      else if (rowStr.includes("INTELBRAS")) mod = "Intelbras";
+                      else if (rowStr.includes("GRANDSTREAM")) mod = "Grandstream";
+                      else if (rowStr.includes("ONVIF")) mod = "ONVIF";
+                      else mod = "Hikvision";
                     } else {
-                      // Lógica antiga (XLS exportado do Digifort/Defense, etc)
                       desc = cols[1] || "";
                       mod = cols[2] || "Hikvision";
                       ender = cols[3] || "";
