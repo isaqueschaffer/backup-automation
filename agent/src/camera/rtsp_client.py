@@ -13,15 +13,20 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     ip = task.get("ip", "").strip()
     canal = task.get("canal")
 
+    # Com canal (galeria do NVR) a referência precisa ter a mesma origem da imagem da noite (stream principal,
+    # {canal}01). O stream secundário ({canal}02 / subtype=1) tem resolução e proporção diferentes.
+    nvr_canal = bool(canal)
+
     if "Grandstream" in modelo:
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/4"
     elif "Intelbras" in modelo:
         ch = canal if canal else 1
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype=1"
+        subtype = 0 if nvr_canal else 1
+        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype={subtype}"
     elif "ONVIF" in modelo:
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile2"
     else:
-        ch_str = f"{canal}02" if canal else "102"
+        ch_str = f"{canal}01" if nvr_canal else "102"
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}"
     
     import imageio_ffmpeg
