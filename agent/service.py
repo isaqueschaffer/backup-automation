@@ -244,7 +244,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                     self._executar_backup(agent_mod, "scheduled")
                     break
 
-                espera_ms = int(min(segundos, 60) * 1000)
+                # Reduzido de 60s para 5s para que o Agente consiga capturar os pings e comandos RTSP a tempo
+                espera_ms = int(min(segundos, 5) * 1000)
                 resultado = win32event.WaitForMultipleObjects(
                     [self.hWaitStop, self.hBackupManual], False, espera_ms
                 )
