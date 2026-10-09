@@ -565,9 +565,35 @@ const buildEqPayload = () => {
                   
                   if (isCsv) {
                     const text = evt.target?.result as string;
-                    const lines = text.split("\n");
-                    const delimiter = lines[0].includes(";") ? ";" : ",";
-                    rows = lines.map(line => line.split(delimiter).map(c => c.replace(/^"|"$/g, "").trim()));
+                    const delimiter = (text.indexOf(";") !== -1 && text.indexOf(";") < (text.indexOf("\n") === -1 ? 9999 : text.indexOf("\n"))) ? ";" : ",";
+                    
+                    // Parser robusto de CSV (suporta aspas e delimitadores no meio do texto)
+                    let currentRow = [];
+                    let currentCell = '';
+                    let inQuotes = false;
+                    for (let i = 0; i < text.length; i++) {
+                      const c = text[i];
+                      if (inQuotes) {
+                        if (c === '"') {
+                          if (i + 1 < text.length && text[i + 1] === '"') { currentCell += '"'; i++; }
+                          else { inQuotes = false; }
+                        } else { currentCell += c; }
+                      } else {
+                        if (c === '"') { inQuotes = true; }
+                        else if (c === delimiter) { currentRow.push(currentCell.trim()); currentCell = ''; }
+                        else if (c === '\n' || c === '\r') {
+                          if (c === '\r' && i + 1 < text.length && text[i + 1] === '\n') i++;
+                          currentRow.push(currentCell.trim());
+                          if (currentRow.some(col => col !== '')) rows.push(currentRow);
+                          currentRow = [];
+                          currentCell = '';
+                        } else { currentCell += c; }
+                      }
+                    }
+                    if (currentCell || currentRow.length > 0) {
+                      currentRow.push(currentCell.trim());
+                      if (currentRow.some(col => col !== '')) rows.push(currentRow);
+                    }
                   } else {
                     const data = new Uint8Array(evt.target?.result as ArrayBuffer);
                     const workbook = XLSX.read(data, { type: "array" });
@@ -581,7 +607,7 @@ const buildEqPayload = () => {
                   let idxDesc = headers.findIndex(h => h.includes("desc"));
                   if (idxDesc === -1) idxDesc = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
                   
-                  let idxIp = headers.findIndex(h => h === "ip" || h.includes("endere"));
+                  let idxIp = headers.findIndex(h => h.includes("ip") || h.includes("endere"));
                   let idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
 
                   let count = 0;
