@@ -1,11 +1,19 @@
+export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE" | "CAMERA";
+
 export interface NVR {
   id: string;
   client_id: string;
+  tipo: TipoEquipamento;
   name: string;
   ip: string;
   username: string;
+  config_extra?: Record<string, unknown> | null;
   last_recording_status?: any;
+  active: boolean;
 }
+
+// Alias semântico
+export type Equipamento = NVR;
 
 export interface Client {
   id: string;
@@ -20,12 +28,19 @@ export interface Client {
   last_backup_status: string | null;
   created_at: string;
   nvr_count: number;
+  restart_requested?: boolean;
+  backup_requested?: boolean;
+  telemetry?: Record<string, any> | null;
   api_key?: string; // only on create/rotate
+  // Campos calculados no servidor (fonte única da verdade para status online)
+  is_online?: boolean;
+  current_server_time?: string;
 }
 
 export interface NVRResult {
   nome: string;
   status: string;
+  tipo?: TipoEquipamento;
 }
 
 export interface Backup {

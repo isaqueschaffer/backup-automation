@@ -6,12 +6,17 @@ from pydantic import BaseModel, field_validator
 
 
 # ─────────────────────────────────────────────
-# NVR
+# Equipamento (antes chamado NVR)
 # ─────────────────────────────────────────────
+TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED", "DEFENSE", "CAMERA"]
+
 class NVRBase(BaseModel):
+    tipo: str = "NVR"  # NVR, OLT, ONU, PABX
     name: str
     ip: str
     username: str
+    config_extra: Optional[Dict[str, Any]] = None
+    active: bool = True
 
 
 class NVRCreate(NVRBase):
@@ -19,18 +24,57 @@ class NVRCreate(NVRBase):
 
 
 class NVRUpdate(BaseModel):
+    tipo: Optional[str] = None
     name: Optional[str] = None
     ip: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    config_extra: Optional[Dict[str, Any]] = None
+    active: Optional[bool] = None
 
 
 class NVRResponse(NVRBase):
     id: UUID
     client_id: UUID
     last_recording_status: Optional[Any] = None
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+# Alias para nomenclatura de equipamentos
+EquipamentoBase = NVRBase
+EquipamentoCreate = NVRCreate
+EquipamentoUpdate = NVRUpdate
+EquipamentoResponse = NVRResponse
+
+
+# ─────────────────────────────────────────────
+# Câmeras atreladas a um NVR
+# ─────────────────────────────────────────────
+class NVRCameraResponse(BaseModel):
+    id: UUID
+    nvr_id: UUID
+    canal: int
+    nome: str
+    perfect_image_base64: Optional[str] = None
+    night_image_base64: Optional[str] = None
+    night_image_date: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+class NVRCameraSetPerfect(BaseModel):
+    canal: int
+    nome: str
+    image_base64: str
+
+class NVRCameraNightImage(BaseModel):
+    nvr_name: str
+    canal: int
+    nome: str
+    image_base64: str
+    night_image_date: datetime
 
 
 # ─────────────────────────────────────────────
@@ -65,6 +109,12 @@ class ClientResponse(ClientBase):
     last_backup_status: Optional[str] = None
     created_at: datetime
     nvr_count: int = 0
+    restart_requested: bool = False
+    backup_requested: bool = False
+    telemetry: Optional[Dict[str, Any]] = None
+    # Calculado no servidor — nunca depende do relógio do navegador
+    is_online: bool = False
+    current_server_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -79,6 +129,7 @@ class ClientWithKey(ClientResponse):
 # ─────────────────────────────────────────────
 class NVRResult(BaseModel):
     nome: str
+    tipo: str = "NVR"  # NVR, OLT, ONU, PABX
     status: str  # OK, PARCIAL, ERRO
     cameras: Optional[List[Dict[str, Any]]] = None
 
@@ -122,11 +173,19 @@ class PaginatedBackups(BaseModel):
 # ─────────────────────────────────────────────
 # Agent (config payload sent to Windows agent)
 # ─────────────────────────────────────────────
-class AgentNVR(BaseModel):
+class AgentEquipamento(BaseModel):
+    """Representa qualquer equipamento enviado ao agente Windows."""
+    tipo: str  # NVR, OLT, ONU, PABX
     name: str
     ip: str
     username: str
     password: str  # decrypted — sent over HTTPS only
+    config_extra: Optional[Dict[str, Any]] = None
+
+
+# Mantido para compatibilidade com agentes mais antigos
+class AgentNVR(AgentEquipamento):
+    pass
 
 
 class AgentConfigResponse(BaseModel):
@@ -134,12 +193,19 @@ class AgentConfigResponse(BaseModel):
     backup_hour: int
     backup_minute: int
     zip_password: Optional[str]
-    nvrs: List[AgentNVR]
+    equipamentos: List[AgentEquipamento]
+    nvrs: List[AgentEquipamento] = []  # alias de compatibilidade — igual a equipamentos
 
 
 class PingResponse(BaseModel):
     status: str
     restart: bool = False
+    backup: bool = False
+    rtsp_task: Optional[dict] = None
+
+
+class PingRequest(BaseModel):
+    telemetry: Optional[Dict[str, Any]] = None
 
 
 # ─────────────────────────────────────────────
@@ -177,3 +243,78 @@ class StatsResponse(BaseModel):
     backups_today: int
     backups_ok: int
     backups_error: int
+
+
+# ─────────────────────────────────────────────
+# Agent Logs
+# ─────────────────────────────────────────────
+class AgentLogResponse(BaseModel):
+    id: UUID
+    client_id: UUID
+    event_type: str
+    message: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─────────────────────────────────────────────
+# Agent OTA (Over The Air Updates)
+# ─────────────────────────────────────────────
+class AgentVersionCreate(BaseModel):
+    version: str                             # ex: "2.1.0"
+    notes: Optional[str] = None
+    url_service: str                         # URL pública do exe (ex: GitHub Release asset)
+    url_tray: Optional[str] = None
+    sha256_service: str                      # SHA256 do service.exe (64 chars hex)
+    sha256_tray: Optional[str] = None
+
+
+class AgentVersionUpdate(BaseModel):
+    version: Optional[str] = None
+    url_service: Optional[str] = None
+    sha256_service: Optional[str] = None
+    url_tray: Optional[str] = None
+    sha256_tray: Optional[str] = None
+
+
+class AgentVersionResponse(BaseModel):
+    id: UUID
+    version: str
+    notes: Optional[str]
+    url_service: str
+    url_tray: Optional[str]
+    sha256_service: str
+    sha256_tray: Optional[str]
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UpdateCheckResponse(BaseModel):
+    """Resposta ao agente ao verificar se há nova versão disponível."""
+    has_update: bool
+    version: Optional[str] = None
+    url_service: Optional[str] = None
+    url_tray: Optional[str] = None
+    sha256_service: Optional[str] = None
+    sha256_tray: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
+# Teste RTSP Automático
+# "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
+class RTSPTestRequest(BaseModel):
+    nome: str
+    ip: str
+    modelo: str
+    usuario: str = "admin"
+    senha: str = "navarro@123"
+    canal: Optional[int] = None
+
+class RTSPTestResponse(BaseModel):
+    success: bool
+    error_message: Optional[str] = None
+    image_base64: Optional[str] = None

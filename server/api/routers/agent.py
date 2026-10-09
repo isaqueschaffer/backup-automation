@@ -2,14 +2,22 @@
 Agent-facing router.
 Windows agent authenticates with X-Client-ID + X-API-Key headers.
 """
-from datetime import datetime
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 
 from auth import get_current_client
 from database import get_db
 from models import Client, Backup, NVR
-from schemas import AgentConfigResponse, AgentNVR, BackupReportCreate, BackupReportResponse, PingResponse
+from schemas import (
+    AgentConfigResponse,
+    AgentEquipamento,
+    BackupReportCreate,
+    BackupReportResponse,
+    PingResponse,
+    PingRequest,
+    TIPOS_EQUIPAMENTO,
+)
 from services.crypto_service import decrypt
 from services.storage_service import save_zip
 from services.email_service import send_backup_report
@@ -21,14 +29,16 @@ router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 @router.get("/config", response_model=AgentConfigResponse)
 def get_agent_config(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
     """Return full config needed by the Windows agent."""
-    nvrs = [
-        AgentNVR(
+    equipamentos = [
+        AgentEquipamento(
+            tipo=nvr.tipo or "NVR",
             name=nvr.name,
             ip=nvr.ip,
             username=nvr.username,
             password=decrypt(nvr.password),
+            config_extra=nvr.config_extra,
         )
-        for nvr in client.nvrs
+        for nvr in client.nvrs if nvr.active
     ]
     zip_pw = decrypt(client.zip_password) if client.zip_password else None
     
@@ -41,20 +51,145 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
         backup_hour=client.backup_hour,
         backup_minute=client.backup_minute,
         zip_password=zip_pw,
-        nvrs=nvrs,
+        equipamentos=equipamentos,
+        nvrs=equipamentos,  # alias de compatibilidade
     )
 
 
-@router.post("/ping", response_model=PingResponse)
-def ping_agent(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
-    """Agent heartbeat to mark it as online. Returns restart flag if requested."""
-    client.last_seen = datetime.utcnow()
-    should_restart = bool(client.restart_requested)
-    if should_restart:
-        client.restart_requested = False  # Consume the flag — restart only once
-    db.commit()
-    return PingResponse(status="ok", restart=should_restart)
+import asyncio
+from typing import Dict, Any
 
+# Global task dictionary for RTSP polling
+# Format: { client_id_str: {"task": dict, "event": asyncio.Event(), "result": None} }
+pending_rtsp_tasks: Dict[str, Any] = {}
+
+@router.post("/ping", response_model=PingResponse)
+async def ping_agent(
+    body: PingRequest | None = None,
+    client: Client = Depends(get_current_client), 
+    db: Session = Depends(get_db)
+):
+    """Agent heartbeat. Uses long-polling (up to 30s) to deliver RTSP test commands instantly."""
+    # Commit imediato: o db.refresh() do long-polling abaixo descartaria last_seen/telemetry não persistidos
+    client.last_seen = datetime.utcnow()
+    if body and body.telemetry:
+        client.telemetry = body.telemetry
+    db.commit()
+    client_id_str = str(client.id)
+
+    # ── Wait for tasks (Long Polling up to 5s) ──
+    for _ in range(5):
+        # Check if there is a pending RTSP task for this client
+        if client_id_str in pending_rtsp_tasks and not pending_rtsp_tasks[client_id_str].get("sent", False):
+            pending_rtsp_tasks[client_id_str]["sent"] = True
+            db.commit()
+            return PingResponse(
+                status="ok", 
+                restart=False, 
+                backup=False, 
+                rtsp_task=pending_rtsp_tasks[client_id_str]["task"]
+            )
+        
+        # Check normal restart/backup flags (only return immediately if they are set)
+        if client.restart_requested or client.backup_requested:
+            break
+            
+        # Fast exit if no tasks and 30s not reached yet
+        await asyncio.sleep(1)
+        db.refresh(client)
+
+    should_restart = bool(client.restart_requested)
+    should_backup = bool(client.backup_requested)
+    
+    # ── Auto-recovery de backup perdido ──
+    if not should_backup and client.backup_hour is not None and client.backup_minute is not None:
+        from datetime import timedelta
+        brt_tz = timezone(timedelta(hours=-3))
+        now_brt = datetime.now(brt_tz)
+        scheduled_time_today = now_brt.replace(hour=client.backup_hour, minute=client.backup_minute, second=0, microsecond=0)
+        
+        if now_brt > scheduled_time_today + timedelta(minutes=30):
+            made_backup_today = False
+            if client.last_backup_at:
+                last_backup_brt = client.last_backup_at.replace(tzinfo=timezone.utc).astimezone(brt_tz)
+                if last_backup_brt.date() == now_brt.date():
+                    made_backup_today = True
+            
+            if not made_backup_today:
+                should_backup = True
+                client.backup_requested = False 
+                from models import AgentLog
+                log_msg = f"Ping recebido. Disparando BACKUP DE RECUPERACAO. Agente falhou em executar no horario agendado ({client.backup_hour:02d}:{client.backup_minute:02d})."
+                db.add(AgentLog(client_id=client.id, event_type="ping_recovery", message=log_msg))
+
+    if should_restart:
+        client.restart_requested = False
+    if should_backup and client.backup_requested:
+        client.backup_requested = False
+
+    from models import AgentLog
+    log_msg = f"Ping recebido. Instruções pendentes: restart={should_restart}, backup={should_backup}"
+    db.add(AgentLog(client_id=client.id, event_type="ping", message=log_msg))
+    
+    from sqlalchemy import select, func
+    count = db.query(func.count(AgentLog.id)).filter(AgentLog.client_id == client.id).scalar()
+    if count > 50:
+        logs_to_delete = db.query(AgentLog).filter(AgentLog.client_id == client.id).order_by(AgentLog.created_at.asc()).limit(count - 50)
+        for lg in logs_to_delete:
+            db.delete(lg)
+
+    db.commit()
+    return PingResponse(status="ok", restart=should_restart, backup=should_backup)
+
+from schemas import RTSPTestResponse
+@router.post("/rtsp-result")
+async def receive_rtsp_result(
+    result: RTSPTestResponse,
+    client: Client = Depends(get_current_client),
+):
+    """Agent posts the result of an RTSP task."""
+    client_id_str = str(client.id)
+    if client_id_str in pending_rtsp_tasks:
+        task_data = pending_rtsp_tasks[client_id_str]
+        task_data["result"] = result
+        task_data["event"].set()
+    return {"status": "ok"}
+
+from schemas import NVRCameraNightImage
+from models import NVRCamera
+
+@router.post("/nvr-cameras/night-image")
+def receive_night_image(
+    body: NVRCameraNightImage,
+    client: Client = Depends(get_current_client),
+    db: Session = Depends(get_db),
+):
+    """Agent posts the night image of an NVR channel."""
+    nvr = db.query(NVR).filter(
+        NVR.client_id == client.id, 
+        NVR.name == body.nvr_name,
+        NVR.active == True
+    ).first()
+    if not nvr:
+        return {"status": "error", "message": "NVR não encontrado ou inativo"}
+
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id, NVRCamera.canal == body.canal).first()
+    if not camera:
+        camera = NVRCamera(
+            nvr_id=nvr.id,
+            canal=body.canal,
+            nome=body.nome,
+            night_image_base64=body.image_base64,
+            night_image_date=body.night_image_date
+        )
+        db.add(camera)
+    else:
+        camera.nome = body.nome
+        camera.night_image_base64 = body.image_base64
+        camera.night_image_date = body.night_image_date
+
+    db.commit()
+    return {"status": "ok"}
 
 @router.post("/backup/report", response_model=BackupReportResponse, status_code=201)
 def receive_backup_report(
@@ -63,26 +198,39 @@ def receive_backup_report(
     db: Session = Depends(get_db),
 ):
     """Agent posts the backup result. Server creates a Backup record."""
+    from datetime import datetime
+    
+    # Usa a hora real do servidor, ignorando o relógio do cliente
+    server_finished_at = datetime.utcnow()
+    # Subtrai o tempo que o cliente diz que levou para achar o "started_at" real do servidor
+    duration = body.finished_at - body.started_at
+    server_started_at = server_finished_at - duration
+
+    nvr_results_with_type = []
+    for r in body.nvr_results:
+        r_dict = r.model_dump()
+        nvr = db.query(NVR).filter(NVR.client_id == client.id, NVR.name == r.nome).first()
+        if nvr:
+            r_dict["tipo"] = nvr.tipo
+            if r.cameras is not None:
+                nvr.last_recording_status = r.cameras
+        else:
+            r_dict["tipo"] = "NVR" # default fallback se foi excluido
+        nvr_results_with_type.append(r_dict)
+
     backup = Backup(
         client_id=client.id,
-        started_at=body.started_at,
-        finished_at=body.finished_at,
+        started_at=server_started_at,
+        finished_at=server_finished_at,
         status=body.status,
-        nvr_results=[r.model_dump() for r in body.nvr_results],
+        nvr_results=nvr_results_with_type,
         trigger=body.trigger,
     )
     db.add(backup)
 
     # Update client last backup info
-    client.last_backup_at = body.finished_at
+    client.last_backup_at = server_finished_at
     client.last_backup_status = body.status
-
-    # Update NVRs with latest recording status
-    for r in body.nvr_results:
-        if r.cameras is not None:
-            nvr = db.query(NVR).filter(NVR.client_id == client.id, NVR.name == r.nome).first()
-            if nvr:
-                nvr.last_recording_status = r.cameras
 
     db.commit()
     db.refresh(backup)
@@ -93,6 +241,7 @@ def receive_backup_report(
 async def upload_backup_zip(
     backup_id: str,
     request: Request,
+    device_type: str = Query("NVR", description="Tipo de equipamento: NVR, OLT, ONU, PABX"),
     file: UploadFile = File(...),
     client: Client = Depends(get_current_client),
     db: Session = Depends(get_db),
@@ -104,13 +253,29 @@ async def upload_backup_zip(
     if not backup:
         raise HTTPException(status_code=404, detail="Backup record not found")
 
+    clean_device_type = device_type.strip().upper()
+    if clean_device_type not in TIPOS_EQUIPAMENTO and clean_device_type != "MIXED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo de equipamento inválido: '{clean_device_type}'. Tipos permitidos: {TIPOS_EQUIPAMENTO} ou MIXED",
+        )
+
     date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
     data = await file.read()
 
-    zip_path = save_zip(client.id, date_str, file.filename or f"backup_{date_str}.zip", data)
+    filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"
+
+    zip_path = save_zip(
+        client_id=client.id,
+        client_name=client.name,
+        date_str=date_str,
+        device_type=clean_device_type,
+        filename=filename,
+        data=data,
+    )
 
     backup.zip_filename = zip_path.name
-    backup.zip_size = len(data)
+    backup.zip_size = (backup.zip_size or 0) + len(data)
     db.commit()
 
     # Send email
@@ -127,7 +292,7 @@ async def upload_backup_zip(
         base_url=str(request.base_url),
         public_url=settings.PUBLIC_URL,
     )
-    backup.email_sent = email_sent
+    backup.email_sent = email_sent or backup.email_sent
     db.commit()
 
     return {"status": "ok", "zip_size": len(data), "email_sent": email_sent}

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Trilan NVR Backup Agent — System Tray App
 Run with: pythonw tray.py
 """
@@ -17,7 +17,8 @@ from pystray import MenuItem as item
 
 DIRETORIO = Path(__file__).resolve().parent
 SERVICO = "TrilanAgentNVR"
-ARQUIVO_LOG = DIRETORIO / "logs" / "servico.log"
+PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
+ARQUIVO_LOG = PASTA_LOG / "servico.log"
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
 
@@ -44,9 +45,11 @@ def criar_icone(status_ok: bool = True):
 # ─────────────────────────────────────────────────────────────
 def cmd_servico(acao):
     try:
-        subprocess.run(["sc.exe", acao, SERVICO], creationflags=NO_WINDOW, check=False)
+        import ctypes
+        # "runas" força a janela de elevação de permissão do Windows (UAC) para esse comando
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", "sc.exe", f"{acao} {SERVICO}", None, 0)
     except Exception as e:
-        print(f"Erro sc.exe {acao}: {e}")
+        print(f"Erro ShellExecuteW {acao}: {e}")
 
 
 def servico_rodando() -> bool:
@@ -91,14 +94,21 @@ def executar_backup_agora(icone, _):
         icone.notify(f"Erro: {e}\nO servico esta rodando?", "Trilan Agente NVR")
 
 
-def abrir_log(icone, _):
+def abrir_log_tempo_real(icone, _):
     try:
         ARQUIVO_LOG.parent.mkdir(exist_ok=True)
         if not ARQUIVO_LOG.exists():
             ARQUIVO_LOG.touch()
-        subprocess.Popen(["notepad.exe", str(ARQUIVO_LOG)])
+        
+        import subprocess
+        # Abre uma janela interativa do PowerShell lendo o arquivo em tempo real (-Wait)
+        comando = f'$Host.UI.RawUI.WindowTitle="Trilan Logs em Tempo Real"; Get-Content "{ARQUIVO_LOG}" -Wait -Tail 50'
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-Command", comando],
+            creationflags=subprocess.CREATE_NEW_CONSOLE
+        )
     except Exception as e:
-        print(f"Erro ao abrir log: {e}")
+        icone.notify(f"Erro ao abrir log: {e}", "Trilan Agente NVR")
 
 
 def criar_menu():
@@ -109,7 +119,7 @@ def criar_menu():
         item("Parar servico", lambda i, j: cmd_servico("stop")),
         item("Reiniciar servico", reiniciar_servico),
         pystray.Menu.SEPARATOR,
-        item("Abrir log", abrir_log),
+        item("Ver Logs (Tempo Real)", abrir_log_tempo_real),
         pystray.Menu.SEPARATOR,
         item("Sair", lambda i, j: i.stop()),
     )

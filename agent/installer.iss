@@ -2,7 +2,7 @@
 
 [Setup]
 AppName=Trilan NVR Backup Agent
-AppVersion=1.0
+AppVersion=1.1.2
 DefaultDirName={pf}\Trilan NVR Backup Agent
 DefaultGroupName=Trilan NVR
 OutputBaseFilename=TrilanAgentSetup
@@ -22,12 +22,16 @@ Name: "{commonstartup}\Trilan Agent Tray"; Filename: "{app}\TrilanAgentTray.exe"
 [Run]
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "install"; Flags: runhidden
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "start"; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""Trilan Agent Tray FTP"" dir=in action=allow program=""{app}\TrilanAgentTray.exe"" enable=yes protocol=TCP localport=21"; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""Trilan Agent Service FTP"" dir=in action=allow program=""{app}\TrilanAgentService.exe"" enable=yes protocol=TCP localport=21"; Flags: runhidden
 Filename: "{app}\TrilanAgentTray.exe"; Flags: nowait postinstall; Description: "Iniciar o Trilan Agent Tray agora"
 
 [UninstallRun]
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "stop"; Flags: runhidden
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "remove"; Flags: runhidden
 Filename: "taskkill"; Parameters: "/f /im TrilanAgentTray.exe"; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""Trilan Agent Tray FTP"""; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""Trilan Agent Service FTP"""; Flags: runhidden
 
 [Code]
 var
@@ -44,7 +48,7 @@ begin
   ConfigPage.Add('Client ID:', False);
   ConfigPage.Add('API Key:', False);
 
-  ConfigPage.Values[0] := 'http://';
+  ConfigPage.Values[0] := 'http://publico.suportetrilan.com.br:7001';
   ConfigPage.Values[1] := '';
   ConfigPage.Values[2] := '';
 end;

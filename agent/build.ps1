@@ -12,6 +12,8 @@ Write-Host "Compilando serviço em background (service.exe)..."
     --hidden-import win32service `
     --hidden-import servicemanager `
     --hidden-import agent `
+    --hidden-import src.application.updater `
+    --collect-all imageio_ffmpeg `
     --name TrilanAgentService `
     service.py
 

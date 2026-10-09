@@ -1,51 +1,55 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  fetchClient, fetchNVRs, createNVR, deleteNVR, updateClient,
-  rotateKey, fetchBackups, restartAgent
+  fetchClient, fetchEquipamentos, createEquipamento, updateEquipamento, deleteEquipamento, updateClient,
+  rotateKey, fetchBackups, restartAgent, triggerBackup
 } from "../api/client";
-import { Client, NVR, Backup } from "../api/types";
+import { Client, NVR, Backup, TipoEquipamento } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
-import { ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server, Archive, RotateCcw } from "lucide-react";
+import api from "../api/client";
+import { useRef } from "react";
+import {
+  ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
+  Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
+  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning, Image
+} from "lucide-react";
+import * as XLSX from "xlsx";
+
+// Intervalo de ping do agente (PING_INTERVAL_S em agent/service.py)
+const AGENT_PING_INTERVAL_MS = 15 * 1000;
+// Após o horário previsto, consulta o cliente a cada 1s por este tempo para pegar o novo ping assim que chegar
+const OVERDUE_FAST_POLL_MS = 30 * 1000;
+
+// last_seen é naive em UTC (REGRA-001)
+const serverUtcMs = (iso: string) => new Date(/Z|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + "Z").getTime();
 
 function fmtDate(s: string | null) {
   if (!s) return "—";
-  return new Date(s).toLocaleString("pt-BR");
+  const str = s.endsWith("Z") ? s : s + "Z";
+  return new Date(str).toLocaleString("pt-BR");
 }
 
 function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate: string | null }) {
   if (!mapStr) return <span>—</span>;
-  
   const refDate = referenceDate ? new Date(referenceDate) : new Date();
-  
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "4px", width: "fit-content", minWidth: "150px" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "4px", width: "fit-content" }}>
       {mapStr.split("").map((char, i) => {
         const isOk = char === "█";
         const daysAgo = (mapStr.length - 1) - i;
-        
         const d = new Date(refDate);
         d.setDate(d.getDate() - daysAgo);
         const dateStr = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-        
         return (
-          <div
-            key={i}
-            title={`${dateStr}: ${isOk ? "Gravou" : "Falhou"}`}
-            className="flex-col items-center justify-center"
+          <div key={i} title={`${dateStr}: ${isOk ? "Gravou" : "Falhou"}`}
             style={{
-              width: 26,
-              height: 18,
-              flexShrink: 0,
-              borderRadius: 2,
+              width: 26, height: 18, flexShrink: 0, borderRadius: 2,
               backgroundColor: isOk ? "var(--ok)" : "var(--err)",
-              border: "1px solid rgba(255,255,255,0.15)",
-              color: "white",
-              display: "flex",
-              cursor: "help",
-              transition: "transform 0.1s"
+              border: "1px solid rgba(255,255,255,0.15)", color: "white",
+              display: "flex", cursor: "help", transition: "transform 0.1s",
+              alignItems: "center", justifyContent: "center"
             }}
             onMouseEnter={e => e.currentTarget.style.transform = "scale(1.15)"}
             onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
@@ -58,55 +62,489 @@ function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate
   );
 }
 
+// ── Info pill component ──────────────────────────────────────────
+
+function TelemetryBar({ label, percent, info }: { label: string, percent: number, info: string }) {
+  const isHigh = percent > 90;
+  const isWarn = percent > 75;
+  const color = isHigh ? "var(--err)" : (isWarn ? "var(--warn)" : "var(--ok)");
+  
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{label}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{info}</span>
+      </div>
+      <div style={{ width: "100%", height: 6, backgroundColor: "var(--surface-2)", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${percent}%`, height: "100%", backgroundColor: color, borderRadius: 3, transition: "width 0.3s ease" }}></div>
+      </div>
+    </div>
+  );
+}
+
+function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
+  icon: React.ReactNode; label: string; value: React.ReactNode;
+  mono?: boolean; copyValue?: string; onCopy?: (v: string) => void;
+}) {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", gap: 6,
+      background: "var(--surface-2, rgba(255,255,255,0.03))",
+      border: "1px solid var(--border)",
+      borderRadius: "var(--radius-sm)", padding: "14px 16px"
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+        {icon}{label}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ color: "var(--text-primary)", fontFamily: mono ? "monospace" : undefined, fontSize: mono ? 12 : 14, fontWeight: 500, wordBreak: "break-all" }}>
+          {value}
+        </span>
+        {copyValue && onCopy && (
+          <button className="btn-icon" style={{ flexShrink: 0 }} onClick={() => onCopy(copyValue)}>
+            <Copy size={12} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── NVR Cameras Modal ──────────────────────────────────────────────
+function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientId: string, nvrId: string, nvrName: string, onClose: () => void }) {
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [zoomImage, setZoomImage] = useState<{ src: string, title: string } | null>(null);
+  const [selectedCamId, setSelectedCamId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchCams = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get(`/clients/${clientId}/equipamentos/${nvrId}/cameras`);
+        setCameras(res.data);
+        if (res.data && res.data.length > 0) {
+          setSelectedCamId(res.data[0].id);
+        }
+      } catch (e) {
+        console.error("Error fetching cameras:", e);
+      }
+      setLoading(false);
+    };
+    fetchCams();
+  }, [clientId, nvrId]);
+
+  const [testingCanal, setTestingCanal] = useState<number | null>(null);
+
+  const capturePerfectImage = async (canal: number, nome: string) => {
+    setTestingCanal(canal);
+    try {
+      const resRtsp = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
+      const dataRtsp = resRtsp.data;
+      if (!dataRtsp.success || !dataRtsp.image_base64) {
+        alert(dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.");
+        setTestingCanal(null);
+        return;
+      }
+      
+      const resSave = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
+        canal, nome, image_base64: dataRtsp.image_base64
+      });
+      const savedCam = resSave.data;
+      setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64 } : c));
+    } catch (e: any) {
+      alert(e.response?.data?.detail || "Erro ao comunicar com o servidor.");
+    }
+    setTestingCanal(null);
+  };
+
+  const selectedCam = cameras.find(c => c.id === selectedCamId);
+
+  return (
+    <>
+      <Modal title={`Câmeras do NVR: ${nvrName}`} onClose={onClose} width="1200px">
+        {loading ? (
+          <div style={{ padding: 40, textAlign: "center" }}>Carregando galeria...</div>
+        ) : cameras.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>Nenhuma câmera sincronizada neste NVR ainda. Aguarde o próximo backup.</div>
+        ) : (
+          <div style={{ display: "flex", height: "75vh", margin: "-24px" }}>
+            {/* Sidebar with Channels */}
+            <div style={{ width: "260px", borderRight: "1px solid var(--border)", overflowY: "auto", padding: "16px 0", background: "var(--surface-50)" }}>
+              <div style={{ padding: "0 16px", marginBottom: 12, fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em" }}>
+                CANAIS GRAVADOS ({cameras.length})
+              </div>
+              {cameras.map(cam => {
+                const isSelected = selectedCamId === cam.id;
+                return (
+                  <div 
+                    key={cam.id} 
+                    style={{ 
+                      padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+                      background: isSelected ? "var(--primary-light)" : "transparent",
+                      borderLeft: `4px solid ${isSelected ? "var(--primary)" : "transparent"}`,
+                      transition: "all 0.2s"
+                    }}
+                    onClick={() => setSelectedCamId(cam.id)}
+                    onMouseEnter={(e) => { if(!isSelected) e.currentTarget.style.background = "var(--surface-hover)" }}
+                    onMouseLeave={(e) => { if(!isSelected) e.currentTarget.style.background = "transparent" }}
+                  >
+                    <Video size={16} color={isSelected ? "var(--primary)" : "var(--text-muted)"} />
+                    <span style={{ fontWeight: isSelected ? 600 : 500, color: isSelected ? "var(--primary-dark)" : "var(--text)" }}>
+                      {cam.nome || `Canal ${cam.canal}`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Main Content Area */}
+            <div style={{ flex: 1, padding: 32, overflowY: "auto", display: "flex", flexDirection: "column", gap: 24, background: "var(--background)" }}>
+              {selectedCam ? (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)", paddingBottom: 16 }}>
+                    <div>
+                      <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>{selectedCam.nome || `Canal ${selectedCam.canal}`}</h2>
+                      <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: 14 }}>
+                        Último backup: {selectedCam.night_image_date ? fmtDate(selectedCam.night_image_date) : "Desconhecido"}
+                      </p>
+                    </div>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={() => capturePerfectImage(selectedCam.canal, selectedCam.nome)} 
+                      disabled={testingCanal === selectedCam.canal}
+                      style={{ display: "flex", gap: 8, alignItems: "center" }}
+                    >
+                      <Image size={16} />
+                      {testingCanal === selectedCam.canal ? "Capturando..." : "Atualizar Imagem de Referência"}
+                    </button>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                    {/* Perfect Image */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981" }}></div>
+                        REFERÊNCIA IDEAL (PERFECT IMAGE)
+                      </div>
+                      <div style={{ background: "var(--surface)", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "16/9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {selectedCam.perfect_image_base64 ? (
+                          <img 
+                            src={`data:image/jpeg;base64,${selectedCam.perfect_image_base64}`} 
+                            alt="Perfect" 
+                            style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in", transition: "transform 0.3s" }} 
+                            onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.03)")}
+                            onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                            onClick={() => setZoomImage({ src: `data:image/jpeg;base64,${selectedCam.perfect_image_base64}`, title: `${selectedCam.nome || `Canal ${selectedCam.canal}`} - REFERÊNCIA IDEAL` })}
+                          />
+                        ) : (
+                          <div style={{ color: "var(--text-muted)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                            <Image size={32} opacity={0.3} />
+                            <span>Sem imagem de referência</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Night Image */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--primary)" }}></div>
+                        ÚLTIMO BACKUP GRAVADO (NOITE)
+                      </div>
+                      <div style={{ background: "var(--surface)", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "16/9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {selectedCam.night_image_base64 ? (
+                          <img 
+                            src={`data:image/jpeg;base64,${selectedCam.night_image_base64}`} 
+                            alt="Night" 
+                            style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in", transition: "transform 0.3s" }} 
+                            onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.03)")}
+                            onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                            onClick={() => setZoomImage({ src: `data:image/jpeg;base64,${selectedCam.night_image_base64}`, title: `${selectedCam.nome || `Canal ${selectedCam.canal}`} - ÚLTIMO BACKUP` })}
+                          />
+                        ) : (
+                          <div style={{ color: "var(--text-muted)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                            <Image size={32} opacity={0.3} />
+                            <span>Sem imagem do último backup</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", flexDirection: "column", gap: 16 }}>
+                  <Video size={48} opacity={0.2} />
+                  <span>Selecione um canal na lateral para visualizar as imagens</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {zoomImage && (
+        <div 
+          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.9)", zIndex: 999999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "zoom-out", padding: 40 }}
+          onClick={() => setZoomImage(null)}
+        >
+          <div style={{ color: "white", fontSize: 20, fontWeight: 600, marginBottom: 20, letterSpacing: "0.02em" }}>{zoomImage.title}</div>
+          <img src={zoomImage.src} style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }} />
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Equipment card component ─────────────────────────────────────
+function EqCard({ eq, onDelete, onViewRecording, onViewCameras, onEdit, onToggleActive }: {
+  eq: NVR;
+  onDelete: () => void;
+  onViewRecording: () => void;
+  onViewCameras?: () => void;
+  onEdit: () => void;
+  onToggleActive: () => void;
+}) {
+  const getEqIcon = (tipo: string) => {
+    const m: any = {
+      NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />, MIKROTIK: <Network size={18} />, DIGIFORT: <Video size={18} />
+    };
+    return m[tipo] || <Video size={18} />;
+  };
+  const getEqColor = (tipo: string) => {
+    const m: any = {
+      NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6", MIKROTIK: "#3b82f6", DIGIFORT: "#f43f5e"
+    };
+    return m[tipo] || "var(--text-muted)";
+  };
+  const color = getEqColor(eq.tipo);
+
+  return (
+    <div style={{
+      background: "var(--surface-2, rgba(255,255,255,0.03))",
+      border: "1px solid var(--border)", borderRadius: "var(--radius)",
+      padding: "16px 20px", display: "flex", alignItems: "center", gap: 16,
+      transition: "border-color 0.15s", opacity: eq.active === false ? 0.6 : 1
+    }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = color)}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}
+    >
+      {/* Icon */}
+      <div style={{
+        width: 42, height: 42, borderRadius: "var(--radius-sm)", flexShrink: 0,
+        background: `${color}18`, border: `1px solid ${color}40`,
+        display: "flex", alignItems: "center", justifyContent: "center", color
+      }}>
+        {getEqIcon(eq.tipo)}
+      </div>
+
+      {/* Info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <span style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: 14 }}>{eq.name}</span>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: `${color}18`, color, border: `1px solid ${color}30` }}>
+            {eq.tipo}
+          </span>
+          {eq.active === false && (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: `var(--warn-bg)`, color: "var(--warn)", border: `1px solid rgba(245,158,11,0.3)` }}>
+              PAUSADO
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12 }}>
+          {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <FolderOpen size={12} /> {(eq.config_extra as any)?.pasta_origem || "—"}
+            </span>
+          ) : (
+            <>
+              <span style={{ fontFamily: "monospace" }}>{eq.ip}</span>
+              {eq.username && <span style={{ display: "flex", alignItems: "center", gap: 3 }}>👤 {eq.username}</span>}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        {eq.tipo === "NVR" && onViewCameras && (
+          <button className="btn btn-secondary btn-sm" onClick={onViewCameras}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Image size={13} /> Galeria
+          </button>
+        )}
+        {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT") && (
+          <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Video size={13} /> Gravações
+          </button>
+        )}
+        <button className="btn-icon" title={eq.active === false ? "Retomar Backup" : "Pausar Backup"} onClick={onToggleActive}>
+          {eq.active === false ? <RefreshCw size={14} /> : <div style={{width:14, height:14, borderLeft:'3px solid currentColor', borderRight:'3px solid currentColor'}}/>}
+        </button>
+        <button className="btn-icon" title="Editar" onClick={onEdit}>
+          <Edit2 size={14} />
+        </button>
+        <button className="btn-icon" style={{ color: "var(--err)" }} title="Remover" onClick={onDelete}>
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ───────────────────────────────────────────────
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
 
   const [client, setClient] = useState<Client | null>(null);
-  const [nvrs, setNVRs] = useState<NVR[]>([]);
+  const [equipamentos, setEquipamentos] = useState<NVR[]>([]);
   const [backups, setBackups] = useState<Backup[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, {status: string, error?: string, image_base64?: string}>>({});
 
-  const [showNVRModal, setShowNVRModal] = useState(false);
+  const [showEqModal, setShowEqModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showRecordingModal, setShowRecordingModal] = useState<{show: boolean, nvrName: string, cameras: any[]}>({show: false, nvrName: "", cameras: []});
+  const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: any[] }>({ show: false, nvrName: "", cameras: [] });
+  const [showNVRCamerasModal, setShowNVRCamerasModal] = useState<{ show: boolean, nvrId: string, nvrName: string }>({ show: false, nvrId: "", nvrName: "" });
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
-  const [nvrForm, setNvrForm] = useState({ name: "", ip: "", username: "", password: "" });
+  const [eqForm, setEqForm] = useState({ tipo: "NVR" as TipoEquipamento, name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
+  const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
+  // Diferença entre relógio do servidor e do navegador, para a contagem do próximo ping andar a cada segundo
+  const [serverSkewMs, setServerSkewMs] = useState(0);
 
-  const load = async () => {
+  const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT", "DEFENSE"];
+  const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️", DEFENSE: "🛡️" };
+
+  const load = async (silent = false) => {
     if (!id) return;
-    const [c, n, b] = await Promise.all([
-      fetchClient(id),
-      fetchNVRs(id),
+    if (!silent) setLoading(true);
+    const [c, eqs, b, lg] = await Promise.all([
+      (await import("../api/client")).fetchClient(id),
+      fetchEquipamentos(id),
       fetchBackups({ client_id: id, size: 10 }),
+      (await import("../api/client")).fetchClientLogs(id),
     ]);
-    setClient(c); setNVRs(n); setBackups(b.items);
-    setLoading(false);
+    setClient(c); setEquipamentos(eqs); setBackups(b.items); setLogs(lg);
+    if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
+    if (!silent) setLoading(false);
   };
+  
   useEffect(() => { load(); }, [id]);
 
-  const handleAddNVR = async () => {
-    if (!nvrForm.name || !nvrForm.ip || !nvrForm.username || !nvrForm.password) {
-      toast("Preencha todos os campos.", "error"); return;
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t1 = setInterval(() => setNow(Date.now()), 1000);
+    const t2 = setInterval(() => { if (id) load(true); }, 10000);
+    return () => { clearInterval(t1); clearInterval(t2); };
+  }, [id]);
+
+  const nextPingMs = client?.last_seen && client.active && client.is_online
+    ? serverUtcMs(client.last_seen) + AGENT_PING_INTERVAL_MS
+    : null;
+  const overdueMs = nextPingMs === null ? -1 : now + serverSkewMs - nextPingMs;
+  const fastPoll = overdueMs >= 0 && overdueMs < OVERDUE_FAST_POLL_MS;
+  useEffect(() => {
+    if (!fastPoll || !id) return;
+    const t = setInterval(async () => {
+      try {
+        const c = await fetchClient(id);
+        setClient(c);
+        if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
+      } catch { /* próxima tentativa em 1s */ }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [fastPoll, id]);
+
+const buildEqPayload = () => {
+    if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
+    const payload: any = { tipo: eqForm.tipo, name: eqForm.name.trim(), ip: "", username: "", password: "", config_extra: null };
+
+    if (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA") {
+      if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.` };
+      payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
+      if (eqForm.tipo === "CAMERA") {
+        payload.config_extra = { modelo: (eqForm as any).modelo || "Hikvision" };
+      } else if (eqForm.tipo === "NVR") {
+        payload.config_extra = { marca: (eqForm as any).marca || "Hikvision" };
+      }
+    } else if (eqForm.tipo === "DIGIFORT") {
+      if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
+      payload.ip = eqForm.pasta_origem.trim(); 
+      payload.username = "digifort"; 
+      payload.password = "digifort"; 
+      payload.config_extra = { 
+        pasta_origem: eqForm.pasta_origem.trim(),
+        caminho_csv: (eqForm as any).caminho_csv?.trim() || "",
+        caminho_log_csv: (eqForm as any).caminho_log_csv?.trim() || ""
+      };
+    } else if (eqForm.tipo === "OLT") {
+      if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
+      payload.config_extra = { fabricante_olt: eqForm.fabricante_olt };
+      if (eqForm.fabricante_olt === "UNM2000") {
+        if (!eqForm.pasta_origem) return { error: "Para UNM2000, informe a pasta de origem dos backups." };
+        payload.ip = eqForm.pasta_origem.trim(); payload.username = "unm2000"; payload.password = "unm2000"; payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
+      } else if (eqForm.fabricante_olt === "HUAWEI" || eqForm.fabricante_olt === "VSOL") {
+        if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.` };
+        payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
+        if (eqForm.fabricante_olt === "HUAWEI") payload.config_extra.pasta_origem = eqForm.pasta_origem.trim();
+      }
+    } else if (eqForm.tipo === "DEFENSE") {
+      if (!eqForm.pasta_origem) return { error: "Para DEFENSE, informe a pasta de origem." };
+      payload.ip = "127.0.0.1";
+      payload.username = "defense";
+      payload.password = "defense";
+      payload.config_extra = {
+        pasta_origem: eqForm.pasta_origem.trim()
+      };
     }
+    // Remove blank passwords in edit mode so backend ignores them
+    if (editingEqId && !payload.password) delete payload.password;
+    return { payload };
+  };
+
+  const handleSaveEquipamento = async () => {
+    const { error, payload } = buildEqPayload();
+    if (error) { toast(error, "error"); return; }
+    
     setSaving(true);
     try {
-      await createNVR(id!, nvrForm);
-      toast("NVR adicionado!", "success");
-      setShowNVRModal(false);
-      setNvrForm({ name: "", ip: "", username: "", password: "" });
+      if (editingEqId) {
+        await updateEquipamento(id!, editingEqId, payload);
+        toast("Equipamento atualizado!", "success");
+      } else {
+        await createEquipamento(id!, payload);
+        toast("Equipamento adicionado!", "success");
+      }
+      setShowEqModal(false);
+      setEqForm({ tipo: "NVR", name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
+      setEditingEqId(null);
       load();
-    } catch { toast("Erro ao adicionar NVR.", "error"); }
+    } catch { toast("Erro ao salvar equipamento.", "error"); }
     finally { setSaving(false); }
   };
 
-  const handleDeleteNVR = async (nvrId: string, name: string) => {
-    if (!confirm(`Remover NVR "${name}"?`)) return;
-    await deleteNVR(id!, nvrId);
-    toast("NVR removido.", "success");
+
+  const handleToggleEquipamento = async (eq: NVR) => {
+    try {
+      const isCurrentlyActive = eq.active !== false; // true if true or undefined
+      await updateEquipamento(id!, eq.id, { active: !isCurrentlyActive });
+      toast(isCurrentlyActive ? "Equipamento pausado." : "Equipamento retomado.", "success");
+      load();
+    } catch { toast("Erro ao alterar estado.", "error"); }
+  };
+
+  const handleDeleteEquipamento = async (eqId: string, name: string) => {
+    if (!confirm(`Remover equipamento "${name}"?`)) return;
+    await deleteEquipamento(id!, eqId);
+    toast("Equipamento removido.", "success");
     load();
   };
 
@@ -134,28 +572,48 @@ export default function ClientDetail() {
   };
 
   const handleRestartAgent = async () => {
-    if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (até 5 min).")) return;
+    if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (em poucos segundos se estiver online).")) return;
     try {
       await restartAgent(id!);
       toast("Reinício agendado! O agente será reiniciado no próximo ping.", "success");
-    } catch {
-      toast("Erro ao solicitar reinício.", "error");
-    }
+    } catch { toast("Erro ao solicitar reinício.", "error"); }
   };
 
-  const isAgentOnline = client && client.active &&
-    (client.last_seen && new Date().getTime() - new Date(client.last_seen).getTime() < 15 * 60 * 1000);
+  const handleTriggerBackup = async () => {
+    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (em poucos segundos se estiver online).")) return;
+    try {
+      await triggerBackup(id!);
+      toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
+    } catch { toast("Erro ao solicitar backup.", "error"); }
+  };
+
+  // is_online calculado no servidor — elimina bugs de fuso horário no navegador
+  const isAgentOnline = !!(client && client.active && client.is_online);
 
   const copyText = (t: string) => { navigator.clipboard.writeText(t); toast("Copiado!", "success"); };
 
   if (loading) return <div className="loading-state"><div className="spinner" /></div>;
   if (!client) return <div className="empty-state">Cliente não encontrado.</div>;
 
+  let nextPingStr = "—";
+  const isPendingAction = client.backup_requested || client.restart_requested;
+  if (nextPingMs !== null) {
+    if (overdueMs >= 0) {
+      nextPingStr = "aguardando…";
+    } else {
+      const secs = Math.ceil(-overdueMs / 1000);
+      nextPingStr = `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+    }
+  }
+
   return (
     <>
+      {/* ── Header ── */}
       <div className="page-header">
         <div className="flex items-center gap-3">
-          <button className="btn-icon" onClick={() => navigate("/clients")}><ArrowLeft size={16} /></button>
+          <button className="btn-icon" onClick={() => navigate("/clients")} title="Voltar">
+            <ArrowLeft size={16} />
+          </button>
           <div>
             <h1 className="page-title">{client.name}</h1>
             <p className="page-subtitle flex items-center gap-2">
@@ -165,150 +623,745 @@ export default function ClientDetail() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={() => { setEditForm({ ...client, email_to: (client.email_to || []).join(", ") as unknown as string[] }); setShowEditModal(true); }}>
+          <button className="btn btn-secondary" onClick={() => {
+            setEditForm({ ...client, email_to: (client.email_to || []).join(", ") as unknown as string[] });
+            setShowEditModal(true);
+          }}>
             <Edit2 size={15} /> Editar
           </button>
           <button className="btn btn-secondary" onClick={handleRotateKey}>
             <RefreshCw size={15} /> Rodar API Key
           </button>
-          <button
-            className="btn btn-secondary"
-            onClick={handleRestartAgent}
-            title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}
-          >
+          <button className="btn btn-secondary" onClick={handleTriggerBackup}
+            title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
+            <CloudLightning size={15} /> Gerar Backup
+          </button>
+          <button className="btn btn-secondary" onClick={handleRestartAgent}
+            title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
             <RotateCcw size={15} /> Reiniciar Agent
           </button>
         </div>
       </div>
 
-      {/* Info */}
-      <div className="card mb-4">
-        <div className="detail-grid">
-          <div className="detail-item">
-            <span className="detail-label">Client ID</span>
-            <div className="flex items-center gap-2">
-              <span className="detail-value font-mono text-sm">{client.id}</span>
-              <button className="btn-icon" onClick={() => copyText(client.id)}><Copy size={12} /></button>
-            </div>
+      {/* ── Banner de Comando Pendente ── */}
+      {isPendingAction && (
+        <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 6, padding: "12px 16px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ color: "#f59e0b", display: "flex" }}><Clock size={18} /></div>
+          <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
+            <strong>Comando na fila!</strong> O {client.backup_requested ? "backup manual" : "reinício"} começará no próximo contato do agente 
+            {isAgentOnline && <span style={{ fontWeight: 600, color: "#f59e0b", marginLeft: 6 }}>({nextPingStr})</span>}.
           </div>
-          <div className="detail-item">
-            <span className="detail-label">API Key (prefixo)</span>
-            <span className="detail-value font-mono text-sm">{client.api_key_prefix}…</span>
+        </div>
+      )}
+
+      {/* ── Layout de três colunas ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
+
+        {/* Coluna 1 — Configuração */}
+        <div className="card" style={{ padding: "20px 24px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+            <Server size={13} /> Configuração do Cliente
           </div>
-          <div className="detail-item">
-            <span className="detail-label">Horário do Backup</span>
-            <span className="detail-value">
-              {String(client.backup_hour).padStart(2,"0")}:{String(client.backup_minute).padStart(2,"0")}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <InfoPill icon={<KeyRound size={11} />} label="Client ID" value={client.id} mono copyValue={client.id} onCopy={copyText} />
+            <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${client.api_key_prefix}…`} mono />
+            <InfoPill icon={<Clock size={11} />} label="Horário do Backup"
+              value={`${String(client.backup_hour).padStart(2, "0")}:${String(client.backup_minute).padStart(2, "0")} (diário)`} />
+            <InfoPill icon={<Mail size={11} />} label="E-mails de Notificação"
+              value={(client.email_to || []).join(", ") || "—"} />
+          </div>
+        </div>
+
+        {/* Coluna 2 — Status */}
+        <div className="card" style={{ padding: "20px 24px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+            <Wifi size={13} /> Status do Agente
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <InfoPill icon={<Wifi size={11} />} label="Conexão"
+              value={<StatusBadge status={isAgentOnline ? "ONLINE" : (client.active ? "OFFLINE" : "DESATIVADO")} />} />
+            <InfoPill icon={<CalendarCheck size={11} />} label="Último contato"
+              value={client.last_seen ? fmtDate(client.last_seen) : "Nunca"} />
+            <InfoPill icon={<Clock size={11} />} label="Próximo contato (estimado)"
+              value={isAgentOnline ? nextPingStr : "—"} />
+            <InfoPill icon={<Archive size={11} />} label="Último Backup"
+              value={<StatusBadge status={client.last_backup_status} />} />
+            <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
+              value={fmtDate(client.last_backup_at)} />
+          </div>
+        </div>
+      
+
+        {/* Coluna 3 — Saúde da Máquina (Telemetria) */}
+        <div className="card" style={{ padding: "20px 24px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+            <Network size={13} /> Saúde do Servidor
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {client.telemetry ? (
+              <>
+                <TelemetryBar label="CPU" percent={client.telemetry.cpu_percent || 0} info={`${client.telemetry.cpu_percent || 0}%`} />
+                <TelemetryBar label="RAM" percent={client.telemetry.ram_percent || 0} info={`${client.telemetry.ram_used_gb || 0} GB / ${client.telemetry.ram_total_gb || 0} GB`} />
+                <TelemetryBar label="Disco (C:)" percent={client.telemetry.disk_percent || 0} info={`${client.telemetry.disk_free_gb || 0} GB Livre`} />
+                {client.telemetry.networks && client.telemetry.networks.map((net: any, i: number) => (
+                  <TelemetryBar 
+                    key={i}
+                    label={`Rede: ${net.name}`} 
+                    percent={Math.min(100, (((net.mbps_sent || 0) + (net.mbps_recv || 0)) / 1000) * 100)} 
+                    info={`↑ ${net.mbps_sent} Mbps  ↓ ${net.mbps_recv} Mbps`} 
+                  />
+                ))}
+                {client.telemetry.gpu_name && (
+                  <TelemetryBar label="GPU" percent={client.telemetry.gpu_percent || 0} info={`${client.telemetry.gpu_name} (${client.telemetry.gpu_percent || 0}%)`} />
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic" }}>Sem dados de telemetria</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Equipamentos ── */}
+      <div style={{ marginBottom: 24 }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="section-title mb-0">
+            <Server size={15} /> Equipamentos
+            <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
+              {equipamentos.filter(e => e.tipo !== "CAMERA").length}
             </span>
           </div>
-          <div className="detail-item">
-            <span className="detail-label">E-mails</span>
-            <span className="detail-value text-sm">{(client.email_to || []).join(", ") || "—"}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Criado em</span>
-            <span className="detail-value">{fmtDate(client.created_at)}</span>
-          </div>
-          <div className="detail-item">
-            <span className="detail-label">Status do Agente</span>
-            <StatusBadge status={client.active ? "ONLINE" : "DESATIVADO"} />
-          </div>
+          <button className="btn btn-secondary" onClick={() => { setEditingEqId(null); setEqForm({ tipo: "NVR", name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" } as any); setShowEqModal(true); }}>
+            <Plus size={14} /> Adicionar
+          </button>
         </div>
+
+        {equipamentos.filter(e => e.tipo !== "CAMERA").length === 0 ? (
+          <div className="empty-state" style={{ padding: "32px" }}>
+            <div className="empty-icon">🖥️</div>
+            <div>Nenhum equipamento cadastrado.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {equipamentos.filter(e => e.tipo !== "CAMERA").map(eq => (
+              <EqCard key={eq.id} eq={eq}
+                onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
+                onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
+                onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name })}
+                onEdit={() => {
+                  setEditingEqId(eq.id);
+                  setEqForm({
+                    tipo: eq.tipo,
+                    name: eq.name,
+                    ip: eq.tipo === "DIGIFORT" || (eq.tipo === "OLT" && (eq.config_extra as any)?.fabricante_olt === "UNM2000") ? "" : eq.ip,
+                    username: eq.username,
+                    password: "", // do not fetch password
+                    pasta_origem: (eq.config_extra as any)?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
+                    fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000",
+                    caminho_csv: (eq.config_extra as any)?.caminho_csv || "",
+                    caminho_log_csv: (eq.config_extra as any)?.caminho_log_csv || "",
+                    marca: (eq.config_extra as any)?.marca || "Hikvision"
+                  } as any);
+                  setShowEqModal(true);
+                }}
+                onToggleActive={() => handleToggleEquipamento(eq)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* NVRs */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="section-title mb-0"><Server size={15} />NVRs ({nvrs.length})</div>
-        <button className="btn btn-secondary" onClick={() => setShowNVRModal(true)}>
-          <Plus size={14} /> Adicionar NVR
-        </button>
+      {/* ── Histórico de Backups ── */}
+      <div>
+        <div className="section-title">
+          <Archive size={15} /> Histórico de Backups
+          <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
+            últimos 10
+          </span>
+        </div>
+        {backups.length === 0 ? (
+          <div className="empty-state" style={{ padding: "32px" }}>
+            <div className="empty-icon">📦</div>
+            <div>Nenhum backup realizado ainda.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {backups.map(b => (
+              <div key={b.id} style={{
+                display: "grid", gridTemplateColumns: "1fr auto auto auto auto",
+                alignItems: "center", gap: 16,
+                background: "var(--surface-2, rgba(255,255,255,0.02))",
+                border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+                padding: "12px 20px"
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 2 }}>
+                    {fmtDate(b.started_at)}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    via {b.trigger}
+                  </div>
+                </div>
+                <StatusBadge status={b.status} />
+                <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "right" }}>
+                  {b.zip_size ? `${(b.zip_size / 1024 / 1024).toFixed(1)} MB` : "—"}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }} title="E-mail enviado">
+                  {b.email_sent ? "✅ E-mail" : "—"}
+                </div>
+                <ChevronRight size={14} style={{ color: "var(--text-muted)", opacity: 0.4 }} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {nvrs.length === 0 ? (
-        <div className="empty-state" style={{ padding: "32px" }}>
-          <div className="empty-icon">📹</div>
-          <div>Nenhum NVR cadastrado.</div>
+      
+      {/* ── Câmeras (Teste RTSP) ── */}
+      <div style={{ marginBottom: 24, marginTop: 24 }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="section-title mb-0">
+            <Video size={15} /> Câmeras do Cliente (Teste RTSP)
+            <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
+              {equipamentos.filter(e => e.tipo === "CAMERA").length}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <input type="file" accept=".csv,.xls,.xlsx" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const isCsv = file.name.toLowerCase().endsWith(".csv");
+              const reader = new FileReader();
+              reader.onload = async (evt) => {
+                setLoading(true);
+                try {
+                  let rows: any[][] = [];
+                  
+                  if (isCsv) {
+                    const text = evt.target?.result as string;
+                    const delimiter = (text.indexOf(";") !== -1 && text.indexOf(";") < (text.indexOf("\n") === -1 ? 9999 : text.indexOf("\n"))) ? ";" : ",";
+                    
+                    // Parser robusto de CSV (suporta aspas e delimitadores no meio do texto)
+                    let currentRow = [];
+                    let currentCell = '';
+                    let inQuotes = false;
+                    for (let i = 0; i < text.length; i++) {
+                      const c = text[i];
+                      if (inQuotes) {
+                        if (c === '"') {
+                          if (i + 1 < text.length && text[i + 1] === '"') { currentCell += '"'; i++; }
+                          else { inQuotes = false; }
+                        } else { currentCell += c; }
+                      } else {
+                        if (c === '"') { inQuotes = true; }
+                        else if (c === delimiter) { currentRow.push(currentCell.trim()); currentCell = ''; }
+                        else if (c === '\n' || c === '\r') {
+                          if (c === '\r' && i + 1 < text.length && text[i + 1] === '\n') i++;
+                          currentRow.push(currentCell.trim());
+                          if (currentRow.some(col => col !== '')) rows.push(currentRow);
+                          currentRow = [];
+                          currentCell = '';
+                        } else { currentCell += c; }
+                      }
+                    }
+                    if (currentCell || currentRow.length > 0) {
+                      currentRow.push(currentCell.trim());
+                      if (currentRow.some(col => col !== '')) rows.push(currentRow);
+                    }
+                  } else {
+                    const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+                    const workbook = XLSX.read(data, { type: "array" });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+                  }
+
+                  const headers = (rows[0] || []).map(h => String(h).trim().toLowerCase());
+                  
+                  let idxDesc = headers.findIndex(h => h.includes("desc"));
+                  if (idxDesc === -1) idxDesc = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+                  
+                  let idxIp = headers.findIndex(h => h.includes("ip") || h.includes("endere"));
+                  let idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
+
+                  let count = 0;
+                  for (let i = 1; i < rows.length; i++) {
+                    const cols = rows[i];
+                    if (!cols || cols.length === 0 || (!cols[0] && !cols[1])) continue;
+                    
+                    let desc = "";
+                    let mod = "Hikvision";
+                    let ender = "";
+                    let pass = "";
+
+                    if (idxDesc >= 0 || idxIp >= 0) {
+                      desc = idxDesc >= 0 ? String(cols[idxDesc] || "") : String(cols[0] || "");
+                      ender = idxIp >= 0 ? String(cols[idxIp] || "") : String(cols[1] || "");
+                      pass = idxPass >= 0 ? String(cols[idxPass] || "") : "";
+                    } else {
+                      // Fallback absoluto caso não ache nenhum cabeçalho
+                      desc = String(cols[1] || "");
+                      ender = String(cols[3] || "");
+                      pass = String(cols[6] || "");
+                    }
+                    
+                    // Limpar caracteres nulos (0x00) que quebram o banco de dados (PostgreSQL)
+                    desc = desc.replace(/\0/g, "").trim();
+                    ender = ender.replace(/\0/g, "").trim();
+                    pass = pass.replace(/\0/g, "").trim();
+                      
+                    const rowStr = cols.join(" ").toUpperCase();
+                    if (rowStr.includes("HIKVISION")) mod = "Hikvision";
+                    else if (rowStr.includes("INTELBRAS")) mod = "Intelbras";
+                    else if (rowStr.includes("GRANDSTREAM")) mod = "Grandstream";
+                    else if (rowStr.includes("ONVIF")) mod = "ONVIF";
+                    else mod = "Hikvision";
+
+                    if (desc && ender) {
+                      await api.post(`/clients/${id}/equipamentos`, {
+                        tipo: "CAMERA",
+                        name: desc,
+                        ip: ender,
+                        username: "admin",
+                        password: pass || "navarro@123",
+                        config_extra: { modelo: mod }
+                      });
+                      count++;
+                    }
+                  }
+                  toast(`Importadas ${count} câmeras com sucesso!`, "success");
+                  load();
+                } catch (err) {
+                  console.error(err);
+                  toast("Erro ao importar câmeras.", "error");
+                } finally {
+                  setLoading(false);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }
+              };
+
+              if (isCsv) {
+                reader.readAsText(file, "ISO-8859-1");
+              } else {
+                reader.readAsArrayBuffer(file);
+              }
+            }} />
+            <button className="btn btn-secondary" style={{ color: "var(--danger)" }} onClick={async () => {
+              const cameras = equipamentos.filter(e => e.tipo === "CAMERA");
+              if (cameras.length === 0) return toast("Nenhuma câmera para apagar.", "error");
+              if (!window.confirm(`Tem certeza que deseja apagar as ${cameras.length} câmeras? Isso não pode ser desfeito.`)) return;
+              setLoading(true);
+              try {
+                for (const cam of cameras) {
+                  await api.delete(`/clients/${id}/equipamentos/${cam.id}`);
+                }
+                toast("Todas as câmeras foram apagadas.", "success");
+                load();
+              } catch (e) {
+                toast("Erro ao apagar câmeras.", "error");
+              } finally {
+                setLoading(false);
+              }
+            }} disabled={loading || isTesting}>
+              <Trash2 size={14} /> Apagar Câmeras
+            </button>
+            <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} disabled={loading || isTesting}>
+              <Plus size={14} /> Importar CSV
+            </button>
+            <button className="btn btn-secondary" onClick={() => { setEditingEqId(null); setEqForm({ tipo: "CAMERA", name: "", ip: "", username: "admin", password: "navarro@123", modelo: "Hikvision" } as any); setShowEqModal(true); }}>
+              <Plus size={14} /> Adicionar Câmera
+            </button>
+            <button className="btn btn-secondary" disabled={Object.values(testResults).filter(r => r.image_base64).length === 0} onClick={async () => {
+              const successCams = Object.entries(testResults).filter(([_, res]) => res.image_base64);
+              if (successCams.length === 1) {
+                const [camId, res] = successCams[0];
+                const cam = equipamentos.find(e => e.id === camId);
+                const name = cam ? cam.name.replace(/\s+/g, '_') : camId;
+                const a = document.createElement("a");
+                a.href = `data:image/jpeg;base64,${res.image_base64}`;
+                a.download = `camera_${name}.jpg`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              } else if (successCams.length > 1) {
+                const JSZip = (await import("jszip")).default;
+                const zip = new JSZip();
+                successCams.forEach(([camId, res]) => {
+                  const cam = equipamentos.find(e => e.id === camId);
+                  const name = cam ? cam.name.replace(/\s+/g, '_') : camId;
+                  zip.file(`camera_${name}.jpg`, res.image_base64!, { base64: true });
+                });
+                const blob = await zip.generateAsync({ type: "blob" });
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = `cameras_${client?.name?.replace(/\\s+/g, '_') || 'cliente'}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              }
+            }}>
+              Baixar Imagens
+            </button>
+            <button className="btn btn-success" disabled={loading || isTesting || equipamentos.filter(e => e.tipo === "CAMERA").length === 0} onClick={async () => {
+              const cams = equipamentos.filter(e => e.tipo === "CAMERA");
+              if (cams.length === 0) return;
+              setIsTesting(true);
+              setTestResults({});
+              
+              for (const cam of cams) {
+                setTestResults(prev => ({ ...prev, [cam.id]: { status: "testing" } }));
+                try {
+                  const res = await api.post(`/clients/${id}/equipamentos/${cam.id}/test-rtsp`);
+                  if (res.data.success) {
+                    setTestResults(prev => ({ ...prev, [cam.id]: { status: "success", image_base64: res.data.image_base64 } }));
+                  } else {
+                    setTestResults(prev => ({ ...prev, [cam.id]: { status: "error", error: res.data.error_message } }));
+                  }
+                } catch (err: any) {
+                  setTestResults(prev => ({ ...prev, [cam.id]: { status: "error", error: "Erro de comunicação na API." } }));
+                }
+              }
+              setIsTesting(false);
+              toast("Teste RTSP concluído!", "success");
+            }}>
+              {isTesting ? "Testando..." : "Testar Todas"}
+            </button>
+          </div>
         </div>
-      ) : (
-        <div className="table-wrap mb-6">
-          <table>
-            <thead><tr><th>Nome</th><th>IP</th><th>Usuário</th><th>Ações</th></tr></thead>
+
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left', background: 'var(--surface-2)' }}>
+                <th style={{ padding: '12px 16px' }}>Descrição</th>
+                <th style={{ padding: '12px 16px' }}>IP</th>
+                <th style={{ padding: '12px 16px' }}>Modelo</th>
+                <th style={{ padding: '12px 16px' }}>Status RTSP</th>
+                <th style={{ padding: '12px 16px' }}>Preview</th>
+                <th style={{ padding: '12px 16px', textAlign: 'right' }}>Ações</th>
+              </tr>
+            </thead>
             <tbody>
-              {nvrs.map(nvr => (
-                <tr key={nvr.id}>
-                  <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>{nvr.name}</td>
-                  <td className="font-mono text-sm">{nvr.ip}</td>
-                  <td className="text-secondary">{nvr.username}</td>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <button className="btn btn-secondary btn-sm"
-                        onClick={() => setShowRecordingModal({show: true, nvrName: nvr.name, cameras: nvr.last_recording_status || []})}>
-                        Status de Gravação
-                      </button>
-                      <button className="btn-icon" style={{ color: "var(--err)" }}
-                        onClick={() => handleDeleteNVR(nvr.id, nvr.name)}>
-                        <Trash2 size={14} />
-                      </button>
+              {equipamentos.filter(e => e.tipo === "CAMERA").map(cam => {
+                const res = testResults[cam.id];
+                return (
+                  <tr key={cam.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '12px 16px' }}>{cam.name}</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>{cam.ip}</td>
+                    <td style={{ padding: '12px 16px' }}>{(cam.config_extra as any)?.modelo || "N/A"}</td>
+                    <td style={{ padding: '12px 16px' }}>
+                      {!res && <span style={{ color: '#888' }}>⏳ Aguardando</span>}
+                      {res?.status === "testing" && <span style={{ color: '#d97706' }}>🔄 Testando...</span>}
+                      {res?.status === "success" && <span style={{ color: '#16a34a', fontWeight: 'bold' }}>✅ Sucesso</span>}
+                      {res?.status === "error" && (
+                        <div>
+                          <span style={{ color: '#dc2626', fontWeight: 'bold' }}>❌ Erro</span>
+                          <div style={{ fontSize: '0.8rem', color: '#dc2626', marginTop: 4 }}>{res.error}</div>
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '12px 16px' }}>
+                      {res?.image_base64 && (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <img src={`data:image/jpeg;base64,${res.image_base64}`} alt="Preview" style={{ maxHeight: '60px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                          <a href={`data:image/jpeg;base64,${res.image_base64}`} download={`camera_${cam.name.replace(/\\s+/g, '_')}.jpg`} title="Baixar Imagem" style={{ cursor: 'pointer', background: 'var(--surface-2)', padding: '6px', borderRadius: '4px', border: '1px solid var(--border)', textDecoration: 'none' }}>
+                            📥
+                          </a>
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                      <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: 12, marginRight: 8 }} onClick={() => {
+                        setEditingEqId(cam.id);
+                        setEqForm({
+                          tipo: "CAMERA",
+                          name: cam.name,
+                          ip: cam.ip,
+                          username: cam.username,
+                          password: "",
+                          modelo: (cam.config_extra as any)?.modelo || "Hikvision"
+                        } as any);
+                        setShowEqModal(true);
+                      }}>Editar</button>
+                      <button onClick={() => handleDeleteEquipamento(cam.id, cam.name)} disabled={isTesting} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>Remover</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {equipamentos.filter(e => e.tipo === "CAMERA").length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>Nenhuma câmera cadastrada. Use "Importar CSV" ou adicione manualmente.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Histórico de Eventos do Agente ── */}
+      <div style={{ marginTop: 20 }}>
+        <div className="section-title">
+          <CloudLightning size={15} /> Eventos do Agente (Pings e Instruções)
+          <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
+            últimos {logs.length}
+          </span>
+        </div>
+        {logs.length === 0 ? (
+          <div className="empty-state" style={{ padding: "32px" }}>
+            <div className="empty-icon">📡</div>
+            <div>Nenhum evento registrado ainda. O agente deve enviar pings a cada 5 minutos.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 300, overflowY: "auto", paddingRight: 8 }}>
+            {logs.map((log: any) => (
+              <div key={log.id} style={{
+                display: "grid", gridTemplateColumns: "140px auto 1fr",
+                alignItems: "center", gap: 12,
+                background: "var(--surface-2, rgba(255,255,255,0.02))",
+                border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+                padding: "10px 16px"
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+                  {fmtDate(log.created_at)}
+                </div>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, textTransform: "uppercase", padding: "2px 6px", borderRadius: 4,
+                  background: log.event_type === "ping" ? "rgba(16, 185, 129, 0.15)" : "rgba(59, 130, 246, 0.15)",
+                  color: log.event_type === "ping" ? "#10b981" : "#3b82f6"
+                }}>
+                  {log.event_type}
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
+                  {log.message}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Modal: Adicionar Equipamento ── */}
+      {showEqModal && (
+        <Modal title={editingEqId ? "Editar Equipamento" : "Adicionar Equipamento"} onClose={() => setShowEqModal(false)}>
+          <div className="form-group">
+            <label className="form-label">Tipo de Equipamento *</label>
+            {eqForm.tipo === "CAMERA" as any ? (
+              <div style={{ padding: "10px", background: "rgba(255,255,255,0.05)", borderRadius: 6, marginBottom: 16 }}>📷 Câmera (RTSP)</div>
+            ) : (
+            <select className="form-input" value={eqForm.tipo}
+              onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: e.target.value === "DEFENSE" ? "C:\\Intelbras Defense IA\\Intelbras Defense IA Server\\bak\\db_backup" : "", fabricante_olt: "UNM2000" })}>
+              {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE_EMOJI[t]} {t}</option>)}
+            </select>
+            )}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Nome *</label>
+            <input className="form-input" type="text"
+              placeholder={`${eqForm.tipo}_Cliente1`}
+              value={eqForm.name} onChange={e => setEqForm({ ...eqForm, name: e.target.value })} />
+          </div>
+          {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA") && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Endereço IP ou Host *</label>
+                <input className="form-input" type="text" placeholder={eqForm.tipo === "PABX" ? "https://192.168.12.2" : "192.168.1.100"}
+                  value={eqForm.ip} onChange={e => setEqForm({ ...eqForm, ip: e.target.value })} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Usuário *</label>
+                  <input className="form-input" type="text"
+                    value={eqForm.username} onChange={e => setEqForm({ ...eqForm, username: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Senha {editingEqId ? <span style={{fontWeight:400, color:'var(--text-muted)'}}>(vazio = manter atual)</span> : '*'}</label>
+                  <input className="form-input" type="password"
+                    value={eqForm.password} onChange={e => setEqForm({ ...eqForm, password: e.target.value })} />
+                </div>
+              </div>
+              {eqForm.tipo === "CAMERA" && (
+                <div className="form-group" style={{ marginTop: 12 }}>
+                  <label className="form-label">Modelo / Fabricante</label>
+                  <select className="form-input" value={(eqForm as any).modelo || "Hikvision"} onChange={e => setEqForm({ ...eqForm, modelo: e.target.value } as any)}>
+                    <option value="Hikvision">Hikvision / Outro</option>
+                    <option value="Intelbras">Intelbras</option>
+                    <option value="Grandstream">Grandstream</option>
+                    <option value="ONVIF">ONVIF Genérico</option>
+                  </select>
+                </div>
+              )}
+              {eqForm.tipo === "NVR" && (
+                <div className="form-group" style={{ marginTop: 12 }}>
+                  <label className="form-label">Marca do NVR</label>
+                  <select className="form-input" value={(eqForm as any).marca || "Hikvision"} onChange={e => setEqForm({ ...eqForm, marca: e.target.value } as any)}>
+                    <option value="Hikvision">Hikvision / Intelbras / Outros</option>
+                    <option value="Motorola">Motorola</option>
+                  </select>
+                </div>
+              )}
+            </>
+          )}
+          {eqForm.tipo === "OLT" && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Sistema da OLT *</label>
+                <select
+                  className="form-input"
+                  value={eqForm.fabricante_olt}
+                  onChange={e =>
+                    setEqForm({
+                      ...eqForm,
+                      fabricante_olt: e.target.value
+                    })
+                  }
+                >
+                  <option value="UNM2000">🔵 UNM2000</option>
+                  <option value="HUAWEI">🔴 HUAWEI</option>
+                  <option value="VSOL">🟢 VSOL</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI")
+                    ? "Endereço IP da OLT *"
+                    : "Pasta de Origem dos Backups *"}
+                </label>
+
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder={
+                    (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI")
+                      ? "192.168.1.100"
+                      : "C:\\Users\\Helena\\Documents"
+                  }
+                  value={
+                    (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") 
+                      ? eqForm.ip 
+                      : eqForm.pasta_origem
+                  }
+                  onChange={e => {
+                    if (eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") {
+                      setEqForm({ ...eqForm, ip: e.target.value })
+                    } else {
+                      setEqForm({ ...eqForm, pasta_origem: e.target.value })
+                    }
+                  }}
+                />
+              </div>
+
+              {(eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI") && (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 12,
+                    marginTop: 12
+                  }}
+                >
+                  <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label">
+                        Usuário *
+                      </label>
+
+                      <input
+                        className="form-input"
+                        type="text"
+                        value={eqForm.username}
+                        onChange={e =>
+                          setEqForm({
+                            ...eqForm,
+                            username: e.target.value
+                          })
+                        }
+                      />
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
 
-      {/* Backup history */}
-      <div className="section-title"><Archive size={15} />Histórico de Backups</div>
-      {backups.length === 0 ? (
-        <div className="empty-state" style={{ padding: "32px" }}>
-          <div className="empty-icon">📦</div>
-          <div>Nenhum backup realizado ainda.</div>
-        </div>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Data/Hora</th><th>Status</th><th>Origem</th><th>ZIP</th><th>Email</th></tr></thead>
-            <tbody>
-              {backups.map(b => (
-                <tr key={b.id}>
-                  <td className="text-sm">{fmtDate(b.started_at)}</td>
-                  <td><StatusBadge status={b.status} /></td>
-                  <td className="text-secondary text-sm">{b.trigger}</td>
-                  <td className="text-secondary text-sm">
-                    {b.zip_size ? `${(b.zip_size / 1024 / 1024).toFixed(1)} MB` : "—"}
-                  </td>
-                  <td>{b.email_sent ? "✅" : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label">
+                        Senha *
+                      </label>
 
-      {/* NVR Modal */}
-      {showNVRModal && (
-        <Modal title="Adicionar NVR" onClose={() => setShowNVRModal(false)}>
-          {(["name","ip","username","password"] as const).map(f => (
-            <div className="form-group" key={f}>
-              <label className="form-label">
-                {f === "name" ? "Nome" : f === "ip" ? "Endereço IP" : f === "username" ? "Usuário" : "Senha"}
-              </label>
-              <input className="form-input" type={f === "password" ? "password" : "text"}
-                placeholder={f === "name" ? "NVR_Loja1" : f === "ip" ? "192.168.1.100" : ""}
-                value={nvrForm[f]} onChange={e => setNvrForm({ ...nvrForm, [f]: e.target.value })} />
+                      <input
+                        className="form-input"
+                        type="password"
+                        value={eqForm.password}
+                        onChange={e =>
+                          setEqForm({
+                            ...eqForm,
+                            password: e.target.value
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "var(--text-muted)",
+                    marginTop: 4,
+                    display: "block"
+                  }}
+                >
+                  {(eqForm.fabricante_olt === "UNM2000")
+                    ? `Pasta onde o ${eqForm.fabricante_olt} exporta os arquivos de backup.`
+                    : "Endereço IP, usuário e senha utilizados para acessar a OLT via SSH."
+                  }
+                </span>
+            </>
+          )}
+          {eqForm.tipo === "DIGIFORT" && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Pasta de Origem do Digifort *</label>
+                <input className="form-input" type="text"
+                  placeholder="C:\Digifort\Backup"
+                  value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Caminho do CSV Exportado (Opcional)</label>
+                <input className="form-input" type="text"
+                  placeholder="export_cameras.csv"
+                  value={(eqForm as any).caminho_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_csv: e.target.value } as any)} />
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Arquivo CSV com a descrição das câmeras gerado pelo Digifort.
+                </span>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Caminho do LOG de Gravações (Opcional)</label>
+                <input className="form-input" type="text"
+                  placeholder="C:\...\quedas_cameras.csv"
+                  value={(eqForm as any).caminho_log_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_log_csv: e.target.value } as any)} />
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Arquivo CSV onde o Agente Webhook salva/lê o histórico (quedas_cameras.csv).
+                </span>
+              </div>
+            </>
+          )}
+          {eqForm.tipo === "DEFENSE" && (
+            <div className="form-group">
+              <label className="form-label">Pasta de Origem do Backup *</label>
+              <input className="form-input" type="text"
+                placeholder="C:\Intelbras Defense IA\...\db_backup"
+                value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                Pasta onde o Defense IA salva os arquivos gerados no backup automático.
+              </span>
             </div>
-          ))}
+          )}
           <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
-            <button className="btn btn-secondary" onClick={() => setShowNVRModal(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={handleAddNVR} disabled={saving}>
-              {saving ? <span className="spinner spinner-sm" /> : <><Plus size={15} /> Adicionar</>}
+            <button className="btn btn-secondary" onClick={() => setShowEqModal(false)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={handleSaveEquipamento} disabled={saving}>
+              {saving ? <span className="spinner spinner-sm" /> : (editingEqId ? "Salvar" : <><Plus size={15} /> Adicionar</>)}
             </button>
           </div>
         </Modal>
       )}
 
-      {/* Edit Modal */}
+      {/* ── Modal: Editar Cliente ── */}
       {showEditModal && (
         <Modal title="Editar Cliente" onClose={() => setShowEditModal(false)}>
           <div className="form-group">
@@ -316,25 +1369,28 @@ export default function ClientDetail() {
             <input className="form-input" value={editForm.name || ""}
               onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
           </div>
-          <div className="flex gap-3">
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">Hora</label>
-              <input className="form-input" type="number" min={0} max={23} value={editForm.backup_hour ?? 2}
-                onChange={e => setEditForm({ ...editForm, backup_hour: +e.target.value })} />
-            </div>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">Minuto</label>
-              <input className="form-input" type="number" min={0} max={59} value={editForm.backup_minute ?? 0}
-                onChange={e => setEditForm({ ...editForm, backup_minute: +e.target.value })} />
+          <div className="form-group">
+            <label className="form-label">Horário do Backup Automático</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label className="form-label" style={{ fontSize: 11 }}>Hora (0-23)</label>
+                <input className="form-input" type="number" min={0} max={23} value={editForm.backup_hour ?? 2}
+                  onChange={e => setEditForm({ ...editForm, backup_hour: +e.target.value })} />
+              </div>
+              <div>
+                <label className="form-label" style={{ fontSize: 11 }}>Minuto (0-59)</label>
+                <input className="form-input" type="number" min={0} max={59} value={editForm.backup_minute ?? 0}
+                  onChange={e => setEditForm({ ...editForm, backup_minute: +e.target.value })} />
+              </div>
             </div>
           </div>
           <div className="form-group">
-            <label className="form-label">E-mails (separados por vírgula)</label>
+            <label className="form-label">E-mails de Notificação (separados por vírgula)</label>
             <input className="form-input" value={editForm.email_to as unknown as string || ""}
               onChange={e => setEditForm({ ...editForm, email_to: e.target.value as unknown as string[] })} />
           </div>
           <div className="form-group">
-            <label className="form-label">Nova senha do ZIP (vazio = manter atual)</label>
+            <label className="form-label">Nova senha do ZIP <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(vazio = manter atual)</span></label>
             <input className="form-input" type="password" value={editForm.zip_password || ""}
               onChange={e => setEditForm({ ...editForm, zip_password: e.target.value })} />
           </div>
@@ -347,12 +1403,14 @@ export default function ClientDetail() {
         </Modal>
       )}
 
-      {/* Rotated key modal */}
+      {/* ── Modal: Nova API Key ── */}
       {rotatedKey && (
         <Modal title="Nova API Key gerada" onClose={() => setRotatedKey(null)}>
-          <div style={{ background: "var(--warn-bg)", border: "1px solid rgba(245,158,11,0.3)",
+          <div style={{
+            background: "var(--warn-bg)", border: "1px solid rgba(245,158,11,0.3)",
             borderRadius: "var(--radius-sm)", padding: "12px 16px", marginBottom: 20,
-            color: "var(--warn)", fontSize: 13 }}>
+            color: "var(--warn)", fontSize: 13
+          }}>
             ⚠️ Copie agora. Não será exibida novamente. Atualize o agent.conf no cliente.
           </div>
           <div className="api-key-display" style={{ borderColor: "rgba(245,158,11,0.4)" }}>
@@ -363,11 +1421,13 @@ export default function ClientDetail() {
             onClick={() => setRotatedKey(null)}>Entendi</button>
         </Modal>
       )}
-      {/* Recording Status Modal */}
+
+      {/* ── Modal: Status de Gravação ── */}
       {showRecordingModal.show && (
-        <Modal wide={true} title={`Gravação - ${showRecordingModal.nvrName} (${fmtDate(client.last_backup_at)})`} onClose={() => setShowRecordingModal({show: false, nvrName: "", cameras: []})}>
+        <Modal wide={true} title={`Gravação — ${showRecordingModal.nvrName} (${fmtDate(client.last_backup_at)})`}
+          onClose={() => setShowRecordingModal({ show: false, nvrName: "", cameras: [] })}>
           {showRecordingModal.cameras.length === 0 ? (
-             <div className="empty-state">Sem dados de gravação disponíveis.</div>
+            <div className="empty-state">Sem dados de gravação disponíveis.</div>
           ) : (
             <div className="table-wrap">
               <table>
@@ -382,30 +1442,21 @@ export default function ClientDetail() {
                 </thead>
                 <tbody>
                   {showRecordingModal.cameras.map((cam, i) => {
-                    // Fallbacks para clientes antigos
                     let rede = cam.status_comunicacao;
                     if (!rede) rede = cam.online ? "ONLINE" : (cam.online === false ? "OFFLINE" : "DESCONHECIDO");
-                    
                     let gravacao = cam.status_gravacao;
                     if (!gravacao) {
-                        const gravouHoje = cam.mapa ? cam.mapa.endsWith("█") : cam.total_dias > 0;
-                        gravacao = gravouHoje ? "COM_GRAVACAO" : "SEM_GRAVACAO";
+                      const gravouHoje = cam.mapa ? cam.mapa.endsWith("█") : cam.total_dias > 0;
+                      gravacao = gravouHoje ? "COM_GRAVACAO" : "SEM_GRAVACAO";
                     }
-
                     return (
-                    <tr key={i}>
-                      <td>{cam.nome || `Canal ${cam.canal}`}</td>
-                      <td>
-                        <StatusBadge status={rede} />
-                      </td>
-                      <td>
-                        <StatusBadge status={gravacao} />
-                      </td>
-                      <td>{cam.total_dias || 0}/15</td>
-                      <td style={{ letterSpacing: "1px" }}>
-                        <MiniCalendar mapStr={cam.mapa || ""} referenceDate={client.last_backup_at} />
-                      </td>
-                    </tr>
+                      <tr key={i}>
+                        <td>{cam.nome || `Canal ${cam.canal}`}</td>
+                        <td><StatusBadge status={rede} /></td>
+                        <td><StatusBadge status={gravacao} /></td>
+                        <td>{cam.total_dias || 0}/15</td>
+                        <td><MiniCalendar mapStr={cam.mapa || ""} referenceDate={client.last_backup_at} /></td>
+                      </tr>
                     );
                   })}
                 </tbody>
@@ -414,7 +1465,16 @@ export default function ClientDetail() {
           )}
         </Modal>
       )}
+
+      {/* ── NVR Cameras Gallery Modal ── */}
+      {showNVRCamerasModal.show && (
+        <NVRCamerasGalleryModal
+          clientId={id!}
+          nvrId={showNVRCamerasModal.nvrId}
+          nvrName={showNVRCamerasModal.nvrName}
+          onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "" })}
+        />
+      )}
     </>
   );
 }
-

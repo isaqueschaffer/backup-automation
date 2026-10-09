@@ -25,12 +25,12 @@ def _build_backup_section(nvr_results: List[dict], overall: str) -> str:
     )
 
     return (
-        f"1. Backup dos NVRs\n"
+        f"\n2. Backup de Equipamentos (NVR, PABX, Mikrotik...)\n"
         f"{'─' * 40}\n"
-        f"Backup automático de NVR\n"
-        f"Total de NVRs: {len(nvr_results)}\n"
-        f"Status: {overall}\n\n"
-        f"Resultado por NVR:\n{lines}\n"
+        f"Backup automático de configurações\n"
+        f"Total de equipamentos: {len(nvr_results)}\n"
+        f"Status geral: {overall}\n\n"
+        f"Resultado por equipamento:\n{lines}\n"
     )
 
 
@@ -80,10 +80,10 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
             problemas_por_nvr[nvr_nome] = problemas
 
     section = (
-        f"\n2. Verificação de Câmeras e Gravações\n"
+        f"\n1. Verificação de Câmeras dos CFTVs\n"
         f"{'─' * 40}\n"
-        f"Verificação das câmeras de todos os NVRs\n"
-        f"Total de NVRs: {total_nvrs}\n"
+        f"Verificação das câmeras dos equipamentos compatíveis\n"
+        f"Total de equipamentos verificados (com câmeras): {len(problemas_por_nvr) if problemas_por_nvr else (total_nvrs if total_cameras > 0 else 0)}\n"
         f"Total de câmeras: {total_cameras}\n"
         f"Câmeras online: {cameras_online}\n"
         f"Câmeras offline: {cameras_offline}\n"
@@ -95,8 +95,10 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
         for nvr_nome, probs in problemas_por_nvr.items():
             section += f"\n  {nvr_nome}:\n"
             section += "\n".join(probs) + "\n"
-    else:
+    elif total_cameras > 0:
         section += f"\n✅ Todas as câmeras estão online e gravando.\n"
+    else:
+        section += f"\nℹ️ Nenhum equipamento do tipo CFTV verificado neste ciclo.\n"
 
     return section
 
@@ -106,12 +108,12 @@ def _build_result_section(nvr_results: List[dict]) -> str:
     has_cameras = any(r.get("cameras") for r in nvr_results)
 
     backup_ok = all(r["status"] in ("OK",) for r in nvr_results)
-    has_motorola = any(r["status"] == "SEM_ARQUIVOS" for r in nvr_results)
+    has_unsupported_backup = any(r["status"] == "SEM_ARQUIVOS" for r in nvr_results)
     
     if backup_ok:
         backup_icon = "✅ Concluído"
-    elif has_motorola and all(r["status"] in ("OK", "SEM_ARQUIVOS") for r in nvr_results):
-        backup_icon = "ℹ️ Concluído (NVR Motorola não suporta backup de arquivo)"
+    elif has_unsupported_backup and all(r["status"] in ("OK", "SEM_ARQUIVOS") for r in nvr_results):
+        backup_icon = "ℹ️ Concluído (alguns equipamentos não suportam backup de arquivo)"
     else:
         backup_icon = "⚠️ Concluído com ressalvas"
 
@@ -147,9 +149,9 @@ def _build_result_section(nvr_results: List[dict]) -> str:
     return (
         f"\n3. Resultado do Serviço\n"
         f"{'─' * 40}\n"
-        f"Backup dos NVRs: {backup_icon}\n"
-        f"Verificação das câmeras: {cam_icon}\n"
-        f"Verificação das gravações: {rec_icon}\n"
+        f"Backup das configurações: {backup_icon}\n"
+        f"Monitoramento (Câmeras): {cam_icon}\n"
+        f"Monitoramento (Gravações): {rec_icon}\n"
     )
 
 
@@ -203,20 +205,23 @@ def send_backup_report(
     msg = EmailMessage()
     msg["From"] = smtp_email
     msg["To"] = ", ".join(recipients)
-    msg["Subject"] = f"Relatório de Backup e Verificação de CFTV — {client_name} — {date_str}"
+    msg["Subject"] = f"{client_name} POP - Verificação de câmeras e Backup dos equipamentos — {date_str}"
 
     # ── Header ──
     body = (
         f"{'═' * 50}\n"
-        f"  Relatório de Backup e Verificação de CFTV\n"
+        f"  {client_name} POP - Verificação de câmeras e Backup dos equipamentos\n"
         f"{'═' * 50}\n\n"
         f"Cliente: {client_name}\n"
         f"Data e hora: {date_hora_str}\n\n"
         f"Serviço executado:\n"
-        f"Backup das configurações dos NVRs e verificação do status das câmeras e das gravações.\n\n"
+        f"Backup das configurações dos equipamentos de rede/CFTV e verificação de status operacional.\n\n"
     )
 
-    # ── Section 1: Backup ──
+    # ── Section 1: Câmeras e Gravações ──
+    body += _build_camera_section(nvr_results)
+
+    # ── Section 2: Backup ──
     body += _build_backup_section(nvr_results, overall)
 
     # ── Download links / attachment ──
@@ -241,8 +246,6 @@ def send_backup_report(
     elif zip_path and not attach:
         body += f"\n  Arquivado no servidor: {zip_path.name}\n"
 
-    # ── Section 2: Câmeras e Gravações ──
-    body += _build_camera_section(nvr_results)
 
     # ── Section 3: Resultado do Serviço ──
     body += _build_result_section(nvr_results)
