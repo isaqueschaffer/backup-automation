@@ -726,6 +726,15 @@ de dados existentes, rollout gradual e plano de rollback.
 
 ## 16. Architecture Changelog
 
+### [2026-10-09] — Agente 1.1.3: Captura de imagem da noite via histórico ISAPI e Galeria unificada
+
+**Alteração:** Agente busca trechos de gravação na madrugada via ISAPI (`buscar_trechos`) antes de tentar baixar a imagem via RTSP, evitando tentativas cegas (e timeouts) em NVRs que não têm gravação. A galeria do NVR agora une os dados da tabela `nvr_cameras` com `last_recording_status`, listando todas as câmeras gravadas (mesmo as que falharam na imagem).
+**Antes:** O ffmpeg tentava baixar 15s de RTSP em horários fixos. Câmeras sem gravação ficavam até 15s bloqueadas. A galeria só mostrava câmeras com imagem capturada com sucesso (`nvr_cameras`).
+**Depois:** A galeria lista todas as câmeras. Falhas mostram o motivo (traduzido do log do ffmpeg).
+**Arquivos:** `agent/src/nvr/hikvision/recordings.py`, `agent/src/camera/rtsp_client.py`, `agent/src/application/backup_job.py`, `agent/src/application/api_client.py`, `server/api/schemas.py`, `server/api/routers/equipamentos.py`, `server/dashboard/src/pages/ClientDetail.tsx`
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-09] — Agente 1.1.2: ping em cadência fixa + telemetria sem NaN
 
 **Alteracao:** Ping do agente movido para thread própria com cadência fixa de 15s (início a início); telemetria sanitizada; "Próximo contato (estimado)" sincronizado com o ping real.

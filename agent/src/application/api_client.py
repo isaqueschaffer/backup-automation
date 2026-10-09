@@ -130,7 +130,7 @@ def upload_night_image(conf: dict, payload: dict) -> bool:
     try:
         r = requests.post(
             f"{conf['server_url']}/api/v1/agent/nvr-cameras/night-image",
-            json=payload, headers=headers, timeout=20, verify=False,
+            json=payload, headers=headers, timeout=60, verify=False,
         )
         r.raise_for_status()
         data = r.json()

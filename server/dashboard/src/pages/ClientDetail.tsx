@@ -151,7 +151,7 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
   const [cameras, setCameras] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [zoomImage, setZoomImage] = useState<{ src: string, title: string } | null>(null);
-  const [selectedCamId, setSelectedCamId] = useState<string | null>(null);
+  const [selectedCanal, setSelectedCanal] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchCams = async () => {
@@ -160,7 +160,7 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
         const res = await api.get(`/clients/${clientId}/equipamentos/${nvrId}/cameras`);
         setCameras(res.data);
         if (res.data && res.data.length > 0) {
-          setSelectedCamId(res.data[0].id);
+          setSelectedCanal(res.data[0].canal);
         }
       } catch (e) {
         console.error("Error fetching cameras:", e);
@@ -187,14 +187,14 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
         canal, nome, image_base64: dataRtsp.image_base64
       });
       const savedCam = resSave.data;
-      setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64 } : c));
+      setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64, id: savedCam.id } : c));
     } catch (e: any) {
       alert(e.response?.data?.detail || "Erro ao comunicar com o servidor.");
     }
     setTestingCanal(null);
   };
 
-  const selectedCam = cameras.find(c => c.id === selectedCamId);
+  const selectedCam = cameras.find(c => c.canal === selectedCanal);
 
   return (
     <>
@@ -208,27 +208,42 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
             {/* Sidebar with Channels */}
             <div style={{ width: "260px", borderRight: "1px solid var(--border)", overflowY: "auto", padding: "16px 0", background: "var(--surface-50)" }}>
               <div style={{ padding: "0 16px", marginBottom: 12, fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em" }}>
-                CANAIS GRAVADOS ({cameras.length})
+                CANAIS ({cameras.length})
               </div>
               {cameras.map(cam => {
-                const isSelected = selectedCamId === cam.id;
+                const isSelected = selectedCanal === cam.canal;
                 return (
                   <div 
-                    key={cam.id} 
+                    key={cam.canal} 
                     style={{ 
-                      padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+                      padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "flex-start", gap: 12,
                       background: isSelected ? "var(--primary-light)" : "transparent",
                       borderLeft: `4px solid ${isSelected ? "var(--primary)" : "transparent"}`,
                       transition: "all 0.2s"
                     }}
-                    onClick={() => setSelectedCamId(cam.id)}
+                    onClick={() => setSelectedCanal(cam.canal)}
                     onMouseEnter={(e) => { if(!isSelected) e.currentTarget.style.background = "var(--surface-hover)" }}
                     onMouseLeave={(e) => { if(!isSelected) e.currentTarget.style.background = "transparent" }}
                   >
-                    <Video size={16} color={isSelected ? "var(--primary)" : "var(--text-muted)"} />
-                    <span style={{ fontWeight: isSelected ? 600 : 500, color: isSelected ? "var(--primary-dark)" : "var(--text)" }}>
-                      {cam.nome || `Canal ${cam.canal}`}
-                    </span>
+                    <Video size={16} color={isSelected ? "var(--primary)" : "var(--text-muted)"} style={{ marginTop: 2 }} />
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontWeight: isSelected ? 600 : 500, color: isSelected ? "var(--primary-dark)" : "var(--text)" }}>
+                        {cam.nome || `Canal ${cam.canal}`}
+                      </span>
+                      <div style={{ fontSize: 11, marginTop: 4, display: "flex", alignItems: "center" }}>
+                        {cam.status_comunicacao === "OFFLINE" ? (
+                          <span style={{ background: "var(--err-bg)", color: "var(--err)", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>OFFLINE</span>
+                        ) : cam.captura_status === "OK" ? (
+                          <span style={{ color: "var(--ok)", fontWeight: 500 }}>Imagem capturada</span>
+                        ) : cam.captura_status === "FALHA" ? (
+                          <span style={{ color: "var(--err)", fontWeight: 500 }} title={cam.captura_motivo}>Falhou: {cam.captura_motivo?.substring(0, 15)}...</span>
+                        ) : cam.captura_status === "SEM_GRAVACAO" ? (
+                          <span style={{ color: "var(--text-muted)" }}>Sem gravação na madrugada</span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)" }}>Sem imagem</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -242,7 +257,7 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
                     <div>
                       <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>{selectedCam.nome || `Canal ${selectedCam.canal}`}</h2>
                       <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: 14 }}>
-                        Último backup: {selectedCam.night_image_date ? fmtDate(selectedCam.night_image_date) : "Desconhecido"}
+                        Último backup: {selectedCam.captura_horario || selectedCam.night_image_date ? fmtDate(selectedCam.captura_horario || selectedCam.night_image_date) : "Desconhecido"}
                       </p>
                     </div>
                     <button 
@@ -270,7 +285,7 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
                       label="ÚLTIMO BACKUP GRAVADO (NOITE)"
                       base64={selectedCam.night_image_base64}
                       alt="Night"
-                      emptyText="Sem imagem do último backup"
+                      emptyText={selectedCam.captura_motivo || "Sem imagem (motivo não informado)"}
                       onZoom={(src) => setZoomImage({ src, title: `${selectedCam.nome || `Canal ${selectedCam.canal}`} - ÚLTIMO BACKUP` })}
                     />
                   </div>

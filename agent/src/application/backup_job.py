@@ -119,31 +119,46 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
         logging.info("  Iniciando extração de imagens noturnas (Playback RTSP) para os canais gravados...")
         for cam_st in cameras_status:
             dias_gravacao = cam_st.get("dias_com_gravacao", [])
-            if dias_gravacao:
-                # Pega a data mais recente com gravação (o último item na lista, ou ordenamos só para garantir)
-                dias_ordenados = sorted(dias_gravacao)
-                data_alvo = dias_ordenados[-1]
+            if not dias_gravacao:
+                cam_st["imagem_noite"] = {"status": "SEM_GRAVACAO", "motivo": "Sem gravação nos últimos 15 dias", "horario": None}
+                logging.warning(f"    [FALHA] Canal {cam_st['canal']}: Sem gravação nos últimos 15 dias.")
+                continue
+
+            dias_ordenados = sorted(dias_gravacao)
+            data_alvo = dias_ordenados[-1]
+            
+            try:
+                ret = capture_night_image(ip, user, pwd, cam_st["canal"], data_alvo)
+                cam_st["imagem_noite"] = {
+                    "status": ret["status"],
+                    "motivo": ret["motivo"],
+                    "horario": ret["horario"]
+                }
                 
-                try:
-                    b64_img = capture_night_image(ip, user, pwd, cam_st["canal"], data_alvo)
-                    if b64_img:
-                        dt_iso = f"{data_alvo}T02:00:00"
-                        payload = {
-                            "nvr_name": nome,
-                            "canal": cam_st["canal"],
-                            "nome": cam_st["nome"],
-                            "image_base64": b64_img,
-                            "night_image_date": dt_iso
-                        }
-                        sucesso_up = upload_night_image(conf, payload)
-                        if sucesso_up:
-                            logging.info(f"    [OK] Imagem noturna do canal {cam_st['canal']} ({data_alvo}) enviada.")
-                        else:
-                            logging.warning(f"    [ERRO] Falha ao enviar imagem noturna do canal {cam_st['canal']} para o servidor.")
+                b64_img = ret["image"]
+                if b64_img and ret["status"] == "OK":
+                    payload = {
+                        "nvr_name": nome,
+                        "canal": cam_st["canal"],
+                        "nome": cam_st["nome"],
+                        "image_base64": b64_img,
+                        "night_image_date": ret["horario"]
+                    }
+                    sucesso_up = upload_night_image(conf, payload)
+                    if sucesso_up:
+                        logging.info(f"    [OK] Imagem noturna do canal {cam_st['canal']} ({ret['horario']}) enviada.")
                     else:
-                        logging.warning(f"    [FALHA] Não foi possível extrair o frame do canal {cam_st['canal']} (RTSP vazio).")
-                except Exception as e:
-                    logging.warning(f"    [ERRO] Exceção ao capturar imagem do canal {cam_st['canal']}: {e}")
+                        cam_st["imagem_noite"]["status"] = "FALHA"
+                        cam_st["imagem_noite"]["motivo"] = "Falha ao enviar a imagem ao servidor"
+                        logging.warning(f"    [ERRO] Falha ao enviar imagem noturna do canal {cam_st['canal']} para o servidor.")
+                else:
+                    logging.warning(f"    [FALHA] Canal {cam_st['canal']}: {ret['motivo']}")
+            except Exception as e:
+                cam_st["imagem_noite"] = {"status": "FALHA", "motivo": str(e), "horario": None}
+                logging.warning(f"    [ERRO] Exceção ao capturar imagem do canal {cam_st['canal']}: {e}")
+    elif tipo_nvr == "MOTOROLA" and cameras_status:
+        for cam_st in cameras_status:
+            cam_st["imagem_noite"] = {"status": "NAO_SUPORTADO", "motivo": "Equipamento Motorola não suporta captura noturna", "horario": None}
 
     return {"nome": nome, "status": status, "cameras": cameras_status}
 

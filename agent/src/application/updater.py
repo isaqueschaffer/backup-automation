@@ -20,7 +20,7 @@ import requests
 
 logger = logging.getLogger("trilan.updater")
 
-CURRENT_VERSION = "1.1.2"   # <-- Atualizar manualmente a cada build
+CURRENT_VERSION = "1.1.3"   # <-- Atualizar manualmente a cada build
 _UPDATE_CHECK_INTERVAL = 3600  # segundos entre verificações de update (1h)
 _last_update_check: float = 0.0
 
