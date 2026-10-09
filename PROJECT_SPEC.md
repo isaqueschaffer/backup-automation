@@ -631,7 +631,7 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 | Digifort | DIGIFORT | — | — |
 | Intelbras Defense | DEFENSE | src/vms/defense.py | API / HTTP |
 | Misto / Custom | MIXED | — | — |
-| Câmera IP (Teste RTSP)| CAMERA | server/api/routers/rtsp_test.py| RTSP (TCP) |
+| Câmera IP (Teste RTSP)| CAMERA | server/api/routers/equipamentos.py + agent.py (`/rtsp-result`), agent/src/camera/rtsp_client.py | RTSP (TCP) |
 
 ---
 
@@ -716,11 +716,7 @@ de dados existentes, rollout gradual e plano de rollback.
 | IC-002 | PyInstaller + pystray | SyntaxWarning: return in a finally block | Inofensivo, warning apenas |
 | IC-003 | PyInstaller + pycparser | pycparser.lextab e yacctab nao encontrados | Inofensivo, warning apenas |
 | IC-004 | OTA Tray em agentes <=1.0.5 | Agentes antigos nao tem logica de download/substituicao do Tray | Conhecido e aceito |
-| IC-005 | agent_update.py edit_version | PUT /api/v1/admin/agent-version/{id} nao aceita url_tray e sha256_tray no schema AgentVersionUpdate | **PENDENTE CORRECAO** |
-
-> **IC-005 REQUER CORRECAO:** O schema `AgentVersionUpdate` em `schemas.py`
-> precisa incluir `url_tray: Optional[str] = None` e `sha256_tray: Optional[str] = None`.
-> O frontend ja envia esses campos mas o schema Pydantic os ignora silenciosamente.
+| IC-005 | agent_update.py edit_version | PUT /api/v1/admin/agent-version/{id} nao aceitava url_tray e sha256_tray | Resolvido (schema `AgentVersionUpdate` inclui os campos; `Settings.tsx` usa `editAgentVersion` do `client.ts`) |
 
 ---
 
@@ -792,7 +788,17 @@ de dados existentes, rollout gradual e plano de rollback.
 
 ---
 
-## 9. Fluxo de Atualização de Versão (Release)
+### [2026-10-09] — Correcao da edicao de versoes OTA no Dashboard
+
+**Alteracao:** `Settings.tsx` chamava `PUT /api/v1/admin/agent-versions/{id}` (plural, rota inexistente) via `fetch` cru, sem `API_BASE`, exibindo sucesso mesmo com 404.
+**Depois:** Usa `editAgentVersion` de `api/client.ts` (`PUT /admin/agent-version/{id}`). IC-005 encerrado.
+**Arquivos:** `server/dashboard/src/pages/Settings.tsx`
+**Breaking Change:** Nao
+**Branch:** isaque
+
+---
+
+## 17. Fluxo de Atualização de Versão (Release)
 
 Quando uma nova versão do Agente Trilan for lançada, certifique-se de atualizar o número da versão nos seguintes arquivos:
 

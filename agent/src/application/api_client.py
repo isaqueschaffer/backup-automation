@@ -55,6 +55,10 @@ def upload_night_image(conf: dict, payload: dict) -> bool:
             json=payload, headers=headers, timeout=20, verify=False,
         )
         r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "error":
+            logging.error(f"Erro na API (night image): {data.get('message')}")
+            return False
         return True
     except Exception as e:
         logging.error(f"Erro ao enviar night image: {e}")

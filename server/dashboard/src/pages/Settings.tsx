@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchSettings, updateSettings, fetchAgentVersions, createAgentVersion, toggleAgentVersion, deleteAgentVersion } from "../api/client";
+import { fetchSettings, updateSettings, fetchAgentVersions, createAgentVersion, toggleAgentVersion, deleteAgentVersion, editAgentVersion } from "../api/client";
 import { useToast } from "../components/Toast";
 import { Save, Mail, Lock, Database, UploadCloud, Trash2, Power, PowerOff } from "lucide-react";
 
@@ -38,12 +38,7 @@ function OtaManager() {
 
   const handleEditSave = async (id: string) => {
     try {
-      // Aqui usamos a rota/função correspondente, garantindo envio dos novos campos
-      await fetch(`/api/v1/admin/agent-versions/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + localStorage.getItem("trilan_token") },
-        body: JSON.stringify(editForm)
-      });
+      await editAgentVersion(id, editForm);
       toast("Versão atualizada!", "success");
       setEditingId(null);
       loadVersions();
