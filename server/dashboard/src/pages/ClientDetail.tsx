@@ -16,6 +16,9 @@ import {
   Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning, Image
 } from "lucide-react";
 
+// Intervalo de ping do agente (agent/service.py)
+const AGENT_PING_INTERVAL_MS = 15 * 1000;
+
 function fmtDate(s: string | null) {
   if (!s) return "—";
   const str = s.endsWith("Z") ? s : s + "Z";
@@ -389,6 +392,8 @@ export default function ClientDetail() {
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
+  // Diferença entre relógio do servidor e do navegador, para a contagem do próximo ping andar a cada segundo
+  const [serverSkewMs, setServerSkewMs] = useState(0);
 
   const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT", "DEFENSE"];
   const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️", DEFENSE: "🛡️" };
@@ -403,6 +408,7 @@ export default function ClientDetail() {
       (await import("../api/client")).fetchClientLogs(id),
     ]);
     setClient(c); setEquipamentos(eqs); setBackups(b.items); setLogs(lg);
+    if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
     if (!silent) setLoading(false);
   };
   
@@ -524,7 +530,7 @@ const buildEqPayload = () => {
   };
 
   const handleRestartAgent = async () => {
-    if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (até 5 min).")) return;
+    if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (em poucos segundos se estiver online).")) return;
     try {
       await restartAgent(id!);
       toast("Reinício agendado! O agente será reiniciado no próximo ping.", "success");
@@ -532,7 +538,7 @@ const buildEqPayload = () => {
   };
 
   const handleTriggerBackup = async () => {
-    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (até 5 min).")) return;
+    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (em poucos segundos se estiver online).")) return;
     try {
       await triggerBackup(id!);
       toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
@@ -550,12 +556,10 @@ const buildEqPayload = () => {
   let nextPingStr = "—";
   const isPendingAction = client.backup_requested || client.restart_requested;
   if (client.last_seen && isAgentOnline) {
-    // Usa current_server_time como base (relógio do servidor, não do navegador)
-    const baseMs = client.current_server_time
-      ? new Date(client.current_server_time).getTime()
-      : Date.now();
+    // Relógio do servidor (via skew) avançando com o tick de 1s do navegador
+    const baseMs = now + serverSkewMs;
     const lastSeenMs = new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime();
-    const nextPingMs = lastSeenMs + 5 * 60 * 1000;
+    const nextPingMs = lastSeenMs + AGENT_PING_INTERVAL_MS;
     const diff = Math.max(0, nextPingMs - baseMs);
     const mm = Math.floor(diff / 60000);
     const ss = Math.floor((diff % 60000) / 1000);

@@ -65,9 +65,11 @@ pending_rtsp_tasks: Dict[str, Any] = {}
 @router.post("/ping", response_model=PingResponse)
 async def ping_agent(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
     """Agent heartbeat. Uses long-polling (up to 30s) to deliver RTSP test commands instantly."""
+    # Commit imediato: o db.refresh() do long-polling abaixo descartaria um last_seen não persistido
     client.last_seen = datetime.utcnow()
+    db.commit()
     client_id_str = str(client.id)
-    
+
     # ── Wait for tasks (Long Polling up to 5s) ──
     for _ in range(5):
         # Check if there is a pending RTSP task for this client

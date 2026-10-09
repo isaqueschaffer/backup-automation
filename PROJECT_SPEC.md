@@ -168,7 +168,7 @@ trilan-nvr-backup-automation/
 ### Fluxo do Agente
 
 1. Ao iniciar: lê `agent.conf`, chama `GET /api/v1/agent/config` para obter configuração
-2. A cada 5 minutos: `POST /api/v1/agent/ping` — heartbeat + recebe flags de controle
+2. A cada 15 segundos: `POST /api/v1/agent/ping` — heartbeat + recebe flags de controle (long-polling de ate 5s no servidor; `last_seen` e commitado no inicio do ping). Agente considerado online se `last_seen` < 180s
 3. No horário agendado (ou quando flag `backup=true` no ping): executa backup completo
 4. Após backup: `POST /api/v1/agent/backup/report` + `POST /api/v1/agent/backup/upload/{id}`
 5. A cada hora (dentro do ciclo de ping): `GET /api/v1/agent/update-check` — verifica OTA
@@ -793,6 +793,16 @@ de dados existentes, rollout gradual e plano de rollback.
 **Alteracao:** `Settings.tsx` chamava `PUT /api/v1/admin/agent-versions/{id}` (plural, rota inexistente) via `fetch` cru, sem `API_BASE`, exibindo sucesso mesmo com 404.
 **Depois:** Usa `editAgentVersion` de `api/client.ts` (`PUT /admin/agent-version/{id}`). IC-005 encerrado.
 **Arquivos:** `server/dashboard/src/pages/Settings.tsx`
+**Breaking Change:** Nao
+**Branch:** isaque
+
+---
+
+### [2026-10-09] — Sincronizacao do "Ultimo contato" com o ping
+
+**Alteracao:** `ping_agent` setava `last_seen` mas o `db.refresh(client)` do long-polling descartava o valor antes do commit; "Ultimo contato" so atualizava em `/agent/config`.
+**Depois:** `last_seen` e commitado logo no inicio do ping. Dashboard calcula "Proximo contato" com intervalo de 15s (antes 5 min) e contagem regressiva continua usando o skew do relogio do servidor.
+**Arquivos:** `server/api/routers/agent.py`, `server/dashboard/src/pages/ClientDetail.tsx`, `server/dashboard/src/api/types.ts`
 **Breaking Change:** Nao
 **Branch:** isaque
 
