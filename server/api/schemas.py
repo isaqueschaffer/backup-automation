@@ -111,6 +111,9 @@ class ClientResponse(ClientBase):
     nvr_count: int = 0
     restart_requested: bool = False
     backup_requested: bool = False
+    # Calculado no servidor — nunca depende do relógio do navegador
+    is_online: bool = False
+    current_server_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 

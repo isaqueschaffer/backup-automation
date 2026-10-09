@@ -539,8 +539,8 @@ const buildEqPayload = () => {
     } catch { toast("Erro ao solicitar backup.", "error"); }
   };
 
-  const isAgentOnline = client && client.active &&
-    (client.last_seen && new Date().getTime() - new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime() < 15 * 60 * 1000);
+  // is_online calculado no servidor — elimina bugs de fuso horário no navegador
+  const isAgentOnline = !!(client && client.active && client.is_online);
 
   const copyText = (t: string) => { navigator.clipboard.writeText(t); toast("Copiado!", "success"); };
 
@@ -550,12 +550,16 @@ const buildEqPayload = () => {
   let nextPingStr = "—";
   const isPendingAction = client.backup_requested || client.restart_requested;
   if (client.last_seen && isAgentOnline) {
+    // Usa current_server_time como base (relógio do servidor, não do navegador)
+    const baseMs = client.current_server_time
+      ? new Date(client.current_server_time).getTime()
+      : Date.now();
     const lastSeenMs = new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime();
     const nextPingMs = lastSeenMs + 5 * 60 * 1000;
-    const diff = Math.max(0, nextPingMs - now);
+    const diff = Math.max(0, nextPingMs - baseMs);
     const mm = Math.floor(diff / 60000);
     const ss = Math.floor((diff % 60000) / 1000);
-    nextPingStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    nextPingStr = `${String(mm).padStart(2, "00")}:${String(ss).padStart(2, "00")}`;
   }
 
   return (

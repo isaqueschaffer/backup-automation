@@ -31,6 +31,9 @@ export interface Client {
   restart_requested?: boolean;
   backup_requested?: boolean;
   api_key?: string; // only on create/rotate
+  // Campos calculados no servidor (fonte única da verdade para status online)
+  is_online?: boolean;
+  current_server_time?: string;
 }
 
 export interface NVRResult {

@@ -1,5 +1,6 @@
 from typing import List
 from uuid import UUID
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -17,6 +18,23 @@ router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
 def _to_response(client: Client) -> ClientResponse:
     data = ClientResponse.model_validate(client)
     data.nvr_count = len(client.nvrs)
+
+    # Usa datetime com fuso UTC explícito para compatibilidade
+    # total com PostgreSQL (que retorna timestamps timezone-aware)
+    now = datetime.now(timezone.utc)
+    data.current_server_time = now
+
+    if client.active and client.last_seen:
+        # Normaliza last_seen: se vier sem fuso (naive), trata como UTC
+        last_seen = client.last_seen
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        diff_seconds = (now - last_seen).total_seconds()
+        # Agente envia ping a cada ~20s. Toleramos até 3 minutos (180s).
+        data.is_online = diff_seconds < 180
+    else:
+        data.is_online = False
+
     return data
 
 
