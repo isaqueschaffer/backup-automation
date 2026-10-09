@@ -7,6 +7,7 @@ Start:    python service.py start
 Stop:     python service.py stop
 Remove:   python service.py remove
 """
+import json
 import os
 import sys
 import traceback
@@ -112,27 +113,68 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         log(f"Servidor configurado: {conf['server_url']}")
         log(f"Client ID: {conf['client_id']}")
 
+        config_loaded = True
         log(f"Testando comunicacao com o servidor: {conf['server_url']}/api/v1/agent/config ...")
         try:
             server_cfg = fetch_server_config(conf)
             hora = int(server_cfg.get("backup_hour", 2))
             minuto = int(server_cfg.get("backup_minute", 0))
             log("COMUNICACAO BEM SUCEDIDA! Configuracoes do servidor recebidas.")
+            
+            # Start Webhook for Digifort/Defense if needed
+            for eq in server_cfg.get("equipamentos", []):
+                tipo = (eq.get("tipo") or "").upper()
+                if tipo == "DIGIFORT":
+                    # config_extra é anulável no banco; uma exceção aqui marcaria config_loaded=False e causaria restart em loop
+                    cfg_ext = eq.get("config_extra") or {}
+                    if isinstance(cfg_ext, str):
+                        try:
+                            cfg_ext = json.loads(cfg_ext)
+                        except Exception:
+                            cfg_ext = {}
+                    caminho_csv = cfg_ext.get("caminho_csv", "")
+                    caminho_log = cfg_ext.get("caminho_log_csv", "")
+                    
+                    try:
+                        from src.application.webhook_digifort import start_webhook
+                        start_webhook(caminho_csv, caminho_log)
+                        log("Agente Webhook Digifort integrado e iniciado com sucesso.")
+                    except Exception as e:
+                        log(f"Falha ao iniciar Agente Webhook Digifort: {e}", is_error=True)
+                
+                elif tipo == "DEFENSE":
+                    try:
+                        from src.application.webhook_defense import start_webhook_defense
+                        start_webhook_defense()
+                        log("Agente Webhook Defense IA iniciado com sucesso na porta 8181.")
+                    except Exception as e:
+                        log(f"Falha ao iniciar Agente Webhook Defense IA: {e}", is_error=True)
         except Exception as e:
             log(f"FALHA na comunicacao com o servidor: {e}", is_error=True)
             log("Usando horario padrao 02:00 para o proximo backup.")
             hora, minuto = 2, 0
+            config_loaded = False
 
         headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
-        self._run_loop(hora, minuto, conf["server_url"], headers, conf)
+        self._run_loop(hora, minuto, conf["server_url"], headers, conf, config_loaded)
 
-    def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict, conf: dict):
+    def _restart_service(self):
+        import subprocess
+        subprocess.Popen(
+            ["cmd", "/c", "ping 127.0.0.1 -n 4 >nul && sc start TrilanAgentNVR"],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+        )
+        self.stop_requested = True
+        win32event.SetEvent(self.hWaitStop)
+
+    def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict, conf: dict, config_loaded: bool = True):
         import agent as agent_mod
         from src.application.api_client import ping_server
         from src.application.updater import check_and_apply_update
         import time
 
         last_ping_time = 0
+        last_successful_ping = time.time()
 
         while not self.stop_requested:
             agora = datetime.now()
@@ -147,53 +189,62 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 # Envia ping a cada 15 segundos para manter status e receber comandos rápidos
                 if time.time() - last_ping_time >= 15:
                     last_ping_time = time.time()
+
                     try:
                         ping_resp = ping_server(conf)
+                        last_ping_time = time.time()
                         
                         if ping_resp:
                             log(f"Ping recebido pelo servidor. Instrucoes: {ping_resp}")
+                            
+                            if time.time() - last_successful_ping > 300 and config_loaded:
+                                log("Servidor voltou a responder apos periodo de desconexao!")
+                                
+                            last_successful_ping = time.time()
+                            
+                            # Se ligou sem internet/servidor, reinicia agora para baixar a config correta
+                            if not config_loaded:
+                                log("Servidor voltou a responder! Reiniciando servico para buscar configuracoes e horario corretos...")
+                                self._restart_service()
+                                return
+
+                            # Verifica se o servidor solicitou teste RTSP
+                            if ping_resp.get("rtsp_task"):
+                                log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
+                                from src.camera.rtsp_client import test_rtsp_camera
+                                from src.application.api_client import send_rtsp_result
+                                import threading
+                                
+                                def run_and_send_rtsp():
+                                    result = test_rtsp_camera(ping_resp["rtsp_task"])
+                                    send_rtsp_result(conf, result)
+                                    log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
+                                    
+                                threading.Thread(target=run_and_send_rtsp, daemon=True).start()
+
+                            # Verifica se o servidor solicitou reinicio
+                            if ping_resp.get("restart"):
+                                log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
+                                self._restart_service()
+                                return
+                                
+                            if ping_resp.get("backup"):
+                                log("Geracao de backup manual solicitada pelo dashboard!")
+                                self._executar_backup(agent_mod, "manual_dashboard")
+
+                            # Verifica OTA
+                            update_iniciado = check_and_apply_update(conf)
+                            if update_iniciado:
+                                log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
+                                self.stop_requested = True
+                                win32event.SetEvent(self.hWaitStop)
+                                return
                         else:
                             log("Ping enviado, mas resposta vazia.")
                             
-                        # Verifica se o servidor solicitou teste RTSP
-                        if ping_resp and ping_resp.get("rtsp_task"):
-                            log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
-                            from src.camera.rtsp_client import test_rtsp_camera
-                            from src.application.api_client import send_rtsp_result
-                            import threading
-                            
-                            def run_and_send_rtsp():
-                                result = test_rtsp_camera(ping_resp["rtsp_task"])
-                                send_rtsp_result(conf, result)
-                                log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
-                                
-                            threading.Thread(target=run_and_send_rtsp, daemon=True).start()
-
-                        # Verifica se o servidor solicitou reinicio
-                        if ping_resp and ping_resp.get("restart"):
-                            log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
-                            import subprocess
-                            subprocess.Popen(
-                                ["cmd", "/c", "timeout /t 3 /nobreak >nul && sc start TrilanAgentNVR"],
-                                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-                            )
-                            self.stop_requested = True
-                            win32event.SetEvent(self.hWaitStop)
-                            return
-                        if ping_resp and ping_resp.get("backup"):
-                            log("Geracao de backup manual solicitada pelo dashboard!")
-                            self._executar_backup(agent_mod, "manual_dashboard")
-
-                        # ── Verifica OTA (apenas se nao houver task importante) ──────────────────────
-                        update_iniciado = check_and_apply_update(conf)
-                        if update_iniciado:
-                            log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
-                            self.stop_requested = True
-                            win32event.SetEvent(self.hWaitStop)
-                            return
-
                     except Exception as e:
                         log(f"Falha ao enviar ping para o servidor (tentara novamente em 15s): {e}", is_error=True)
+                        last_ping_time = time.time()
                 
                 segundos = (proximo - agora).total_seconds()
                 if segundos <= 0:
@@ -227,3 +278,4 @@ if __name__ == "__main__":
         servicemanager.StartServiceCtrlDispatcher()
     else:
         win32serviceutil.HandleCommandLine(TrilanAgentService)
+

@@ -2,7 +2,7 @@
 Agent-facing router.
 Windows agent authenticates with X-Client-ID + X-API-Key headers.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from schemas import (
     BackupReportCreate,
     BackupReportResponse,
     PingResponse,
+    PingRequest,
     TIPOS_EQUIPAMENTO,
 )
 from services.crypto_service import decrypt
@@ -63,10 +64,16 @@ from typing import Dict, Any
 pending_rtsp_tasks: Dict[str, Any] = {}
 
 @router.post("/ping", response_model=PingResponse)
-async def ping_agent(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
+async def ping_agent(
+    body: PingRequest | None = None,
+    client: Client = Depends(get_current_client), 
+    db: Session = Depends(get_db)
+):
     """Agent heartbeat. Uses long-polling (up to 30s) to deliver RTSP test commands instantly."""
-    # Commit imediato: o db.refresh() do long-polling abaixo descartaria um last_seen não persistido
+    # Commit imediato: o db.refresh() do long-polling abaixo descartaria last_seen/telemetry não persistidos
     client.last_seen = datetime.utcnow()
+    if body and body.telemetry:
+        client.telemetry = body.telemetry
     db.commit()
     client_id_str = str(client.id)
 
@@ -96,7 +103,7 @@ async def ping_agent(client: Client = Depends(get_current_client), db: Session =
     
     # ── Auto-recovery de backup perdido ──
     if not should_backup and client.backup_hour is not None and client.backup_minute is not None:
-        from datetime import timedelta, timezone
+        from datetime import timedelta
         brt_tz = timezone(timedelta(hours=-3))
         now_brt = datetime.now(brt_tz)
         scheduled_time_today = now_brt.replace(hour=client.backup_hour, minute=client.backup_minute, second=0, microsecond=0)

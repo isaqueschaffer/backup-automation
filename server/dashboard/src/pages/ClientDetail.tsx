@@ -15,6 +15,7 @@ import {
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
   Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning, Image
 } from "lucide-react";
+import * as XLSX from "xlsx";
 
 // Intervalo de ping do agente (agent/service.py)
 const AGENT_PING_INTERVAL_MS = 15 * 1000;
@@ -57,6 +58,25 @@ function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate
 }
 
 // ── Info pill component ──────────────────────────────────────────
+
+function TelemetryBar({ label, percent, info }: { label: string, percent: number, info: string }) {
+  const isHigh = percent > 90;
+  const isWarn = percent > 75;
+  const color = isHigh ? "var(--err)" : (isWarn ? "var(--warn)" : "var(--ok)");
+  
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{label}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{info}</span>
+      </div>
+      <div style={{ width: "100%", height: 6, backgroundColor: "var(--surface-2)", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${percent}%`, height: "100%", backgroundColor: color, borderRadius: 3, transition: "width 0.3s ease" }}></div>
+      </div>
+    </div>
+  );
+}
+
 function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
   icon: React.ReactNode; label: string; value: React.ReactNode;
   mono?: boolean; copyValue?: string; onCopy?: (v: string) => void;
@@ -614,8 +634,8 @@ const buildEqPayload = () => {
         </div>
       )}
 
-      {/* ── Layout de duas colunas ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+      {/* ── Layout de três colunas ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
 
         {/* Coluna 1 — Configuração */}
         <div className="card" style={{ padding: "20px 24px" }}>
@@ -648,6 +668,36 @@ const buildEqPayload = () => {
               value={<StatusBadge status={client.last_backup_status} />} />
             <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
               value={fmtDate(client.last_backup_at)} />
+          </div>
+        </div>
+      
+
+        {/* Coluna 3 — Saúde da Máquina (Telemetria) */}
+        <div className="card" style={{ padding: "20px 24px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+            <Network size={13} /> Saúde do Servidor
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {client.telemetry ? (
+              <>
+                <TelemetryBar label="CPU" percent={client.telemetry.cpu_percent || 0} info={`${client.telemetry.cpu_percent || 0}%`} />
+                <TelemetryBar label="RAM" percent={client.telemetry.ram_percent || 0} info={`${client.telemetry.ram_used_gb || 0} GB / ${client.telemetry.ram_total_gb || 0} GB`} />
+                <TelemetryBar label="Disco (C:)" percent={client.telemetry.disk_percent || 0} info={`${client.telemetry.disk_free_gb || 0} GB Livre`} />
+                {client.telemetry.networks && client.telemetry.networks.map((net: any, i: number) => (
+                  <TelemetryBar 
+                    key={i}
+                    label={`Rede: ${net.name}`} 
+                    percent={Math.min(100, (((net.mbps_sent || 0) + (net.mbps_recv || 0)) / 1000) * 100)} 
+                    info={`↑ ${net.mbps_sent} Mbps  ↓ ${net.mbps_recv} Mbps`} 
+                  />
+                ))}
+                {client.telemetry.gpu_name && (
+                  <TelemetryBar label="GPU" percent={client.telemetry.gpu_percent || 0} info={`${client.telemetry.gpu_name} (${client.telemetry.gpu_percent || 0}%)`} />
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic" }}>Sem dados de telemetria</div>
+            )}
           </div>
         </div>
       </div>
@@ -757,24 +807,95 @@ const buildEqPayload = () => {
             </span>
           </div>
           <div className="flex gap-2">
-            <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
+            <input type="file" accept=".csv,.xls,.xlsx" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
               const file = e.target.files?.[0];
               if (!file) return;
+              const isCsv = file.name.toLowerCase().endsWith(".csv");
               const reader = new FileReader();
               reader.onload = async (evt) => {
-                const text = evt.target?.result as string;
-                const lines = text.split("\n");
-                let count = 0;
                 setLoading(true);
                 try {
-                  for (let i = 1; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line) continue;
-                    const cols = line.split(";").map(c => c.replace(/^"|"$/g, "").trim());
-                    const desc = cols[1] || "";
-                    const mod = cols[2] || "Hikvision";
-                    const ender = cols[3] || "";
-                    const pass = cols[6] || "";
+                  let rows: any[][] = [];
+                  
+                  if (isCsv) {
+                    const text = evt.target?.result as string;
+                    const delimiter = (text.indexOf(";") !== -1 && text.indexOf(";") < (text.indexOf("\n") === -1 ? 9999 : text.indexOf("\n"))) ? ";" : ",";
+                    
+                    // Parser robusto de CSV (suporta aspas e delimitadores no meio do texto)
+                    let currentRow = [];
+                    let currentCell = '';
+                    let inQuotes = false;
+                    for (let i = 0; i < text.length; i++) {
+                      const c = text[i];
+                      if (inQuotes) {
+                        if (c === '"') {
+                          if (i + 1 < text.length && text[i + 1] === '"') { currentCell += '"'; i++; }
+                          else { inQuotes = false; }
+                        } else { currentCell += c; }
+                      } else {
+                        if (c === '"') { inQuotes = true; }
+                        else if (c === delimiter) { currentRow.push(currentCell.trim()); currentCell = ''; }
+                        else if (c === '\n' || c === '\r') {
+                          if (c === '\r' && i + 1 < text.length && text[i + 1] === '\n') i++;
+                          currentRow.push(currentCell.trim());
+                          if (currentRow.some(col => col !== '')) rows.push(currentRow);
+                          currentRow = [];
+                          currentCell = '';
+                        } else { currentCell += c; }
+                      }
+                    }
+                    if (currentCell || currentRow.length > 0) {
+                      currentRow.push(currentCell.trim());
+                      if (currentRow.some(col => col !== '')) rows.push(currentRow);
+                    }
+                  } else {
+                    const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+                    const workbook = XLSX.read(data, { type: "array" });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+                  }
+
+                  const headers = (rows[0] || []).map(h => String(h).trim().toLowerCase());
+                  
+                  let idxDesc = headers.findIndex(h => h.includes("desc"));
+                  if (idxDesc === -1) idxDesc = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+                  
+                  let idxIp = headers.findIndex(h => h.includes("ip") || h.includes("endere"));
+                  let idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
+
+                  let count = 0;
+                  for (let i = 1; i < rows.length; i++) {
+                    const cols = rows[i];
+                    if (!cols || cols.length === 0 || (!cols[0] && !cols[1])) continue;
+                    
+                    let desc = "";
+                    let mod = "Hikvision";
+                    let ender = "";
+                    let pass = "";
+
+                    if (idxDesc >= 0 || idxIp >= 0) {
+                      desc = idxDesc >= 0 ? String(cols[idxDesc] || "") : String(cols[0] || "");
+                      ender = idxIp >= 0 ? String(cols[idxIp] || "") : String(cols[1] || "");
+                      pass = idxPass >= 0 ? String(cols[idxPass] || "") : "";
+                    } else {
+                      // Fallback absoluto caso não ache nenhum cabeçalho
+                      desc = String(cols[1] || "");
+                      ender = String(cols[3] || "");
+                      pass = String(cols[6] || "");
+                    }
+                    
+                    // Limpar caracteres nulos (0x00) que quebram o banco de dados (PostgreSQL)
+                    desc = desc.replace(/\0/g, "").trim();
+                    ender = ender.replace(/\0/g, "").trim();
+                    pass = pass.replace(/\0/g, "").trim();
+                      
+                    const rowStr = cols.join(" ").toUpperCase();
+                    if (rowStr.includes("HIKVISION")) mod = "Hikvision";
+                    else if (rowStr.includes("INTELBRAS")) mod = "Intelbras";
+                    else if (rowStr.includes("GRANDSTREAM")) mod = "Grandstream";
+                    else if (rowStr.includes("ONVIF")) mod = "ONVIF";
+                    else mod = "Hikvision";
 
                     if (desc && ender) {
                       await api.post(`/clients/${id}/equipamentos`, {
@@ -782,7 +903,7 @@ const buildEqPayload = () => {
                         name: desc,
                         ip: ender,
                         username: "admin",
-                        password: pass,
+                        password: pass || "navarro@123",
                         config_extra: { modelo: mod }
                       });
                       count++;
@@ -791,14 +912,39 @@ const buildEqPayload = () => {
                   toast(`Importadas ${count} câmeras com sucesso!`, "success");
                   load();
                 } catch (err) {
+                  console.error(err);
                   toast("Erro ao importar câmeras.", "error");
                 } finally {
                   setLoading(false);
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }
               };
-              reader.readAsText(file, "ISO-8859-1");
+
+              if (isCsv) {
+                reader.readAsText(file, "ISO-8859-1");
+              } else {
+                reader.readAsArrayBuffer(file);
+              }
             }} />
+            <button className="btn btn-secondary" style={{ color: "var(--danger)" }} onClick={async () => {
+              const cameras = equipamentos.filter(e => e.tipo === "CAMERA");
+              if (cameras.length === 0) return toast("Nenhuma câmera para apagar.", "error");
+              if (!window.confirm(`Tem certeza que deseja apagar as ${cameras.length} câmeras? Isso não pode ser desfeito.`)) return;
+              setLoading(true);
+              try {
+                for (const cam of cameras) {
+                  await api.delete(`/clients/${id}/equipamentos/${cam.id}`);
+                }
+                toast("Todas as câmeras foram apagadas.", "success");
+                load();
+              } catch (e) {
+                toast("Erro ao apagar câmeras.", "error");
+              } finally {
+                setLoading(false);
+              }
+            }} disabled={loading || isTesting}>
+              <Trash2 size={14} /> Apagar Câmeras
+            </button>
             <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} disabled={loading || isTesting}>
               <Plus size={14} /> Importar CSV
             </button>

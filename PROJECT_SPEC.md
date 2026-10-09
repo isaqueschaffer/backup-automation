@@ -89,6 +89,9 @@
 | Pillow | >=10.3.0 | Renderização de ícone |
 | paramiko | >=3.4.0,<4.0.0 | SSH (para OLTs/Mikrotiks) |
 | pyftpdlib | >=1.5.8 | FTP (para equipamentos que usam FTP) |
+| imageio-ffmpeg | — | ffmpeg embarcado (captura RTSP / imagem noturna) |
+| psutil | >=5.9.0 | Telemetria (CPU, RAM, disco, rede) |
+| GPUtil | >=1.4.0 | Telemetria de GPU (opcional, falha silenciosa) |
 
 ---
 
@@ -203,6 +206,7 @@ trilan-nvr-backup-automation/
 | created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
 | restart_requested | BOOLEAN | bool | NOT NULL | FALSE |
 | backup_requested | BOOLEAN | bool | NOT NULL | FALSE |
+| telemetry | JSON | dict | NULL | — (CPU/RAM/disco/rede/GPU enviados no ping) |
 
 #### `nvrs` (tabela de equipamentos — nome mantido por compatibilidade)
 
@@ -434,7 +438,7 @@ API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 | Metodo | Path | Descricao |
 |---|---|---|
 | GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente |
-| POST | `/api/v1/agent/ping` | Heartbeat; retorna flags `restart` e `backup` |
+| POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup` |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP |
 | GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA |
@@ -804,6 +808,34 @@ de dados existentes, rollout gradual e plano de rollback.
 **Depois:** `last_seen` e commitado logo no inicio do ping. Dashboard calcula "Proximo contato" com intervalo de 15s (antes 5 min) e contagem regressiva continua usando o skew do relogio do servidor.
 **Arquivos:** `server/api/routers/agent.py`, `server/dashboard/src/pages/ClientDetail.tsx`, `server/dashboard/src/api/types.ts`
 **Breaking Change:** Nao
+**Branch:** isaque
+
+---
+
+### [2026-10-09] — Merge auditado da branch `helena` (isaque_repo/helena @ 13f066c)
+
+**Tipo:** merge real (`git merge --no-ff`) com resolução seletiva, auditado contra este documento.
+
+**Incorporado:**
+- Telemetria do agente (CPU, RAM, disco, rede por placa, GPU) enviada no body do ping; coluna `clients.telemetry` (JSON) via migração inline (REGRA-007); card "Saúde do Servidor" no ClientDetail.
+- Importação de câmeras via CSV robusto (aspas, `;`/`,`) e XLSX (`xlsx` 0.18.5), mapeamento dinâmico de colunas, limpeza de `\0`, botão "Apagar Câmeras".
+- `service.py`: inicia webhooks Digifort/Defense conforme equipamentos; se iniciou sem servidor, reinicia ao reconectar para buscar config; restart via `ping -n 4` (o `timeout` falha sem console no contexto de serviço).
+- `backup_job.py`: equipamentos `CAMERA` ignorados no backup automático.
+- `.agents/rules/git-deploy.md`: nome correto do repo secundário.
+
+**Bloqueado / ajustado na resolução:**
+- `docker-compose.yml`: porta `7005` e volume `pg_data_local` **rejeitados** (o volume novo apontaria produção para um banco vazio). Mantido `7001` + `pg_data`.
+- `datetime.now(timezone.utc).replace(tzinfo=None)` em `models.py`/`agent.py` revertido para `datetime.utcnow()` (REGRA-001 / ADR-001).
+- `routers/rtsp_test.py` + `numpy`/`opencv` no servidor: **rejeitados** — sem consumidor no frontend, o container não alcança a LAN do cliente, credencial padrão hardcoded; o teste RTSP já é feito pelo agente.
+- `numpy`/`opencv` no agente: removidos (agente usa `imageio-ffmpeg` desde a v1.0.8).
+- `webhook_defense.py`: versão de debug (POST não registrava evento) rejeitada.
+- `vms/defense_api.py`: esqueleto com TODOs, não referenciado — não incorporado.
+- Scripts avulsos/backup (`fix.py`, `resolve.py`, `patch_client_detail*.py`, `insert_cameras.py`, `scratch_test*`, `clientdetail.bak`, `cameras.csv`) não incorporados.
+- `service.py`: corrigido mojibake (`â€”`, `Ã£`) inclusive no `_svc_display_name_`; `config_extra` nulo não derruba mais a carga de config (evita restart em loop).
+- Ping: `last_seen` e `telemetry` commitados antes do long-polling (5s), preservando a correção anterior.
+
+**Breaking Change:** Não (body do ping é opcional; agentes antigos continuam funcionando).
+**Requer:** nova build do agente para enviar telemetria.
 **Branch:** isaque
 
 ---

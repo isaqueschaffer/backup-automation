@@ -24,12 +24,74 @@ def fetch_server_config(conf: dict) -> dict:
         logging.error(f"Conteudo recebido: {r.text[:200]}")
         raise RuntimeError("Servidor retornou uma resposta invalida (provavelmente HTML em vez de JSON).") from e
 
+def _get_telemetry() -> dict:
+    telemetry = {}
+    try:
+        import psutil
+        
+        # Leitura inicial de rede (por placa)
+        net_start = psutil.net_io_counters(pernic=True)
+        
+        # Medição de CPU (espera 1 segundo)
+        telemetry["cpu_percent"] = psutil.cpu_percent(interval=1)
+        
+        # Leitura final de rede após 1 segundo
+        net_end = psutil.net_io_counters(pernic=True)
+        stats = psutil.net_if_stats()
+        
+        networks = []
+        for nic, start_io in net_start.items():
+            if not stats.get(nic) or not stats[nic].isup:
+                continue
+            if "Loopback" in nic or "Pseudo" in nic:
+                continue
+            end_io = net_end.get(nic)
+            if not end_io: continue
+            
+            bytes_sent_sec = end_io.bytes_sent - start_io.bytes_sent
+            bytes_recv_sec = end_io.bytes_recv - start_io.bytes_recv
+            
+            networks.append({
+                "name": nic,
+                "mbps_sent": round((bytes_sent_sec * 8) / 1_000_000, 2),
+                "mbps_recv": round((bytes_recv_sec * 8) / 1_000_000, 2)
+            })
+        
+        telemetry["networks"] = networks
+        
+        mem = psutil.virtual_memory()
+        telemetry["ram_percent"] = mem.percent
+        telemetry["ram_total_gb"] = round(mem.total / (1024 ** 3), 2)
+        telemetry["ram_used_gb"] = round(mem.used / (1024 ** 3), 2)
+        
+        disk = psutil.disk_usage('C:\\')
+        telemetry["disk_percent"] = disk.percent
+        telemetry["disk_total_gb"] = round(disk.total / (1024 ** 3), 2)
+        telemetry["disk_free_gb"] = round(disk.free / (1024 ** 3), 2)
+    except Exception as e:
+        logging.error(f"Erro ao coletar psutil: {e}")
+        
+    try:
+        import GPUtil
+        gpus = GPUtil.getGPUs()
+        if gpus:
+            gpu = gpus[0]
+            telemetry["gpu_percent"] = round(gpu.load * 100, 1)
+            telemetry["gpu_memory_total"] = gpu.memoryTotal
+            telemetry["gpu_memory_used"] = gpu.memoryUsed
+            telemetry["gpu_name"] = gpu.name
+    except Exception as e:
+        pass # Ignora se nao tiver GPUtil ou GPU
+        
+    return telemetry
+
 def ping_server(conf: dict) -> dict:
     """Envia um ping para o servidor para manter o status online. Usa long-polling."""
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    payload = {"telemetry": _get_telemetry()}
     r = requests.post(
         f"{conf['server_url']}/api/v1/agent/ping",
-        headers=headers, timeout=40, verify=False,
+        headers=headers, timeout=40, verify=False, json=payload
     )
     r.raise_for_status()
     return r.json()
