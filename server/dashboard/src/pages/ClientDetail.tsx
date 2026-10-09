@@ -55,25 +55,6 @@ function MiniCalendar({ mapStr, referenceDate }: { mapStr: string; referenceDate
 }
 
 // ── Info pill component ──────────────────────────────────────────
-
-function TelemetryBar({ label, percent, info }: { label: string, percent: number, info: string }) {
-  const isHigh = percent > 90;
-  const isWarn = percent > 75;
-  const color = isHigh ? "var(--err)" : (isWarn ? "var(--warn)" : "var(--ok)");
-  
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{label}</span>
-        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{info}</span>
-      </div>
-      <div style={{ width: "100%", height: 6, backgroundColor: "var(--surface-2)", borderRadius: 3, overflow: "hidden" }}>
-        <div style={{ width: `${percent}%`, height: "100%", backgroundColor: color, borderRadius: 3, transition: "width 0.3s ease" }}></div>
-      </div>
-    </div>
-  );
-}
-
 function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
   icon: React.ReactNode; label: string; value: React.ReactNode;
   mono?: boolean; copyValue?: string; onCopy?: (v: string) => void;
@@ -431,7 +412,7 @@ const buildEqPayload = () => {
       )}
 
       {/* ── Layout de duas colunas ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
 
         {/* Coluna 1 — Configuração */}
         <div className="card" style={{ padding: "20px 24px" }}>
@@ -464,35 +445,6 @@ const buildEqPayload = () => {
               value={<StatusBadge status={client.last_backup_status} />} />
             <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
               value={fmtDate(client.last_backup_at)} />
-          </div>
-        </div>
-
-        {/* Coluna 3 — Saúde da Máquina (Telemetria) */}
-        <div className="card" style={{ padding: "20px 24px" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
-            <Network size={13} /> Saúde do Servidor
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {client.telemetry ? (
-              <>
-                <TelemetryBar label="CPU" percent={client.telemetry.cpu_percent || 0} info={`${client.telemetry.cpu_percent || 0}%`} />
-                <TelemetryBar label="RAM" percent={client.telemetry.ram_percent || 0} info={`${client.telemetry.ram_used_gb || 0} GB / ${client.telemetry.ram_total_gb || 0} GB`} />
-                <TelemetryBar label="Disco (C:)" percent={client.telemetry.disk_percent || 0} info={`${client.telemetry.disk_free_gb || 0} GB Livre`} />
-                {client.telemetry.networks && client.telemetry.networks.map((net: any, i: number) => (
-                  <TelemetryBar 
-                    key={i}
-                    label={`Rede: ${net.name}`} 
-                    percent={Math.min(100, (((net.mbps_sent || 0) + (net.mbps_recv || 0)) / 1000) * 100)} 
-                    info={`↑ ${net.mbps_sent} Mbps  ↓ ${net.mbps_recv} Mbps`} 
-                  />
-                ))}
-                {client.telemetry.gpu_name && (
-                  <TelemetryBar label="GPU" percent={client.telemetry.gpu_percent || 0} info={`${client.telemetry.gpu_name} (${client.telemetry.gpu_percent || 0}%)`} />
-                )}
-              </>
-            ) : (
-              <div style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic" }}>Sem dados de telemetria</div>
-            )}
           </div>
         </div>
       </div>
@@ -600,80 +552,47 @@ const buildEqPayload = () => {
             </span>
           </div>
           <div className="flex gap-2">
-            <input type="file" accept=".csv, .xlsx, .xls" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
+            <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
               const file = e.target.files?.[0];
               if (!file) return;
-              setLoading(true);
-              try {
-                const XLSX = await import("xlsx");
-                const data = await file.arrayBuffer();
-                const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-                
-                if (rows.length < 2) {
-                  toast("Arquivo vazio", "error");
-                  return;
-                }
-
-                // Header analysis
-                let headerRow = (rows[0] as any[]).map(c => String(c || '').trim().toLowerCase());
-                if (headerRow.length === 1 && headerRow[0].includes(';')) {
-                   headerRow = headerRow[0].split(';').map(c => c.replace(/^"|"$/g, "").trim());
-                }
-                const isDefense = headerRow.includes("nome do dispositivo") || headerRow.includes("nome do dispositivo"); // Excel sometimes adds spaces
-
+              const reader = new FileReader();
+              reader.onload = async (evt) => {
+                const text = evt.target?.result as string;
+                const lines = text.split("\n");
                 let count = 0;
-                for (let i = 1; i < rows.length; i++) {
-                  let row = rows[i] as any[];
-                  if (!row || row.length === 0) continue;
-                  
-                  if (row.length === 1 && typeof row[0] === 'string' && row[0].includes(';')) {
-                     row = row[0].split(';').map(c => c.replace(/^"|"$/g, "").trim());
-                  }
+                setLoading(true);
+                try {
+                  for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+                    const cols = line.split(";").map(c => c.replace(/^"|"$/g, "").trim());
+                    const desc = cols[1] || "";
+                    const mod = cols[2] || "Hikvision";
+                    const ender = cols[3] || "";
+                    const pass = cols[6] || "";
 
-                  let desc = "";
-                  let mod = "Hikvision";
-                  let ender = "";
-                  let pass = "navarro@123";
-
-                  if (isDefense) {
-                    const nameIdx = headerRow.indexOf("nome do dispositivo");
-                    const ipIdx = headerRow.indexOf("ip do dispositivo");
-                    const typeIdx = headerRow.indexOf("tipo de dispositivo");
-                    
-                    if (nameIdx !== -1) desc = row[nameIdx] || "";
-                    if (ipIdx !== -1) ender = row[ipIdx] || "";
-                    if (typeIdx !== -1) mod = row[typeIdx] || "Intelbras";
-                    else mod = "Intelbras";
-                  } else {
-                    desc = row[1] || "";
-                    mod = row[2] || "Hikvision";
-                    ender = row[3] || "";
-                    pass = row[6] || "navarro@123";
+                    if (desc && ender) {
+                      await api.post(`/clients/${id}/equipamentos`, {
+                        tipo: "CAMERA",
+                        name: desc,
+                        ip: ender,
+                        username: "admin",
+                        password: pass,
+                        config_extra: { modelo: mod }
+                      });
+                      count++;
+                    }
                   }
-
-                  if (desc && ender) {
-                    await api.post(`/clients/${id}/equipamentos`, {
-                      tipo: "CAMERA",
-                      name: String(desc).trim(),
-                      ip: String(ender).trim(),
-                      username: "admin",
-                      password: pass,
-                      config_extra: { modelo: mod }
-                    });
-                    count++;
-                  }
+                  toast(`Importadas ${count} câmeras com sucesso!`, "success");
+                  load();
+                } catch (err) {
+                  toast("Erro ao importar câmeras.", "error");
+                } finally {
+                  setLoading(false);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
                 }
-                toast(`Importadas ${count} câmeras com sucesso!`, "success");
-                load();
-              } catch (err) {
-                console.error(err);
-                toast("Erro ao importar câmeras.", "error");
-              } finally {
-                setLoading(false);
-                if (fileInputRef.current) fileInputRef.current.value = '';
-              }
+              };
+              reader.readAsText(file, "ISO-8859-1");
             }} />
             <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} disabled={loading || isTesting}>
               <Plus size={14} /> Importar CSV

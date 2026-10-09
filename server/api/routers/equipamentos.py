@@ -130,104 +130,53 @@ from schemas import RTSPTestResponse
     response_model=RTSPTestResponse,
     dependencies=[Depends(verify_admin_token)],
 )
-def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, db: Session = Depends(get_db)):
-    """Testa a conexǜo RTSP de uma cǽmera (ou NVR) usando as credenciais salvas no BD."""
+async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, db: Session = Depends(get_db)):
+    """Testa a conexao RTSP delegando a tarefa ao agente local via long-polling."""
     eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.client_id == client_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
     
     from services.crypto_service import decrypt
-    import urllib.parse
-    import os
-    import cv2
-    import base64
+    import asyncio
+    from routers.agent import pending_rtsp_tasks
 
     try:
         senha_pura = decrypt(eq.password) if eq.password else "navarro@123"
     except:
         senha_pura = eq.password or "navarro@123"
-        
-    senha_enc = urllib.parse.quote(senha_pura, safe='')
-    usuario = eq.username or "admin"
-    modelo = (eq.config_extra or {}).get("modelo", "")
-    ip = eq.ip.strip()
 
-    if "Grandstream" in modelo:
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/4"
-    elif "Intelbras" in modelo:
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel=1&subtype=1"
-    elif "ONVIF" in modelo:
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile2"
-    else:
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/102"
-    
-    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000"
-    
-    import socket
-    def pre_check_rtsp(url: str) -> str:
-        try:
-            parsed = urllib.parse.urlparse(url)
-            ip_host = parsed.hostname
-            port = parsed.port or 554
-            user = parsed.username or ""
-            pwd = parsed.password or ""
-            
-            pwd_decoded = urllib.parse.unquote(pwd)
-            auth_b64 = base64.b64encode(f"{user}:{pwd_decoded}".encode()).decode()
-            
-            req = f"DESCRIBE {url} RTSP/1.0\r\nCSeq: 1\r\nAuthorization: Basic {auth_b64}\r\nUser-Agent: Python\r\nAccept: application/sdp\r\n\r\n"
-            
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(3.0)
-            s.connect((ip_host, port))
-            s.sendall(req.encode())
-            resp = s.recv(1024).decode(errors='ignore')
-            s.close()
-            
-            if resp.startswith("RTSP/1.0 ") or resp.startswith("RTSP/1.1 "):
-                status_line = resp.split("\r\n")[0]
-                parts = status_line.split(" ", 2)
-                if len(parts) >= 2:
-                    code = parts[1]
-                    if code == "401":
-                        return "FALHA 401: Não Autorizado. A senha ou usuário estão incorretos."
-                    elif code == "404":
-                        return "FALHA 404: Não Encontrado. O caminho RTSP ou Modelo configurado estão incorretos."
-                    elif int(code) >= 400:
-                        return f"FALHA {code}: {parts[2] if len(parts)>2 else 'Erro retornado pela câmera'}."
-        except socket.timeout:
-            return "FALHA: Tempo limite excedido (Timeout). A câmera pode estar desligada, firewall bloqueando, ou IP inacessível."
-        except ConnectionRefusedError:
-            return "FALHA: Conexão recusada (Porta 554 fechada). A câmera pode não suportar RTSP."
-        except Exception as e:
-            pass
-        return None
+    client_id_str = str(client_id)
+    event = asyncio.Event()
 
-    detalhe_erro = pre_check_rtsp(rtsp_url)
-    if detalhe_erro:
-        return RTSPTestResponse(success=False, error_message=detalhe_erro)
-    
-    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-    
-    if not cap.isOpened():
-        return RTSPTestResponse(success=False, error_message="FALHA DESCONHECIDA: Não foi possível conectar ao RTSP ou ler o vídeo.")
-    
+    task_data = {
+        "equipamento_id": str(eq.id),
+        "ip": eq.ip.strip(),
+        "modelo": (eq.config_extra or {}).get("modelo", ""),
+        "username": eq.username or "admin",
+        "password": senha_pura,
+    }
+
+    pending_rtsp_tasks[client_id_str] = {
+        "task": task_data,
+        "event": event,
+        "result": None,
+        "sent": False
+    }
+
     try:
-        for _ in range(2):
-            cap.grab()
-        sucesso, frame = cap.retrieve()
-        cap.release()
+        # Wait up to 35 seconds for the agent to reply (Dashboard UI expects ~30s max usually, we give 35s)
+        await asyncio.wait_for(event.wait(), timeout=35.0)
+    except asyncio.TimeoutError:
+        # Se timeout, removemos a tarefa e retornamos erro
+        if client_id_str in pending_rtsp_tasks:
+            del pending_rtsp_tasks[client_id_str]
+        return RTSPTestResponse(success=False, error_message="FALHA: O Agente local não respondeu ao comando de teste a tempo. Verifique se o agente está online.")
+    
+    result = pending_rtsp_tasks[client_id_str].get("result")
+    if client_id_str in pending_rtsp_tasks:
+        del pending_rtsp_tasks[client_id_str]
         
-        if sucesso:
-            height, width = frame.shape[:2]
-            new_width = 640
-            new_height = int((new_width / width) * height)
-            frame_resized = cv2.resize(frame, (new_width, new_height))
-            _, buffer = cv2.imencode('.jpg', frame_resized, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            b64_str = base64.b64encode(buffer).decode('utf-8')
-            return RTSPTestResponse(success=True, error_message=None, image_base64=b64_str)
-        else:
-            return RTSPTestResponse(success=False, error_message="FALHA: Conectou, mas a imagem retornou vazia ou corrompida.")
-    except Exception as e:
-        cap.release()
-        return RTSPTestResponse(success=False, error_message=f"ERRO INTERNO: {str(e)}")
+    if not result:
+        return RTSPTestResponse(success=False, error_message="FALHA: Agente respondeu, mas sem dados válidos.")
+
+    return result

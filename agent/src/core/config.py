@@ -12,8 +12,12 @@ def load_conf() -> dict:
     cfg = configparser.ConfigParser()
     try:
         cfg.read(CONF_FILE, encoding="utf-8-sig")
+        url = cfg["server"]["url"].rstrip("/")
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = f"http://{url}"
+
         return {
-            "server_url": cfg["server"]["url"].rstrip("/"),
+            "server_url": url,
             "client_id": cfg["auth"]["client_id"],
             "api_key": cfg["auth"]["api_key"],
         }

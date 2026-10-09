@@ -170,6 +170,7 @@ class PingResponse(BaseModel):
     status: str
     restart: bool = False
     backup: bool = False
+    rtsp_task: Optional[dict] = None
 
 
 class PingRequest(BaseModel):

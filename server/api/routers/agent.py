@@ -56,33 +56,58 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
     )
 
 
+import asyncio
+from typing import Dict, Any
+
+# Global task dictionary for RTSP polling
+# Format: { client_id_str: {"task": dict, "event": asyncio.Event(), "result": None} }
+pending_rtsp_tasks: Dict[str, Any] = {}
+
 @router.post("/ping", response_model=PingResponse)
-def ping_agent(
+async def ping_agent(
     body: PingRequest | None = None,
     client: Client = Depends(get_current_client), 
     db: Session = Depends(get_db)
 ):
-    """Agent heartbeat to mark it as online. Returns restart/backup flags if requested."""
+    """Agent heartbeat. Uses long-polling (up to 30s) to deliver RTSP test commands instantly."""
     client.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
+    client_id_str = str(client.id)
     
     if body and body.telemetry:
         client.telemetry = body.telemetry
+        
+    # ── Wait for tasks (Long Polling up to 30s) ──
+    for _ in range(30):
+        # Check if there is a pending RTSP task for this client
+        if client_id_str in pending_rtsp_tasks and not pending_rtsp_tasks[client_id_str].get("sent", False):
+            pending_rtsp_tasks[client_id_str]["sent"] = True
+            db.commit()
+            return PingResponse(
+                status="ok", 
+                restart=False, 
+                backup=False, 
+                rtsp_task=pending_rtsp_tasks[client_id_str]["task"]
+            )
+        
+        # Check normal restart/backup flags (only return immediately if they are set)
+        if client.restart_requested or client.backup_requested:
+            break
+            
+        # Fast exit if no tasks and 30s not reached yet
+        await asyncio.sleep(1)
+        db.refresh(client)
 
     should_restart = bool(client.restart_requested)
     should_backup = bool(client.backup_requested)
     
     # ── Auto-recovery de backup perdido ──
-    # Se já passou mais de 30 min do horário agendado E ainda não fez backup hoje, injetamos a ordem de backup
     if not should_backup and client.backup_hour is not None and client.backup_minute is not None:
         from datetime import timedelta
         brt_tz = timezone(timedelta(hours=-3))
         now_brt = datetime.now(brt_tz)
-        
         scheduled_time_today = now_brt.replace(hour=client.backup_hour, minute=client.backup_minute, second=0, microsecond=0)
         
-        # Se o relógio já passou 30 minutos da hora agendada
         if now_brt > scheduled_time_today + timedelta(minutes=30):
-            # Verifica se já teve um backup concluído hoje (comparando pela data local BRT)
             made_backup_today = False
             if client.last_backup_at:
                 last_backup_brt = client.last_backup_at.replace(tzinfo=timezone.utc).astimezone(brt_tz)
@@ -91,22 +116,20 @@ def ping_agent(
             
             if not made_backup_today:
                 should_backup = True
-                client.backup_requested = False # Não precisa persistir no banco, já vai injetar na resposta
-
+                client.backup_requested = False 
                 from models import AgentLog
                 log_msg = f"Ping recebido. Disparando BACKUP DE RECUPERACAO. Agente falhou em executar no horario agendado ({client.backup_hour:02d}:{client.backup_minute:02d})."
                 db.add(AgentLog(client_id=client.id, event_type="ping_recovery", message=log_msg))
 
     if should_restart:
-        client.restart_requested = False  # Consume the flag — restart only once
+        client.restart_requested = False
     if should_backup and client.backup_requested:
-        client.backup_requested = False   # Consume the flag (se foi solicitacao manual)
+        client.backup_requested = False
 
     from models import AgentLog
     log_msg = f"Ping recebido. Instruções pendentes: restart={should_restart}, backup={should_backup}"
     db.add(AgentLog(client_id=client.id, event_type="ping", message=log_msg))
     
-    # Limita o histórico a 50 logs por cliente para não inchar o banco
     from sqlalchemy import select, func
     count = db.query(func.count(AgentLog.id)).filter(AgentLog.client_id == client.id).scalar()
     if count > 50:
@@ -116,6 +139,21 @@ def ping_agent(
 
     db.commit()
     return PingResponse(status="ok", restart=should_restart, backup=should_backup)
+
+from schemas import RTSPTestResponse
+@router.post("/rtsp-result")
+async def receive_rtsp_result(
+    result: RTSPTestResponse,
+    client: Client = Depends(get_current_client),
+):
+    """Agent posts the result of an RTSP task."""
+    client_id_str = str(client.id)
+    if client_id_str in pending_rtsp_tasks:
+        task_data = pending_rtsp_tasks[client_id_str]
+        task_data["result"] = result
+        task_data["event"].set()
+    return {"status": "ok"}
+
 
 
 @router.post("/backup/report", response_model=BackupReportResponse, status_code=201)

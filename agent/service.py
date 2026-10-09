@@ -1,5 +1,5 @@
 """
-Trilan NVR Backup Agent — Windows Service
+Trilan NVR Backup Agent â€” Windows Service
 Runs agent.py on a schedule and listens for manual trigger events.
 
 Install:  python service.py install
@@ -20,10 +20,14 @@ import win32serviceutil
 import servicemanager
 import win32security
 
+# Imports explicitos para o PyInstaller nÃ£o perder dependÃªncias em imports dinÃ¢micos
+import src.camera.rtsp_client
+import src.application.api_client
+
 DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
 
-# Usa ProgramData para logs — gravavel sem privilegios de admin
+# Usa ProgramData para logs â€” gravavel sem privilegios de admin
 PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
 PASTA_LOG.mkdir(parents=True, exist_ok=True)
 ARQUIVO_LOG = PASTA_LOG / "servico.log"
@@ -52,7 +56,7 @@ def log(msg, is_error=False):
 
 class TrilanAgentService(win32serviceutil.ServiceFramework):
     _svc_name_ = "TrilanAgentNVR"
-    _svc_display_name_ = "Trilan — Agente Backup NVR"
+    _svc_display_name_ = "Trilan â€” Agente Backup NVR"
     _svc_description_ = "Executa backups automaticos de NVRs e envia os arquivos ao servidor Trilan."
 
     def __init__(self, args):
@@ -73,7 +77,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         win32event.SetEvent(self.hWaitStop)
 
     def SvcDoRun(self):
-        # Tenta carregar a versão do updater se possível
+        # Tenta carregar a versÃ£o do updater se possÃ­vel
         try:
             from src.application.updater import get_current_version
             v = get_current_version()
@@ -81,7 +85,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             v = "Desconhecida"
 
         log("=" * 60)
-        log(f"TRILAN AGENT NVR INICIADO (Versão: {v})")
+        log(f"TRILAN AGENT NVR INICIADO (VersÃ£o: {v})")
         log(f"Diretorio: {DIRETORIO}")
         try:
             self._load_schedule_and_run()
@@ -175,10 +179,10 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             while not self.stop_requested:
                 agora = datetime.now()
                 
-                # Envia ping a cada 5 minutos (300s) se online, ou a cada 10 minutos (600s) se offline
-                intervalo_ping = 300 if (time.time() - last_successful_ping < 300) else 600
-                
-                if time.time() - last_ping_time >= intervalo_ping:
+# Envia ping a cada 15 segundos para manter status e receber comandos rÃ¡pidos
+                if time.time() - last_ping_time >= 15:
+                    last_ping_time = time.time()
+
                     try:
                         ping_resp = ping_server(conf)
                         last_ping_time = time.time()
@@ -197,6 +201,20 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                                 self._restart_service()
                                 return
 
+                            # Verifica se o servidor solicitou teste RTSP
+                            if ping_resp.get("rtsp_task"):
+                                log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
+                                from src.camera.rtsp_client import test_rtsp_camera
+                                from src.application.api_client import send_rtsp_result
+                                import threading
+                                
+                                def run_and_send_rtsp():
+                                    result = test_rtsp_camera(ping_resp["rtsp_task"])
+                                    send_rtsp_result(conf, result)
+                                    log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
+                                    
+                                threading.Thread(target=run_and_send_rtsp, daemon=True).start()
+
                             # Verifica se o servidor solicitou reinicio
                             if ping_resp.get("restart"):
                                 log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
@@ -207,7 +225,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                                 log("Geracao de backup manual solicitada pelo dashboard!")
                                 self._executar_backup(agent_mod, "manual_dashboard")
 
-                            # ── Verifica OTA (uma vez por hora) ──────────────────────
+                            # Verifica OTA
                             update_iniciado = check_and_apply_update(conf)
                             if update_iniciado:
                                 log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
@@ -218,7 +236,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                             log("Ping enviado, mas resposta vazia.")
                             
                     except Exception as e:
-                        log(f"Falha na conexao com o servidor (tentando novamente em {int(intervalo_ping/60)} minutos): {e}", is_error=True)
+                        log(f"Falha ao enviar ping para o servidor (tentara novamente em 15s): {e}", is_error=True)
                         last_ping_time = time.time()
                 
                 segundos = (proximo - agora).total_seconds()
@@ -238,7 +256,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     def _executar_backup(self, agent_mod, trigger: str):
         if self.stop_requested:
             return
-        log(f"INICIANDO BACKUP — {trigger.upper()}")
+        log(f"INICIANDO BACKUP â€” {trigger.upper()}")
         try:
             agent_mod.run_backup(trigger)
             log("BACKUP FINALIZADO.")
@@ -253,3 +271,4 @@ if __name__ == "__main__":
         servicemanager.StartServiceCtrlDispatcher()
     else:
         win32serviceutil.HandleCommandLine(TrilanAgentService)
+
