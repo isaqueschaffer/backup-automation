@@ -8,5 +8,5 @@ paramiko>=3.4.0,<4.0.0
 pyftpdlib>=1.5.8
 psutil>=5.9.0
 GPUtil>=1.4.0
-numpy<2
-opencv-python-headless==4.9.0.80
+numpy
+opencv-python-headless
