@@ -726,6 +726,17 @@ de dados existentes, rollout gradual e plano de rollback.
 
 ## 16. Architecture Changelog
 
+### [2026-10-09] — Versão do agente 1.1.1
+
+**Alteracao:** Versão do agente elevada para 1.1.1 (build com telemetria psutil/GPUtil do merge `helena`).
+**Antes:** `CURRENT_VERSION = "1.1.0"`, `AppVersion=1.1.0`.
+**Depois:** `CURRENT_VERSION = "1.1.1"`, `AppVersion=1.1.1`, dashboard `package.json` 1.1.1.
+**Arquivos:** agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json
+**Breaking Change:** Não. Requer build (`agent/build.ps1`), GitHub Release v1.1.1 e registro no OTA Manager.
+**Branch:** isaque
+
+---
+
 ### [2026-10-07] — Merge Seletivo da Branch `helena` (Câmeras RTSP)
 
 **Alteracao:** Adicionado suporte ao tipo `CAMERA` e roteador de testes de preview de imagem RTSP.
