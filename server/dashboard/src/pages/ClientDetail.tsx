@@ -594,6 +594,25 @@ const buildEqPayload = () => {
               };
               reader.readAsText(file, "ISO-8859-1");
             }} />
+            <button className="btn btn-secondary" style={{ color: "var(--danger)" }} onClick={async () => {
+              const cameras = equipamentos.filter(e => e.tipo === "CAMERA");
+              if (cameras.length === 0) return toast("Nenhuma câmera para apagar.", "error");
+              if (!window.confirm(`Tem certeza que deseja apagar as ${cameras.length} câmeras? Isso não pode ser desfeito.`)) return;
+              setLoading(true);
+              try {
+                for (const cam of cameras) {
+                  await api.delete(`/clients/${id}/equipamentos/${cam.id}`);
+                }
+                toast("Todas as câmeras foram apagadas.", "success");
+                load();
+              } catch (e) {
+                toast("Erro ao apagar câmeras.", "error");
+              } finally {
+                setLoading(false);
+              }
+            }} disabled={loading || isTesting}>
+              <Trash2 size={14} /> Apagar Câmeras
+            </button>
             <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} disabled={loading || isTesting}>
               <Plus size={14} /> Importar CSV
             </button>
