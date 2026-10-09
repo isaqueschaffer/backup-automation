@@ -552,7 +552,7 @@ const buildEqPayload = () => {
             </span>
           </div>
           <div className="flex gap-2">
-            <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
+            <input type="file" accept=".csv,.xls,.xlsx" ref={fileInputRef} style={{ display: 'none' }} onChange={async (e) => {
               const file = e.target.files?.[0];
               if (!file) return;
               const reader = new FileReader();
@@ -566,10 +566,25 @@ const buildEqPayload = () => {
                     const line = lines[i].trim();
                     if (!line) continue;
                     const cols = line.split(";").map(c => c.replace(/^"|"$/g, "").trim());
-                    const desc = cols[1] || "";
-                    const mod = cols[2] || "Hikvision";
-                    const ender = cols[3] || "";
-                    const pass = cols[6] || "";
+                    
+                    let desc = "";
+                    let mod = "Hikvision";
+                    let ender = "";
+                    let pass = "";
+
+                    if (file.name.toLowerCase().endsWith(".csv")) {
+                      // Lógica nova para CSV puro
+                      desc = cols[0] || "";
+                      ender = cols[1] || "";
+                      mod = cols[2] || "Hikvision";
+                      pass = cols[3] || "";
+                    } else {
+                      // Lógica antiga (XLS exportado do Digifort/Defense, etc)
+                      desc = cols[1] || "";
+                      mod = cols[2] || "Hikvision";
+                      ender = cols[3] || "";
+                      pass = cols[6] || "";
+                    }
 
                     if (desc && ender) {
                       await api.post(`/clients/${id}/equipamentos`, {
@@ -577,7 +592,7 @@ const buildEqPayload = () => {
                         name: desc,
                         ip: ender,
                         username: "admin",
-                        password: pass,
+                        password: pass || "navarro@123",
                         config_extra: { modelo: mod }
                       });
                       count++;
