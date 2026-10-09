@@ -604,6 +604,11 @@ const buildEqPayload = () => {
                       ender = String(cols[3] || "");
                       pass = String(cols[6] || "");
                     }
+                    
+                    // Limpar caracteres nulos (0x00) que quebram o banco de dados (PostgreSQL)
+                    desc = desc.replace(/\0/g, "").trim();
+                    ender = ender.replace(/\0/g, "").trim();
+                    pass = pass.replace(/\0/g, "").trim();
                       
                     const rowStr = cols.join(" ").toUpperCase();
                     if (rowStr.includes("HIKVISION")) mod = "Hikvision";
