@@ -563,20 +563,23 @@ const buildEqPayload = () => {
                 setLoading(true);
                 try {
                   const isCsv = file.name.toLowerCase().endsWith(".csv");
-                  const headers = lines[0].split(";").map(c => c.replace(/^"|"$/g, "").trim().toLowerCase());
+                  const delimiter = lines[0].includes(";") ? ";" : ",";
+                  const headers = lines[0].split(delimiter).map(c => c.replace(/^"|"$/g, "").trim().toLowerCase());
                   
                   let idxDesc = -1;
                   let idxIp = -1;
+                  let idxPass = -1;
 
                   if (isCsv) {
-                    idxDesc = headers.findIndex(h => h.includes("desc"));
+                    idxDesc = headers.findIndex(h => h.includes("desc") || h.includes("nome"));
                     idxIp = headers.findIndex(h => h === "ip" || h.includes("endere"));
+                    idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
                   }
 
                   for (let i = 1; i < lines.length; i++) {
                     const line = lines[i].trim();
                     if (!line) continue;
-                    const cols = line.split(";").map(c => c.replace(/^"|"$/g, "").trim());
+                    const cols = line.split(delimiter).map(c => c.replace(/^"|"$/g, "").trim());
                     
                     let desc = "";
                     let mod = "Hikvision";
@@ -586,6 +589,7 @@ const buildEqPayload = () => {
                     if (isCsv) {
                       desc = idxDesc >= 0 ? cols[idxDesc] : (cols[0] || "");
                       ender = idxIp >= 0 ? cols[idxIp] : (cols[1] || "");
+                      pass = idxPass >= 0 ? cols[idxPass] : "";
                       
                       const rowStr = line.toUpperCase();
                       if (rowStr.includes("HIKVISION")) mod = "Hikvision";
