@@ -726,16 +726,6 @@ de dados existentes, rollout gradual e plano de rollback.
 
 ## 16. Architecture Changelog
 
-### [2026-10-13] — Agente 1.1.5: Referência ideal em resolução cheia (snapshot do NVR)
-
-**Alteração:** A imagem de referência da galeria do NVR passa a ser pedida ao próprio NVR por HTTP antes do RTSP.
-**Antes:** Só RTSP (`{canal}01`); em alguns NVR/DVR Hikvision/Intelbras a imagem chegava em 352×240, contra 1920×1080 da imagem da noite.
-**Depois:** `rtsp_client._snapshot_nvr` tenta `/ISAPI/Streaming/channels/{canal}01/picture` (Hikvision) e `/cgi-bin/snapshot.cgi?channel=N` (Intelbras), com Digest/Basic; valida JPEG; se falhar, usa RTSP como antes. Motorola segue por RTSP (`chID=N`). NVR sem marca cadastrada: se o RTSP padrão falhar, tenta o formato Motorola.
-**Observação:** snapshot Hikvision/Intelbras não foi testado em equipamento real (só havia NVR Motorola na VPN); Motorola sem marca validada no .2.
-**Arquivos:** agent/src/camera/rtsp_client.py, agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json
-**Breaking Change:** Não.
-**Branch:** isaque
-
 ### [2026-10-13] — Agente 1.1.4: Galeria/imagem da noite para NVR Motorola (NVMS-9000)
 
 **Alteração:** Captura da imagem da noite e da referência ideal passa a funcionar em NVR Motorola, e a galeria lista as câmeras Motorola.
