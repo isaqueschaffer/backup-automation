@@ -122,6 +122,9 @@ export const deleteGroup = (id: string): Promise<void> =>
 export const triggerGroupBackup = (id: string): Promise<void> =>
   api.post(`/groups/${id}/trigger-backup`).then((r) => r.data);
 
+export const cancelGroupQueue = (id: string): Promise<void> =>
+  api.post(`/groups/${id}/cancel-queue`).then((r) => r.data);
+
 export const downloadGroupZip = async (id: string, groupName: string): Promise<void> => {
   const res = await api.get(`/groups/${id}/download-latest`, { responseType: "blob" });
   const blob = new Blob([res.data], { type: "application/zip" });

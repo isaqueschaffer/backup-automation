@@ -17,7 +17,7 @@ from schemas import (
     ClientGroupResponse,
     ClientResponse,
 )
-from routers.clients import _to_response as client_to_response
+from routers.clients import _to_response as client_to_response, check_client_online
 from services.storage_service import get_zip_path
 
 router = APIRouter(prefix="/api/v1/groups", tags=["groups"])
@@ -45,6 +45,18 @@ def _to_response(group: ClientGroup, db: Session) -> ClientGroupResponse:
     agents_online = sum(1 for c in clients_resp if c.is_online)
     last_backups = [c.last_backup_at for c in group.clients if c.last_backup_at]
     last_backup_at = max(last_backups) if last_backups else None
+
+    # Auto-destravamento de segurança: se a fila está ativa mas o agente atual está offline ou inexistente
+    if group.queue_active:
+        active_clients = sorted([c for c in group.clients if c.active], key=lambda c: c.queue_order)
+        curr_idx = group.queue_current_index if group.queue_current_index is not None else 0
+        curr_client = active_clients[curr_idx] if curr_idx < len(active_clients) else None
+        
+        # Se não há cliente ou o cliente atual da fila está offline:
+        if not curr_client or not check_client_online(curr_client):
+            group.queue_active = False
+            group.queue_current_index = None
+            db.commit()
 
     return ClientGroupResponse(
         id=group.id,
@@ -146,24 +158,55 @@ def trigger_group_backup(group_id: UUID, db: Session = Depends(get_db)):
     if not active_clients:
         raise HTTPException(status_code=400, detail="Nenhum agente ativo nesta unidade")
 
-    # Inicia fila e dispara apenas o primeiro
+    # Procura o primeiro agente que esteja ONLINE
+    first_online = None
+    first_idx = None
+    for idx, c in enumerate(active_clients):
+        if check_client_online(c):
+            first_online = c
+            first_idx = idx
+            break
+
+    if not first_online:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum agente online nesta unidade no momento para iniciar o backup"
+        )
+
+    # Inicia fila e dispara o primeiro agente online
     group.queue_active = True
-    group.queue_current_index = 0
-    active_clients[0].backup_requested = True
+    group.queue_current_index = first_idx
+    first_online.backup_requested = True
 
     from models import AgentLog
     db.add(AgentLog(
-        client_id=active_clients[0].id,
+        client_id=first_online.id,
         event_type="queue_backup",
-        message=f"Backup em fila iniciado pela Unidade '{group.name}'. Posição 1/{len(active_clients)}."
+        message=f"Backup em fila iniciado pela Unidade '{group.name}'. Posição {first_idx + 1}/{len(active_clients)} ({first_online.name})."
     ))
 
     db.commit()
     return {
         "status": "ok",
-        "message": f"Fila iniciada. Primeiro agente: {active_clients[0].name}",
+        "message": f"Fila iniciada. Primeiro agente online: {first_online.name}",
         "queue_size": len(active_clients),
     }
+
+
+@router.post("/{group_id}/cancel-queue", dependencies=[Depends(verify_admin_token)])
+def cancel_group_queue(group_id: UUID, db: Session = Depends(get_db)):
+    """Cancela e destrava a fila de backup da unidade imediatamente."""
+    group = db.query(ClientGroup).filter(ClientGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+
+    group.queue_active = False
+    group.queue_current_index = None
+    for c in group.clients:
+        c.backup_requested = False
+
+    db.commit()
+    return {"status": "ok", "message": "Fila cancelada com sucesso"}
 
 
 @router.get("/{group_id}/download-latest", dependencies=[Depends(verify_admin_token)])

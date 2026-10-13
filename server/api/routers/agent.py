@@ -246,23 +246,39 @@ def receive_backup_report(
     if getattr(client, 'group_id', None) and getattr(client, 'group', None):
         group = client.group
         if group.queue_active:
+            from routers.clients import check_client_online
             active_clients = sorted(
                 [c for c in group.clients if c.active],
                 key=lambda c: c.queue_order
             )
-            current_idx = group.queue_current_index or 0
-            next_idx = current_idx + 1
-            if next_idx < len(active_clients):
+            current_idx = group.queue_current_index if group.queue_current_index is not None else 0
+            next_online_client = None
+            next_idx = None
+            for idx in range(current_idx + 1, len(active_clients)):
+                c = active_clients[idx]
+                if check_client_online(c):
+                    next_online_client = c
+                    next_idx = idx
+                    break
+                else:
+                    from models import AgentLog
+                    db.add(AgentLog(
+                        client_id=c.id,
+                        event_type="queue_backup_skipped",
+                        message=f"Agente '{c.name}' está OFFLINE. Pulado na fila da Unidade '{group.name}'."
+                    ))
+
+            if next_online_client is not None:
                 group.queue_current_index = next_idx
-                active_clients[next_idx].backup_requested = True
+                next_online_client.backup_requested = True
                 from models import AgentLog
                 db.add(AgentLog(
-                    client_id=active_clients[next_idx].id,
+                    client_id=next_online_client.id,
                     event_type="queue_backup",
-                    message=f"Backup em fila disparado pela Unidade '{group.name}'. Posição {next_idx + 1}/{len(active_clients)}."
+                    message=f"Backup em fila disparado pela Unidade '{group.name}'. Posição {next_idx + 1}/{len(active_clients)} ({next_online_client.name})."
                 ))
             else:
-                # Todos concluíram
+                # Nenhum próximo online ou fim da fila atingido
                 group.queue_active = False
                 group.queue_current_index = None
             db.commit()

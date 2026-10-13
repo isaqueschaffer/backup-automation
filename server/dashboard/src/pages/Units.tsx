@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   fetchGroups, createGroup, deleteGroup,
-  triggerGroupBackup, downloadGroupZip, updateGroup
+  triggerGroupBackup, cancelGroupQueue, downloadGroupZip, updateGroup
 } from "../api/client";
 import { ClientGroup } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
@@ -10,7 +10,7 @@ import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
 import {
   Plus, Trash2, Eye, ChevronDown, ChevronRight,
-  CloudLightning, Download, Building2, Edit2, Clock
+  CloudLightning, Download, Building2, Edit2, Clock, RotateCcw
 } from "lucide-react";
 
 function healthLabel(health: ClientGroup["health"]) {
@@ -51,7 +51,13 @@ export default function Units() {
   const { toast } = useToast();
 
   const load = () => fetchGroups().then(setGroups).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const interval = setInterval(() => {
+      fetchGroups().then(setGroups);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const toggleExpand = (id: string) =>
     setExpandedIds(prev => {
@@ -91,6 +97,16 @@ export default function Units() {
     await deleteGroup(g.id);
     toast("Unidade removida.", "success");
     load();
+  };
+
+  const handleCancelQueue = async (g: ClientGroup) => {
+    try {
+      await cancelGroupQueue(g.id);
+      toast("Fila cancelada e destravada!", "success");
+      load();
+    } catch (e: any) {
+      toast("Erro ao cancelar fila.", "error");
+    }
   };
 
   const handleTriggerBackup = async (g: ClientGroup) => {
@@ -163,8 +179,15 @@ export default function Units() {
                       <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)" }}>{g.name}</span>
                       <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 10px", borderRadius: 999, background: h.bg, color: h.color, border: `1px solid ${h.color}40` }}>{h.label}</span>
                       {g.queue_active && (
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 10px", borderRadius: 999, background: "rgba(245,158,11,0.12)", color: "var(--warn)", border: "1px solid rgba(245,158,11,0.3)" }}>
-                          ⏳ Fila em andamento
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 10px", borderRadius: 999, background: "rgba(245,158,11,0.12)", color: "var(--warn)", border: "1px solid rgba(245,158,11,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
+                          <span>⏳ Fila em andamento</span>
+                          <span
+                            title="Destravar/Cancelar fila"
+                            onClick={(e) => { e.stopPropagation(); handleCancelQueue(g); }}
+                            style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", color: "var(--err)", marginLeft: 2 }}
+                          >
+                            <RotateCcw size={12} />
+                          </span>
                         </span>
                       )}
                     </div>
@@ -179,10 +202,16 @@ export default function Units() {
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                    <button className="btn btn-secondary btn-sm" title="Iniciar fila de backup" disabled={triggeringId === g.id || g.queue_active} onClick={() => handleTriggerBackup(g)} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      {triggeringId === g.id ? <span className="spinner spinner-sm" /> : <CloudLightning size={13} />}
-                      Backup
-                    </button>
+                    {g.queue_active ? (
+                      <button className="btn btn-secondary btn-sm" title="Destravar / Cancelar fila em andamento" onClick={() => handleCancelQueue(g)} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--err)", borderColor: "rgba(239,68,68,0.4)" }}>
+                        <RotateCcw size={13} /> Parar Fila
+                      </button>
+                    ) : (
+                      <button className="btn btn-secondary btn-sm" title="Iniciar fila de backup" disabled={triggeringId === g.id} onClick={() => handleTriggerBackup(g)} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {triggeringId === g.id ? <span className="spinner spinner-sm" /> : <CloudLightning size={13} />}
+                        Backup
+                      </button>
+                    )}
                     <button className="btn btn-secondary btn-sm" title="Baixar ZIP agrupado" disabled={downloadingId === g.id} onClick={() => handleDownload(g)} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {downloadingId === g.id ? <span className="spinner spinner-sm" /> : <Download size={13} />}
                       ZIP
