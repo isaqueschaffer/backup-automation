@@ -5,6 +5,36 @@ import subprocess
 from datetime import timezone
 from typing import Dict, Any
 
+def _snapshot_nvr(ip: str, usuario: str, senha: str, canal: int, marca_modelo: str):
+    """Snapshot JPEG de um canal do NVR via HTTP (Hikvision ISAPI / Intelbras snapshot.cgi). None se falhar."""
+    import logging
+    import requests
+    from requests.auth import HTTPDigestAuth, HTTPBasicAuth
+
+    intelbras = "intelbras" in marca_modelo.lower()
+    hikvision = "hikvision" in marca_modelo.lower()
+    urls = []
+    if not intelbras:
+        urls.append(f"http://{ip}/ISAPI/Streaming/channels/{canal}01/picture")
+    if not hikvision:
+        urls.append(f"http://{ip}/cgi-bin/snapshot.cgi?channel={canal}")
+    if intelbras:
+        urls.append(f"http://{ip}/ISAPI/Streaming/channels/{canal}01/picture")
+
+    for url in urls:
+        for auth in (HTTPDigestAuth(usuario, senha), HTTPBasicAuth(usuario, senha)):
+            try:
+                r = requests.get(url, auth=auth, timeout=10, verify=False)
+                if r.status_code == 200 and len(r.content) > 1000 and r.content[:2] == b"\xff\xd8":
+                    return r.content
+                if r.status_code != 401:
+                    break
+            except Exception as e:
+                logging.warning(f"Snapshot NVR {url}: {e}")
+                break
+    return None
+
+
 def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     """Testa a conexao RTSP da camera localmente pelo agente e retorna a imagem em base64."""
     senha_pura = task.get("password", "navarro@123")
@@ -19,6 +49,14 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     nvr_canal = bool(canal)
 
     marca = task.get("marca") or ""
+
+    # Galeria do NVR: o snapshot HTTP do próprio NVR sai na resolução cheia do canal
+    # (o RTSP de alguns NVR/DVR entrega 352x240). Se falhar, segue para o RTSP.
+    if nvr_canal and "motorola" not in (marca + modelo).lower():
+        jpeg = _snapshot_nvr(ip, usuario, senha_pura, canal, marca + " " + modelo)
+        if jpeg:
+            return {"success": True, "error_message": None,
+                    "image_base64": base64.b64encode(jpeg).decode('utf-8')}
 
     if "motorola" in marca.lower() or "motorola" in modelo.lower():
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal or 1}&streamType=main"
@@ -37,18 +75,25 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     import imageio_ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     
+    urls = [rtsp_url]
+    if nvr_canal and not marca and "motorola" not in modelo.lower():
+        # Marca não cadastrada: se o formato padrão falhar, tenta o da Motorola
+        urls.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal}&streamType=main")
+
     try:
-        cmd = [
-            ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
-            "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
-        ]
-        result = subprocess.run(cmd, capture_output=True, timeout=15)
-        
-        if result.returncode == 0 and len(result.stdout) > 1000:
-            b64_str = base64.b64encode(result.stdout).decode('utf-8')
-            return {"success": True, "error_message": None, "image_base64": b64_str}
-        else:
-            return {"success": False, "error_message": "FALHA: ffmpeg retornou vazio ou erro ao capturar."}
+        for url in urls:
+            cmd = [
+                ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
+                "-i", url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
+            ]
+            try:
+                result = subprocess.run(cmd, capture_output=True, timeout=15)
+            except subprocess.TimeoutExpired:
+                continue
+            if result.returncode == 0 and len(result.stdout) > 1000:
+                b64_str = base64.b64encode(result.stdout).decode('utf-8')
+                return {"success": True, "error_message": None, "image_base64": b64_str}
+        return {"success": False, "error_message": "FALHA: ffmpeg retornou vazio ou erro ao capturar."}
     except Exception as e:
         return {"success": False, "error_message": f"ERRO INTERNO NO AGENTE (FFmpeg): {str(e)}"}
 
