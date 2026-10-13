@@ -1,4 +1,4 @@
-export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE";
+export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE" | "CAMERA";
 
 export interface NVR {
   id: string;
@@ -32,6 +32,9 @@ export interface Client {
   backup_requested?: boolean;
   telemetry?: Record<string, any> | null;
   api_key?: string; // only on create/rotate
+  // Campos calculados no servidor (fonte única da verdade para status online)
+  is_online?: boolean;
+  current_server_time?: string;
 }
 
 export interface NVRResult {

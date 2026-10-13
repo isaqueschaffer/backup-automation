@@ -104,9 +104,7 @@ export default function Clients() {
                   <td>
                     <StatusBadge status={
                       !c.active ? "DESATIVADO" : 
-                      (c.last_seen && new Date().getTime() - new Date(c.last_seen.endsWith("Z") ? c.last_seen : c.last_seen + "Z").getTime() < 15 * 60 * 1000) 
-                        ? "ONLINE" 
-                        : "OFFLINE"
+                      c.is_online ? "ONLINE" : "OFFLINE"
                     } />
                   </td>
                   <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>{c.nvr_count}</td>

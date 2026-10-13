@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  fetchEquipamentos, createEquipamento, updateEquipamento, deleteEquipamento, updateClient,
+  fetchClient, fetchEquipamentos, createEquipamento, updateEquipamento, deleteEquipamento, updateClient,
   rotateKey, fetchBackups, restartAgent, triggerBackup
 } from "../api/client";
 import { Client, NVR, Backup, TipoEquipamento } from "../api/types";
@@ -10,13 +10,20 @@ import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
 import api from "../api/client";
 import { useRef } from "react";
-import { Video } from "lucide-react";
 import {
   ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
-  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning
+  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning, Image
 } from "lucide-react";
 import * as XLSX from "xlsx";
+
+// Intervalo de ping do agente (PING_INTERVAL_S em agent/service.py)
+const AGENT_PING_INTERVAL_MS = 15 * 1000;
+// Após o horário previsto, consulta o cliente a cada 1s por este tempo para pegar o novo ping assim que chegar
+const OVERDUE_FAST_POLL_MS = 30 * 1000;
+
+// last_seen é naive em UTC (REGRA-001)
+const serverUtcMs = (iso: string) => new Date(/Z|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + "Z").getTime();
 
 function fmtDate(s: string | null) {
   if (!s) return "—";
@@ -103,11 +110,216 @@ function InfoPill({ icon, label, value, mono = false, copyValue, onCopy }: {
   );
 }
 
+// Painel de imagem da câmera: usado pela referência e pela noite para garantir a mesma visualização.
+// "contain" mostra o quadro inteiro (sem cortar o enquadramento) e a resolução ajuda a comparar a origem.
+function CameraImagePanel({ dotColor, label, base64, alt, emptyText, onZoom }: {
+  dotColor: string, label: string, base64?: string | null, alt: string, emptyText: string, onZoom: (src: string) => void
+}) {
+  const [dims, setDims] = useState<string | null>(null);
+  const src = base64 ? `data:image/jpeg;base64,${base64}` : null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor }}></div>
+        {label}
+        {src && dims && <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 500, letterSpacing: 0 }}>{dims}</span>}
+      </div>
+      <div style={{ background: "#000", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "16/9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {src ? (
+          <img
+            src={src}
+            alt={alt}
+            style={{ width: "100%", height: "100%", objectFit: "contain", cursor: "zoom-in", transition: "transform 0.3s" }}
+            onLoad={(e) => setDims(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
+            onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.03)")}
+            onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
+            onClick={() => onZoom(src)}
+          />
+        ) : (
+          <div style={{ color: "var(--text-muted)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+            <Image size={32} opacity={0.3} />
+            <span>{emptyText}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── NVR Cameras Modal ──────────────────────────────────────────────
+function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientId: string, nvrId: string, nvrName: string, onClose: () => void }) {
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [zoomImage, setZoomImage] = useState<{ src: string, title: string } | null>(null);
+  const [selectedCanal, setSelectedCanal] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchCams = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get(`/clients/${clientId}/equipamentos/${nvrId}/cameras`);
+        setCameras(res.data);
+        if (res.data && res.data.length > 0) {
+          setSelectedCanal(res.data[0].canal);
+        }
+      } catch (e) {
+        console.error("Error fetching cameras:", e);
+      }
+      setLoading(false);
+    };
+    fetchCams();
+  }, [clientId, nvrId]);
+
+  const [testingCanal, setTestingCanal] = useState<number | null>(null);
+
+  const capturePerfectImage = async (canal: number, nome: string) => {
+    setTestingCanal(canal);
+    try {
+      const resRtsp = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
+      const dataRtsp = resRtsp.data;
+      if (!dataRtsp.success || !dataRtsp.image_base64) {
+        alert(dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.");
+        setTestingCanal(null);
+        return;
+      }
+      
+      const resSave = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
+        canal, nome, image_base64: dataRtsp.image_base64
+      });
+      const savedCam = resSave.data;
+      setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64, id: savedCam.id } : c));
+    } catch (e: any) {
+      alert(e.response?.data?.detail || "Erro ao comunicar com o servidor.");
+    }
+    setTestingCanal(null);
+  };
+
+  const selectedCam = cameras.find(c => c.canal === selectedCanal);
+
+  return (
+    <>
+      <Modal title={`Câmeras do NVR: ${nvrName}`} onClose={onClose} width="1200px">
+        {loading ? (
+          <div style={{ padding: 40, textAlign: "center" }}>Carregando galeria...</div>
+        ) : cameras.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>Nenhuma câmera sincronizada neste NVR ainda. Aguarde o próximo backup.</div>
+        ) : (
+          <div style={{ display: "flex", height: "75vh", margin: "-24px" }}>
+            {/* Sidebar with Channels */}
+            <div style={{ width: "260px", borderRight: "1px solid var(--border)", overflowY: "auto", padding: "16px 0", background: "var(--surface-50)" }}>
+              <div style={{ padding: "0 16px", marginBottom: 12, fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em" }}>
+                CANAIS ({cameras.length})
+              </div>
+              {cameras.map(cam => {
+                const isSelected = selectedCanal === cam.canal;
+                return (
+                  <div 
+                    key={cam.canal} 
+                    style={{ 
+                      padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "flex-start", gap: 12,
+                      background: isSelected ? "var(--primary-light)" : "transparent",
+                      borderLeft: `4px solid ${isSelected ? "var(--primary)" : "transparent"}`,
+                      transition: "all 0.2s"
+                    }}
+                    onClick={() => setSelectedCanal(cam.canal)}
+                    onMouseEnter={(e) => { if(!isSelected) e.currentTarget.style.background = "var(--surface-hover)" }}
+                    onMouseLeave={(e) => { if(!isSelected) e.currentTarget.style.background = "transparent" }}
+                  >
+                    <Video size={16} color={isSelected ? "var(--primary)" : "var(--text-muted)"} style={{ marginTop: 2 }} />
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontWeight: isSelected ? 600 : 500, color: isSelected ? "var(--primary-dark)" : "var(--text)" }}>
+                        {cam.nome || `Canal ${cam.canal}`}
+                      </span>
+                      <div style={{ fontSize: 11, marginTop: 4, display: "flex", alignItems: "center" }}>
+                        {cam.status_comunicacao === "OFFLINE" ? (
+                          <span style={{ background: "var(--err-bg)", color: "var(--err)", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>OFFLINE</span>
+                        ) : cam.captura_status === "OK" ? (
+                          <span style={{ color: "var(--ok)", fontWeight: 500 }}>Imagem capturada</span>
+                        ) : cam.captura_status === "FALHA" ? (
+                          <span style={{ color: "var(--err)", fontWeight: 500 }} title={cam.captura_motivo}>Falhou: {cam.captura_motivo?.substring(0, 15)}...</span>
+                        ) : cam.captura_status === "SEM_GRAVACAO" ? (
+                          <span style={{ color: "var(--text-muted)" }}>Sem gravação na madrugada</span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)" }}>Sem imagem</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Main Content Area */}
+            <div style={{ flex: 1, padding: 32, overflowY: "auto", display: "flex", flexDirection: "column", gap: 24, background: "var(--background)" }}>
+              {selectedCam ? (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)", paddingBottom: 16 }}>
+                    <div>
+                      <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>{selectedCam.nome || `Canal ${selectedCam.canal}`}</h2>
+                      <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: 14 }}>
+                        Último backup: {selectedCam.captura_horario || selectedCam.night_image_date ? fmtDate(selectedCam.captura_horario || selectedCam.night_image_date) : "Desconhecido"}
+                      </p>
+                    </div>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={() => capturePerfectImage(selectedCam.canal, selectedCam.nome)} 
+                      disabled={testingCanal === selectedCam.canal}
+                      style={{ display: "flex", gap: 8, alignItems: "center" }}
+                    >
+                      <Image size={16} />
+                      {testingCanal === selectedCam.canal ? "Capturando..." : "Atualizar Imagem de Referência"}
+                    </button>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                    <CameraImagePanel
+                      dotColor="#10b981"
+                      label="REFERÊNCIA IDEAL (PERFECT IMAGE)"
+                      base64={selectedCam.perfect_image_base64}
+                      alt="Perfect"
+                      emptyText="Sem imagem de referência"
+                      onZoom={(src) => setZoomImage({ src, title: `${selectedCam.nome || `Canal ${selectedCam.canal}`} - REFERÊNCIA IDEAL` })}
+                    />
+                    <CameraImagePanel
+                      dotColor="var(--primary)"
+                      label="ÚLTIMO BACKUP GRAVADO (NOITE)"
+                      base64={selectedCam.night_image_base64}
+                      alt="Night"
+                      emptyText={selectedCam.captura_motivo || "Sem imagem (motivo não informado)"}
+                      onZoom={(src) => setZoomImage({ src, title: `${selectedCam.nome || `Canal ${selectedCam.canal}`} - ÚLTIMO BACKUP` })}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", flexDirection: "column", gap: 16 }}>
+                  <Video size={48} opacity={0.2} />
+                  <span>Selecione um canal na lateral para visualizar as imagens</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {zoomImage && (
+        <div 
+          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.9)", zIndex: 999999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "zoom-out", padding: 40 }}
+          onClick={() => setZoomImage(null)}
+        >
+          <div style={{ color: "white", fontSize: 20, fontWeight: 600, marginBottom: 20, letterSpacing: "0.02em" }}>{zoomImage.title}</div>
+          <img src={zoomImage.src} style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }} />
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Equipment card component ─────────────────────────────────────
-function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
+function EqCard({ eq, onDelete, onViewRecording, onViewCameras, onEdit, onToggleActive }: {
   eq: NVR;
   onDelete: () => void;
   onViewRecording: () => void;
+  onViewCameras?: () => void;
   onEdit: () => void;
   onToggleActive: () => void;
 }) {
@@ -173,6 +385,12 @@ function EqCard({ eq, onDelete, onViewRecording, onEdit, onToggleActive }: {
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        {eq.tipo === "NVR" && onViewCameras && (
+          <button className="btn btn-secondary btn-sm" onClick={onViewCameras}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Image size={13} /> Galeria
+          </button>
+        )}
         {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT") && (
           <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -211,11 +429,14 @@ export default function ClientDetail() {
   const [showEqModal, setShowEqModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: any[] }>({ show: false, nvrName: "", cameras: [] });
+  const [showNVRCamerasModal, setShowNVRCamerasModal] = useState<{ show: boolean, nvrId: string, nvrName: string }>({ show: false, nvrId: "", nvrName: "" });
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState({ tipo: "NVR" as TipoEquipamento, name: "", ip: "", username: "", password: "", pasta_origem: "", fabricante_olt: "UNM2000" });
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
+  // Diferença entre relógio do servidor e do navegador, para a contagem do próximo ping andar a cada segundo
+  const [serverSkewMs, setServerSkewMs] = useState(0);
 
   const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT", "DEFENSE"];
   const TIPO_ICONE_EMOJI: Record<string, string> = { NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️", DEFENSE: "🛡️" };
@@ -230,6 +451,7 @@ export default function ClientDetail() {
       (await import("../api/client")).fetchClientLogs(id),
     ]);
     setClient(c); setEquipamentos(eqs); setBackups(b.items); setLogs(lg);
+    if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
     if (!silent) setLoading(false);
   };
   
@@ -242,6 +464,23 @@ export default function ClientDetail() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, [id]);
 
+  const nextPingMs = client?.last_seen && client.active && client.is_online
+    ? serverUtcMs(client.last_seen) + AGENT_PING_INTERVAL_MS
+    : null;
+  const overdueMs = nextPingMs === null ? -1 : now + serverSkewMs - nextPingMs;
+  const fastPoll = overdueMs >= 0 && overdueMs < OVERDUE_FAST_POLL_MS;
+  useEffect(() => {
+    if (!fastPoll || !id) return;
+    const t = setInterval(async () => {
+      try {
+        const c = await fetchClient(id);
+        setClient(c);
+        if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
+      } catch { /* próxima tentativa em 1s */ }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [fastPoll, id]);
+
 const buildEqPayload = () => {
     if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
     const payload: any = { tipo: eqForm.tipo, name: eqForm.name.trim(), ip: "", username: "", password: "", config_extra: null };
@@ -251,6 +490,8 @@ const buildEqPayload = () => {
       payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
       if (eqForm.tipo === "CAMERA") {
         payload.config_extra = { modelo: (eqForm as any).modelo || "Hikvision" };
+      } else if (eqForm.tipo === "NVR") {
+        payload.config_extra = { marca: (eqForm as any).marca || "Hikvision" };
       }
     } else if (eqForm.tipo === "DIGIFORT") {
       if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
@@ -349,7 +590,7 @@ const buildEqPayload = () => {
   };
 
   const handleRestartAgent = async () => {
-    if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (até 5 min).")) return;
+    if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (em poucos segundos se estiver online).")) return;
     try {
       await restartAgent(id!);
       toast("Reinício agendado! O agente será reiniciado no próximo ping.", "success");
@@ -357,15 +598,15 @@ const buildEqPayload = () => {
   };
 
   const handleTriggerBackup = async () => {
-    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (até 5 min).")) return;
+    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (em poucos segundos se estiver online).")) return;
     try {
       await triggerBackup(id!);
       toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
     } catch { toast("Erro ao solicitar backup.", "error"); }
   };
 
-  const isAgentOnline = client && client.active &&
-    (client.last_seen && new Date().getTime() - new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime() < 15 * 60 * 1000);
+  // is_online calculado no servidor — elimina bugs de fuso horário no navegador
+  const isAgentOnline = !!(client && client.active && client.is_online);
 
   const copyText = (t: string) => { navigator.clipboard.writeText(t); toast("Copiado!", "success"); };
 
@@ -374,13 +615,13 @@ const buildEqPayload = () => {
 
   let nextPingStr = "—";
   const isPendingAction = client.backup_requested || client.restart_requested;
-  if (client.last_seen && isAgentOnline) {
-    const lastSeenMs = new Date(client.last_seen.endsWith("Z") ? client.last_seen : client.last_seen + "Z").getTime();
-    const nextPingMs = lastSeenMs + 5 * 60 * 1000;
-    const diff = Math.max(0, nextPingMs - now);
-    const mm = Math.floor(diff / 60000);
-    const ss = Math.floor((diff % 60000) / 1000);
-    nextPingStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  if (nextPingMs !== null) {
+    if (overdueMs >= 0) {
+      nextPingStr = "aguardando…";
+    } else {
+      const secs = Math.ceil(-overdueMs / 1000);
+      nextPingStr = `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+    }
   }
 
   return (
@@ -524,6 +765,7 @@ const buildEqPayload = () => {
               <EqCard key={eq.id} eq={eq}
                 onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
                 onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
+                onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name })}
                 onEdit={() => {
                   setEditingEqId(eq.id);
                   setEqForm({
@@ -535,7 +777,8 @@ const buildEqPayload = () => {
                     pasta_origem: (eq.config_extra as any)?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
                     fabricante_olt: (eq.config_extra as any)?.fabricante_olt || "UNM2000",
                     caminho_csv: (eq.config_extra as any)?.caminho_csv || "",
-                    caminho_log_csv: (eq.config_extra as any)?.caminho_log_csv || ""
+                    caminho_log_csv: (eq.config_extra as any)?.caminho_log_csv || "",
+                    marca: (eq.config_extra as any)?.marca || "Hikvision"
                   } as any);
                   setShowEqModal(true);
                 }}
@@ -965,6 +1208,15 @@ const buildEqPayload = () => {
                   </select>
                 </div>
               )}
+              {eqForm.tipo === "NVR" && (
+                <div className="form-group" style={{ marginTop: 12 }}>
+                  <label className="form-label">Marca do NVR</label>
+                  <select className="form-input" value={(eqForm as any).marca || "Hikvision"} onChange={e => setEqForm({ ...eqForm, marca: e.target.value } as any)}>
+                    <option value="Hikvision">Hikvision / Intelbras / Outros</option>
+                    <option value="Motorola">Motorola</option>
+                  </select>
+                </div>
+              )}
             </>
           )}
           {eqForm.tipo === "OLT" && (
@@ -1230,6 +1482,16 @@ const buildEqPayload = () => {
             </div>
           )}
         </Modal>
+      )}
+
+      {/* ── NVR Cameras Gallery Modal ── */}
+      {showNVRCamerasModal.show && (
+        <NVRCamerasGalleryModal
+          clientId={id!}
+          nvrId={showNVRCamerasModal.nvrId}
+          nvrName={showNVRCamerasModal.nvrName}
+          onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "" })}
+        />
       )}
     </>
   );

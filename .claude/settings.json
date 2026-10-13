@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git push origin isaque)",
+      "PowerShell(git push https://github.com/isaqueschaffer/backup-automation.git isaque:integracao-equipamentos)",
+      "PowerShell(python -m py_compile server/api/routers/agent.py)",
+      "PowerShell(git add PROJECT_SPEC.md server/api/routers/agent.py server/dashboard/src/api/types.ts server/dashboard/src/pages/ClientDetail.tsx)"
+    ]
+  }
+}

@@ -43,7 +43,7 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
     zip_pw = decrypt(client.zip_password) if client.zip_password else None
     
     # Update last_seen
-    client.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
+    client.last_seen = datetime.utcnow()
     db.commit()
     
     return AgentConfigResponse(
@@ -70,14 +70,15 @@ async def ping_agent(
     db: Session = Depends(get_db)
 ):
     """Agent heartbeat. Uses long-polling (up to 30s) to deliver RTSP test commands instantly."""
-    client.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
-    client_id_str = str(client.id)
-    
+    # Commit imediato: o db.refresh() do long-polling abaixo descartaria last_seen/telemetry não persistidos
+    client.last_seen = datetime.utcnow()
     if body and body.telemetry:
         client.telemetry = body.telemetry
-        
-    # ── Wait for tasks (Long Polling up to 30s) ──
-    for _ in range(30):
+    db.commit()
+    client_id_str = str(client.id)
+
+    # ── Wait for tasks (Long Polling up to 5s) ──
+    for _ in range(5):
         # Check if there is a pending RTSP task for this client
         if client_id_str in pending_rtsp_tasks and not pending_rtsp_tasks[client_id_str].get("sent", False):
             pending_rtsp_tasks[client_id_str]["sent"] = True
@@ -154,7 +155,41 @@ async def receive_rtsp_result(
         task_data["event"].set()
     return {"status": "ok"}
 
+from schemas import NVRCameraNightImage
+from models import NVRCamera
 
+@router.post("/nvr-cameras/night-image")
+def receive_night_image(
+    body: NVRCameraNightImage,
+    client: Client = Depends(get_current_client),
+    db: Session = Depends(get_db),
+):
+    """Agent posts the night image of an NVR channel."""
+    nvr = db.query(NVR).filter(
+        NVR.client_id == client.id, 
+        NVR.name == body.nvr_name,
+        NVR.active == True
+    ).first()
+    if not nvr:
+        return {"status": "error", "message": "NVR não encontrado ou inativo"}
+
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id, NVRCamera.canal == body.canal).first()
+    if not camera:
+        camera = NVRCamera(
+            nvr_id=nvr.id,
+            canal=body.canal,
+            nome=body.nome,
+            night_image_base64=body.image_base64,
+            night_image_date=body.night_image_date
+        )
+        db.add(camera)
+    else:
+        camera.nome = body.nome
+        camera.night_image_base64 = body.image_base64
+        camera.night_image_date = body.night_image_date
+
+    db.commit()
+    return {"status": "ok"}
 
 @router.post("/backup/report", response_model=BackupReportResponse, status_code=201)
 def receive_backup_report(
@@ -166,7 +201,7 @@ def receive_backup_report(
     from datetime import datetime
     
     # Usa a hora real do servidor, ignorando o relógio do cliente
-    server_finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    server_finished_at = datetime.utcnow()
     # Subtrai o tempo que o cliente diz que levou para achar o "started_at" real do servidor
     duration = body.finished_at - body.started_at
     server_started_at = server_finished_at - duration
@@ -225,7 +260,7 @@ async def upload_backup_zip(
             detail=f"Tipo de equipamento inválido: '{clean_device_type}'. Tipos permitidos: {TIPOS_EQUIPAMENTO} ou MIXED",
         )
 
-    date_str = (backup.started_at or datetime.now(timezone.utc).replace(tzinfo=None)).strftime("%d-%m-%Y")
+    date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
     data = await file.read()
 
     filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"

@@ -1,4 +1,5 @@
 import logging
+import math
 import requests
 from pathlib import Path
 from datetime import datetime
@@ -85,10 +86,25 @@ def _get_telemetry() -> dict:
         
     return telemetry
 
+def _json_safe(obj):
+    # GPUtil devolve NaN para campos "[N/A]" do nvidia-smi; NaN quebra o JSON e derrubaria o ping inteiro
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    return obj
+
 def ping_server(conf: dict) -> dict:
     """Envia um ping para o servidor para manter o status online. Usa long-polling."""
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
-    payload = {"telemetry": _get_telemetry()}
+    try:
+        telemetry = _json_safe(_get_telemetry())
+    except Exception as e:
+        logging.error(f"Telemetria ignorada neste ping: {e}")
+        telemetry = None
+    payload = {"telemetry": telemetry}
     r = requests.post(
         f"{conf['server_url']}/api/v1/agent/ping",
         headers=headers, timeout=40, verify=False, json=payload
@@ -107,6 +123,23 @@ def send_rtsp_result(conf: dict, result: dict) -> bool:
         return True
     except Exception as e:
         logging.error(f"Erro ao enviar resultado RTSP: {e}")
+        return False
+
+def upload_night_image(conf: dict, payload: dict) -> bool:
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/nvr-cameras/night-image",
+            json=payload, headers=headers, timeout=60, verify=False,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "error":
+            logging.error(f"Erro na API (night image): {data.get('message')}")
+            return False
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao enviar night image: {e}")
         return False
 
 def post_report(conf: dict, started_at: datetime, finished_at: datetime,

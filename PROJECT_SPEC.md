@@ -89,6 +89,9 @@
 | Pillow | >=10.3.0 | Renderização de ícone |
 | paramiko | >=3.4.0,<4.0.0 | SSH (para OLTs/Mikrotiks) |
 | pyftpdlib | >=1.5.8 | FTP (para equipamentos que usam FTP) |
+| imageio-ffmpeg | — | ffmpeg embarcado (captura RTSP / imagem noturna) |
+| psutil | >=5.9.0 | Telemetria (CPU, RAM, disco, rede) |
+| GPUtil | >=1.4.0 | Telemetria de GPU (opcional, falha silenciosa) |
 
 ---
 
@@ -168,7 +171,7 @@ trilan-nvr-backup-automation/
 ### Fluxo do Agente
 
 1. Ao iniciar: lê `agent.conf`, chama `GET /api/v1/agent/config` para obter configuração
-2. A cada 5 minutos: `POST /api/v1/agent/ping` — heartbeat + recebe flags de controle
+2. A cada 15 segundos: `POST /api/v1/agent/ping` — heartbeat + recebe flags de controle (long-polling de ate 5s no servidor; `last_seen` e commitado no inicio do ping). Agente considerado online se `last_seen` < 180s
 3. No horário agendado (ou quando flag `backup=true` no ping): executa backup completo
 4. Após backup: `POST /api/v1/agent/backup/report` + `POST /api/v1/agent/backup/upload/{id}`
 5. A cada hora (dentro do ciclo de ping): `GET /api/v1/agent/update-check` — verifica OTA
@@ -203,6 +206,7 @@ trilan-nvr-backup-automation/
 | created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
 | restart_requested | BOOLEAN | bool | NOT NULL | FALSE |
 | backup_requested | BOOLEAN | bool | NOT NULL | FALSE |
+| telemetry | JSON | dict | NULL | — (CPU/RAM/disco/rede/GPU enviados no ping) |
 
 #### `nvrs` (tabela de equipamentos — nome mantido por compatibilidade)
 
@@ -434,7 +438,7 @@ API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 | Metodo | Path | Descricao |
 |---|---|---|
 | GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente |
-| POST | `/api/v1/agent/ping` | Heartbeat; retorna flags `restart` e `backup` |
+| POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup` |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP |
 | GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA |
@@ -631,7 +635,7 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 | Digifort | DIGIFORT | — | — |
 | Intelbras Defense | DEFENSE | src/vms/defense.py | API / HTTP |
 | Misto / Custom | MIXED | — | — |
-| Câmera IP (Teste RTSP)| CAMERA | server/api/routers/rtsp_test.py| RTSP (TCP) |
+| Câmera IP (Teste RTSP)| CAMERA | server/api/routers/equipamentos.py + agent.py (`/rtsp-result`), agent/src/camera/rtsp_client.py | RTSP (TCP) |
 
 ---
 
@@ -716,15 +720,44 @@ de dados existentes, rollout gradual e plano de rollback.
 | IC-002 | PyInstaller + pystray | SyntaxWarning: return in a finally block | Inofensivo, warning apenas |
 | IC-003 | PyInstaller + pycparser | pycparser.lextab e yacctab nao encontrados | Inofensivo, warning apenas |
 | IC-004 | OTA Tray em agentes <=1.0.5 | Agentes antigos nao tem logica de download/substituicao do Tray | Conhecido e aceito |
-| IC-005 | agent_update.py edit_version | PUT /api/v1/admin/agent-version/{id} nao aceita url_tray e sha256_tray no schema AgentVersionUpdate | **PENDENTE CORRECAO** |
-
-> **IC-005 REQUER CORRECAO:** O schema `AgentVersionUpdate` em `schemas.py`
-> precisa incluir `url_tray: Optional[str] = None` e `sha256_tray: Optional[str] = None`.
-> O frontend ja envia esses campos mas o schema Pydantic os ignora silenciosamente.
+| IC-005 | agent_update.py edit_version | PUT /api/v1/admin/agent-version/{id} nao aceitava url_tray e sha256_tray | Resolvido (schema `AgentVersionUpdate` inclui os campos; `Settings.tsx` usa `editAgentVersion` do `client.ts`) |
 
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-09] — Agente 1.1.3: Captura de imagem da noite via histórico ISAPI e Galeria unificada
+
+**Alteração:** Agente busca trechos de gravação na madrugada via ISAPI (`buscar_trechos`) antes de tentar baixar a imagem via RTSP, evitando tentativas cegas (e timeouts) em NVRs que não têm gravação. A galeria do NVR agora une os dados da tabela `nvr_cameras` com `last_recording_status`, listando todas as câmeras gravadas (mesmo as que falharam na imagem).
+**Antes:** O ffmpeg tentava baixar 15s de RTSP em horários fixos. Câmeras sem gravação ficavam até 15s bloqueadas. A galeria só mostrava câmeras com imagem capturada com sucesso (`nvr_cameras`).
+**Depois:** A galeria lista todas as câmeras. Falhas mostram o motivo (traduzido do log do ffmpeg).
+**Arquivos:** `agent/src/nvr/hikvision/recordings.py`, `agent/src/camera/rtsp_client.py`, `agent/src/application/backup_job.py`, `agent/src/application/api_client.py`, `server/api/schemas.py`, `server/api/routers/equipamentos.py`, `server/dashboard/src/pages/ClientDetail.tsx`
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-09] — Agente 1.1.2: ping em cadência fixa + telemetria sem NaN
+
+**Alteracao:** Ping do agente movido para thread própria com cadência fixa de 15s (início a início); telemetria sanitizada; "Próximo contato (estimado)" sincronizado com o ping real.
+**Antes:** O ping só era verificado quando o loop principal acordava (espera de até 60s, e bloqueado durante backups), então saía a cada ~60s enquanto o dashboard contava 15s e ficava em 00:00. GPUtil devolvia NaN para campos `[N/A]` do nvidia-smi e o `requests` recusava serializar o JSON, derrubando todos os pings (cliente aparecia offline e não recebia OTA).
+**Depois:** `service.py` roda `_ping_loop` em thread (`PING_INTERVAL_S = 15`); as instruções do ping são enfileiradas e executadas no loop principal via evento `hPingResp`. `hWaitStop` virou manual-reset para as duas threads verem a parada. `api_client._json_safe` troca NaN/inf por null e falha de telemetria não impede o ping. Dashboard mostra "aguardando…" ao passar do horário e consulta o cliente a cada 1s por até 30s.
+**Imagem de referência (1.1.2):** `rtsp_client.test_rtsp_camera` passa a capturar o stream principal (`{canal}01` / `subtype=0`) quando a tarefa traz `canal` (galeria do NVR), igual à origem da imagem da noite; antes usava o secundário (`{canal}02` / `subtype=1`), com resolução e proporção diferentes. O teste de câmera direta (sem canal) continua no secundário.
+**Galeria do NVR (dashboard):** os painéis "Referência Ideal" e "Último backup (noite)" usam o mesmo componente `CameraImagePanel`, com `object-fit: contain` (quadro inteiro, sem corte) e a resolução da imagem ao lado do título. Antes eram dois blocos duplicados com `cover`, que cortava imagens fora de 16:9.
+**Arquivos:** agent/service.py, agent/src/application/api_client.py, agent/src/camera/rtsp_client.py, agent/src/application/updater.py, agent/installer.iss, server/dashboard/src/pages/ClientDetail.tsx, server/dashboard/package.json
+**Breaking Change:** Não. Clientes na 1.1.1 com GPU que retorna NaN não pingam e portanto não recebem OTA: atualizar manualmente.
+**Branch:** isaque
+
+---
+
+### [2026-10-09] — Versão do agente 1.1.1
+
+**Alteracao:** Versão do agente elevada para 1.1.1 (build com telemetria psutil/GPUtil do merge `helena`).
+**Antes:** `CURRENT_VERSION = "1.1.0"`, `AppVersion=1.1.0`.
+**Depois:** `CURRENT_VERSION = "1.1.1"`, `AppVersion=1.1.1`, dashboard `package.json` 1.1.1.
+**Arquivos:** agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json
+**Breaking Change:** Não. Requer build (`agent/build.ps1`), GitHub Release v1.1.1 e registro no OTA Manager.
+**Branch:** isaque
+
+---
 
 ### [2026-10-07] — Merge Seletivo da Branch `helena` (Câmeras RTSP)
 
@@ -778,3 +811,72 @@ de dados existentes, rollout gradual e plano de rollback.
 **Depois:** Codigo revertido ao estado estavel anterior
 **Breaking Change:** Sim (reverteu features da helena)
 **Branch:** isaque | **Commit:** da6dc80 (reset)
+
+---
+
+### [2026-10-08] — Galeria de Imagens de Câmeras (NVR) Lado a Lado
+
+**Alteracao:** Implementado sistema completo para salvar "Perfect Image" e extrair automaticamente "Night Image" das câmeras de NVR. Limitado para Hikvision/Intelbras para garantir estabilidade.
+**Antes:** As câmeras atreladas aos NVRs apenas recebiam mapeamento em texto dos dias gravados.
+**Depois:** Banco de dados recebe tabela `nvr_cameras`. UI do Dashboard agora possui a Galeria (Botão "Galeria" no Card do NVR). Agente extrai a imagem noturna usando o endpoint RTSP de Playback (02:00:00 da última gravação válida) logo após verificar as gravações do NVR.
+**Arquivos:** `server/api/models.py`, `server/api/schemas.py`, `server/api/routers/equipamentos.py`, `server/api/routers/agent.py`, `agent/src/camera/rtsp_client.py`, `agent/src/application/backup_job.py`, `server/dashboard/src/pages/ClientDetail.tsx`
+**Breaking Change:** Não
+**Branch:** isaque
+
+---
+
+### [2026-10-09] — Correcao da edicao de versoes OTA no Dashboard
+
+**Alteracao:** `Settings.tsx` chamava `PUT /api/v1/admin/agent-versions/{id}` (plural, rota inexistente) via `fetch` cru, sem `API_BASE`, exibindo sucesso mesmo com 404.
+**Depois:** Usa `editAgentVersion` de `api/client.ts` (`PUT /admin/agent-version/{id}`). IC-005 encerrado.
+**Arquivos:** `server/dashboard/src/pages/Settings.tsx`
+**Breaking Change:** Nao
+**Branch:** isaque
+
+---
+
+### [2026-10-09] — Sincronizacao do "Ultimo contato" com o ping
+
+**Alteracao:** `ping_agent` setava `last_seen` mas o `db.refresh(client)` do long-polling descartava o valor antes do commit; "Ultimo contato" so atualizava em `/agent/config`.
+**Depois:** `last_seen` e commitado logo no inicio do ping. Dashboard calcula "Proximo contato" com intervalo de 15s (antes 5 min) e contagem regressiva continua usando o skew do relogio do servidor.
+**Arquivos:** `server/api/routers/agent.py`, `server/dashboard/src/pages/ClientDetail.tsx`, `server/dashboard/src/api/types.ts`
+**Breaking Change:** Nao
+**Branch:** isaque
+
+---
+
+### [2026-10-09] — Merge auditado da branch `helena` (isaque_repo/helena @ 13f066c)
+
+**Tipo:** merge real (`git merge --no-ff`) com resolução seletiva, auditado contra este documento.
+
+**Incorporado:**
+- Telemetria do agente (CPU, RAM, disco, rede por placa, GPU) enviada no body do ping; coluna `clients.telemetry` (JSON) via migração inline (REGRA-007); card "Saúde do Servidor" no ClientDetail.
+- Importação de câmeras via CSV robusto (aspas, `;`/`,`) e XLSX (`xlsx` 0.18.5), mapeamento dinâmico de colunas, limpeza de `\0`, botão "Apagar Câmeras".
+- `service.py`: inicia webhooks Digifort/Defense conforme equipamentos; se iniciou sem servidor, reinicia ao reconectar para buscar config; restart via `ping -n 4` (o `timeout` falha sem console no contexto de serviço).
+- `backup_job.py`: equipamentos `CAMERA` ignorados no backup automático.
+- `.agents/rules/git-deploy.md`: nome correto do repo secundário.
+
+**Bloqueado / ajustado na resolução:**
+- `docker-compose.yml`: porta `7005` e volume `pg_data_local` **rejeitados** (o volume novo apontaria produção para um banco vazio). Mantido `7001` + `pg_data`.
+- `datetime.now(timezone.utc).replace(tzinfo=None)` em `models.py`/`agent.py` revertido para `datetime.utcnow()` (REGRA-001 / ADR-001).
+- `routers/rtsp_test.py` + `numpy`/`opencv` no servidor: **rejeitados** — sem consumidor no frontend, o container não alcança a LAN do cliente, credencial padrão hardcoded; o teste RTSP já é feito pelo agente.
+- `numpy`/`opencv` no agente: removidos (agente usa `imageio-ffmpeg` desde a v1.0.8).
+- `webhook_defense.py`: versão de debug (POST não registrava evento) rejeitada.
+- `vms/defense_api.py`: esqueleto com TODOs, não referenciado — não incorporado.
+- Scripts avulsos/backup (`fix.py`, `resolve.py`, `patch_client_detail*.py`, `insert_cameras.py`, `scratch_test*`, `clientdetail.bak`, `cameras.csv`) não incorporados.
+- `service.py`: corrigido mojibake (`â€”`, `Ã£`) inclusive no `_svc_display_name_`; `config_extra` nulo não derruba mais a carga de config (evita restart em loop).
+- Ping: `last_seen` e `telemetry` commitados antes do long-polling (5s), preservando a correção anterior.
+
+**Breaking Change:** Não (body do ping é opcional; agentes antigos continuam funcionando).
+**Requer:** nova build do agente para enviar telemetria.
+**Branch:** isaque
+
+---
+
+## 17. Fluxo de Atualização de Versão (Release)
+
+Quando uma nova versão do Agente Trilan for lançada, certifique-se de atualizar o número da versão nos seguintes arquivos:
+
+1. **`server/dashboard/package.json`**: Propriedade `"version"`.
+2. **`agent/src/application/updater.py`**: Variável `CURRENT_VERSION`.
+3. **`agent/installer.iss`**: Propriedades `AppVersion` e `OutputBaseFilename` (para controle e nome do executável do InnoSetup).

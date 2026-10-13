@@ -50,6 +50,39 @@ EquipamentoResponse = NVRResponse
 
 
 # ─────────────────────────────────────────────
+# Câmeras atreladas a um NVR
+# ─────────────────────────────────────────────
+class NVRCameraResponse(BaseModel):
+    id: Optional[UUID] = None
+    nvr_id: UUID
+    canal: int
+    nome: str
+    perfect_image_base64: Optional[str] = None
+    night_image_base64: Optional[str] = None
+    night_image_date: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    status_comunicacao: Optional[str] = None
+    status_gravacao: Optional[str] = None
+    captura_status: Optional[str] = None
+    captura_motivo: Optional[str] = None
+    captura_horario: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+class NVRCameraSetPerfect(BaseModel):
+    canal: int
+    nome: str
+    image_base64: str
+
+class NVRCameraNightImage(BaseModel):
+    nvr_name: str
+    canal: int
+    nome: str
+    image_base64: str
+    night_image_date: datetime
+
+
+# ─────────────────────────────────────────────
 # Client
 # ─────────────────────────────────────────────
 class ClientBase(BaseModel):
@@ -84,6 +117,9 @@ class ClientResponse(ClientBase):
     restart_requested: bool = False
     backup_requested: bool = False
     telemetry: Optional[Dict[str, Any]] = None
+    # Calculado no servidor — nunca depende do relógio do navegador
+    is_online: bool = False
+    current_server_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -279,7 +315,9 @@ class RTSPTestRequest(BaseModel):
     nome: str
     ip: str
     modelo: str
+    usuario: str = "admin"
     senha: str = "navarro@123"
+    canal: Optional[int] = None
 
 class RTSPTestResponse(BaseModel):
     success: bool
