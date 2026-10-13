@@ -4,6 +4,7 @@ import { ToastProvider } from "./components/Toast";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
+import Units from "./pages/Units";
 import Clients from "./pages/Clients";
 import ClientDetail from "./pages/ClientDetail";
 import Backups from "./pages/Backups";
@@ -20,6 +21,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<ProtectedRoute><Layout><Overview /></Layout></ProtectedRoute>} />
+      <Route path="/units" element={<ProtectedRoute><Layout><Units /></Layout></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><Layout><Clients /></Layout></ProtectedRoute>} />
       <Route path="/clients/:id" element={<ProtectedRoute><Layout><ClientDetail /></Layout></ProtectedRoute>} />
       <Route path="/backups" element={<ProtectedRoute><Layout><Backups /></Layout></ProtectedRoute>} />

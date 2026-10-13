@@ -104,6 +104,8 @@ class ClientUpdate(BaseModel):
     email_to: Optional[List[str]] = None
     active: Optional[bool] = None
     zip_password: Optional[str] = None
+    group_id: Optional[UUID] = None
+    queue_order: Optional[int] = None
 
 
 class ClientResponse(ClientBase):
@@ -120,6 +122,9 @@ class ClientResponse(ClientBase):
     # Calculado no servidor — nunca depende do relógio do navegador
     is_online: bool = False
     current_server_time: Optional[datetime] = None
+    group_id: Optional[UUID] = None
+    group_name: Optional[str] = None
+    queue_order: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -306,6 +311,43 @@ class UpdateCheckResponse(BaseModel):
     sha256_service: Optional[str] = None
     sha256_tray: Optional[str] = None
     notes: Optional[str] = None
+
+
+# ─────────────────────────────────────────────
+# Client Groups (Unidades)
+# ─────────────────────────────────────────────
+class ClientGroupBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    active: bool = True
+    backup_hour: int = 2
+    backup_minute: int = 0
+
+
+class ClientGroupCreate(ClientGroupBase):
+    pass
+
+
+class ClientGroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    active: Optional[bool] = None
+    backup_hour: Optional[int] = None
+    backup_minute: Optional[int] = None
+
+
+class ClientGroupResponse(ClientGroupBase):
+    id: UUID
+    created_at: datetime
+    agents_total: int = 0
+    agents_online: int = 0
+    health: str = "NO_DATA"  # ALL_OK | PARTIAL | ALL_ERROR | NO_DATA
+    last_backup_at: Optional[datetime] = None
+    queue_active: bool = False
+    clients: List["ClientResponse"] = []
+
+    model_config = {"from_attributes": True}
+
 
 
 # "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?

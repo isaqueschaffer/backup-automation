@@ -9,7 +9,7 @@ from models import Client, Backup
 from schemas import StatsResponse
 from auth import verify_admin_token
 from config import settings
-from routers import auth_router, clients, nvrs, backups, agent, settings_router, equipamentos
+from routers import auth_router, clients, nvrs, backups, agent, settings_router, equipamentos, groups
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -47,6 +47,25 @@ try:
     except Exception:
         colunas_nvrs = []
     
+    # Cria tabela client_groups se não existir (Unidades)
+    try:
+        insp.get_columns('client_groups')
+    except Exception:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS client_groups (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    backup_hour INTEGER DEFAULT 2,
+                    backup_minute INTEGER DEFAULT 0,
+                    queue_active BOOLEAN NOT NULL DEFAULT FALSE,
+                    queue_current_index INTEGER,
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                );
+            """))
+
     with engine.begin() as conn:
         if 'last_seen' not in colunas_existentes:
             conn.execute(text("ALTER TABLE clients ADD COLUMN last_seen TIMESTAMP WITHOUT TIME ZONE;"))
@@ -59,6 +78,12 @@ try:
 
         if 'telemetry' not in colunas_existentes:
             conn.execute(text("ALTER TABLE clients ADD COLUMN telemetry JSON;"))
+
+        if 'group_id' not in colunas_existentes:
+            conn.execute(text("ALTER TABLE clients ADD COLUMN group_id UUID REFERENCES client_groups(id) ON DELETE SET NULL;"))
+
+        if 'queue_order' not in colunas_existentes:
+            conn.execute(text("ALTER TABLE clients ADD COLUMN queue_order INTEGER NOT NULL DEFAULT 0;"))
             
         if colunas_nvrs and 'last_recording_status' not in colunas_nvrs:
             conn.execute(text("ALTER TABLE nvrs ADD COLUMN last_recording_status JSON;"))
@@ -105,6 +130,7 @@ app.include_router(nvrs.router)           # mantido para compatibilidade
 app.include_router(backups.router)
 app.include_router(agent.router)
 app.include_router(settings_router.router)
+app.include_router(groups.router)
 app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 

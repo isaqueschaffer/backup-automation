@@ -41,15 +41,22 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
         for nvr in client.nvrs if nvr.active
     ]
     zip_pw = decrypt(client.zip_password) if client.zip_password else None
-    
+
+    # Usa horário do grupo se o agente pertencer a uma Unidade
+    backup_hour = client.backup_hour
+    backup_minute = client.backup_minute
+    if getattr(client, 'group_id', None) and getattr(client, 'group', None):
+        backup_hour = client.group.backup_hour
+        backup_minute = client.group.backup_minute
+
     # Update last_seen
     client.last_seen = datetime.utcnow()
     db.commit()
     
     return AgentConfigResponse(
         client_name=client.name,
-        backup_hour=client.backup_hour,
-        backup_minute=client.backup_minute,
+        backup_hour=backup_hour,
+        backup_minute=backup_minute,
         zip_password=zip_pw,
         equipamentos=equipamentos,
         nvrs=equipamentos,  # alias de compatibilidade
@@ -234,6 +241,48 @@ def receive_backup_report(
 
     db.commit()
     db.refresh(backup)
+
+    # ── Avançar fila de backup sequencial da Unidade ──
+    if getattr(client, 'group_id', None) and getattr(client, 'group', None):
+        group = client.group
+        if group.queue_active:
+            from routers.clients import check_client_online
+            active_clients = sorted(
+                [c for c in group.clients if c.active],
+                key=lambda c: c.queue_order
+            )
+            current_idx = group.queue_current_index if group.queue_current_index is not None else 0
+            next_online_client = None
+            next_idx = None
+            for idx in range(current_idx + 1, len(active_clients)):
+                c = active_clients[idx]
+                if check_client_online(c):
+                    next_online_client = c
+                    next_idx = idx
+                    break
+                else:
+                    from models import AgentLog
+                    db.add(AgentLog(
+                        client_id=c.id,
+                        event_type="queue_backup_skipped",
+                        message=f"Agente '{c.name}' está OFFLINE. Pulado na fila da Unidade '{group.name}'."
+                    ))
+
+            if next_online_client is not None:
+                group.queue_current_index = next_idx
+                next_online_client.backup_requested = True
+                from models import AgentLog
+                db.add(AgentLog(
+                    client_id=next_online_client.id,
+                    event_type="queue_backup",
+                    message=f"Backup em fila disparado pela Unidade '{group.name}'. Posição {next_idx + 1}/{len(active_clients)} ({next_online_client.name})."
+                ))
+            else:
+                # Nenhum próximo online ou fim da fila atingido
+                group.queue_active = False
+                group.queue_current_index = None
+            db.commit()
+
     return BackupReportResponse(backup_id=backup.id)
 
 

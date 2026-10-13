@@ -15,6 +15,17 @@ from services.storage_service import move_client_to_trash
 router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
 
 
+def check_client_online(client: Client) -> bool:
+    if not client.active or not client.last_seen:
+        return False
+    now = datetime.now(timezone.utc)
+    last_seen = client.last_seen
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+    diff_seconds = (now - last_seen).total_seconds()
+    return diff_seconds < 180
+
+
 def _to_response(client: Client) -> ClientResponse:
     data = ClientResponse.model_validate(client)
     data.nvr_count = len(client.nvrs)
@@ -23,17 +34,11 @@ def _to_response(client: Client) -> ClientResponse:
     # total com PostgreSQL (que retorna timestamps timezone-aware)
     now = datetime.now(timezone.utc)
     data.current_server_time = now
+    data.is_online = check_client_online(client)
 
-    if client.active and client.last_seen:
-        # Normaliza last_seen: se vier sem fuso (naive), trata como UTC
-        last_seen = client.last_seen
-        if last_seen.tzinfo is None:
-            last_seen = last_seen.replace(tzinfo=timezone.utc)
-        diff_seconds = (now - last_seen).total_seconds()
-        # Agente envia ping a cada ~20s. Toleramos até 3 minutos (180s).
-        data.is_online = diff_seconds < 180
-    else:
-        data.is_online = False
+    # Preenche nome do grupo se o agente estiver em uma Unidade
+    if getattr(client, 'group', None):
+        data.group_name = client.group.name
 
     return data
 

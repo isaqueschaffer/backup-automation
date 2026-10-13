@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
+import { ClientGroup } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -92,5 +93,53 @@ export const deleteAgentVersion = (id: string) =>
   api.delete(`/admin/agent-version/${id}`).then((r) => r.data);
 export const editAgentVersion = (id: string, data: Record<string, string>) =>
   api.put(`/admin/agent-version/${id}`, data).then((r) => r.data);
+
+// ── Groups (Unidades) ──────────────────────────────────────────
+export const fetchGroups = (): Promise<ClientGroup[]> =>
+  api.get("/groups").then((r) => r.data);
+
+export const fetchGroup = (id: string): Promise<ClientGroup> =>
+  api.get(`/groups/${id}`).then((r) => r.data);
+
+export const createGroup = (data: {
+  name: string;
+  description?: string;
+  backup_hour: number;
+  backup_minute: number;
+  active: boolean;
+}): Promise<ClientGroup> => api.post("/groups", data).then((r) => r.data);
+
+export const updateGroup = (
+  id: string,
+  data: Partial<{
+    name: string;
+    description: string;
+    backup_hour: number;
+    backup_minute: number;
+    active: boolean;
+  }>
+): Promise<ClientGroup> => api.put(`/groups/${id}`, data).then((r) => r.data);
+
+export const deleteGroup = (id: string): Promise<void> =>
+  api.delete(`/groups/${id}`).then((r) => r.data);
+
+export const triggerGroupBackup = (id: string): Promise<void> =>
+  api.post(`/groups/${id}/trigger-backup`).then((r) => r.data);
+
+export const cancelGroupQueue = (id: string): Promise<void> =>
+  api.post(`/groups/${id}/cancel-queue`).then((r) => r.data);
+
+export const downloadGroupZip = async (id: string, groupName: string): Promise<void> => {
+  const res = await api.get(`/groups/${id}/download-latest`, { responseType: "blob" });
+  const blob = new Blob([res.data], { type: "application/zip" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  const date = new Date().toLocaleDateString("pt-BR").replace(/\//g, "-");
+  a.download = `unidade_${groupName.replace(/ /g, "_")}_${date}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+};
 
 export default api;
