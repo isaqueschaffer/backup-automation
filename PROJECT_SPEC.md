@@ -726,6 +726,22 @@ de dados existentes, rollout gradual e plano de rollback.
 
 ## 16. Architecture Changelog
 
+### [2026-10-13] — Agente 1.1.4: Galeria/imagem da noite para NVR Motorola (NVMS-9000)
+
+**Alteração:** Captura da imagem da noite e da referência ideal passa a funcionar em NVR Motorola, e a galeria lista as câmeras Motorola.
+**Antes:** O backup marcava toda câmera Motorola como `NAO_SUPORTADO`; a referência usava a URL RTSP da Hikvision (404); o canal Motorola era reportado como GUID (`{0000000N-0000-...}`) e o servidor descartava (`int()` falhava), então a galeria ficava vazia.
+**Depois:**
+- RTSP Motorola: ao vivo `rtsp://.../chID=N&streamType=main`; playback `chID=N&date=AAAA-MM-DD&time=HH:MM:SS&timelen=10&streamType=main`. A rota `test-rtsp` agora envia também `marca` (NVR guarda a marca em `config_extra.marca`, não em `modelo`).
+- `factory.py`: o canal Motorola é reportado como inteiro (N do GUID; GUID original em `canal_guid`) e com `dias_com_gravacao`. O servidor também converte GUID de relatórios de agentes antigos (`_canal_int`).
+- `motorola/recordings.py`: `buscar_trechos_motorola` usa `queryChlRecLog` (mesmo comando da tela de gravação do NVR; resposta em UTC; erro `noRecord` = sem gravação) para achar o trecho real da madrugada.
+- `rtsp_client.capture_night_image_motorola`: 02:00 limitado ao trecho (até 2 trechos por interpretação de horário). Alguns NVRs (ex.: relógio/fuso reconfigurado) exibem/reproduzem no horário UTC cru da busca em vez do fuso local; o agente testa as duas interpretações ("local"/"utc") e lembra a que funcionou por NVR (`_MODO_HORARIO_MOTOROLA`). Sem gravação na madrugada = `SEM_GRAVACAO`; busca falhou = horários fixos como fallback.
+- `backup_job.py`: um login Motorola para todas as câmeras; antes das 06h usa o último dia anterior a hoje (a madrugada de hoje ainda não terminou).
+**Validação (8 NVRs Motorola, VPN, madrugada de 12/10):** imagem capturada na grande maioria das câmeras com gravação; as restantes são `SEM_GRAVACAO` ou falha com motivo (NVR lista trecho mas não entrega o vídeo em 1–3 canais por NVR).
+**Limitação conhecida:** num NVR com fuso divergente e gravação contínua, a interpretação errada do horário poderia devolver um quadro de outro horário; o horário reportado é o solicitado ao NVR.
+**Arquivos:** agent/src/camera/rtsp_client.py, agent/src/nvr/factory.py, agent/src/nvr/motorola/recordings.py, agent/src/application/backup_job.py, agent/src/application/updater.py, agent/installer.iss, server/api/routers/equipamentos.py, server/dashboard/package.json
+**Breaking Change:** Não. Relatórios Motorola passam a trazer `canal` inteiro; o servidor aceita os dois formatos.
+**Branch:** isaque
+
 ### [2026-10-09] — Agente 1.1.3: Captura de imagem da noite via histórico ISAPI e Galeria unificada
 
 **Alteração:** Agente busca trechos de gravação na madrugada via ISAPI (`buscar_trechos`) antes de tentar baixar a imagem via RTSP, evitando tentativas cegas (e timeouts) em NVRs que não têm gravação. A galeria do NVR agora une os dados da tabela `nvr_cameras` com `last_recording_status`, listando todas as câmeras gravadas (mesmo as que falharam na imagem).

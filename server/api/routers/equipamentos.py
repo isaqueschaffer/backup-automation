@@ -152,6 +152,7 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Op
         "equipamento_id": str(eq.id),
         "ip": eq.ip.strip(),
         "modelo": (eq.config_extra or {}).get("modelo", ""),
+        "marca": (eq.config_extra or {}).get("marca", ""),
         "username": eq.username or "admin",
         "password": senha_pura,
         "canal": canal,
@@ -202,17 +203,28 @@ def get_nvr_cameras(
     
     report_status = nvr.last_recording_status or []
     
-    canais_set = set(db_dict.keys())
-    for st in report_status:
+    def _canal_int(valor):
+        # Motorola (agentes < 1.1.4) reportava o canal como GUID "{0000000N-0000-...}"
         try:
-            canais_set.add(int(st["canal"]))
-        except ValueError:
-            pass
+            return int(valor)
+        except (ValueError, TypeError):
+            try:
+                return int(str(valor).strip("{}").split("-")[0], 16)
+            except ValueError:
+                return None
+
+    report_by_ch = {}
+    for st in report_status:
+        ch_int = _canal_int(st.get("canal"))
+        if ch_int is not None:
+            report_by_ch[ch_int] = st
+
+    canais_set = set(db_dict.keys()) | set(report_by_ch.keys())
 
     merged_cameras = []
     for ch in sorted(canais_set):
         c_db = db_dict.get(ch)
-        c_report = next((x for x in report_status if str(x.get("canal")) == str(ch)), None)
+        c_report = report_by_ch.get(ch)
         
         obj = {
             "id": c_db.id if c_db else None,

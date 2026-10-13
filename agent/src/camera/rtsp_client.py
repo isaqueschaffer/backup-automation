@@ -2,6 +2,7 @@ import os
 import base64
 import urllib.parse
 import subprocess
+from datetime import timezone
 from typing import Dict, Any
 
 def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
@@ -17,7 +18,11 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     # {canal}01). O stream secundário ({canal}02 / subtype=1) tem resolução e proporção diferentes.
     nvr_canal = bool(canal)
 
-    if "Grandstream" in modelo:
+    marca = task.get("marca") or ""
+
+    if "motorola" in marca.lower() or "motorola" in modelo.lower():
+        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal or 1}&streamType=main"
+    elif "Grandstream" in modelo:
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/4"
     elif "Intelbras" in modelo:
         ch = canal if canal else 1
@@ -64,6 +69,120 @@ def _motivo_ffmpeg(stderr: str) -> str:
         ultima_linha = linhas[-1]
         return ultima_linha[:150]
     return "Erro desconhecido"
+
+# Interpretação do horário de playback que funcionou por NVR: "local" ou "utc"
+_MODO_HORARIO_MOTOROLA = {}
+
+
+def _frame_motorola(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, timeout=15):
+    """Lê um frame do playback RTSP Motorola em `alvo` (datetime local). Retorna (jpeg|None, stderr)."""
+    rtsp_url = (
+        f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal}"
+        f"&date={alvo.strftime('%Y-%m-%d')}&time={alvo.strftime('%H:%M:%S')}&timelen=10&streamType=main"
+    )
+    cmd = [
+        ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
+        "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    if result.returncode == 0 and len(result.stdout) > 1000:
+        return result.stdout, ""
+    return None, result.stderr.decode('utf-8', errors='ignore')
+
+
+def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: int, date_str: str, sessao=None) -> dict:
+    """
+    Captura um frame da madrugada (00h-06h) via playback RTSP de um NVR Motorola (NVMS-9000).
+    Busca os trechos reais com queryChlRecLog e usa 02:00 limitado ao trecho (como no Hikvision).
+    Horário sem gravação faz o NVR segurar a conexão; por isso, se a busca falhar, o fallback
+    por horários fixos usa timeout curto.
+    """
+    import imageio_ffmpeg
+    import logging
+    from datetime import datetime, timedelta
+    from src.nvr.motorola.recordings import buscar_trechos_motorola
+
+    result_dict = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
+
+    try:
+        data_obj = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        result_dict["motivo"] = "Data inválida"
+        return result_dict
+
+    senha_enc = urllib.parse.quote(senha_pura, safe='')
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    ideal = data_obj.replace(hour=2)
+
+    inicio_madrugada = data_obj
+    fim_madrugada = data_obj.replace(hour=6)
+
+    # (modo, alvos): "local" = horário exibido no NVR é o do fuso local (padrão);
+    # "utc" = NVR cujo relógio exibido coincide com o horário UTC cru devolvido pela busca.
+    tentativas = []
+    buscou_trechos = False
+    if sessao is not None:
+        # Janela larga, para cobrir qualquer diferença de fuso entre NVR e agente
+        brutos = buscar_trechos_motorola(
+            ip, sessao, canal, data_obj - timedelta(hours=6), data_obj + timedelta(hours=18), max_results=None)
+        if brutos is not None:
+            buscou_trechos = True
+            modos = ["local", "utc"]
+            if _MODO_HORARIO_MOTOROLA.get(ip) == "utc":
+                modos.reverse()
+            for modo in modos:
+                exibidos = []
+                for st_utc, en_utc in brutos:
+                    # buscar_trechos_motorola devolve horário local do agente; recupera o UTC cru
+                    if modo == "local":
+                        exibidos.append((st_utc, en_utc))
+                    else:
+                        exibidos.append((st_utc.astimezone(timezone.utc).replace(tzinfo=None),
+                                         en_utc.astimezone(timezone.utc).replace(tzinfo=None)))
+                na_madrugada = [t for t in exibidos if t[0] < fim_madrugada and t[1] > inicio_madrugada]
+                if not na_madrugada:
+                    continue
+
+                def distancia(t):
+                    if t[0] <= ideal <= t[1]:
+                        return 0
+                    return min(abs((t[0] - ideal).total_seconds()), abs((t[1] - ideal).total_seconds()))
+                alvos = []
+                for st, en in sorted(na_madrugada, key=distancia)[:2]:
+                    alvo = min(max(ideal, st + timedelta(seconds=1)), max(st, en - timedelta(seconds=3)))
+                    alvos.append(alvo)
+                tentativas.append((modo, alvos))
+
+    if buscou_trechos:
+        if not tentativas:
+            result_dict["status"] = "SEM_GRAVACAO"
+            result_dict["motivo"] = "Sem gravação na madrugada (00h-06h)"
+            return result_dict
+    else:
+        tentativas = [("local", [data_obj.replace(hour=h) for h in (2, 3, 4, 1, 5, 0)])]
+
+    for modo, alvos in tentativas:
+        for alvo in alvos:
+            try:
+                jpeg, stderr_text = _frame_motorola(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo)
+                if jpeg:
+                    _MODO_HORARIO_MOTOROLA[ip] = modo
+                    result_dict["image"] = base64.b64encode(jpeg).decode('utf-8')
+                    result_dict["horario"] = alvo.strftime("%Y-%m-%dT%H:%M:%S")
+                    result_dict["status"] = "OK"
+                    result_dict["motivo"] = None
+                    return result_dict
+                result_dict["motivo"] = _motivo_ffmpeg(stderr_text)
+                logging.warning(f"FFmpeg Motorola canal {canal} ({alvo:%H:%M:%S}, {modo}): {stderr_text[-300:]}")
+            except subprocess.TimeoutExpired:
+                result_dict["motivo"] = "NVR não entregou vídeo na madrugada (tempo esgotado)"
+                logging.warning(f"FFmpeg Motorola timeout no canal {canal} ({alvo:%H:%M:%S}, {modo})")
+            except Exception as e:
+                result_dict["motivo"] = f"Erro no agente: {str(e)[:100]}"
+                logging.error(f"FFmpeg Motorola exception no canal {canal}: {e}")
+
+    return result_dict
+
 
 def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date_str: str) -> dict:
     """
