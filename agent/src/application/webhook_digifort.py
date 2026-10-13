@@ -1,5 +1,6 @@
 import datetime
 import csv
+import io
 import os
 import socket
 import re
@@ -12,48 +13,119 @@ PORTA_SNMP = 162
 ARQUIVO_CSV = r"C:\Relatorios_Digifort\quedas_cameras.csv"
 
 ARQUIVO_EXPORT_CAMERAS = ""
-DICIONARIO_CAMERAS_NOME = {} # Nome -> info
-DICIONARIO_CAMERAS_IP = {} # IP -> info
+DICIONARIO_CAMERAS_NOME = {} # Nome / Descricao / Normalizado -> info
+DICIONARIO_CAMERAS_IP = {}   # IP -> info
+LISTA_CAMERAS_UNICAS = []    # Lista canônica de câmeras
+ULTIMO_CAMINHO_EXPORT = ""
+
+def normalizar_texto(texto):
+    """Normaliza texto removendo caracteres especiais e espaços extras."""
+    if not texto:
+        return ""
+    t = re.sub(r'[^a-zA-Z0-9]', ' ', str(texto).lower())
+    return ' '.join(t.split())
+
+def ler_linhas_csv(caminho_arquivo):
+    """Lê arquivo CSV tentando UTF-8 com fallback para CP1252 (ANSI do Windows)."""
+    encodings_para_tentar = ['utf-8-sig', 'cp1252', 'latin1']
+    for enc in encodings_para_tentar:
+        try:
+            with open(caminho_arquivo, mode='r', encoding=enc) as f:
+                content = f.read()
+                if '\ufffd' not in content:
+                    f_io = io.StringIO(content)
+                    reader = csv.DictReader(f_io, delimiter=';')
+                    if reader.fieldnames:
+                        return list(reader), reader.fieldnames
+        except UnicodeDecodeError:
+            continue
+        except Exception:
+            break
+            
+    with open(caminho_arquivo, mode='r', encoding='utf-8-sig', errors='replace') as f:
+        reader = csv.DictReader(f, delimiter=';')
+        return list(reader), reader.fieldnames or []
+
+def obter_valor_coluna(row, *nomes_possiveis):
+    """Busca o valor da coluna correspondente ignorando maiúsculas/minúsculas e acentuação básica."""
+    for chave, valor in row.items():
+        if not chave:
+            continue
+        chave_limpa = chave.strip().lstrip('\ufeff').lower()
+        for np in nomes_possiveis:
+            if np.lower() == chave_limpa:
+                return valor.strip() if valor else ''
+    for chave, valor in row.items():
+        if not chave:
+            continue
+        chave_limpa = chave.strip().lstrip('\ufeff').lower()
+        for np in nomes_possiveis:
+            if np.lower() in chave_limpa:
+                return valor.strip() if valor else ''
+    return ''
 
 def carregar_dicionario_cameras(caminho_arquivo):
     dicionario_nome = {}
     dicionario_ip = {}
+    lista_unicas = []
+    
     if os.path.isfile(caminho_arquivo):
         try:
-            with open(caminho_arquivo, mode='r', encoding='utf-8-sig', errors='replace') as f:
-                reader = csv.DictReader(f, delimiter=';')
+            linhas, colunas = ler_linhas_csv(caminho_arquivo)
+            is_novo_formato = any(k in [c.lower() for c in colunas] for k in ['endereço', 'endereco', 'nome', 'ip'])
+            
+            for index, row in enumerate(linhas, start=1):
+                if is_novo_formato:
+                    ip = obter_valor_coluna(row, 'endereço', 'endereco', 'ip')
+                    nome = obter_valor_coluna(row, 'nome')
+                    descricao = obter_valor_coluna(row, 'descrição', 'descricao')
+                else:
+                    ip = ''
+                    nome = f"{index:02d}"
+                    descricao = obter_valor_coluna(row, 'descrição', 'descricao')
                 
-                colunas = reader.fieldnames or []
-                is_novo_formato = 'Endereço' in colunas or 'Nome' in colunas
+                # Nome de exibição principal:
+                # Se 'nome' for apenas número (ex: '01', '44') e tiver descrição, usa a descrição.
+                # Se descrição for mais detalhada, prioriza a descrição pois é o que vem nos alarmes do Digifort.
+                if nome.isdigit() and descricao:
+                    nome_exibicao = descricao
+                elif descricao and len(descricao) > len(nome):
+                    nome_exibicao = descricao
+                else:
+                    nome_exibicao = nome or descricao or f"Camera {index:02d}"
+                    
+                info = {
+                    'Nome': nome_exibicao,
+                    'NomeCurto': nome,
+                    'Descricao': descricao,
+                    'IP': ip
+                }
+                lista_unicas.append(info)
                 
-                for index, row in enumerate(reader, start=1):
-                    if is_novo_formato:
-                        ip = row.get('Endereço', '')
-                        nome = row.get('Nome', '')
-                        descricao = row.get('Descrição', '')
-                        
-                        info = {'Nome': nome or descricao, 'IP': ip}
-                        if nome:
-                            dicionario_nome[nome] = info
-                        elif descricao:
-                            dicionario_nome[descricao] = info
-                        if ip:
-                            dicionario_ip[ip] = info
-                    else:
-                        numero = f"{index:02d}"
-                        descricao = row.get("Descrição", "")
-                        if descricao:
-                            info = {'Nome': descricao.strip(), 'IP': ''}
-                            dicionario_nome[descricao.strip()] = info
-                            dicionario_nome[numero] = info
-                            
-            print(f"[OK] Cameras carregadas do arquivo {caminho_arquivo}")
+                # Mapeia todas as formas de busca para o mesmo objeto info
+                if nome:
+                    dicionario_nome[nome] = info
+                    dicionario_nome[nome.lower()] = info
+                    dicionario_nome[normalizar_texto(nome)] = info
+                if descricao:
+                    dicionario_nome[descricao] = info
+                    dicionario_nome[descricao.lower()] = info
+                    dicionario_nome[normalizar_texto(descricao)] = info
+                    
+                num_str = f"{index:02d}"
+                dicionario_nome[num_str] = info
+                dicionario_nome[str(index)] = info
+                
+                if ip:
+                    dicionario_ip[ip] = info
+                    
+            print(f"[OK] {len(lista_unicas)} cameras carregadas do arquivo {caminho_arquivo}")
         except Exception as e:
             print(f"[ERRO] ao ler {caminho_arquivo}: {e}")
     else:
         print(f"[AVISO] Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
         
-    return dicionario_nome, dicionario_ip
+    return dicionario_nome, dicionario_ip, lista_unicas
 
 def registrar_queda(nome_camera, nome_evento):
     agora = datetime.datetime.now()
@@ -76,32 +148,45 @@ def registrar_queda(nome_camera, nome_evento):
 
 def get_status_cameras(caminho_export="", caminho_log=""):
     """Lê o histórico do CSV e retorna o dicionário com o status de cada câmera"""
+    global ULTIMO_CAMINHO_EXPORT
     
-    # Usa o cache se estiver vazio e o caminho foi passado
-    if caminho_export and not DICIONARIO_CAMERAS_NOME:
-        nomes, ips = carregar_dicionario_cameras(caminho_export)
+    # Recarrega se o caminho mudou ou se o dicionário estiver vazio
+    if caminho_export and (caminho_export != ULTIMO_CAMINHO_EXPORT or not DICIONARIO_CAMERAS_NOME):
+        nomes, ips, unicas = carregar_dicionario_cameras(caminho_export)
+        DICIONARIO_CAMERAS_NOME.clear()
+        DICIONARIO_CAMERAS_IP.clear()
+        LISTA_CAMERAS_UNICAS.clear()
         DICIONARIO_CAMERAS_NOME.update(nomes)
         DICIONARIO_CAMERAS_IP.update(ips)
+        LISTA_CAMERAS_UNICAS.extend(unicas)
+        ULTIMO_CAMINHO_EXPORT = caminho_export
         
     status_cameras = {}
-    for nome in DICIONARIO_CAMERAS_NOME.keys():
-        if not nome.isdigit():
-            status_cameras[nome] = "OK"
+    if LISTA_CAMERAS_UNICAS:
+        for cam in LISTA_CAMERAS_UNICAS:
+            status_cameras[cam['Nome']] = "OK"
+    else:
+        for nome in DICIONARIO_CAMERAS_NOME.keys():
+            if not nome.isdigit():
+                status_cameras[nome] = "OK"
             
     arquivo_alvo = caminho_log if caminho_log else ARQUIVO_CSV
         
     if os.path.isfile(arquivo_alvo):
-        with open(arquivo_alvo, mode='r', encoding='utf-8-sig', errors='replace') as file:
-            reader = csv.DictReader(file, delimiter=';')
-            for row in reader:
-                camera = row.get('Camera')
-                evento = row.get('Evento')
-                if camera and evento:
-                    # 'Restaurada' in evento previne problemas com 'Câmera Restaurada' em CP1252 vs UTF8
-                    if 'Restaurada' in evento or 'Online' in evento:
-                        status_cameras[camera] = "OK"
-                    else:
-                        status_cameras[camera] = "FALHA"
+        linhas_log, _ = ler_linhas_csv(arquivo_alvo)
+        for row in linhas_log:
+            camera_raw = obter_valor_coluna(row, 'camera')
+            evento = obter_valor_coluna(row, 'evento')
+            if not camera_raw or not evento:
+                continue
+                
+            info = (DICIONARIO_CAMERAS_NOME.get(camera_raw) or 
+                    DICIONARIO_CAMERAS_NOME.get(camera_raw.lower()) or 
+                    DICIONARIO_CAMERAS_NOME.get(normalizar_texto(camera_raw)))
+                    
+            nome_alvo = info['Nome'] if info else camera_raw
+            is_ok = ('restaurada' in evento.lower() or 'online' in evento.lower() or evento.lower() == 'ok')
+            status_cameras[nome_alvo] = "OK" if is_ok else "FALHA"
                         
     return status_cameras
 
@@ -159,7 +244,7 @@ def rodar_sniffer_snmp():
 
                 if not camera_identificada:
                     for nome, info in DICIONARIO_CAMERAS_NOME.items():
-                        if not nome.isdigit() and nome.lower() in texto_lower:
+                        if not nome.isdigit() and (nome.lower() in texto_lower or normalizar_texto(nome) in normalizar_texto(texto_limpo)):
                             camera_identificada = info
                             break
             except:
@@ -176,7 +261,7 @@ def start_webhook(caminho_csv_export: str, caminho_log: str):
     Mantido o nome original 'start_webhook' para não quebrar o service.py,
     mas agora inicia apenas o sniffer SNMP e não mais um servidor HTTP.
     """
-    global ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV, snmp_thread
+    global ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV, snmp_thread, LISTA_CAMERAS_UNICAS, ULTIMO_CAMINHO_EXPORT
     if snmp_thread is not None:
         return 
     
@@ -185,9 +270,12 @@ def start_webhook(caminho_csv_export: str, caminho_log: str):
     
     DICIONARIO_CAMERAS_NOME.clear()
     DICIONARIO_CAMERAS_IP.clear()
-    nomes, ips = carregar_dicionario_cameras(ARQUIVO_EXPORT_CAMERAS)
+    LISTA_CAMERAS_UNICAS.clear()
+    nomes, ips, unicas = carregar_dicionario_cameras(ARQUIVO_EXPORT_CAMERAS)
     DICIONARIO_CAMERAS_NOME.update(nomes)
     DICIONARIO_CAMERAS_IP.update(ips)
+    LISTA_CAMERAS_UNICAS.extend(unicas)
+    ULTIMO_CAMINHO_EXPORT = ARQUIVO_EXPORT_CAMERAS
     
     # Inicia o Sniffer SNMP na 162
     snmp_thread = threading.Thread(target=rodar_sniffer_snmp, daemon=True)
