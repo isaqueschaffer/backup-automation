@@ -114,8 +114,15 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
     from src.core.config import load_conf
     conf = load_conf()
 
-    if tipo_nvr != "MOTOROLA" and cameras_status:
-        from src.camera.rtsp_client import capture_night_image
+    if cameras_status:
+        from src.camera.rtsp_client import capture_night_image, capture_night_image_motorola
+        if tipo_nvr == "MOTOROLA":
+            from src.nvr.motorola.cameras import buscar_cameras as login_motorola
+            _, sessao_motorola = login_motorola(ip, user, pwd)  # um login para todas as câmeras
+            capturar = lambda ip_, u_, p_, canal_, data_: capture_night_image_motorola(
+                ip_, u_, p_, canal_, data_, sessao=sessao_motorola)
+        else:
+            capturar = capture_night_image
         logging.info("  Iniciando extração de imagens noturnas (Playback RTSP) para os canais gravados...")
         for cam_st in cameras_status:
             dias_gravacao = cam_st.get("dias_com_gravacao", [])
@@ -125,10 +132,16 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
                 continue
 
             dias_ordenados = sorted(dias_gravacao)
-            data_alvo = dias_ordenados[-1]
-            
+            # Dia mais recente cuja madrugada (00h-06h) já terminou; antes das 06h "hoje" ainda não tem imagem.
+            hoje_str = datetime.now().strftime("%Y-%m-%d")
+            if datetime.now().hour < 6:
+                anteriores = [d for d in dias_ordenados if d < hoje_str]
+                data_alvo = anteriores[-1] if anteriores else dias_ordenados[-1]
+            else:
+                data_alvo = dias_ordenados[-1]
+
             try:
-                ret = capture_night_image(ip, user, pwd, cam_st["canal"], data_alvo)
+                ret = capturar(ip, user, pwd, cam_st["canal"], data_alvo)
                 cam_st["imagem_noite"] = {
                     "status": ret["status"],
                     "motivo": ret["motivo"],
@@ -156,9 +169,6 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
             except Exception as e:
                 cam_st["imagem_noite"] = {"status": "FALHA", "motivo": str(e), "horario": None}
                 logging.warning(f"    [ERRO] Exceção ao capturar imagem do canal {cam_st['canal']}: {e}")
-    elif tipo_nvr == "MOTOROLA" and cameras_status:
-        for cam_st in cameras_status:
-            cam_st["imagem_noite"] = {"status": "NAO_SUPORTADO", "motivo": "Equipamento Motorola não suporta captura noturna", "horario": None}
 
     return {"nome": nome, "status": status, "cameras": cameras_status}
 

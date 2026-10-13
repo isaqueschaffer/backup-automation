@@ -46,6 +46,12 @@ def buscar_cameras(nvr_ip, usuario, senha, marca=None):
 
     return {}, "DESCONHECIDO", None
 
+def _canal_numerico_motorola(canal_id):
+    try:
+        return int(str(canal_id).strip("{}").split("-")[0], 16)
+    except ValueError:
+        return canal_id
+
 def gerar_mapa_dias(dias_com_gravacao):
     hoje = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     datas_set = set(d.strftime("%Y-%m-%d") for d in dias_com_gravacao)
@@ -91,14 +97,18 @@ def verificar_gravacao_nvr(nvr_ip, usuario, senha, marca=None):
                     status_gravacao = "NAO_VERIFICADO"
                         
                 resultados.append({
-                    "canal": canal_id,
+                    # O canal Motorola é um GUID "{0000000N-0000-...}"; o número N é o chID do RTSP
+                    # e a chave usada pela galeria (nvr_cameras.canal é inteiro).
+                    "canal": _canal_numerico_motorola(canal_id),
+                    "canal_guid": canal_id,
                     "nome": camera["nome"],
                     "ip": camera["ip"],
                     "online": camera["online"],
                     "status_comunicacao": status_comunicacao,
                     "status_gravacao": status_gravacao,
                     "total_dias": len(dias_com_gravacao),
-                    "mapa": gerar_mapa_dias(dias_com_gravacao)
+                    "mapa": gerar_mapa_dias(dias_com_gravacao),
+                    "dias_com_gravacao": [d.strftime("%Y-%m-%d") for d in dias_com_gravacao]
                 })
             return resultados, tipo
 
