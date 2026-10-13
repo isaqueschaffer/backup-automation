@@ -172,24 +172,51 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
 
   const [testingCanal, setTestingCanal] = useState<number | null>(null);
 
-  const capturePerfectImage = async (canal: number, nome: string) => {
-    setTestingCanal(canal);
+  // Captura e salva a referência de um canal. Retorna null se deu certo, ou a mensagem de erro.
+  const capturarReferencia = async (canal: number, nome: string): Promise<string | null> => {
     try {
       const resRtsp = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
       const dataRtsp = resRtsp.data;
       if (!dataRtsp.success || !dataRtsp.image_base64) {
-        alert(dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.");
-        setTestingCanal(null);
-        return;
+        return dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.";
       }
-      
       const resSave = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
         canal, nome, image_base64: dataRtsp.image_base64
       });
       const savedCam = resSave.data;
       setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64, id: savedCam.id } : c));
+      return null;
     } catch (e: any) {
-      alert(e.response?.data?.detail || "Erro ao comunicar com o servidor.");
+      return e.response?.data?.detail || "Erro ao comunicar com o servidor.";
+    }
+  };
+
+  const capturePerfectImage = async (canal: number, nome: string) => {
+    setTestingCanal(canal);
+    const erro = await capturarReferencia(canal, nome);
+    if (erro) alert(erro);
+    setTestingCanal(null);
+  };
+
+  // Atualiza a referência de todas as câmeras disponíveis (não OFFLINE), uma por vez:
+  // o servidor tem uma única vaga de tarefa RTSP por cliente.
+  const [bulk, setBulk] = useState<{ done: number; total: number; falhas: string[] } | null>(null);
+  const cancelBulk = useRef(false);
+
+  const updateAllReferences = async () => {
+    const alvo = cameras.filter(c => c.status_comunicacao !== "OFFLINE");
+    if (alvo.length === 0) { alert("Nenhuma câmera disponível para atualizar."); return; }
+    if (!confirm(`Atualizar a imagem de referência de ${alvo.length} câmera(s)?\nLeva cerca de 15 a 20 segundos por câmera.`)) return;
+    cancelBulk.current = false;
+    const falhas: string[] = [];
+    setBulk({ done: 0, total: alvo.length, falhas });
+    for (let i = 0; i < alvo.length; i++) {
+      if (cancelBulk.current) break;
+      const cam = alvo[i];
+      setTestingCanal(cam.canal);
+      const erro = await capturarReferencia(cam.canal, cam.nome);
+      if (erro) falhas.push(`${cam.nome || `Canal ${cam.canal}`}: ${erro}`);
+      setBulk({ done: i + 1, total: alvo.length, falhas: [...falhas] });
     }
     setTestingCanal(null);
   };
@@ -209,6 +236,33 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
             <div style={{ width: "260px", borderRight: "1px solid var(--border)", overflowY: "auto", padding: "16px 0", background: "var(--surface-50)" }}>
               <div style={{ padding: "0 16px", marginBottom: 12, fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em" }}>
                 CANAIS ({cameras.length})
+              </div>
+              <div style={{ padding: "0 16px", marginBottom: 12 }}>
+                {bulk && bulk.done < bulk.total && !cancelBulk.current ? (
+                  <>
+                    <div style={{ fontSize: 12, marginBottom: 6 }}>Atualizando referências {bulk.done}/{bulk.total}...</div>
+                    <div style={{ height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden", marginBottom: 8 }}>
+                      <div style={{ width: `${(bulk.done / bulk.total) * 100}%`, height: "100%", background: "var(--primary)", transition: "width 0.3s" }} />
+                    </div>
+                    <button className="btn btn-secondary" style={{ width: "100%", justifyContent: "center" }}
+                      onClick={() => { cancelBulk.current = true; setBulk(b => b && { ...b, total: b.done }); }}>
+                      Cancelar
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn btn-secondary" style={{ width: "100%", justifyContent: "center", gap: 6 }}
+                    onClick={updateAllReferences} disabled={testingCanal !== null}>
+                    <Image size={14} /> Atualizar todas as referências
+                  </button>
+                )}
+                {bulk && bulk.done === bulk.total && (
+                  <div style={{ fontSize: 12, marginTop: 8, color: bulk.falhas.length ? "var(--err)" : "var(--ok)" }}
+                    title={bulk.falhas.join("\n")}>
+                    {bulk.falhas.length
+                      ? `${bulk.total - bulk.falhas.length} atualizada(s), ${bulk.falhas.length} falhou(aram) — passe o mouse para ver`
+                      : `${bulk.total} referência(s) atualizada(s)`}
+                  </div>
+                )}
               </div>
               {cameras.map(cam => {
                 const isSelected = selectedCanal === cam.canal;

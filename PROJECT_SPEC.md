@@ -726,6 +726,15 @@ de dados existentes, rollout gradual e plano de rollback.
 
 ## 16. Architecture Changelog
 
+### [2026-10-13] — Ações em massa: reiniciar/backup de todos os clientes e atualizar todas as referências da galeria
+
+**Alteração:** Três botões novos, sem mudança no agente.
+**API:** `POST /api/v1/clients/restart-agent-all` e `POST /api/v1/clients/trigger-backup-all` marcam `restart_requested` / `backup_requested` em todos os clientes ativos e online (ping < 180s); offline ficam de fora. Resposta: `{"queued": n, "skipped_offline": m}`. Reaproveitam o fluxo existente de flags consumidas no ping.
+**Dashboard:** tela Clientes ganha "Reiniciar todos" e "Backup de todos" (com confirmação). Na galeria do NVR, "Atualizar todas as referências" atualiza uma câmera por vez (todas as não OFFLINE), com progresso, cancelar e resumo de falhas; é sequencial porque `pending_rtsp_tasks` guarda uma única tarefa RTSP por cliente (~15–20s por câmera, limitado pelo ping do agente).
+**Arquivos:** server/api/routers/clients.py, server/dashboard/src/api/client.ts, server/dashboard/src/pages/Clients.tsx, server/dashboard/src/pages/ClientDetail.tsx
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-13] — Agente 1.1.4: Galeria/imagem da noite para NVR Motorola (NVMS-9000)
 
 **Alteração:** Captura da imagem da noite e da referência ideal passa a funcionar em NVR Motorola, e a galeria lista as câmeras Motorola.

@@ -48,7 +48,11 @@ export const restartAgent = (id: string) =>
   api.post(`/clients/${id}/restart-agent`).then((r) => r.data);
 export const triggerBackup = (id: string) =>
   api.post(`/clients/${id}/trigger-backup`).then((r) => r.data);
-export const fetchClientLogs = (id: string) =>
+export const triggerBackupAll = () =>
+  api.post("/clients/trigger-backup-all").then((r) => r.data);
+export const restartAgentAll = () =>
+  api.post("/clients/restart-agent-all").then((r) => r.data);
+export const fetchClientLogs =(id: string) =>
   api.get(`/clients/${id}/logs`).then((r) => r.data);
 
 // ── Equipamentos (novo endpoint genérico) ────────────────────
