@@ -35,6 +35,9 @@ export interface Client {
   // Campos calculados no servidor (fonte única da verdade para status online)
   is_online?: boolean;
   current_server_time?: string;
+  group_id?: string | null;
+  group_name?: string | null;
+  queue_order?: number;
 }
 
 export interface NVRResult {
@@ -79,3 +82,20 @@ export interface Settings {
   smtp_email: string | null;
   retention_days: string | null;
 }
+
+export interface ClientGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  backup_hour: number;
+  backup_minute: number;
+  created_at: string;
+  agents_total: number;
+  agents_online: number;
+  health: "ALL_OK" | "PARTIAL" | "ALL_ERROR" | "NO_DATA";
+  last_backup_at: string | null;
+  queue_active: boolean;
+  clients: Client[];
+}
+

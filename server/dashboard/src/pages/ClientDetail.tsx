@@ -13,7 +13,7 @@ import { useRef } from "react";
 import {
   ArrowLeft, Plus, Trash2, RefreshCw, Copy, Edit2, Server,
   Archive, RotateCcw, Clock, Mail, CalendarCheck, KeyRound,
-  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning, Image
+  Wifi, WifiOff, Video, FolderOpen, ChevronRight, Phone, Network, CloudLightning, Image, Building2
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -435,6 +435,7 @@ export default function ClientDetail() {
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Client> & { zip_password?: string }>({});
   const [saving, setSaving] = useState(false);
+  const [groups, setGroups] = useState<any[]>([]);
   // Diferença entre relógio do servidor e do navegador, para a contagem do próximo ping andar a cada segundo
   const [serverSkewMs, setServerSkewMs] = useState(0);
 
@@ -444,13 +445,14 @@ export default function ClientDetail() {
   const load = async (silent = false) => {
     if (!id) return;
     if (!silent) setLoading(true);
-    const [c, eqs, b, lg] = await Promise.all([
+    const [c, eqs, b, lg, gs] = await Promise.all([
       (await import("../api/client")).fetchClient(id),
       fetchEquipamentos(id),
       fetchBackups({ client_id: id, size: 10 }),
       (await import("../api/client")).fetchClientLogs(id),
+      (await import("../api/client")).fetchGroups().catch(() => []),
     ]);
-    setClient(c); setEquipamentos(eqs); setBackups(b.items); setLogs(lg);
+    setClient(c); setEquipamentos(eqs); setBackups(b.items); setLogs(lg); setGroups(gs);
     if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
     if (!silent) setLoading(false);
   };
@@ -642,7 +644,12 @@ const buildEqPayload = () => {
         </div>
         <div className="flex gap-2">
           <button className="btn btn-secondary" onClick={() => {
-            setEditForm({ ...client, email_to: (client.email_to || []).join(", ") as unknown as string[] });
+            setEditForm({
+              ...client,
+              group_id: client.group_id || "",
+              queue_order: client.queue_order ?? 0,
+              email_to: (client.email_to || []).join(", ") as unknown as string[]
+            });
             setShowEditModal(true);
           }}>
             <Edit2 size={15} /> Editar
@@ -683,6 +690,10 @@ const buildEqPayload = () => {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <InfoPill icon={<KeyRound size={11} />} label="Client ID" value={client.id} mono copyValue={client.id} onCopy={copyText} />
             <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${client.api_key_prefix}…`} mono />
+            {client.group_name && (
+              <InfoPill icon={<Building2 size={11} />} label="Unidade"
+                value={`${client.group_name} (Posição ${(client.queue_order ?? 0) + 1} na fila)`} />
+            )}
             <InfoPill icon={<Clock size={11} />} label="Horário do Backup"
               value={`${String(client.backup_hour).padStart(2, "0")}:${String(client.backup_minute).padStart(2, "0")} (diário)`} />
             <InfoPill icon={<Mail size={11} />} label="E-mails de Notificação"
@@ -1402,6 +1413,25 @@ const buildEqPayload = () => {
               </div>
             </div>
           </div>
+          <div className="form-group">
+            <label className="form-label">Unidade (opcional)</label>
+            <select className="form-input"
+              value={(editForm as any).group_id || ""}
+              onChange={e => setEditForm({ ...editForm, group_id: e.target.value || null } as any)}>
+              <option value="">— Sem unidade —</option>
+              {groups.map((g: any) => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </div>
+          {(editForm as any).group_id && (
+            <div className="form-group">
+              <label className="form-label">Ordem na fila de backup da unidade (0, 1, 2...)</label>
+              <input className="form-input" type="number" min={0}
+                value={(editForm as any).queue_order ?? 0}
+                onChange={e => setEditForm({ ...editForm, queue_order: +e.target.value } as any)} />
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label">E-mails de Notificação (separados por vírgula)</label>
             <input className="form-input" value={editForm.email_to as unknown as string || ""}

@@ -35,6 +35,10 @@ def _to_response(client: Client) -> ClientResponse:
     else:
         data.is_online = False
 
+    # Preenche nome do grupo se o agente estiver em uma Unidade
+    if getattr(client, 'group', None):
+        data.group_name = client.group.name
+
     return data
 
 

@@ -9,6 +9,23 @@ from sqlalchemy.orm import relationship
 from database import Base
 
 
+class ClientGroup(Base):
+    __tablename__ = "client_groups"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    active = Column(Boolean, default=True, nullable=False)
+    backup_hour = Column(Integer, default=2)
+    backup_minute = Column(Integer, default=0)
+    # Estado da fila de backup sequencial
+    queue_active = Column(Boolean, default=False, nullable=False)
+    queue_current_index = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    clients = relationship("Client", back_populates="group", order_by="Client.queue_order")
+
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -28,11 +45,14 @@ class Client(Base):
     restart_requested = Column(Boolean, default=False, nullable=False)
     backup_requested = Column(Boolean, default=False, nullable=False)
     telemetry = Column(JSON, nullable=True)  # Hardware stats (CPU, RAM, Disk, GPU)
+    group_id = Column(UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
+    queue_order = Column(Integer, default=0, nullable=False)
 
     nvrs = relationship("NVR", back_populates="client", cascade="all, delete-orphan")
     equipamentos = relationship("NVR", back_populates="client", cascade="all, delete-orphan", overlaps="nvrs")
     backups = relationship("Backup", back_populates="client")
     logs = relationship("AgentLog", back_populates="client", cascade="all, delete-orphan", order_by="desc(AgentLog.created_at)")
+    group = relationship("ClientGroup", back_populates="clients")
 
 
 class NVR(Base):

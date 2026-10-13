@@ -96,7 +96,17 @@ export default function Clients() {
               {clients.map((c) => (
                 <tr key={c.id}>
                   <td>
-                    <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{c.name}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{c.name}</div>
+                      {c.group_name && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
+                          background: "rgba(99,102,241,0.12)", color: "#6366f1", border: "1px solid rgba(99,102,241,0.3)"
+                        }}>
+                          {c.group_name}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs text-muted font-mono" style={{ marginTop: 2 }}>
                       {c.id.slice(0, 8)}...
                     </div>

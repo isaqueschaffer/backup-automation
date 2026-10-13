@@ -1,12 +1,13 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import {
-  LayoutDashboard, Users, Archive, Settings, LogOut, Server, Video
+  LayoutDashboard, Users, Archive, Settings, LogOut, Server, Video, Building2
 } from "lucide-react";
 import pkg from "../../package.json";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Visão Geral" },
+  { to: "/units", icon: Building2, label: "Unidades" },
   { to: "/clients", icon: Users, label: "Clientes" },
   { to: "/backups", icon: Archive, label: "Backups" },
   { to: "/settings", icon: Settings, label: "Configurações" },
