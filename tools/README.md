@@ -1,5 +1,23 @@
 # tools/
 
+Utilitários avulsos de apoio e diagnóstico. **Não fazem parte do build do agente nem do deploy do servidor.**
+Nenhum deles é importado pelo código de produção.
+
+| Arquivo | Para que serve |
+|---|---|
+| `agente_digifort.py` | Agente Digifort standalone (ver abaixo) |
+| `agente_webhook_digifort.py` | Versão standalone do webhook do Digifort |
+| `simulador_digifort.py` | Simula eventos do Digifort para testar o webhook |
+| `snmp_sniffer.py` | Escuta traps SNMP para diagnóstico |
+| `test_webhook.py` | Dispara um webhook de teste |
+| `teste_print_hikvision.py` | Teste manual de login/consulta em NVR Hikvision (pede credenciais por argumento) |
+
+Credenciais e chaves de API **nunca** devem ser gravadas nestes scripts: passe por argumento ou variável de ambiente.
+
+---
+
+# tools/
+
 Scripts utilitários e ferramentas de análise standalone, **não integrados ao agente de backup**.
 
 ## agente_digifort.py
