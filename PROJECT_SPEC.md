@@ -784,6 +784,15 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-14] — Agente 1.1.5: correções da auditoria
+
+**Alteração:** Versão do agente elevada para 1.1.5 para distribuir, via OTA, as correções da auditoria (todos os clientes estavam na 1.1.4, e o OTA só atualiza para versão maior).
+**Inclui:** não loga credenciais de câmera; OTA defensivo (exige https, exceção não derruba o serviço); `buscar_trechos` sem "dummy"; `rtsp_task` não se perde durante backup manual; timeouts em mysqldump/Mikrotik; `ConfigError`; hidden-imports no build.
+**Atenção:** Atualizações OTA com URL `http://` passam a ser ignoradas (use https no GitHub Release).
+**Arquivos:** agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-13] — Auditoria geral: correções, reestruturação do repositório e do dashboard
 
 **Alteração:** Auditoria por área (API, dashboard, agente, higiene do repositório) seguida das correções seguras.
