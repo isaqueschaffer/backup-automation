@@ -286,11 +286,25 @@ def _validate_version(v: Optional[str]) -> Optional[str]:
     return v.strip() if v is not None else v
 
 
-def _validate_sha256(v: Optional[str]) -> Optional[str]:
-    """SHA-256 precisa ter 64 caracteres hexadecimais, quando informado."""
-    if v is not None and not _SHA256_RE.match(v.strip()):
+def _validate_sha256(v: Optional[str], obrigatorio: bool = False) -> Optional[str]:
+    """SHA-256 precisa ter 64 caracteres hexadecimais, quando informado.
+
+    Campo vazio ("") vindo do formulário conta como não informado (o Tray é opcional).
+    """
+    if v is None or not v.strip():
+        if obrigatorio:
+            raise ValueError("Informe o SHA-256 do TrilanAgentService.exe")
+        return None
+    if not _SHA256_RE.match(v.strip()):
         raise ValueError("SHA-256 inválido: deve ter 64 caracteres hexadecimais")
-    return v.strip() if v is not None else v
+    return v.strip()
+
+
+def _blank_to_none(v: Optional[str]) -> Optional[str]:
+    """URL opcional vazia ("") vinda do formulário vira None."""
+    if v is None or not v.strip():
+        return None
+    return v.strip()
 
 
 class AgentVersionCreate(BaseModel):
@@ -306,10 +320,20 @@ class AgentVersionCreate(BaseModel):
     def _check_version(cls, v):
         return _validate_version(v)
 
-    @field_validator("sha256_service", "sha256_tray")
+    @field_validator("sha256_service")
     @classmethod
-    def _check_sha256(cls, v):
+    def _check_sha256_service(cls, v):
+        return _validate_sha256(v, obrigatorio=True)
+
+    @field_validator("sha256_tray")
+    @classmethod
+    def _check_sha256_tray(cls, v):
         return _validate_sha256(v)
+
+    @field_validator("url_tray")
+    @classmethod
+    def _check_url_tray(cls, v):
+        return _blank_to_none(v)
 
 
 class AgentVersionUpdate(BaseModel):
@@ -328,6 +352,11 @@ class AgentVersionUpdate(BaseModel):
     @classmethod
     def _check_sha256(cls, v):
         return _validate_sha256(v)
+
+    @field_validator("url_tray")
+    @classmethod
+    def _check_url_tray(cls, v):
+        return _blank_to_none(v)
 
 
 class AgentVersionResponse(BaseModel):

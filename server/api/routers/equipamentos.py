@@ -158,11 +158,17 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Op
 
     event = asyncio.Event()
 
+    marca = (eq.config_extra or {}).get("marca", "") or ""
+    if not marca and any(isinstance(st, dict) and st.get("canal_guid") for st in (eq.last_recording_status or [])):
+        # NVR sem marca cadastrada: o backup detecta sozinho, mas o teste RTSP precisa saber.
+        # Só NVR Motorola (NVMS-9000) reporta `canal_guid` no relatório de gravação.
+        marca = "Motorola"
+
     task_data = {
         "equipamento_id": str(eq.id),
         "ip": eq.ip.strip(),
         "modelo": (eq.config_extra or {}).get("modelo", ""),
-        "marca": (eq.config_extra or {}).get("marca", ""),
+        "marca": marca,
         "username": eq.username or "admin",
         "password": senha_pura,
         "canal": canal,
