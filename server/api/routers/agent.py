@@ -42,7 +42,7 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
     ]
     zip_pw = decrypt(client.zip_password) if client.zip_password else None
 
-    # Usa horário do grupo se o agente pertencer a uma Unidade
+    # Usa horário do cliente se a máquina pertencer a um Cliente
     backup_hour = client.backup_hour
     backup_minute = client.backup_minute
     if getattr(client, 'group_id', None) and getattr(client, 'group', None):
@@ -242,7 +242,7 @@ def receive_backup_report(
     db.commit()
     db.refresh(backup)
 
-    # ── Avançar fila de backup sequencial da Unidade ──
+    # ── Avançar fila de backup sequencial do Cliente ──
     if getattr(client, 'group_id', None) and getattr(client, 'group', None):
         group = client.group
         if group.queue_active:
@@ -265,7 +265,7 @@ def receive_backup_report(
                     db.add(AgentLog(
                         client_id=c.id,
                         event_type="queue_backup_skipped",
-                        message=f"Agente '{c.name}' está OFFLINE. Pulado na fila da Unidade '{group.name}'."
+                        message=f"Máquina '{c.name}' está OFFLINE. Pulada na fila do Cliente '{group.name}'."
                     ))
 
             if next_online_client is not None:
@@ -275,7 +275,7 @@ def receive_backup_report(
                 db.add(AgentLog(
                     client_id=next_online_client.id,
                     event_type="queue_backup",
-                    message=f"Backup em fila disparado pela Unidade '{group.name}'. Posição {next_idx + 1}/{len(active_clients)} ({next_online_client.name})."
+                    message=f"Backup em fila disparado pelo Cliente '{group.name}'. Posição {next_idx + 1}/{len(active_clients)} ({next_online_client.name})."
                 ))
             else:
                 # Nenhum próximo online ou fim da fila atingido

@@ -20,7 +20,7 @@ from schemas import (
 from routers.clients import _to_response as client_to_response, check_client_online
 from services.storage_service import get_zip_path
 
-router = APIRouter(prefix="/api/v1/groups", tags=["groups"])
+router = APIRouter(prefix="/api/v1/clients", tags=["Clientes"])
 
 
 def _compute_health(clients: list) -> str:
@@ -101,7 +101,7 @@ def create_group(body: ClientGroupCreate, db: Session = Depends(get_db)):
 def get_group(group_id: UUID, db: Session = Depends(get_db)):
     group = db.query(ClientGroup).filter(ClientGroup.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
     return _to_response(group, db)
 
 
@@ -109,7 +109,7 @@ def get_group(group_id: UUID, db: Session = Depends(get_db)):
 def update_group(group_id: UUID, body: ClientGroupUpdate, db: Session = Depends(get_db)):
     group = db.query(ClientGroup).filter(ClientGroup.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
     schedule_changed = (
         (body.backup_hour is not None and body.backup_hour != group.backup_hour) or
@@ -119,7 +119,7 @@ def update_group(group_id: UUID, body: ClientGroupUpdate, db: Session = Depends(
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(group, field, value)
 
-    # Propaga horário para todos os agentes do grupo e solicita restart
+    # Propaga horário para todas as máquinas do cliente e solicita restart
     if schedule_changed:
         for client in group.clients:
             client.backup_hour = group.backup_hour
@@ -136,7 +136,7 @@ def update_group(group_id: UUID, body: ClientGroupUpdate, db: Session = Depends(
 def delete_group(group_id: UUID, db: Session = Depends(get_db)):
     group = db.query(ClientGroup).filter(ClientGroup.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
     for client in group.clients:
         client.group_id = None
         client.queue_order = 0
@@ -146,17 +146,17 @@ def delete_group(group_id: UUID, db: Session = Depends(get_db)):
 
 @router.post("/{group_id}/trigger-backup", dependencies=[Depends(verify_admin_token)])
 def trigger_group_backup(group_id: UUID, db: Session = Depends(get_db)):
-    """Dispara backup em fila para todos os agentes do grupo (um de cada vez, por ordem queue_order)."""
+    """Dispara backup em fila para todas as máquinas do cliente (uma de cada vez, por ordem queue_order)."""
     group = db.query(ClientGroup).filter(ClientGroup.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
     active_clients = sorted(
         [c for c in group.clients if c.active],
         key=lambda c: c.queue_order
     )
     if not active_clients:
-        raise HTTPException(status_code=400, detail="Nenhum agente ativo nesta unidade")
+        raise HTTPException(status_code=400, detail="Nenhuma máquina ativa neste cliente")
 
     # Procura o primeiro agente que esteja ONLINE
     first_online = None
@@ -170,10 +170,10 @@ def trigger_group_backup(group_id: UUID, db: Session = Depends(get_db)):
     if not first_online:
         raise HTTPException(
             status_code=400,
-            detail="Nenhum agente online nesta unidade no momento para iniciar o backup"
+            detail="Nenhuma máquina online neste cliente no momento para iniciar o backup"
         )
 
-    # Inicia fila e dispara o primeiro agente online
+    # Inicia fila e dispara a primeira máquina online
     group.queue_active = True
     group.queue_current_index = first_idx
     first_online.backup_requested = True
@@ -182,23 +182,23 @@ def trigger_group_backup(group_id: UUID, db: Session = Depends(get_db)):
     db.add(AgentLog(
         client_id=first_online.id,
         event_type="queue_backup",
-        message=f"Backup em fila iniciado pela Unidade '{group.name}'. Posição {first_idx + 1}/{len(active_clients)} ({first_online.name})."
+        message=f"Backup em fila iniciado pelo Cliente '{group.name}'. Posição {first_idx + 1}/{len(active_clients)} ({first_online.name})."
     ))
 
     db.commit()
     return {
         "status": "ok",
-        "message": f"Fila iniciada. Primeiro agente online: {first_online.name}",
+        "message": f"Fila iniciada. Primeira máquina online: {first_online.name}",
         "queue_size": len(active_clients),
     }
 
 
 @router.post("/{group_id}/cancel-queue", dependencies=[Depends(verify_admin_token)])
 def cancel_group_queue(group_id: UUID, db: Session = Depends(get_db)):
-    """Cancela e destrava a fila de backup da unidade imediatamente."""
+    """Cancela e destrava a fila de backup do cliente imediatamente."""
     group = db.query(ClientGroup).filter(ClientGroup.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
     group.queue_active = False
     group.queue_current_index = None
@@ -211,10 +211,10 @@ def cancel_group_queue(group_id: UUID, db: Session = Depends(get_db)):
 
 @router.get("/{group_id}/download-latest", dependencies=[Depends(verify_admin_token)])
 def download_group_zip(group_id: UUID, db: Session = Depends(get_db)):
-    """Gera e retorna um ZIP agrupado com os backups mais recentes de cada agente."""
+    """Gera e retorna um ZIP agrupado com os backups mais recentes de cada máquina do cliente."""
     group = db.query(ClientGroup).filter(ClientGroup.id == group_id).first()
     if not group:
-        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
     zip_buffer = io.BytesIO()
     found_any = False
@@ -238,12 +238,12 @@ def download_group_zip(group_id: UUID, db: Session = Depends(get_db)):
             found_any = True
 
     if not found_any:
-        raise HTTPException(status_code=404, detail="Nenhum backup disponível para os agentes desta unidade")
+        raise HTTPException(status_code=404, detail="Nenhum backup disponível para as máquinas deste cliente")
 
     zip_buffer.seek(0)
     safe_group_name = group.name.replace(" ", "_").replace("/", "_")
     date_today = datetime.now().strftime("%d-%m-%Y")
-    filename = f"unidade_{safe_group_name}_{date_today}.zip"
+    filename = f"cliente_{safe_group_name}_{date_today}.zip"
 
     return StreamingResponse(
         zip_buffer,

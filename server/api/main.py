@@ -47,7 +47,7 @@ try:
     except Exception:
         colunas_nvrs = []
     
-    # Cria tabela client_groups se não existir (Unidades)
+    # Cria tabela client_groups se não existir (Clientes)
     try:
         insp.get_columns('client_groups')
     except Exception:
@@ -103,6 +103,16 @@ try:
 except Exception as e:
     print(f"Erro ao executar migrações de colunas: {e}")
 
+openapi_tags = [
+    {"name": "auth", "description": "Autenticação administrativa"},
+    {"name": "Clientes", "description": "Gestão de Clientes (agrupamentos de máquinas, fila de backup e download consolidado)"},
+    {"name": "Máquinas", "description": "Gestão de Máquinas/Agentes (configuração individual, IP, status e chaves)"},
+    {"name": "Equipamentos", "description": "Equipamentos vinculados às máquinas (NVR, OLT, ONU, PABX, etc.)"},
+    {"name": "backups", "description": "Histórico e relatórios de backups"},
+    {"name": "agent", "description": "Comunicação e heartbeat com os Agentes Windows"},
+    {"name": "settings", "description": "Configurações do sistema (SMTP, retenção)"},
+]
+
 # ─── App ───────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Trilan Backup de Equipamentos API",
@@ -110,6 +120,7 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    openapi_tags=openapi_tags,
 )
 
 _cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()] or ["*"]
@@ -124,13 +135,13 @@ app.add_middleware(
 
 # ─── Routers ───────────────────────────────────────────────────────────────
 app.include_router(auth_router.router)
-app.include_router(clients.router)
-app.include_router(equipamentos.router)  # novo router genérico
-app.include_router(nvrs.router)           # mantido para compatibilidade
+app.include_router(groups.router)        # Clientes: /api/v1/clients
+app.include_router(clients.router)       # Máquinas: /api/v1/machines
+app.include_router(equipamentos.router)  # Equipamentos: /api/v1/machines/{client_id}/equipamentos
+app.include_router(nvrs.router, include_in_schema=False)  # mantido para compatibilidade
 app.include_router(backups.router)
 app.include_router(agent.router)
 app.include_router(settings_router.router)
-app.include_router(groups.router)
 app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 

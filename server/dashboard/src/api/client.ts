@@ -35,32 +35,32 @@ export const login = (password: string) =>
 // ── Stats ─────────────────────────────────────────────────────
 export const fetchStats = () => api.get("/stats").then((r) => r.data);
 
-// ── Clients ───────────────────────────────────────────────────
-export const fetchClients = () => api.get("/clients").then((r) => r.data);
-export const fetchClient = (id: string) => api.get(`/clients/${id}`).then((r) => r.data);
+// ── Machines (Máquinas / Agentes) ───────────────────────────
+export const fetchClients = () => api.get("/machines").then((r) => r.data);
+export const fetchClient = (id: string) => api.get(`/machines/${id}`).then((r) => r.data);
 export const createClient = (data: Record<string, unknown>) =>
-  api.post("/clients", data).then((r) => r.data);
+  api.post("/machines", data).then((r) => r.data);
 export const updateClient = (id: string, data: Record<string, unknown>) =>
-  api.put(`/clients/${id}`, data).then((r) => r.data);
-export const deleteClient = (id: string) => api.delete(`/clients/${id}`);
+  api.put(`/machines/${id}`, data).then((r) => r.data);
+export const deleteClient = (id: string) => api.delete(`/machines/${id}`);
 export const rotateKey = (id: string) =>
-  api.post(`/clients/${id}/rotate-key`).then((r) => r.data);
+  api.post(`/machines/${id}/rotate-key`).then((r) => r.data);
 export const restartAgent = (id: string) =>
-  api.post(`/clients/${id}/restart-agent`).then((r) => r.data);
+  api.post(`/machines/${id}/restart-agent`).then((r) => r.data);
 export const triggerBackup = (id: string) =>
-  api.post(`/clients/${id}/trigger-backup`).then((r) => r.data);
+  api.post(`/machines/${id}/trigger-backup`).then((r) => r.data);
 export const fetchClientLogs = (id: string) =>
-  api.get(`/clients/${id}/logs`).then((r) => r.data);
+  api.get(`/machines/${id}/logs`).then((r) => r.data);
 
-// ── Equipamentos (novo endpoint genérico) ────────────────────
+// ── Equipamentos ──────────────────────────────────────────────
 export const fetchEquipamentos = (clientId: string) =>
-  api.get(`/clients/${clientId}/equipamentos`).then((r) => r.data);
+  api.get(`/machines/${clientId}/equipamentos`).then((r) => r.data);
 export const createEquipamento = (clientId: string, data: Record<string, unknown>) =>
-  api.post(`/clients/${clientId}/equipamentos`, data).then((r) => r.data);
+  api.post(`/machines/${clientId}/equipamentos`, data).then((r) => r.data);
 export const updateEquipamento = (clientId: string, eqId: string, data: Record<string, unknown>) =>
-  api.put(`/clients/${clientId}/equipamentos/${eqId}`, data).then((r) => r.data);
+  api.put(`/machines/${clientId}/equipamentos/${eqId}`, data).then((r) => r.data);
 export const deleteEquipamento = (clientId: string, eqId: string) =>
-  api.delete(`/clients/${clientId}/equipamentos/${eqId}`);
+  api.delete(`/machines/${clientId}/equipamentos/${eqId}`);
 
 // ── NVRs (mantido como alias para retrocompatibilidade) ───────
 export const fetchNVRs = fetchEquipamentos;
@@ -90,12 +90,12 @@ export const deleteAgentVersion = (id: string) =>
 export const editAgentVersion = (id: string, data: Record<string, string>) =>
   api.put(`/admin/agent-version/${id}`, data).then((r) => r.data);
 
-// ── Groups (Unidades) ──────────────────────────────────────────
+// ── Clientes (antigos Groups / Unidades) ──────────────────────
 export const fetchGroups = (): Promise<ClientGroup[]> =>
-  api.get("/groups").then((r) => r.data);
+  api.get("/clients").then((r) => r.data);
 
 export const fetchGroup = (id: string): Promise<ClientGroup> =>
-  api.get(`/groups/${id}`).then((r) => r.data);
+  api.get(`/clients/${id}`).then((r) => r.data);
 
 export const createGroup = (data: {
   name: string;
@@ -103,7 +103,7 @@ export const createGroup = (data: {
   backup_hour: number;
   backup_minute: number;
   active: boolean;
-}): Promise<ClientGroup> => api.post("/groups", data).then((r) => r.data);
+}): Promise<ClientGroup> => api.post("/clients", data).then((r) => r.data);
 
 export const updateGroup = (
   id: string,
@@ -114,24 +114,24 @@ export const updateGroup = (
     backup_minute: number;
     active: boolean;
   }>
-): Promise<ClientGroup> => api.put(`/groups/${id}`, data).then((r) => r.data);
+): Promise<ClientGroup> => api.put(`/clients/${id}`, data).then((r) => r.data);
 
 export const deleteGroup = (id: string): Promise<void> =>
-  api.delete(`/groups/${id}`).then((r) => r.data);
+  api.delete(`/clients/${id}`).then((r) => r.data);
 
 export const triggerGroupBackup = (id: string): Promise<void> =>
-  api.post(`/groups/${id}/trigger-backup`).then((r) => r.data);
+  api.post(`/clients/${id}/trigger-backup`).then((r) => r.data);
 
 export const cancelGroupQueue = (id: string): Promise<void> =>
-  api.post(`/groups/${id}/cancel-queue`).then((r) => r.data);
+  api.post(`/clients/${id}/cancel-queue`).then((r) => r.data);
 
 export const downloadGroupZip = async (id: string, groupName: string): Promise<void> => {
-  const res = await api.get(`/groups/${id}/download-latest`, { responseType: "blob" });
+  const res = await api.get(`/clients/${id}/download-latest`, { responseType: "blob" });
   const blob = new Blob([res.data], { type: "application/zip" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   const date = new Date().toLocaleDateString("pt-BR").replace(/\//g, "-");
-  a.download = `unidade_${groupName.replace(/ /g, "_")}_${date}.zip`;
+  a.download = `cliente_${groupName.replace(/ /g, "_")}_${date}.zip`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

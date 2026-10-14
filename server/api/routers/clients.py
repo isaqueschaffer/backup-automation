@@ -12,7 +12,7 @@ from schemas import ClientCreate, ClientUpdate, ClientResponse, ClientWithKey, A
 from services.crypto_service import encrypt
 from services.storage_service import move_client_to_trash
 
-router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
+router = APIRouter(prefix="/api/v1/machines", tags=["Máquinas"])
 
 
 def check_client_online(client: Client) -> bool:
@@ -36,7 +36,7 @@ def _to_response(client: Client) -> ClientResponse:
     data.current_server_time = now
     data.is_online = check_client_online(client)
 
-    # Preenche nome do grupo se o agente estiver em uma Unidade
+    # Preenche nome do cliente se a máquina estiver vinculada a um Cliente
     if getattr(client, 'group', None):
         data.group_name = client.group.name
 
@@ -77,7 +77,7 @@ def create_client(body: ClientCreate, db: Session = Depends(get_db)):
 def get_client(client_id: UUID, db: Session = Depends(get_db)):
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Máquina não encontrada")
     return _to_response(client)
 
 
@@ -85,7 +85,7 @@ def get_client(client_id: UUID, db: Session = Depends(get_db)):
 def update_client(client_id: UUID, body: ClientUpdate, db: Session = Depends(get_db)):
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Máquina não encontrada")
         
     time_changed = False
     for field, value in body.model_dump(exclude_none=True).items():
@@ -110,12 +110,12 @@ def update_client(client_id: UUID, body: ClientUpdate, db: Session = Depends(get
 def delete_client(client_id: UUID, db: Session = Depends(get_db)):
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Máquina não encontrada")
         
     # Remove os backups associados no banco para evitar erro de Foreign Key
     db.query(Backup).filter(Backup.client_id == client_id).delete(synchronize_session=False)
     
-    # Move a pasta de backups do cliente para a lixeira
+    # Move a pasta de backups da máquina para a lixeira
     move_client_to_trash(client.id, client.name)
     
     db.delete(client)
@@ -127,7 +127,7 @@ def delete_client(client_id: UUID, db: Session = Depends(get_db)):
 def rotate_api_key(client_id: UUID, db: Session = Depends(get_db)):
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Máquina não encontrada")
     raw_key, key_hash = generate_api_key()
     client.api_key_hash = key_hash
     client.api_key_prefix = raw_key[:16]
@@ -144,17 +144,17 @@ def rotate_api_key(client_id: UUID, db: Session = Depends(get_db)):
 def trigger_backup(client_id: UUID, db: Session = Depends(get_db)):
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Máquina não encontrada")
     client.backup_requested = True
     db.commit()
-    return {"status": "ok", "message": "Backup solicitado via dashboard"}
+    return {"status": "ok", "message": "Backup da máquina solicitado via dashboard"}
 
 @router.post("/{client_id}/restart-agent", dependencies=[Depends(verify_admin_token)])
 def request_agent_restart(client_id: UUID, db: Session = Depends(get_db)):
-    """Signal the Windows agent to restart on next ping."""
+    """Solicita o reinício do agente da máquina no próximo ping."""
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Máquina não encontrada")
     client.restart_requested = True
     db.commit()
     return {"queued": True}
@@ -164,7 +164,7 @@ def request_agent_restart(client_id: UUID, db: Session = Depends(get_db)):
 def get_client_logs(client_id: UUID, db: Session = Depends(get_db), limit: int = 50):
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Máquina não encontrada")
     
     from models import AgentLog
     logs = db.query(AgentLog).filter(AgentLog.client_id == client_id).order_by(AgentLog.created_at.desc()).limit(limit).all()

@@ -314,7 +314,7 @@ class UpdateCheckResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────
-# Client Groups (Unidades)
+# Clientes (antigas Unidades)
 # ─────────────────────────────────────────────
 class ClientGroupBase(BaseModel):
     name: str
@@ -347,6 +347,19 @@ class ClientGroupResponse(ClientGroupBase):
     clients: List["ClientResponse"] = []
 
     model_config = {"from_attributes": True}
+
+
+# Aliases semânticos para a API
+ClienteBase = ClientGroupBase
+ClienteCreate = ClientGroupCreate
+ClienteUpdate = ClientGroupUpdate
+ClienteResponse = ClientGroupResponse
+
+MachineBase = ClientBase
+MachineCreate = ClientCreate
+MachineUpdate = ClientUpdate
+MachineResponse = ClientResponse
+MachineWithKey = ClientWithKey
 
 
 

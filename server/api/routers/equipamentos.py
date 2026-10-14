@@ -15,13 +15,13 @@ from models import Client, NVR, NVRCamera
 from schemas import NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse, NVRCameraSetPerfect
 from services.crypto_service import encrypt
 
-router = APIRouter(prefix="/api/v1/clients/{client_id}/equipamentos", tags=["equipamentos"])
+router = APIRouter(prefix="/api/v1/machines/{client_id}/equipamentos", tags=["Equipamentos"])
 
 
 def _get_client_or_404(client_id: UUID, db: Session) -> Client:
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Máquina não encontrada")
     return client
 
 
@@ -31,7 +31,7 @@ def list_equipamentos(
     tipo: Optional[str] = Query(None, description="Filtrar por tipo: NVR, OLT, ONU, PABX"),
     db: Session = Depends(get_db),
 ):
-    """Lista todos os equipamentos de um cliente, com filtro opcional por tipo."""
+    """Lista todos os equipamentos de uma máquina, com filtro opcional por tipo."""
     _get_client_or_404(client_id, db)
     q = db.query(NVR).filter(NVR.client_id == client_id)
     if tipo:

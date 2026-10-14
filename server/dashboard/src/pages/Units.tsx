@@ -10,7 +10,7 @@ import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
 import {
   Plus, Trash2, Eye, ChevronDown, ChevronRight,
-  CloudLightning, Download, Building2, Edit2, Clock, RotateCcw
+  CloudLightning, Download, Users, Edit2, Clock, RotateCcw
 } from "lucide-react";
 
 function healthLabel(health: ClientGroup["health"]) {
@@ -135,11 +135,11 @@ export default function Units() {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Unidades</h1>
-          <p className="page-subtitle">{groups.length} unidade(s) — grupos de agentes por local/empresa</p>
+          <h1 className="page-title">Clientes</h1>
+          <p className="page-subtitle">{groups.length} cliente(s)</p>
         </div>
         <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={15} /> Nova Unidade
+          <Plus size={15} /> Novo Cliente
         </button>
       </div>
 
@@ -148,7 +148,7 @@ export default function Units() {
       ) : groups.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">🏢</div>
-          <div>Nenhuma unidade cadastrada.</div>
+          <div>Nenhum cliente cadastrado.</div>
           <button className="btn btn-primary mt-2" onClick={() => setShowCreate(true)}>Criar agora</button>
         </div>
       ) : (
@@ -172,7 +172,7 @@ export default function Units() {
                     {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </div>
                   <div style={{ width: 40, height: 40, borderRadius: "var(--radius-sm)", background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", display: "flex", alignItems: "center", justifyContent: "center", color: "#6366f1", flexShrink: 0 }}>
-                    <Building2 size={18} />
+                    <Users size={18} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
