@@ -157,7 +157,7 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
     const fetchCams = async () => {
       setLoading(true);
       try {
-        const res = await api.get(`/clients/${clientId}/equipamentos/${nvrId}/cameras`);
+        const res = await api.get(`/machines/${clientId}/equipamentos/${nvrId}/cameras`);
         setCameras(res.data);
         if (res.data && res.data.length > 0) {
           setSelectedCanal(res.data[0].canal);
@@ -175,12 +175,12 @@ function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientI
   // Captura e salva a referência de um canal. Retorna null se deu certo, ou a mensagem de erro.
   const capturarReferencia = async (canal: number, nome: string): Promise<string | null> => {
     try {
-      const resRtsp = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
+      const resRtsp = await api.post(`/machines/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
       const dataRtsp = resRtsp.data;
       if (!dataRtsp.success || !dataRtsp.image_base64) {
         return dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.";
       }
-      const resSave = await api.post(`/clients/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
+      const resSave = await api.post(`/machines/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
         canal, nome, image_base64: dataRtsp.image_base64
       });
       const savedCam = resSave.data;
@@ -1001,7 +1001,7 @@ const buildEqPayload = () => {
                     else mod = "Hikvision";
 
                     if (desc && ender) {
-                      await api.post(`/clients/${id}/equipamentos`, {
+                      await api.post(`/machines/${id}/equipamentos`, {
                         tipo: "CAMERA",
                         name: desc,
                         ip: ender,
@@ -1036,7 +1036,7 @@ const buildEqPayload = () => {
               setLoading(true);
               try {
                 for (const cam of cameras) {
-                  await api.delete(`/clients/${id}/equipamentos/${cam.id}`);
+                  await api.delete(`/machines/${id}/equipamentos/${cam.id}`);
                 }
                 toast("Todas as câmeras foram apagadas.", "success");
                 load();
@@ -1094,7 +1094,7 @@ const buildEqPayload = () => {
               for (const cam of cams) {
                 setTestResults(prev => ({ ...prev, [cam.id]: { status: "testing" } }));
                 try {
-                  const res = await api.post(`/clients/${id}/equipamentos/${cam.id}/test-rtsp`);
+                  const res = await api.post(`/machines/${id}/equipamentos/${cam.id}/test-rtsp`);
                   if (res.data.success) {
                     setTestResults(prev => ({ ...prev, [cam.id]: { status: "success", image_base64: res.data.image_base64 } }));
                   } else {
