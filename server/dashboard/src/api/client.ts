@@ -49,6 +49,10 @@ export const restartAgent = (id: string) =>
   api.post(`/machines/${id}/restart-agent`).then((r) => r.data);
 export const triggerBackup = (id: string) =>
   api.post(`/machines/${id}/trigger-backup`).then((r) => r.data);
+export const triggerBackupAll = () =>
+  api.post("/machines/trigger-backup-all").then((r) => r.data);
+export const restartAgentAll = () =>
+  api.post("/machines/restart-agent-all").then((r) => r.data);
 export const fetchClientLogs = (id: string) =>
   api.get(`/machines/${id}/logs`).then((r) => r.data);
 

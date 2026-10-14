@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchClients, createClient, deleteClient } from "../api/client";
+import { fetchClients, createClient, deleteClient, restartAgentAll, triggerBackupAll } from "../api/client";
 import { Client } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
-import { Plus, Trash2, Eye, Copy } from "lucide-react";
+import { Plus, Trash2, Eye, Copy, RotateCcw, Play } from "lucide-react";
 
 interface NewClientForm {
   name: string; backup_hour: number; backup_minute: number;
@@ -21,6 +21,7 @@ export default function Clients() {
     name: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
   });
   const [saving, setSaving] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -53,7 +54,21 @@ export default function Clients() {
     load();
   };
 
-  const copyKey = (key: string) => {
+  const handleBulk = async (action: "restart" | "backup") => {
+    const online = clients.filter(c => c.active && c.is_online).length;
+    const texto = action === "restart" ? "Reiniciar o agente" : "Iniciar o backup";
+    if (!confirm(`${texto} de ${online} cliente(s) online?\nClientes offline serão ignorados.`)) return;
+    setBulkBusy(true);
+    try {
+      const r = action === "restart" ? await restartAgentAll() : await triggerBackupAll();
+      toast(`${action === "restart" ? "Reinício" : "Backup"} solicitado para ${r.queued} cliente(s)` +
+        (r.skipped_offline ? ` (${r.skipped_offline} offline ignorado(s)).` : "."), "success");
+      load();
+    } catch { toast("Erro ao enviar o comando em massa.", "error"); }
+    finally { setBulkBusy(false); }
+  };
+
+  const copyKey =(key: string) => {
     navigator.clipboard.writeText(key);
     toast("Chave copiada!", "success");
   };
@@ -65,9 +80,19 @@ export default function Clients() {
           <h1 className="page-title">Clientes</h1>
           <p className="page-subtitle">{clients.length} cliente(s) cadastrado(s)</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={15} /> Novo Cliente
-        </button>
+        <div className="flex gap-2">
+          <button className="btn btn-secondary" onClick={() => handleBulk("restart")} disabled={bulkBusy}
+            title="Reinicia o agente de todos os clientes online">
+            <RotateCcw size={15} /> Reiniciar todos
+          </button>
+          <button className="btn btn-secondary" onClick={() => handleBulk("backup")} disabled={bulkBusy}
+            title="Dispara backup em todos os clientes online">
+            <Play size={15} /> Backup de todos
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+            <Plus size={15} /> Novo Cliente
+          </button>
+        </div>
       </div>
 
       {loading ? (

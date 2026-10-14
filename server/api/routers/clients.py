@@ -140,6 +140,32 @@ def rotate_api_key(client_id: UUID, db: Session = Depends(get_db)):
     return ClientWithKey.model_validate(client)
 
 
+def _flag_all_online(db: Session, flag: str) -> dict:
+    """Marca `flag` em todos os clientes ativos e online; offline ficam de fora."""
+    clients = db.query(Client).filter(Client.active == True).all()
+    queued = skipped = 0
+    for c in clients:
+        if _to_response(c).is_online:
+            setattr(c, flag, True)
+            queued += 1
+        else:
+            skipped += 1
+    db.commit()
+    return {"queued": queued, "skipped_offline": skipped}
+
+
+@router.post("/trigger-backup-all", dependencies=[Depends(verify_admin_token)])
+def trigger_backup_all(db: Session = Depends(get_db)):
+    """Solicita backup em todos os clientes online."""
+    return _flag_all_online(db, "backup_requested")
+
+
+@router.post("/restart-agent-all", dependencies=[Depends(verify_admin_token)])
+def restart_agent_all(db: Session = Depends(get_db)):
+    """Solicita reinício do agente em todos os clientes online."""
+    return _flag_all_online(db, "restart_requested")
+
+
 @router.post("/{client_id}/trigger-backup", dependencies=[Depends(verify_admin_token)])
 def trigger_backup(client_id: UUID, db: Session = Depends(get_db)):
     client = db.query(Client).filter(Client.id == client_id).first()
