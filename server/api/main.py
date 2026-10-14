@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date
 from fastapi import FastAPI, Depends
@@ -5,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast, Date, text, inspect
 
-from database import Base, engine, get_db
+from database import Base, engine, get_db, SessionLocal
 from models import Machine, Customer, Backup
 from schemas import StatsResponse
 from auth import verify_admin_token
@@ -19,13 +20,18 @@ Base.metadata.create_all(bind=engine)
 logger = logging.getLogger("trilan.api")
 
 
-def _run_ddl(sql: str, descricao: str) -> None:
-    """Executa um DDL em transação própria: a falha de um não impede os demais."""
+def _run_ddl(sql: str, descricao: str) -> bool:
+    """Executa um DDL em transação própria: a falha de um não impede os demais.
+
+    Retorna True se o DDL foi aplicado.
+    """
     try:
         with engine.begin() as conn:
             conn.execute(text(sql))
+        return True
     except Exception:
         logger.exception("Falha na migração (%s)", descricao)
+        return False
 
 
 def _tem_tabela(nome: str) -> bool:
@@ -77,6 +83,23 @@ if not _tem_tabela('client_groups'):
         );
     """, "criar tabela client_groups")
 
+# Rodadas de backup do Cliente (1 e-mail por rodada) — antes de backups.run_id (FK)
+if not _tem_tabela('customer_backup_runs'):
+    _run_ddl("""
+        CREATE TABLE IF NOT EXISTS customer_backup_runs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            customer_id UUID NOT NULL REFERENCES client_groups(id) ON DELETE CASCADE,
+            trigger VARCHAR(30) NOT NULL,
+            started_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            deadline_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            closed_at TIMESTAMP WITHOUT TIME ZONE,
+            status VARCHAR(20) NOT NULL DEFAULT 'EM_ANDAMENTO',
+            expected_machine_ids JSON NOT NULL DEFAULT '[]',
+            email_sent BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+        );
+    """, "criar tabela customer_backup_runs")
+
 # (tabela, coluna, DDL) — cada ALTER roda em transação separada
 _MIGRACOES_COLUNAS = [
     ("clients", "last_seen", "ALTER TABLE clients ADD COLUMN last_seen TIMESTAMP WITHOUT TIME ZONE;"),
@@ -91,15 +114,43 @@ _MIGRACOES_COLUNAS = [
     ("nvrs", "config_extra", "ALTER TABLE nvrs ADD COLUMN config_extra JSON;"),
     ("nvrs", "active", "ALTER TABLE nvrs ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE;"),
     ("nvrs", "updated_at", "ALTER TABLE nvrs ADD COLUMN updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();"),
+    # Rodadas de backup do Cliente
+    ("backups", "run_id", "ALTER TABLE backups ADD COLUMN run_id UUID REFERENCES customer_backup_runs(id) ON DELETE SET NULL;"),
+    ("client_groups", "email_to", "ALTER TABLE client_groups ADD COLUMN email_to TEXT[] NOT NULL DEFAULT '{}';"),
 ]
 
 _colunas_cache: dict = {}
+_colunas_criadas: set = set()
 for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
     if _tabela not in _colunas_cache:
         _colunas_cache[_tabela] = _colunas(_tabela)
     # tabela inexistente (lista vazia): nada a migrar
     if _colunas_cache[_tabela] and _coluna not in _colunas_cache[_tabela]:
-        _run_ddl(_ddl, f"{_tabela}.{_coluna}")
+        if _run_ddl(_ddl, f"{_tabela}.{_coluna}"):
+            _colunas_criadas.add((_tabela, _coluna))
+
+
+def _popular_email_to_clientes() -> None:
+    """Preenche client_groups.email_to com a UNIÃO (sem repetição, ordem estável) dos
+    e-mails das máquinas de cada Cliente. Só roda quando a coluna acabou de ser criada."""
+    try:
+        with SessionLocal() as db:
+            for customer in db.query(Customer).all():
+                emails: list = []
+                for machine in customer.machines:  # ordem da fila
+                    for email in (machine.email_to or []):
+                        email = (email or "").strip()
+                        if email and email not in emails:
+                            emails.append(email)
+                customer.email_to = emails
+            db.commit()
+        logger.info("Migração: client_groups.email_to preenchido com os e-mails das máquinas")
+    except Exception:
+        logger.exception("Falha ao preencher client_groups.email_to")
+
+
+if ("client_groups", "email_to") in _colunas_criadas:
+    _popular_email_to_clientes()
 
 openapi_tags = [
     {"name": "auth", "description": "Autenticação administrativa"},
@@ -142,6 +193,45 @@ app.include_router(agent.router)
 app.include_router(settings_router.router)
 app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
+
+
+# ─── Tarefa de fundo: fechamento das rodadas de backup do Cliente ──────────
+# A cada 30s fecha as rodadas vencidas/completas e envia o e-mail do Cliente.
+# LIMITAÇÃO (a mesma do pending_rtsp_tasks em routers/agent.py): pensado para 1 worker
+# uvicorn. Com vários workers cada processo rodaria o seu loop; o fechamento é protegido
+# por UPDATE condicional (closed_at IS NULL), então o e-mail não duplica, mas o trabalho sim.
+RUN_CLOSER_INTERVAL_SECONDS = 30
+_run_closer_task = None
+
+
+def _close_due_runs_once() -> None:
+    from services.backup_runs import close_due_runs
+    with SessionLocal() as db:
+        close_due_runs(db)
+
+
+async def _run_closer_loop() -> None:
+    while True:
+        try:
+            # SMTP e banco são bloqueantes: roda no threadpool para não travar o event loop
+            await asyncio.to_thread(_close_due_runs_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Falha na tarefa de fechamento das rodadas de backup")
+        await asyncio.sleep(RUN_CLOSER_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_run_closer() -> None:
+    global _run_closer_task
+    _run_closer_task = asyncio.create_task(_run_closer_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_run_closer() -> None:
+    if _run_closer_task is not None:
+        _run_closer_task.cancel()
 
 
 # ─── Stats endpoint ────────────────────────────────────────────────────────

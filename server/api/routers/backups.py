@@ -4,7 +4,7 @@ from datetime import date
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, cast, Date
 
@@ -132,6 +132,25 @@ def public_download_backup_zip(backup_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Arquivo ZIP nao encontrado no servidor.")
 
     return FileResponse(path=str(path), filename=b.zip_filename, media_type="application/zip")
+
+
+@router.get("/public-run-download/{run_id}")
+def public_download_run_zip(run_id: UUID, db: Session = Depends(get_db)):
+    """Endpoint público (link do e-mail do Cliente): ZIP unificado da rodada, usando o ID da rodada como token."""
+    from models import CustomerBackupRun
+    from services.backup_runs import build_run_zip, iter_file, run_zip_filename
+
+    run = db.query(CustomerBackupRun).filter(CustomerBackupRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Rodada não encontrada")
+    f = build_run_zip(db, run)
+    if f is None:
+        raise HTTPException(status_code=404, detail="Nenhum ZIP disponível nesta rodada")
+    return StreamingResponse(
+        iter_file(f),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{run_zip_filename(run)}"'},
+    )
 
 
 @router.post("/{backup_id}/resend-email", dependencies=[Depends(verify_admin_token)])

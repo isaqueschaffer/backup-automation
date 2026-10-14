@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { Customer, Machine, PaginatedBackups } from "./types";
+import { Customer, CustomerRun, Machine, PaginatedBackups } from "./types";
+import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -114,6 +115,7 @@ export const createCustomer = (data: {
   description?: string;
   backup_hour: number;
   backup_minute: number;
+  email_to: string[];
   active: boolean;
 }): Promise<Customer> => api.post("/clients", data).then((r) => r.data);
 
@@ -124,9 +126,24 @@ export const updateCustomer = (
     description: string | null;
     backup_hour: number;
     backup_minute: number;
+    email_to: string[];
     active: boolean;
   }>
 ): Promise<Customer> => api.put(`/clients/${id}`, data).then((r) => r.data);
+
+// ── Rodadas de backup do cliente (1 e-mail por rodada) ────────
+export const fetchCustomerRuns = (customerId: string, limit = 20): Promise<CustomerRun[]> =>
+  api.get(`/clients/${customerId}/runs`, { params: { limit } }).then((r) => r.data);
+
+// ZIP unificado da rodada (uma pasta por máquina). Erros vêm dentro do blob: use extractBlobError.
+export const downloadCustomerRunZip = async (customerId: string, runId: string, nomeArquivo: string): Promise<void> => {
+  const res = await api.get(`/clients/${customerId}/runs/${runId}/download`, { responseType: "blob" });
+  saveBlob(res.data, nomeArquivo);
+};
+
+// Reenvia o e-mail de uma rodada fechada (409 se ainda estiver em andamento)
+export const resendCustomerRunEmail = (customerId: string, runId: string): Promise<{ email_sent: boolean }> =>
+  api.post(`/clients/${customerId}/runs/${runId}/resend-email`).then((r) => r.data);
 
 export const deleteCustomer = (id: string): Promise<void> =>
   api.delete(`/clients/${id}`).then((r) => r.data);

@@ -7,11 +7,17 @@ export interface CustomerForm {
   description: string;
   backup_hour: number;
   backup_minute: number;
+  // E-mails do relatório como texto separado por vírgula (vira lista ao salvar)
+  email_to: string;
 }
 
 export const emptyCustomerForm = (): CustomerForm => ({
-  name: "", description: "", backup_hour: 2, backup_minute: 0,
+  name: "", description: "", backup_hour: 2, backup_minute: 0, email_to: "",
 });
+
+// "a@x.com, , b@y.com" → ["a@x.com", "b@y.com"] (trim, sem vazios, sem repetidos)
+export const parseEmailList = (s: string): string[] =>
+  Array.from(new Set(s.split(",").map(e => e.trim()).filter(Boolean)));
 
 // Formulário de Cliente (criar e editar). Em edição, avisa que o horário vale para todas as máquinas.
 export default function CustomerFormModal({ title, initial, isEdit, saving, onSave, onClose }: {
@@ -35,6 +41,14 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
         <label className="form-label">Descrição (opcional)</label>
         <input className="form-input" placeholder="Ex: Matriz e filiais da zona sul" value={form.description}
           onChange={e => setForm({ ...form, description: e.target.value })} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">E-mails do relatório (separados por vírgula)</label>
+        <input className="form-input" placeholder="Ex: ti@cliente.com.br, gerente@cliente.com.br" value={form.email_to}
+          onChange={e => setForm({ ...form, email_to: e.target.value })} />
+        <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+          Um único e-mail por rodada com o relatório de todas as máquinas. Substitui os e-mails próprios das máquinas deste cliente.
+        </div>
       </div>
       <div className="flex gap-3">
         <div className="form-group" style={{ flex: 1 }}>

@@ -22,9 +22,34 @@ class Customer(Base):
     # Estado da fila de backup sequencial
     queue_active = Column(Boolean, default=False, nullable=False)
     queue_current_index = Column(Integer, nullable=True)
+    # Destinatários do e-mail único por rodada de backup do Cliente
+    email_to = Column(ARRAY(String), default=[], nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     machines = relationship("Machine", back_populates="customer", order_by="Machine.queue_order")
+    runs = relationship(
+        "CustomerBackupRun", back_populates="customer",
+        cascade="all, delete-orphan", order_by="desc(CustomerBackupRun.started_at)",
+    )
+
+
+class CustomerBackupRun(Base):
+    """Rodada de backup do Cliente: agrupa os backups das máquinas e gera 1 e-mail ao fechar."""
+    __tablename__ = "customer_backup_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id = Column(UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="CASCADE"), nullable=False)
+    trigger = Column(String(30), nullable=False)  # scheduled | queue | manual_machine
+    started_at = Column(DateTime, nullable=False)
+    deadline_at = Column(DateTime, nullable=False)
+    closed_at = Column(DateTime, nullable=True)
+    status = Column(String(20), nullable=False, default="EM_ANDAMENTO")  # EM_ANDAMENTO | OK | PARCIAL | ERRO
+    expected_machine_ids = Column(JSON, nullable=False, default=list)  # lista de str (UUID)
+    email_sent = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = relationship("Customer", back_populates="runs")
+    backups = relationship("Backup", back_populates="run")
 
 
 class Machine(Base):
@@ -112,8 +137,11 @@ class Backup(Base):
     email_sent = Column(Boolean, default=False)
     trigger = Column(String(50), default="scheduled")  # scheduled | manual
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Rodada do Cliente à qual o backup pertence (só máquinas com Cliente)
+    run_id = Column(UUID(as_uuid=True), ForeignKey("customer_backup_runs.id", ondelete="SET NULL"), nullable=True)
 
     machine = relationship("Machine", back_populates="backups")
+    run = relationship("CustomerBackupRun", back_populates="backups")
 
 
 class AgentLog(Base):

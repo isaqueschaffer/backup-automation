@@ -4,21 +4,31 @@ from typing import List
 from uuid import UUID
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 
 from auth import verify_admin_token
 from database import get_db
-from models import Machine, Customer, Backup, AgentLog
+from models import Machine, Customer, Backup, AgentLog, CustomerBackupRun
 from schemas import (
     CustomerCreate,
     CustomerUpdate,
     CustomerResponse,
     CustomerQueueOrder,
+    CustomerRunResponse,
 )
 from routers.machines import machine_to_response, check_machine_online, next_queue_order
 from services.storage_service import get_zip_path
+from services.backup_runs import (
+    build_run_zip,
+    close_queue_run_on_cancel,
+    iter_file,
+    open_queue_run,
+    run_to_dict,
+    run_zip_filename,
+    send_run_email,
+)
 
 router = APIRouter(prefix="/api/v1/clients", tags=["Clientes"])
 
@@ -104,6 +114,7 @@ def _to_response(customer: Customer, db: Session, commit: bool = True) -> Custom
         backup_hour=customer.backup_hour,
         backup_minute=customer.backup_minute,
         created_at=customer.created_at,
+        email_to=list(customer.email_to or []),
         machines_total=len(customer.machines),
         machines_online=machines_online,
         health=_compute_health(customer.machines),
@@ -133,6 +144,7 @@ def create_customer(body: CustomerCreate, db: Session = Depends(get_db)):
         active=body.active,
         backup_hour=body.backup_hour,
         backup_minute=body.backup_minute,
+        email_to=body.email_to,
     )
     db.add(customer)
     db.commit()
@@ -302,6 +314,9 @@ def trigger_customer_backup(customer_id: UUID, db: Session = Depends(get_db)):
     customer.queue_current_index = first_idx
     first_online.backup_requested = True
 
+    # Rodada `queue`: esperadas = máquinas ativas da fila (1 e-mail ao fechar)
+    open_queue_run(db, customer, [str(m.id) for m in queue])
+
     db.add(AgentLog(
         machine_id=first_online.id,
         event_type="queue_backup",
@@ -327,6 +342,9 @@ def cancel_customer_queue(customer_id: UUID, db: Session = Depends(get_db)):
         m.backup_requested = False
 
     db.commit()
+
+    # Fecha a rodada `queue` aberta; e-mail só se pelo menos 1 máquina reportou
+    close_queue_run_on_cancel(db, customer)
     return {"status": "ok", "message": "Fila cancelada com sucesso"}
 
 
@@ -369,3 +387,54 @@ def download_customer_zip(customer_id: UUID, db: Session = Depends(get_db)):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ─── Rodadas de backup do Cliente ──────────────────────────────────────────
+
+def _get_run_or_404(customer_id: UUID, run_id: UUID, db: Session) -> CustomerBackupRun:
+    run = db.query(CustomerBackupRun).filter(
+        CustomerBackupRun.id == run_id, CustomerBackupRun.customer_id == customer_id
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Rodada não encontrada")
+    return run
+
+
+@router.get("/{customer_id}/runs", response_model=List[CustomerRunResponse],
+            dependencies=[Depends(verify_admin_token)])
+def list_customer_runs(customer_id: UUID, limit: int = Query(20, ge=1, le=200), db: Session = Depends(get_db)):
+    """Rodadas de backup do cliente (mais recentes primeiro)."""
+    _get_customer_or_404(customer_id, db)
+    runs = (
+        db.query(CustomerBackupRun)
+        .options(selectinload(CustomerBackupRun.backups))
+        .filter(CustomerBackupRun.customer_id == customer_id)
+        .order_by(CustomerBackupRun.started_at.desc(), CustomerBackupRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [CustomerRunResponse(**run_to_dict(db, r)) for r in runs]
+
+
+@router.get("/{customer_id}/runs/{run_id}/download", dependencies=[Depends(verify_admin_token)])
+def download_customer_run_zip(customer_id: UUID, run_id: UUID, db: Session = Depends(get_db)):
+    """ZIP unificado da rodada: uma pasta por máquina com o ZIP do backup."""
+    run = _get_run_or_404(customer_id, run_id, db)
+    f = build_run_zip(db, run)
+    if f is None:
+        raise HTTPException(status_code=404, detail="Nenhum ZIP disponível nesta rodada")
+    return StreamingResponse(
+        iter_file(f),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{run_zip_filename(run)}"'},
+    )
+
+
+@router.post("/{customer_id}/runs/{run_id}/resend-email", dependencies=[Depends(verify_admin_token)])
+def resend_customer_run_email(customer_id: UUID, run_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """Reenvia o e-mail de uma rodada já fechada (409 se ainda aberta)."""
+    run = _get_run_or_404(customer_id, run_id, db)
+    if run.closed_at is None:
+        raise HTTPException(status_code=409, detail="Rodada ainda em andamento. Aguarde o fechamento.")
+    sent = send_run_email(db, run, base_url=str(request.base_url), resend=True)
+    return {"email_sent": sent}

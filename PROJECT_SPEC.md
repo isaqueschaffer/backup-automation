@@ -484,10 +484,14 @@ API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 | POST | `/api/v1/clients/{id}/trigger-backup` · `/cancel-queue` | Fila sequencial de backup do Cliente |
 | POST/DELETE | `/api/v1/clients/{id}/machines/{machine_id}` | Vincular (herda horário) / remover máquina do Cliente (409 com fila ativa) |
 | PUT | `/api/v1/clients/{id}/queue-order` | Ordem da fila `{machine_ids:[...]}` (arrastar e soltar; 409 com fila ativa) |
+| GET | `/api/v1/clients/{id}/runs` | Rodadas de backup do Cliente (1 e-mail por rodada) |
+| GET | `/api/v1/clients/{id}/runs/{run_id}/download` | ZIP unificado da rodada (uma pasta por máquina) |
+| POST | `/api/v1/clients/{id}/runs/{run_id}/resend-email` | Reenviar e-mail da rodada (409 se aberta) |
 | GET | `/api/v1/clients/{id}/download-latest` | ZIP unificado do último backup do Cliente |
 | GET | `/api/v1/backups` | Listar backups (paginado; filtros `machine_id`, `customer_id`) |
 | GET | `/api/v1/backups/{id}/download` | Download de ZIP (admin) |
 | GET | `/api/v1/backups/public-download/{id}` | Download público por link de e-mail (sem auth; ver riscos abertos) |
+| GET | `/api/v1/backups/public-run-download/{run_id}` | ZIP unificado da rodada pelo link do e-mail do Cliente (mesmo modelo do public-download) |
 | POST | `/api/v1/backups/{id}/resend-email` | Reenviar e-mail do backup |
 | GET/PUT | `/api/v1/settings` | Configuracoes do sistema |
 | POST | `/api/v1/admin/agent-version` | Registrar nova versao OTA |
@@ -793,6 +797,21 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-14] — Backup e e-mail por Cliente (rodadas)
+
+**Alteração:** Cliente com várias máquinas recebe 1 e-mail por rodada de backup, com o relatório de todas as máquinas e um ZIP unificado.
+**Antes:** 1 e-mail por upload de cada máquina, para os e-mails da máquina (5 máquinas = 5 e-mails); máquina sem ZIP não gerava e-mail.
+**Depois:**
+- Nova tabela `customer_backup_runs` e `backups.run_id`; `client_groups.email_to` (populado na criação com a união dos e-mails das máquinas). Migração inline idempotente; datetimes naive (REGRA-001).
+- Rodada `scheduled` (aberta no 1º relatório agendado), `queue` (aberta no backup em fila do cliente) e `manual_machine` (backup avulso de uma máquina: e-mail só dela). Fecha quando todas as máquinas esperadas reportaram + 90 s para o ZIP chegar (`RUN_UPLOAD_GRACE_SECONDS`), ou no prazo de 2 h (`RUN_DEADLINE_HOURS`); fila que termina pulando máquinas offline fecha logo após o último ZIP. Quem não reportou aparece como "não executou".
+- Fechamento por tarefa de fundo a cada 30 s (`services/backup_runs.py`, 1 worker uvicorn) com `UPDATE ... WHERE closed_at IS NULL` para nunca enviar o e-mail duas vezes.
+- E-mail do cliente (`send_customer_report`): resumo por máquina, seções de câmeras e backup de cada máquina e link `PUBLIC_URL/api/v1/backups/public-run-download/{run_id}` (sem `PUBLIC_URL`, diz "ZIP disponível no painel"). Máquina sem cliente: e-mail por upload como antes.
+- E-mails da máquina com cliente são os do cliente (PUT alterando = 400). Painel: e-mails no cliente, seção "Rodadas de backup" (detalhes, baixar ZIP, reenviar), e-mail travado na máquina.
+**Requisito de produção:** definir `PUBLIC_URL` no `.env` para o link do ZIP sair no e-mail automático.
+**Verificação:** simulação com SMTP interceptado (rodada completa, máquina faltando, avulso, fila, cancelamento, máquina sem cliente, downloads, reenvio, duplicidade, contrato do agente inalterado) e as 45 chamadas do painel conferidas contra a API.
+**Breaking Change:** Não para o agente. A API admin ganhou campos e rotas (o painel foi atualizado junto).
+**Branch:** isaque
 
 ### [2026-10-14] — Cliente e Máquina reorganizados; fila com arrastar e soltar
 

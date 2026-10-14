@@ -12,12 +12,15 @@ const cardTitleStyle: React.CSSProperties = {
 };
 
 // As três colunas do topo: Configuração, Status do Agente e Saúde do Servidor (telemetria)
-export default function MachineInfoCards({ machine, isAgentOnline, nextPingStr, onCopy }: {
+export default function MachineInfoCards({ machine, customerEmails, isAgentOnline, nextPingStr, onCopy }: {
   machine: Machine;
+  // E-mails do cliente quando a máquina os herda (null = não carregados: usa os da máquina)
+  customerEmails: string[] | null;
   isAgentOnline: boolean;
   nextPingStr: string;
   onCopy: (v: string) => void;
 }) {
+  const emails = (machine.email_from_customer && customerEmails) || machine.email_to || [];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
 
@@ -36,8 +39,11 @@ export default function MachineInfoCards({ machine, isAgentOnline, nextPingStr, 
           <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${machine.api_key_prefix}…`} mono />
           <InfoPill icon={<Clock size={11} />} label="Horário do Backup"
             value={`${fmtSchedule(machine.backup_hour, machine.backup_minute)} (diário)${machine.schedule_from_customer ? " — definido pelo cliente" : ""}`} />
-          <InfoPill icon={<Mail size={11} />} label="E-mails de Notificação"
-            value={(machine.email_to || []).join(", ") || "—"} />
+          <InfoPill icon={<Mail size={11} />} label={machine.email_from_customer ? "E-mails do relatório (do cliente)" : "E-mails de Notificação"}
+            value={machine.email_from_customer
+              ? <>{emails.join(", ") || "—"}
+                  <span className="text-muted" style={{ fontSize: 12 }}> — definidos pelo cliente, 1 e-mail por rodada</span></>
+              : (emails.join(", ") || "—")} />
         </div>
       </div>
 

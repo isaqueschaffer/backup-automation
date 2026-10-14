@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  fetchMachine, fetchMachineLogs, fetchEquipamentos, createEquipamento, updateEquipamento,
+  fetchCustomer, fetchMachine, fetchMachineLogs, fetchEquipamentos, createEquipamento, updateEquipamento,
   deleteEquipamento, updateMachine, rotateMachineKey, fetchBackups, restartMachineAgent, triggerMachineBackup
 } from "../../../api/client";
 import { AgentLog, Backup, CameraRecStatus, Machine, EqForm, NVR } from "../../../api/types";
@@ -48,6 +48,8 @@ export default function MachineDetail() {
     name: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
   });
   const [saving, setSaving] = useState(false);
+  // E-mails efetivos quando vêm do cliente (null = ainda não carregados ou máquina sem cliente)
+  const [customerEmails, setCustomerEmails] = useState<string[] | null>(null);
   // Diferença entre relógio do servidor e do navegador, para a contagem do próximo ping andar a cada segundo
   const [serverSkewMs, setServerSkewMs] = useState(0);
 
@@ -92,6 +94,18 @@ export default function MachineDetail() {
     const t2 = setInterval(() => { if (id) load(true); }, 10000);
     return () => { clearInterval(t1); clearInterval(t2); };
   }, [id, load]);
+
+  // Busca os e-mails do cliente só quando muda o vínculo (não a cada polling)
+  const emailCustomerId = machine?.email_from_customer ? machine.customer_id ?? null : null;
+  useEffect(() => {
+    setCustomerEmails(null);
+    if (!emailCustomerId) return;
+    let cancelled = false;
+    fetchCustomer(emailCustomerId)
+      .then(c => { if (!cancelled) setCustomerEmails(c.email_to || []); })
+      .catch(() => { /* mantém null: o card mostra os e-mails da máquina */ });
+    return () => { cancelled = true; };
+  }, [emailCustomerId]);
 
   const nextPingMs = machine?.last_seen && machine.active && machine.is_online
     ? serverUtcMs(machine.last_seen) + AGENT_PING_INTERVAL_MS
@@ -173,7 +187,7 @@ export default function MachineDetail() {
       name: machine.name,
       backup_hour: machine.backup_hour,
       backup_minute: machine.backup_minute,
-      email_to: (machine.email_to || []).join(", "),
+      email_to: ((machine.email_from_customer && customerEmails) || machine.email_to || []).join(", "),
       zip_password: "",
     });
     setShowEditModal(true);
@@ -184,11 +198,12 @@ export default function MachineDetail() {
     try {
       // Só os campos editáveis. Cliente e posição na fila mudam na tela do Cliente;
       // com cliente, o horário vem dele e não é enviado.
+      // Idem para os e-mails: com cliente, vêm dele e não são enviados.
       const payload: Record<string, unknown> = {
         name: editForm.name,
-        email_to: parseEmails(editForm.email_to),
         zip_password: editForm.zip_password || undefined,
       };
+      if (!machine?.email_from_customer) payload.email_to = parseEmails(editForm.email_to);
       if (!machine?.schedule_from_customer) {
         payload.backup_hour = editForm.backup_hour;
         payload.backup_minute = editForm.backup_minute;
@@ -258,7 +273,7 @@ export default function MachineDetail() {
       />
 
       {/* ── Layout de três colunas ── */}
-      <MachineInfoCards machine={machine} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} />
+      <MachineInfoCards machine={machine} customerEmails={customerEmails} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} />
 
       {/* ── Equipamentos ── */}
       <div style={{ marginBottom: 24 }}>
@@ -334,6 +349,7 @@ export default function MachineDetail() {
         <EditMachineModal
           form={editForm} setForm={setEditForm}
           customerName={machine.schedule_from_customer ? (machine.customer_name || "vinculado") : null}
+          emailCustomerName={machine.email_from_customer ? (machine.customer_name || "vinculado") : null}
           saving={saving} onSave={handleEditSave} onClose={() => setShowEditModal(false)}
         />
       )}

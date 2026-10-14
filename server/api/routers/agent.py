@@ -3,6 +3,7 @@ Agent-facing router.
 Windows agent authenticates with X-Client-ID + X-API-Key headers.
 """
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 from uuid import UUID
@@ -29,7 +30,10 @@ from routers.machines import check_machine_online
 from services.crypto_service import decrypt
 from services.storage_service import save_zip_stream, UploadTooLargeError
 from services.email_service import send_backup_report
+from services.backup_runs import attach_report_to_run, finish_queue_run
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 
@@ -289,6 +293,16 @@ def receive_backup_report(
     db.commit()
     db.refresh(backup)
 
+    # ── Rodada do Cliente (1 e-mail por rodada) ──
+    # Antes de avançar a fila: a escolha da rodada usa o estado da fila no momento do relatório.
+    # Falha aqui nunca pode derrubar o relatório do agente (o Backup já foi gravado).
+    if machine.customer_id is not None:
+        try:
+            attach_report_to_run(db, machine, backup, body.trigger)
+        except Exception:
+            db.rollback()
+            logger.exception("Falha ao associar o backup %s à rodada do cliente", backup.id)
+
     # ── Avançar fila de backup sequencial do Cliente ──
     customer = machine.customer
     if customer is not None and customer.queue_active:
@@ -329,6 +343,8 @@ def receive_backup_report(
             # Nenhuma próxima máquina online ou fim da fila atingido
             customer.queue_active = False
             customer.queue_current_index = None
+            # Máquinas puladas não vão reportar: fecha a rodada assim que o último ZIP chegar
+            finish_queue_run(db, customer)
         db.commit()
 
     return BackupReportResponse(backup_id=backup.id)
@@ -391,7 +407,12 @@ def upload_backup_zip(
     backup.zip_size = (backup.zip_size or 0) + zip_size
     db.commit()
 
-    # Send email
+    # Máquina com Cliente: o e-mail sai 1 vez por rodada (ao fechar), não por upload.
+    # O JSON de resposta ao agente é o mesmo (email_sent=False aqui).
+    if machine.customer_id is not None and backup.run_id is not None:
+        return {"status": "ok", "zip_size": zip_size, "email_sent": False}
+
+    # Send email (máquina sem Cliente)
     nvr_results = backup.nvr_results or []
 
     email_sent = send_backup_report(

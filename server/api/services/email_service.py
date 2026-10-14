@@ -170,6 +170,93 @@ def _build_result_section(nvr_results: List[dict]) -> str:
     )
 
 
+def _smtp_config(db: Session) -> Optional[dict]:
+    """Lê a configuração SMTP (tabela settings com fallback para variáveis de ambiente).
+
+    Retorna None (com aviso no log) se servidor ou e-mail remetente não estiverem configurados.
+    """
+    smtp_server_setting = db.query(Setting).filter_by(key="smtp_server").first()
+    smtp_email_setting = db.query(Setting).filter_by(key="smtp_email").first()
+    smtp_port_setting = db.query(Setting).filter_by(key="smtp_port").first()
+    smtp_password_setting = db.query(Setting).filter_by(key="smtp_password").first()
+
+    smtp_server = smtp_server_setting.value if smtp_server_setting and smtp_server_setting.value else settings.SMTP_SERVER
+    smtp_email = smtp_email_setting.value if smtp_email_setting and smtp_email_setting.value else settings.SMTP_EMAIL
+
+    try:
+        smtp_port = int(smtp_port_setting.value) if smtp_port_setting and smtp_port_setting.value else settings.SMTP_PORT
+    except ValueError:
+        smtp_port = settings.SMTP_PORT
+
+    smtp_password = smtp_password_setting.value if smtp_password_setting and smtp_password_setting.value else settings.SMTP_PASSWORD
+
+    if not smtp_server or not smtp_email:
+        logger.warning(f"SMTP not configured (server='{smtp_server}', email='{smtp_email}') — skipping email.")
+        return None
+
+    return {"server": smtp_server, "port": smtp_port, "email": smtp_email, "password": smtp_password}
+
+
+def _clean_recipients(recipients: Optional[List[str]]) -> List[str]:
+    """Limpa e valida destinatários (aceita vários e-mails na mesma entrada, separados por , ou ;)."""
+    clean_recipients: List[str] = []
+    for r in (recipients or []):
+        if not r:
+            continue
+        parts = str(r).replace(";", ",").split(",")
+        for part in parts:
+            item = part.strip()
+            if item and "@" in item and "." in item:
+                if item not in clean_recipients:
+                    clean_recipients.append(item)
+    return clean_recipients
+
+
+def _overall_status(nvr_results: List[dict]) -> str:
+    """Status geral do backup de uma máquina (texto usado na seção 2)."""
+    if any(_norm_status(r) == "ERRO" for r in nvr_results):
+        return "❌ COM ERROS"
+    if any(_norm_status(r) == "PARCIAL" for r in nvr_results):
+        return "⚠️ PARCIAL"
+    return "✅ SUCESSO"
+
+
+def _smtp_send(msg: EmailMessage, cfg: dict, clean_recipients: List[str]) -> bool:
+    """Envio SMTP com retentativas e suporte a SSL/STARTTLS. Retorna True em caso de sucesso."""
+    smtp_server, smtp_port = cfg["server"], cfg["port"]
+    max_retries = 3
+    last_error = None
+    timeout_s = 30
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"[SMTP] Tentativa {attempt}/{max_retries} para {clean_recipients} via {smtp_server}:{smtp_port}...")
+            if smtp_port == 465:
+                server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout_s)
+            else:
+                server = smtplib.SMTP(smtp_server, smtp_port, timeout=timeout_s)
+                server.ehlo()
+                if server.has_extn("STARTTLS"):
+                    server.starttls()
+                    server.ehlo()
+
+            with server:
+                if cfg["password"]:
+                    server.login(cfg["email"], cfg["password"])
+                server.send_message(msg)
+
+            logger.info(f"[SMTP] E-mail enviado com sucesso para {clean_recipients} na tentativa {attempt}.")
+            return True
+        except Exception as exc:
+            last_error = exc
+            logger.warning(f"[SMTP] Tentativa {attempt}/{max_retries} falhou: {exc}")
+            if attempt < max_retries:
+                time.sleep(2 * attempt)
+
+    logger.error(f"[SMTP] Falha definitiva no envio de e-mail para {clean_recipients} após {max_retries} tentativas: {last_error}")
+    return False
+
+
 def send_backup_report(
     machine_name: str,
     date_str: str,
@@ -181,49 +268,19 @@ def send_backup_report(
     base_url: Optional[str] = None,
     public_url: Optional[str] = None,
 ) -> bool:
-    """Send backup report email. Returns True on success."""
-    smtp_server_setting = db.query(Setting).filter_by(key="smtp_server").first()
-    smtp_email_setting = db.query(Setting).filter_by(key="smtp_email").first()
-    smtp_port_setting = db.query(Setting).filter_by(key="smtp_port").first()
-    smtp_password_setting = db.query(Setting).filter_by(key="smtp_password").first()
-
-    smtp_server = smtp_server_setting.value if smtp_server_setting and smtp_server_setting.value else settings.SMTP_SERVER
-    smtp_email = smtp_email_setting.value if smtp_email_setting and smtp_email_setting.value else settings.SMTP_EMAIL
-    
-    try:
-        smtp_port = int(smtp_port_setting.value) if smtp_port_setting and smtp_port_setting.value else settings.SMTP_PORT
-    except ValueError:
-        smtp_port = settings.SMTP_PORT
-        
-    smtp_password = smtp_password_setting.value if smtp_password_setting and smtp_password_setting.value else settings.SMTP_PASSWORD
-
-    if not smtp_server or not smtp_email:
-        logger.warning(f"SMTP not configured (server='{smtp_server}', email='{smtp_email}') — skipping email.")
+    """Send backup report email (máquina sem Cliente). Returns True on success."""
+    cfg = _smtp_config(db)
+    if cfg is None:
         return False
 
     # ── Limpeza e validação de destinatários ──
-    clean_recipients: List[str] = []
-    for r in (recipients or []):
-        if not r:
-            continue
-        # Trata múltiplos emails separados por vírgula ou ponto-e-vírgula na mesma entrada
-        parts = str(r).replace(";", ",").split(",")
-        for part in parts:
-            item = part.strip()
-            if item and "@" in item and "." in item:
-                if item not in clean_recipients:
-                    clean_recipients.append(item)
-
+    clean_recipients = _clean_recipients(recipients)
     if not clean_recipients:
         logger.warning(f"No valid recipients configured for '{machine_name}' (received: {recipients}) — skipping email.")
         return False
 
     # ── Overall backup status ──
-    overall = "✅ SUCESSO"
-    if any(_norm_status(r) == "ERRO" for r in nvr_results):
-        overall = "❌ COM ERROS"
-    elif any(_norm_status(r) == "PARCIAL" for r in nvr_results):
-        overall = "⚠️ PARCIAL"
+    overall = _overall_status(nvr_results)
 
     # ── Date/time formatting (BRT = UTC-3, independente do fuso do container) ──
     now = datetime.utcnow() - timedelta(hours=3)
@@ -231,7 +288,7 @@ def send_backup_report(
 
     # ── Build email ──
     msg = EmailMessage()
-    msg["From"] = smtp_email
+    msg["From"] = cfg["email"]
     msg["To"] = ", ".join(clean_recipients)
     msg["Subject"] = f"{machine_name} POP - Verificação de câmeras e Backup dos equipamentos — {date_str}"
 
@@ -264,18 +321,18 @@ def send_backup_report(
 
     if backup_id:
         body += f"\n🔗 LINKS PARA BAIXAR O BACKUP DIRETAMENTE:\n"
+        link_public = None
         if public_url:
             link_public = f"{public_url.rstrip('/')}/api/v1/backups/public-download/{backup_id}"
             body += f"  Acesso: {link_public}\n"
         if base_url:
             link_ddns = f"{base_url.rstrip('/')}/api/v1/backups/public-download/{backup_id}"
             # Evita repetir o mesmo link quando base_url coincide com a URL pública
-            if not public_url or link_ddns != link_public:
+            if link_ddns != link_public:
                 body += f"  Acesso: {link_ddns}\n"
         body += f"\n  O link não requer senha do painel e pode ser acessado de qualquer navegador.\n"
     elif zip_path and not attach:
         body += f"\n  Arquivado no servidor: {zip_path.name}\n"
-
 
     # ── Section 3: Resultado do Serviço ──
     body += _build_result_section(nvr_results)
@@ -297,35 +354,133 @@ def send_backup_report(
             filename=zip_path.name,
         )
 
-    # ── Envio SMTP com retentativas e suporte a SSL/STARTTLS ──
-    max_retries = 3
-    last_error = None
-    timeout_s = 30
+    return _smtp_send(msg, cfg, clean_recipients)
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.info(f"[SMTP] Tentativa {attempt}/{max_retries} para {clean_recipients} via {smtp_server}:{smtp_port}...")
-            if smtp_port == 465:
-                server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout_s)
-            else:
-                server = smtplib.SMTP(smtp_server, smtp_port, timeout=timeout_s)
-                server.ehlo()
-                if server.has_extn("STARTTLS"):
-                    server.starttls()
-                    server.ehlo()
 
-            with server:
-                if smtp_password:
-                    server.login(smtp_email, smtp_password)
-                server.send_message(msg)
+# ─── E-mail único por rodada do Cliente ────────────────────────────────────
 
-            logger.info(f"[SMTP] E-mail enviado com sucesso para {clean_recipients} na tentativa {attempt}.")
-            return True
-        except Exception as exc:
-            last_error = exc
-            logger.warning(f"[SMTP] Tentativa {attempt}/{max_retries} falhou: {exc}")
-            if attempt < max_retries:
-                time.sleep(2 * attempt)
+RUN_TRIGGER_LABELS = {
+    "scheduled": "Agendado",
+    "queue": "Fila (disparado pelo painel)",
+    "manual_machine": "Avulso",
+}
 
-    logger.error(f"[SMTP] Falha definitiva no envio de e-mail para {clean_recipients} após {max_retries} tentativas: {last_error}")
-    return False
+_OK_STATUSES = ("OK", "SEM_ARQUIVOS")
+
+
+def _machine_summary_line(entry: dict) -> str:
+    """Linha do resumo: nome, status e contagem de equipamentos OK / com erro (ou 'não executou')."""
+    name = entry.get("name") or "?"
+    status = entry.get("status")
+    if not status:
+        return f"  ❌ {name}: não executou (offline/sem retorno)"
+    results = entry.get("nvr_results") or []
+    ok = sum(1 for r in results if _norm_status(r) in _OK_STATUSES)
+    err = len(results) - ok
+    st = _norm_status({"status": status})  # PARTIAL/ERROR -> PARCIAL/ERRO
+    icon = "✅" if st in _OK_STATUSES else "⚠️" if st == "PARCIAL" else "❌"
+    return f"  {icon} {name}: {st} — {ok} equipamento(s) OK, {err} com erro"
+
+
+def send_customer_report(
+    customer_name: str,
+    run_id: str,
+    run_trigger: str,
+    started_at: Optional[datetime],
+    entries: List[dict],
+    recipients: List[str],
+    db: Session,
+    has_zip: bool = False,
+    public_url: Optional[str] = None,
+    base_url: Optional[str] = None,
+    manual_machine_name: Optional[str] = None,
+) -> bool:
+    """Envia o e-mail único da rodada do Cliente. Retorna True em caso de sucesso.
+
+    `entries`: uma por máquina esperada (ordem da rodada), com chaves
+    `name`, `status` (status do backup ou None se não executou) e `nvr_results`.
+    Sem anexo: o ZIP unificado da rodada fica disponível por link público.
+    """
+    cfg = _smtp_config(db)
+    if cfg is None:
+        return False
+
+    clean_recipients = _clean_recipients(recipients)
+    if not clean_recipients:
+        logger.warning(f"No valid recipients configured for customer '{customer_name}' (received: {recipients}) — skipping email.")
+        return False
+
+    # Datas em BRT (UTC-3); started_at é UTC naive (REGRA-001)
+    ref = (started_at or datetime.utcnow()) - timedelta(hours=3)
+    date_str = ref.strftime("%d-%m-%Y")
+    date_hora_str = ref.strftime("%d/%m/%Y – %H:%M")
+
+    subject = f"{customer_name} - Verificação de câmeras e Backup dos equipamentos — {date_str}"
+    tipo = RUN_TRIGGER_LABELS.get(run_trigger, run_trigger)
+    if run_trigger == "manual_machine" and manual_machine_name:
+        subject += f" (backup avulso: {manual_machine_name})"
+        tipo = f"Avulso ({manual_machine_name})"
+
+    msg = EmailMessage()
+    msg["From"] = cfg["email"]
+    msg["To"] = ", ".join(clean_recipients)
+    msg["Subject"] = subject
+
+    reported = [e for e in entries if e.get("status")]
+
+    # ── Cabeçalho ──
+    body = (
+        f"{'═' * 50}\n"
+        f"  {customer_name} - Verificação de câmeras e Backup dos equipamentos\n"
+        f"{'═' * 50}\n\n"
+        f"Cliente: {customer_name}\n"
+        f"Data e hora: {date_hora_str}\n"
+        f"Tipo da rodada: {tipo}\n\n"
+        f"Serviço executado:\n"
+        f"Backup das configurações dos equipamentos de rede/CFTV e verificação de status operacional.\n\n"
+    )
+
+    # ── Resumo por máquina ──
+    body += (
+        f"Resumo ({len(reported)}/{len(entries)} máquina(s) reportaram)\n"
+        f"{'─' * 40}\n"
+    )
+    body += "\n".join(_machine_summary_line(e) for e in entries) + "\n"
+
+    # ── Bloco por máquina que reportou ──
+    for e in reported:
+        nvr_results = e.get("nvr_results") or []
+        body += (
+            f"\n\n{'═' * 50}\n"
+            f"  Máquina: {e.get('name') or '?'}\n"
+            f"{'═' * 50}\n"
+        )
+        body += _build_camera_section(nvr_results)
+        body += _build_backup_section(nvr_results, _overall_status(nvr_results))
+
+    # ── Link do ZIP unificado da rodada ──
+    if has_zip:
+        links = []
+        if public_url:
+            links.append(f"{public_url.rstrip('/')}/api/v1/backups/public-run-download/{run_id}")
+        if base_url:
+            link_base = f"{base_url.rstrip('/')}/api/v1/backups/public-run-download/{run_id}"
+            if link_base not in links:
+                links.append(link_base)
+        if links:
+            body += f"\n\n🔗 LINK PARA BAIXAR O ZIP DA RODADA (todas as máquinas):\n"
+            for link in links:
+                body += f"  Acesso: {link}\n"
+            body += f"\n  O link não requer senha do painel e pode ser acessado de qualquer navegador.\n"
+        else:
+            body += "\n\n📦 ZIP disponível no painel.\n"
+
+    # ── Rodapé ──
+    body += (
+        f"\n{'═' * 50}\n"
+        f"  Relatório gerado automaticamente — Trilan CFTV\n"
+        f"{'═' * 50}\n"
+    )
+
+    msg.set_content(body)
+    return _smtp_send(msg, cfg, clean_recipients)

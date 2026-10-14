@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # Tamanho máximo aceito no upload de ZIP do agente (em MB)
     MAX_UPLOAD_MB: int = 1024
 
+    # Rodadas de backup do Cliente (1 e-mail por rodada)
+    # Prazo máximo da rodada a partir do início (horas)
+    RUN_DEADLINE_HOURS: int = 2
+    # Espera após o último relatório antes de fechar (tempo para o ZIP chegar)
+    RUN_UPLOAD_GRACE_SECONDS: int = 90
+
     # SMTP
     SMTP_SERVER: Optional[str] = None
     SMTP_PORT: int = 587

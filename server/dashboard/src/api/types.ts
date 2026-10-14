@@ -109,6 +109,8 @@ export interface Machine {
   customer_name?: string | null;
   // true quando a máquina tem cliente: o horário vem do cliente
   schedule_from_customer?: boolean;
+  // true quando a máquina tem cliente: os e-mails do relatório vêm do cliente
+  email_from_customer: boolean;
 }
 
 export interface NVRResult {
@@ -133,6 +135,8 @@ export interface Backup {
   email_sent: boolean;
   trigger: string;
   created_at: string | null;
+  // Rodada de backup do cliente em que este backup entrou (null = máquina sem cliente)
+  run_id?: string | null;
 }
 
 export interface PaginatedBackups {
@@ -166,6 +170,8 @@ export interface Customer {
   active: boolean;
   backup_hour: number;
   backup_minute: number;
+  // Destinatários do e-mail único por rodada (relatório de todas as máquinas)
+  email_to: string[];
   created_at: string;
   machines_total: number;
   machines_online: number;
@@ -174,5 +180,34 @@ export interface Customer {
   queue_active: boolean;
   queue_current_index?: number | null;
   machines: Machine[]; // ordenadas por queue_order
+}
+
+// Rodada de backup do cliente: agrupa os backups das máquinas e gera 1 e-mail
+export type CustomerRunTrigger = "scheduled" | "queue" | "manual_machine";
+// "EM_ANDAMENTO" enquanto aberta; ao fechar: OK, PARCIAL ou ERRO
+export type CustomerRunStatus = "EM_ANDAMENTO" | "OK" | "PARCIAL" | "ERRO";
+
+export interface CustomerRunMachine {
+  machine_id: string;
+  machine_name: string;
+  backup_id: string | null;
+  // status do backup; "NAO_EXECUTOU" se não reportou e a rodada fechou; null se ainda aberta
+  status: string | null;
+  zip: boolean;
+}
+
+export interface CustomerRun {
+  id: string;
+  trigger: CustomerRunTrigger | string;
+  started_at: string;
+  deadline_at: string;
+  closed_at: string | null;
+  status: CustomerRunStatus | string;
+  email_sent: boolean;
+  machines_expected: number;
+  machines_reported: number;
+  machines_ok: number;
+  has_zip: boolean;
+  machines: CustomerRunMachine[];
 }
 

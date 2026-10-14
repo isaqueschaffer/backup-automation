@@ -10,16 +10,19 @@ export interface EditMachineForm {
   zip_password: string;
 }
 
-export default function EditMachineModal({ form, setForm, customerName, saving, onSave, onClose }: {
+export default function EditMachineModal({ form, setForm, customerName, emailCustomerName, saving, onSave, onClose }: {
   form: EditMachineForm;
   setForm: React.Dispatch<React.SetStateAction<EditMachineForm>>;
   // Nome do cliente quando o horário vem dele (campo travado); null = horário próprio
   customerName: string | null;
+  // Nome do cliente quando os e-mails vêm dele (campo travado e não enviado no PUT); null = e-mails próprios
+  emailCustomerName: string | null;
   saving: boolean;
   onSave: () => void;
   onClose: () => void;
 }) {
   const locked = customerName !== null;
+  const emailLocked = emailCustomerName !== null;
   return (
     <Modal title="Editar Máquina" onClose={onClose}>
       <div className="form-group">
@@ -49,8 +52,14 @@ export default function EditMachineModal({ form, setForm, customerName, saving, 
       </div>
       <div className="form-group">
         <label className="form-label">E-mails de Notificação (separados por vírgula)</label>
-        <input className="form-input" value={form.email_to}
+        <input className="form-input" value={form.email_to} disabled={emailLocked}
           onChange={e => setForm({ ...form, email_to: e.target.value })} />
+        {emailLocked && (
+          <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+            Definido pelo cliente {emailCustomerName}. O relatório sai em um único e-mail por rodada do cliente;
+            para mudar os destinatários, edite o cliente.
+          </div>
+        )}
       </div>
       <div className="form-group">
         <label className="form-label">Nova senha do ZIP <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(vazio = manter atual)</span></label>

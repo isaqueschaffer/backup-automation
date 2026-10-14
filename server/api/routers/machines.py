@@ -41,6 +41,8 @@ def machine_to_response(machine: Machine, schema=MachineResponse):
 
     # Máquina vinculada a um Cliente usa o horário do Cliente
     data.schedule_from_customer = machine.customer_id is not None
+    # ...e os e-mails do relatório também são os do Cliente (1 e-mail por rodada)
+    data.email_from_customer = machine.customer_id is not None
     if machine.customer is not None:
         data.customer_name = machine.customer.name
 
@@ -133,6 +135,13 @@ def update_machine(machine_id: UUID, body: MachineUpdate, db: Session = Depends(
         raise HTTPException(
             status_code=400,
             detail=f"Horário definido pelo cliente {machine.customer.name}. Altere no cliente.",
+        )
+
+    # Máquina vinculada: os e-mails do relatório são definidos pelo Cliente
+    if machine.customer is not None and "email_to" in changes and list(changes["email_to"]) != list(machine.email_to or []):
+        raise HTTPException(
+            status_code=400,
+            detail=f"E-mails definidos pelo cliente {machine.customer.name}. Altere no cliente.",
         )
 
     time_changed = False

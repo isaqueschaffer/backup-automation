@@ -8,7 +8,7 @@ import { useToast } from "../../../../components/Toast";
 import { fmtDate } from "../../../../utils/date";
 import { extractBlobError, saveBlob } from "../../../../utils/download";
 
-// Últimos backups das máquinas do cliente
+// Últimos backups individuais das máquinas do cliente (um ZIP por máquina)
 export default function CustomerBackups({ backups }: { backups: Backup[] | null }) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -26,7 +26,7 @@ export default function CustomerBackups({ backups }: { backups: Backup[] | null 
   return (
     <div style={{ marginBottom: 24 }}>
       <div className="flex items-center justify-between mb-3">
-        <div className="section-title" style={{ marginBottom: 0 }}><Archive size={15} /> Backups recentes do cliente</div>
+        <div className="section-title" style={{ marginBottom: 0 }}><Archive size={15} /> Backups por máquina</div>
         <Link to="/backups" className="text-sm">Ver todos</Link>
       </div>
       {backups === null ? (

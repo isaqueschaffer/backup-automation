@@ -7,7 +7,7 @@ import { fmtDate, fmtSchedule } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
 import { Plus, Trash2, Eye } from "lucide-react";
 import HealthBadge, { QueueBadge } from "./components/HealthBadge";
-import CustomerFormModal, { CustomerForm, emptyCustomerForm } from "./components/CustomerFormModal";
+import CustomerFormModal, { CustomerForm, emptyCustomerForm, parseEmailList } from "./components/CustomerFormModal";
 
 // Lista plana de Clientes: um clique abre o detalhe (/clientes/:id)
 export default function CustomersPage() {
@@ -44,6 +44,7 @@ export default function CustomersPage() {
         description: form.description.trim() || undefined,
         backup_hour: form.backup_hour,
         backup_minute: form.backup_minute,
+        email_to: parseEmailList(form.email_to),
         active: true,
       });
       toast("Cliente criado!", "success");

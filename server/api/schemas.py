@@ -124,6 +124,8 @@ class MachineResponse(MachineBase):
     customer_name: Optional[str] = None
     # True quando o horário vem do Cliente (máquina vinculada)
     schedule_from_customer: bool = False
+    # True quando os e-mails do relatório são os do Cliente (máquina vinculada)
+    email_from_customer: bool = False
     queue_order: int = 0
 
     model_config = {"from_attributes": True}
@@ -172,6 +174,8 @@ class BackupResponse(BaseModel):
     email_sent: bool
     trigger: str
     created_at: Optional[datetime]
+    # Rodada do Cliente (null para máquinas sem Cliente ou backups antigos)
+    run_id: Optional[UUID] = None
 
     model_config = {"from_attributes": True}
 
@@ -395,8 +399,33 @@ class CustomerBase(BaseModel):
     backup_minute: int = Field(0, ge=0, le=59)
 
 
+_EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+
+
+def _clean_email_list(v: Optional[List[str]]) -> Optional[List[str]]:
+    """Remove strings vazias e repetidas (ordem mantida) e valida o formato básico do e-mail."""
+    if v is None:
+        return None
+    result: List[str] = []
+    for item in v:
+        email = (item or "").strip()
+        if not email:
+            continue
+        if not _EMAIL_RE.match(email):
+            raise ValueError(f"E-mail inválido: {email}")
+        if email not in result:
+            result.append(email)
+    return result
+
+
 class CustomerCreate(CustomerBase):
-    pass
+    # Destinatários do e-mail único por rodada de backup
+    email_to: List[str] = []
+
+    @field_validator("email_to")
+    @classmethod
+    def _check_email_to(cls, v):
+        return _clean_email_list(v) or []
 
 
 class CustomerUpdate(BaseModel):
@@ -406,6 +435,12 @@ class CustomerUpdate(BaseModel):
     active: Optional[bool] = None
     backup_hour: Optional[int] = Field(None, ge=0, le=23)
     backup_minute: Optional[int] = Field(None, ge=0, le=59)
+    email_to: Optional[List[str]] = None
+
+    @field_validator("email_to")
+    @classmethod
+    def _check_email_to(cls, v):
+        return _clean_email_list(v)
 
 
 class CustomerResponse(CustomerBase):
@@ -414,6 +449,7 @@ class CustomerResponse(CustomerBase):
     backup_minute: int
     id: UUID
     created_at: datetime
+    email_to: List[str] = []
     machines_total: int = 0
     machines_online: int = 0
     health: str = "NO_DATA"  # ALL_OK | PARTIAL | ALL_ERROR | NO_DATA
@@ -428,6 +464,31 @@ class CustomerResponse(CustomerBase):
 class CustomerQueueOrder(BaseModel):
     """Nova ordem da fila: precisa conter exatamente as máquinas do Cliente."""
     machine_ids: List[UUID]
+
+
+class CustomerRunMachine(BaseModel):
+    machine_id: UUID
+    machine_name: str
+    backup_id: Optional[UUID] = None
+    # Status do backup; "NAO_EXECUTOU" se a rodada fechou sem relatório; null se ainda aberta
+    status: Optional[str] = None
+    zip: bool = False
+
+
+class CustomerRunResponse(BaseModel):
+    """Rodada de backup do Cliente (1 e-mail por rodada)."""
+    id: UUID
+    trigger: str  # scheduled | queue | manual_machine
+    started_at: datetime
+    deadline_at: datetime
+    closed_at: Optional[datetime] = None
+    status: str  # EM_ANDAMENTO | OK | PARCIAL | ERRO
+    email_sent: bool = False
+    machines_expected: int = 0
+    machines_reported: int = 0
+    machines_ok: int = 0
+    has_zip: bool = False
+    machines: List[CustomerRunMachine] = []
 
 
 # ─────────────────────────────────────────────

@@ -2,21 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   attachMachine, cancelCustomerQueue, deleteCustomer, detachMachine, downloadCustomerZip,
-  fetchBackups, fetchCustomer, reorderCustomerQueue, triggerCustomerBackup, updateCustomer,
+  fetchBackups, fetchCustomer, fetchCustomerRuns, reorderCustomerQueue, triggerCustomerBackup, updateCustomer,
 } from "../../../api/client";
-import { Backup, Customer, Machine } from "../../../api/types";
+import { Backup, Customer, CustomerRun, Machine } from "../../../api/types";
 import { useToast } from "../../../components/Toast";
 import { fmtSchedule } from "../../../utils/date";
 import { apiErrorMessage } from "../../../utils/errors";
-import CustomerFormModal, { CustomerForm } from "../components/CustomerFormModal";
+import CustomerFormModal, { CustomerForm, parseEmailList } from "../components/CustomerFormModal";
 import CustomerHeader, { CustomerAction } from "./components/CustomerHeader";
 import QueueSection, { moveItem } from "./components/QueueSection";
 import AddMachineModal from "./components/AddMachineModal";
 import CustomerBackups from "./components/CustomerBackups";
+import CustomerRuns from "./components/CustomerRuns";
 
 const POLL_MS = 5000;
 
-// Detalhe do Cliente: dados, fila de backup (ordem por arrastar e soltar) e backups recentes
+// Detalhe do Cliente: dados, fila de backup (ordem por arrastar e soltar), rodadas de backup e backups por máquina
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -26,6 +27,7 @@ export default function CustomerDetail() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [backups, setBackups] = useState<Backup[] | null>(null);
+  const [runs, setRuns] = useState<CustomerRun[] | null>(null);
   const [busy, setBusy] = useState<CustomerAction | null>(null);
   const [queueSaving, setQueueSaving] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -39,16 +41,33 @@ export default function CustomerDetail() {
   const activeIdRef = useRef<string | undefined>(undefined);
   const seqRef = useRef(0);
   const reorderPendingRef = useRef(false);
+  // Sequência própria das rodadas: descarta respostas que chegarem fora de ordem
+  const runsSeqRef = useRef(0);
 
   const applyCustomer = useCallback((c: Customer) => {
     seqRef.current++;
     if (activeIdRef.current === c.id) setCustomer(c);
   }, []);
 
+  // Rodadas recarregadas no mesmo ciclo do polling do cliente (sem intervalo próprio)
+  const loadRuns = useCallback(async () => {
+    if (!id) return;
+    const reqId = id;
+    const seq = ++runsSeqRef.current;
+    try {
+      const r = await fetchCustomerRuns(reqId);
+      if (activeIdRef.current === reqId && seq === runsSeqRef.current) setRuns(r);
+    } catch {
+      // falha em silêncio; na 1ª carga sai do estado "carregando"
+      if (activeIdRef.current === reqId && seq === runsSeqRef.current) setRuns(prev => prev ?? []);
+    }
+  }, [id]);
+
   const refresh = useCallback(async (initial = false) => {
     if (!id) return;
     const reqId = id;
     const seq = ++seqRef.current;
+    loadRuns();
     try {
       const c = await fetchCustomer(reqId);
       if (activeIdRef.current !== reqId || seq !== seqRef.current || reorderPendingRef.current) return;
@@ -62,11 +81,11 @@ export default function CustomerDetail() {
     } finally {
       if (initial && activeIdRef.current === reqId) setLoading(false);
     }
-  }, [id, toast]);
+  }, [id, toast, loadRuns]);
 
   useEffect(() => {
     activeIdRef.current = id;
-    setLoading(true); setCustomer(null); setNotFound(false); setBackups(null);
+    setLoading(true); setCustomer(null); setNotFound(false); setBackups(null); setRuns(null);
     refresh(true);
     const t = setInterval(() => refresh(), POLL_MS);
     return () => { clearInterval(t); activeIdRef.current = undefined; };
@@ -140,6 +159,7 @@ export default function CustomerDetail() {
         description: form.description.trim() || null,
         backup_hour: form.backup_hour,
         backup_minute: form.backup_minute,
+        email_to: parseEmailList(form.email_to),
       });
       applyCustomer(updated);
       setShowEdit(false);
@@ -203,13 +223,18 @@ export default function CustomerDetail() {
         onAdd={() => setShowAdd(true)}
       />
 
+      <CustomerRuns customerId={c.id} customerName={c.name} runs={runs} onChanged={loadRuns} />
+
       <CustomerBackups backups={backups} />
 
       {showEdit && (
         <CustomerFormModal
           title="Editar cliente"
           isEdit
-          initial={{ name: c.name, description: c.description || "", backup_hour: c.backup_hour, backup_minute: c.backup_minute }}
+          initial={{
+            name: c.name, description: c.description || "", backup_hour: c.backup_hour, backup_minute: c.backup_minute,
+            email_to: (c.email_to || []).join(", "),
+          }}
           saving={editSaving}
           onSave={handleEditSave}
           onClose={() => setShowEdit(false)}
