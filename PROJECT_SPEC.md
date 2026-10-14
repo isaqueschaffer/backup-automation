@@ -100,51 +100,66 @@
 ```
 trilan-nvr-backup-automation/
 ├── PROJECT_SPEC.md              <- ESTE ARQUIVO (fonte de verdade)
-├── agent/
-│   ├── service.py               <- Entry point do serviço Windows
+├── README.md
+├── agent/                       <- Agente Windows (PyInstaller)
+│   ├── service.py               <- Entry point do serviço Windows (ping em thread + loop principal)
 │   ├── tray.py                  <- Entry point do app de bandeja
-│   ├── agent.py                 <- Orquestrador de backup
-│   ├── agent.conf               <- Configuração local do agente
+│   ├── agent.py                 <- Orquestrador de backup (reexporta run_backup)
+│   ├── agent.conf               <- Configuração local do agente (NAO versionar)
+│   ├── agent.conf.example
+│   ├── build.ps1                <- Gera os EXEs em dist/ (hidden-imports aqui)
+│   ├── publish_version.ps1
+│   ├── installer.iss            <- Instalador Inno Setup (versão do agente)
 │   ├── requirements.txt
-│   ├── src/
-│   │   ├── application/
-│   │   │   ├── api_client.py    <- HTTP client para o servidor
-│   │   │   └── updater.py       <- Lógica de auto-atualização OTA
-│   │   ├── nvr/
-│   │   │   ├── factory.py       <- Detecta tipo de NVR e orquestra busca
-│   │   │   ├── hikvision/       <- Integração Hikvision (NVR/DVR)
-│   │   │   └── motorola/        <- Integração Motorola
-│   │   ├── olt/                 <- Integração OLT
-│   │   ├── pabx/                <- Integração PABX
-│   │   ├── mikrotik/            <- Integração Mikrotik
-│   │   └── core/config.py       <- Lê agent.conf
-│   └── dist/                    <- EXEs compilados
-│       ├── TrilanAgentService.exe
-│       └── TrilanAgentTray.exe
+│   ├── dist/                    <- EXEs compilados (NAO versionados; vão por upload no OTA Manager)
+│   └── src/
+│       ├── application/
+│       │   ├── api_client.py    <- HTTP client para o servidor (ping, upload, telemetria)
+│       │   ├── backup_job.py    <- Orquestra o backup por equipamento + captura da imagem da noite
+│       │   ├── updater.py       <- Auto-atualização OTA (CURRENT_VERSION)
+│       │   ├── webhook_defense.py / webhook_digifort.py
+│       ├── backup/              <- archiver, crypto, downloader, file_manager/
+│       ├── camera/rtsp_client.py<- Teste RTSP, referência ideal e imagem da noite (ffmpeg)
+│       ├── core/config.py       <- Lê agent.conf (ConfigError, parse_config_extra)
+│       ├── nvr/
+│       │   ├── factory.py       <- Detecta tipo de NVR e orquestra busca/gravação
+│       │   ├── hikvision/       <- NVR/DVR Hikvision (ISAPI)
+│       │   └── motorola/        <- NVR Motorola/NVMS-9000 (cameras, recordings, queryChlRecLog)
+│       ├── olt/                 <- huawei_active, unm2000, vsol
+│       ├── pabx/issabel.py
+│       ├── mikrotik/routeros.py
+│       ├── vms/defense.py       <- Intelbras Defense
+│       └── utils/               <- http.py, xml_parser.py
 ├── server/
 │   ├── .env                     <- Configuração de produção (NAO versionar)
-│   ├── .env.example
+│   ├── .env.example / .env.local.example
 │   ├── docker-compose.yml       <- Produção (Dokploy)
-│   ├── api/
-│   │   ├── main.py              <- FastAPI app + migracoes inline
-│   │   ├── models.py            <- ORM SQLAlchemy
-│   │   ├── schemas.py           <- Pydantic schemas
-│   │   ├── auth.py              <- JWT + API Key auth
-│   │   ├── database.py          <- Engine + SessionLocal
-│   │   ├── config.py            <- Settings via pydantic-settings
-│   │   └── routers/
-│   │       ├── agent.py         <- /api/v1/agent/*
-│   │       ├── agent_update.py  <- OTA endpoints
-│   │       ├── clients.py       <- /api/v1/clients/*
-│   │       ├── equipamentos.py  <- /api/v1/equipamentos/*
-│   │       ├── nvrs.py          <- /api/v1/nvrs/* (compatibilidade)
-│   │       ├── backups.py       <- /api/v1/backups/*
-│   │       ├── settings_router.py
-│   │       └── auth_router.py
-│   └── dashboard/
+│   ├── docker-compose.local.yml <- Desenvolvimento local
+│   ├── nginx/nginx.conf
+│   ├── api/                     <- Backend FastAPI
+│   │   ├── main.py              <- App + migrações inline (sem Alembic)
+│   │   ├── models.py / schemas.py / auth.py / database.py / config.py
+│   │   ├── routers/
+│   │   │   ├── agent.py         <- /api/v1/agent/*
+│   │   │   ├── agent_update.py  <- OTA: /agent/update-check e /admin/agent-version/*
+│   │   │   ├── clients.py       <- /api/v1/machines/*  (máquinas = agentes; arquivo mantém o nome histórico)
+│   │   │   ├── groups.py        <- /api/v1/clients/*   (Clientes/Unidades que agrupam máquinas)
+│   │   │   ├── equipamentos.py  <- /api/v1/machines/{id}/equipamentos/*
+│   │   │   ├── nvrs.py          <- legado, fora do schema (candidato a remoção)
+│   │   │   ├── backups.py       <- /api/v1/backups/*
+│   │   │   ├── settings_router.py / auth_router.py
+│   │   ├── services/            <- crypto_service, email_service, storage_service
+│   │   └── tests/
+│   └── dashboard/               <- React + Vite + TypeScript
+│       ├── Dockerfile / nginx-spa.conf
 │       └── src/
-│           ├── pages/Settings.tsx   <- Gerenciador OTA
-│           └── api/client.ts
+│           ├── api/             <- client.ts (axios) e types.ts
+│           ├── components/ / utils/date.ts
+│           └── pages/
+│               ├── ClientDetail/    <- index.tsx, utils.ts, components/, hooks/
+│               ├── Clients.tsx (máquinas) / Units.tsx (clientes) / Backups.tsx / Overview.tsx / Settings.tsx
+├── tools/                       <- Utilitários avulsos (não entram em build nem deploy)
+├── archive/legacy_scripts/      <- Código legado, só consulta
 └── .agents/                     <- Skills do Antigravity IDE
 ```
 
@@ -440,24 +455,36 @@ API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 | GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente |
 | POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup` |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup |
-| POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP |
-| GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA |
+| POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
+| GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa) |
+| POST | `/api/v1/agent/rtsp-result` | Agente devolve o resultado da tarefa RTSP do dashboard |
+| POST | `/api/v1/agent/nvr-cameras/night-image` | Agente envia a imagem da noite de um canal |
 
 ### Endpoints de Admin (Bearer Token)
 
 | Metodo | Path | Descricao |
 |---|---|---|
 | POST | `/api/v1/auth/login` | Login — retorna JWT |
-| GET/POST | `/api/v1/clients` | Listar/criar clientes |
-| GET/PUT/DELETE | `/api/v1/clients/{id}` | Detalhar/atualizar/deletar |
-| POST | `/api/v1/clients/{id}/rotate-key` | Rotacionar API key |
-| POST | `/api/v1/clients/{id}/trigger-backup` | Solicitar backup manual |
-| POST | `/api/v1/clients/{id}/restart-agent` | Solicitar reinicio do agente |
-| GET | `/api/v1/clients/{id}/logs` | Listar logs do agente |
-| GET/POST | `/api/v1/equipamentos` | Listar/criar equipamentos |
-| GET/PUT/DELETE | `/api/v1/equipamentos/{id}` | Gerenciar equipamento |
+| GET/POST | `/api/v1/machines` | Listar/criar máquinas (agentes) |
+| GET/PUT/DELETE | `/api/v1/machines/{id}` | Detalhar/atualizar/deletar máquina |
+| POST | `/api/v1/machines/{id}/rotate-key` | Rotacionar API key |
+| POST | `/api/v1/machines/{id}/trigger-backup` | Solicitar backup manual |
+| POST | `/api/v1/machines/{id}/restart-agent` | Solicitar reinicio do agente |
+| POST | `/api/v1/machines/trigger-backup-all` · `/restart-agent-all` | Ação em massa nas máquinas online (`{queued, skipped_offline}`) |
+| GET | `/api/v1/machines/{id}/logs` | Listar logs do agente |
+| GET/POST | `/api/v1/machines/{id}/equipamentos` | Listar/criar equipamentos da máquina |
+| GET/PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{eq_id}` | Gerenciar equipamento |
+| POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/test-rtsp` | Tarefa RTSP via agente (409 se já houver uma pendente) |
+| GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras` | Galeria do NVR (une `nvr_cameras` + `last_recording_status`) |
+| POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/perfect-image` | Salvar imagem de referência |
+| GET/POST | `/api/v1/clients` | Listar/criar Clientes (grupos de máquinas — groups.py) |
+| GET/PUT/DELETE | `/api/v1/clients/{id}` | Gerenciar Cliente |
+| POST | `/api/v1/clients/{id}/trigger-backup` · `/cancel-queue` | Fila sequencial de backup do Cliente |
+| GET | `/api/v1/clients/{id}/download-latest` | ZIP unificado do último backup do Cliente |
 | GET | `/api/v1/backups` | Listar backups (paginado) |
-| GET | `/api/v1/backups/{id}/download` | Download de ZIP |
+| GET | `/api/v1/backups/{id}/download` | Download de ZIP (admin) |
+| GET | `/api/v1/backups/public-download/{id}` | Download público por link de e-mail (sem auth; ver riscos abertos) |
+| POST | `/api/v1/backups/{id}/resend-email` | Reenviar e-mail do backup |
 | GET/PUT | `/api/v1/settings` | Configuracoes do sistema |
 | POST | `/api/v1/admin/agent-version` | Registrar nova versao OTA |
 | GET | `/api/v1/admin/agent-version` | Listar versoes OTA |
@@ -473,7 +500,7 @@ API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 ```json
 {
   "has_update": true,
-  "version": "1.0.6",
+  "version": "1.1.4",
   "url_service": "https://github.com/.../TrilanAgentService.exe",
   "url_tray": "https://github.com/.../TrilanAgentTray.exe",
   "sha256_service": "<64 chars hex lowercase>",
@@ -627,12 +654,12 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 | NVR IP (Hikvision) | NVR | src/nvr/hikvision/ | HTTP ISAPI |
 | DVR Analogico (Hikvision) | DVR | src/nvr/hikvision/ | HTTP ISAPI |
 | NVR Hibrido (Hikvision) | NVR | src/nvr/factory.py | HTTP ISAPI |
-| Motorola | MOTOROLA | src/nvr/motorola/ | HTTP |
-| OLT | OLT | src/olt/ | SSH Paramiko |
+| Motorola (NVMS-9000) | MOTOROLA | src/nvr/motorola/ + camera/rtsp_client.py | HTTP + RTSP (`chID=N`); imagem da noite via `queryChlRecLog` |
+| OLT (Huawei, UNM2000, V-SOL) | OLT | src/olt/ (huawei_active, unm2000, vsol) | SSH Paramiko |
 | ONU | ONU | — | — |
 | PABX | PABX | src/pabx/ | — |
-| Mikrotik | MIKROTIK | src/mikrotik/ | SSH/API |
-| Digifort | DIGIFORT | — | — |
+| Mikrotik | MIKROTIK | src/mikrotik/routeros.py | SSH/SFTP |
+| Digifort | DIGIFORT | src/application/webhook_digifort.py + tools/agente_digifort.py | Webhook/SNMP |
 | Intelbras Defense | DEFENSE | src/vms/defense.py | API / HTTP |
 | Misto / Custom | MIXED | — | — |
 | Câmera IP (Teste RTSP)| CAMERA | server/api/routers/equipamentos.py + agent.py (`/rtsp-result`), agent/src/camera/rtsp_client.py | RTSP (TCP) |
@@ -710,6 +737,30 @@ por incompatibilidade de tipo com o banco de dados existente.
 **Licao:** Qualquer alteracao de tipo de coluna datetime e CRITICA e exige analise
 de dados existentes, rollout gradual e plano de rollback.
 
+### ADR-007 — Rotas renomeadas: máquinas em `/machines`, Clientes (grupos) em `/clients`
+
+**Data:** 13/10/2026 | **Status:** VIGENTE
+
+**Decisao:** O que era `/api/v1/clients` (agentes) passou a `/api/v1/machines` e `/api/v1/machines/{id}/equipamentos`.
+`/api/v1/clients` agora é o agrupamento Cliente/Unidade (`groups.py`). Os arquivos mantêm os nomes históricos
+(`clients.py` = máquinas, `groups.py` = clientes). O dashboard (`Clients.tsx` = máquinas, `Units.tsx` = clientes) segue a mesma troca.
+
+**Licao:** Chamadas diretas `api.get('/clients/...')` no dashboard passaram despercebidas na renomeação (galeria e RTSP davam 404).
+Ao renomear rota, grep por todos os caminhos no dashboard, não só em `api/client.ts`.
+
+---
+
+### ADR-008 — Binários e artefatos não são versionados
+
+**Data:** 13/10/2026 | **Status:** VIGENTE
+
+**Decisao:** `agent/dist/` (EXEs), `__pycache__/`, dumps `*.sql`, `scratch_test/` e `.claude/` ficam fora do git. Os EXEs vão por upload
+no OTA Manager (GitHub Release). Utilitários avulsos ficam em `tools/`; código legado em `archive/`.
+
+**Motivo:** Os EXEs (~50 MB cada, várias versões) inflaram o histórico para ~150 MB e o clone do Dokploy levava minutos.
+O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (`git filter-repo` + force-push nos dois remotes)
+é decisão pendente do dono.
+
 ---
 
 ## 15. Incompatibilidades Conhecidas
@@ -721,15 +772,33 @@ de dados existentes, rollout gradual e plano de rollback.
 | IC-003 | PyInstaller + pycparser | pycparser.lextab e yacctab nao encontrados | Inofensivo, warning apenas |
 | IC-004 | OTA Tray em agentes <=1.0.5 | Agentes antigos nao tem logica de download/substituicao do Tray | Conhecido e aceito |
 | IC-005 | agent_update.py edit_version | PUT /api/v1/admin/agent-version/{id} nao aceitava url_tray e sha256_tray | Resolvido (schema `AgentVersionUpdate` inclui os campos; `Settings.tsx` usa `editAgentVersion` do `client.ts`) |
+| IC-006 | Dashboard `/auth` + JWT | Token em `localStorage` (risco de XSS) | Aceito; mitigação futura: cookie httpOnly |
+| IC-007 | `backups/public-download/{id}` | Link público sem expiração enviado por e-mail; o UUID é o único segredo | ABERTO — decisão do dono (token assinado com expiração) |
+| IC-008 | OTA (`updater.py`) | Só integridade (SHA-256), sem assinatura do EXE; `https://` é exigido | ABERTO — decisão do dono (Authenticode ou allowlist de host) |
+| IC-009 | `api_client.py` | `verify=False` em todas as chamadas ao servidor, inclusive o ping com a API key | ABERTO — decisão do dono |
+| IC-010 | `pending_rtsp_tasks` | Estado em memória do processo: exige 1 worker uvicorn | Documentado; multi-worker pede Redis/tabela |
+| IC-011 | Rotas `/clients` e `datetime.now(timezone.utc)` | `check_client_online`/`current_server_time` usam datetime aware, sem gravar no banco | Exceção documentada à REGRA-001 (nunca gravar) |
+| IC-012 | Credencial padrão `navarro@123` | Ainda usada como fallback em `rtsp_client.py`, `equipamentos.py`, `schemas.py` e no dashboard | ABERTO — decisão do dono (muda o comportamento do teste RTSP) |
 
 ---
 
 ## 16. Architecture Changelog
 
+### [2026-10-13] — Auditoria geral: correções, reestruturação do repositório e do dashboard
+
+**Alteração:** Auditoria por área (API, dashboard, agente, higiene do repositório) seguida das correções seguras.
+**Repositório:** `agent/dist`, `__pycache__` e `.claude/settings.json` deixam de ser versionados; removidos `.bat` com API key, `index.xml`, `scratch_test/` (config real de OLT), imagens de teste e arquivos soltos da raiz; scripts avulsos em `tools/`, legado em `archive/legacy_scripts/`; `.gitignore` ampliado. Seção 3 e rotas da seção 8 reescritas conforme o código.
+**API:** corrige `UnboundLocalError` do auto-recovery do ping (importava `AgentLog` depois do uso); upload de ZIP sem path traversal, em streaming (`MAX_UPLOAD_MB`) e fora do event loop; ping libera a sessão do banco no long-poll; `test-rtsp` devolve 409 se já houver tarefa; `compare_digest` em senha admin e API key; `backup_hour/minute` validados na entrada (respostas sem limite); `group_id` inexistente = 404; lixeira só após o commit; menos N+1; `update-check` escolhe a maior versão ativa e valida X.Y.Z/SHA-256; migrações inline com um ALTER por transação e logging.
+**Agente:** não loga credenciais de `rtsp_task` nem senha da URL RTSP; OTA defensivo (https obrigatório, `tmp_dir` limpo, exceção não derruba o serviço); `buscar_trechos` não devolve mais "dummy" (busca inconclusiva cai nos horários fixos); pings drenados durante backup manual não perdem o `rtsp_task`; timeouts em mysqldump e Mikrotik; `ConfigError` no lugar de `sys.exit`; hidden-imports adicionais no `build.ps1`.
+**Dashboard:** `ClientDetail.tsx` (~1580 linhas) dividido em `pages/ClientDetail/` (index, utils, components, hooks); `utils/date.ts`; aliases CSS das variáveis inexistentes; tipos alinhados ao backend; tratamento de erro/corrida nos carregamentos; correção do 422 ao editar máquina sem grupo e da regex `\s` nos nomes de arquivo; `tsc` e `vite build` verificados em cópia fora do projeto.
+**Pendente (decisão do dono):** IC-007 a IC-009 e IC-012; rotacionar a API key do agente e a `SECRET_KEY`/senha de dev que estavam versionadas; reescrever o histórico do git para tirar EXEs e segredos.
+**Breaking Change:** Não nos contratos de API. Uploads acima de `MAX_UPLOAD_MB` agora recebem 413; atualizações OTA com URL `http://` deixam de ser aplicadas.
+**Branch:** isaque
+
 ### [2026-10-13] — Ações em massa: reiniciar/backup de todos os clientes e atualizar todas as referências da galeria
 
 **Alteração:** Três botões novos, sem mudança no agente.
-**API:** `POST /api/v1/clients/restart-agent-all` e `POST /api/v1/clients/trigger-backup-all` marcam `restart_requested` / `backup_requested` em todos os clientes ativos e online (ping < 180s); offline ficam de fora. Resposta: `{"queued": n, "skipped_offline": m}`. Reaproveitam o fluxo existente de flags consumidas no ping.
+**API:** `POST /api/v1/machines/restart-agent-all` e `POST /api/v1/machines/trigger-backup-all` marcam `restart_requested` / `backup_requested` em todos os clientes ativos e online (ping < 180s); offline ficam de fora. Resposta: `{"queued": n, "skipped_offline": m}`. Reaproveitam o fluxo existente de flags consumidas no ping.
 **Dashboard:** tela Clientes ganha "Reiniciar todos" e "Backup de todos" (com confirmação). Na galeria do NVR, "Atualizar todas as referências" atualiza uma câmera por vez (todas as não OFFLINE), com progresso, cancelar e resumo de falhas; é sequencial porque `pending_rtsp_tasks` guarda uma única tarefa RTSP por cliente (~15–20s por câmera, limitado pelo ping do agente).
 **Arquivos:** server/api/routers/clients.py, server/dashboard/src/api/client.ts, server/dashboard/src/pages/Clients.tsx, server/dashboard/src/pages/ClientDetail.tsx
 **Breaking Change:** Não.
