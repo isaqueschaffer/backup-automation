@@ -3,28 +3,31 @@ import { useNavigate } from "react-router-dom";
 import { fetchStats, fetchClients } from "../api/client";
 import { Stats, Client } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
+import { useToast } from "../components/Toast";
+import { fmtDate } from "../utils/date";
 import { Users, CheckCircle, AlertCircle, Archive, Clock } from "lucide-react";
-
-function fmtDate(s: string | null) {
-  if (!s) return "Nunca";
-  const str = s.endsWith("Z") ? s : s + "Z";
-  return new Date(str).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
 
 function fmtSchedule(h: number, m: number) {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 }
 
-// Gatilho para build (Docploy)
 export default function Overview() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
+  const [loadError, setLoadError] = useState(false);
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   useEffect(() => {
-    fetchStats().then(setStats);
-    fetchClients().then(setClients);
-  }, []);
+    let cancelled = false;
+    fetchStats()
+      .then((s) => { if (!cancelled) setStats(s); })
+      .catch(() => { if (!cancelled) toast("Erro ao carregar estatísticas.", "error"); });
+    fetchClients()
+      .then((c) => { if (!cancelled) setClients(c); })
+      .catch(() => { if (!cancelled) { setLoadError(true); toast("Erro ao carregar clientes.", "error"); } });
+    return () => { cancelled = true; };
+  }, [toast]);
 
   return (
     <>
@@ -66,7 +69,11 @@ export default function Overview() {
 
       {/* Client cards */}
       <div className="section-title"><Users size={15} />Clientes</div>
-      {clients.length === 0 ? (
+      {clients.length === 0 && loadError ? (
+        <div className="empty-state">
+          <div>Não foi possível carregar os clientes.</div>
+        </div>
+      ) : clients.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">🏢</div>
           <div>Nenhum cliente cadastrado ainda.</div>
@@ -101,7 +108,7 @@ export default function Overview() {
                 <div className="client-stat-item">
                   <div className="client-stat-label">Último backup</div>
                   <div className="client-stat-value" style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    {fmtDate(c.last_backup_at)}
+                    {fmtDate(c.last_backup_at, { short: true, empty: "Nunca" })}
                   </div>
                 </div>
               </div>

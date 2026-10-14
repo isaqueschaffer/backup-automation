@@ -1,4 +1,71 @@
-export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE" | "CAMERA";
+export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE" | "CAMERA" | "MIXED";
+
+// Status de gravação de uma câmera (NVR.last_recording_status)
+export interface CameraRecStatus {
+  nome?: string;
+  canal?: number;
+  online?: boolean;
+  status_comunicacao?: string;
+  status_gravacao?: string;
+  mapa?: string;
+  total_dias?: number;
+}
+
+export interface EquipamentoConfig {
+  pasta_origem?: string;
+  fabricante_olt?: string;
+  caminho_csv?: string;
+  caminho_log_csv?: string;
+  marca?: string;
+  modelo?: string;
+  [key: string]: unknown;
+}
+
+// Estado do formulário de equipamento (ClientDetail)
+export interface EqForm {
+  tipo: TipoEquipamento;
+  name: string;
+  ip: string;
+  username: string;
+  password: string;
+  pasta_origem: string;
+  fabricante_olt: string;
+  modelo?: string;
+  marca?: string;
+  caminho_csv?: string;
+  caminho_log_csv?: string;
+}
+
+// Câmera sincronizada de um NVR (galeria)
+export interface NvrCamera {
+  id?: string;
+  canal: number;
+  nome?: string;
+  status_comunicacao?: string;
+  captura_status?: string;
+  captura_motivo?: string;
+  captura_horario?: string | null;
+  night_image_date?: string | null;
+  perfect_image_base64?: string | null;
+  night_image_base64?: string | null;
+}
+
+export interface AgentLog {
+  id: string;
+  event_type: string;
+  message: string;
+  created_at: string | null;
+}
+
+export interface AgentVersion {
+  id: string;
+  version: string;
+  url_service: string;
+  sha256_service: string;
+  url_tray?: string | null;
+  sha256_tray?: string | null;
+  active: boolean;
+}
 
 export interface NVR {
   id: string;
@@ -7,8 +74,8 @@ export interface NVR {
   name: string;
   ip: string;
   username: string;
-  config_extra?: Record<string, unknown> | null;
-  last_recording_status?: any;
+  config_extra?: EquipamentoConfig | null;
+  last_recording_status?: CameraRecStatus[] | null;
   active: boolean;
 }
 
@@ -22,6 +89,7 @@ export interface Client {
   backup_hour: number;
   backup_minute: number;
   email_to: string[];
+  zip_password?: string;
   active: boolean;
   last_seen: string | null;
   last_backup_at: string | null;
@@ -44,11 +112,12 @@ export interface NVRResult {
   nome: string;
   status: string;
   tipo?: TipoEquipamento;
+  cameras?: CameraRecStatus[];
 }
 
 export interface Backup {
   id: string;
-  client_id: string;
+  client_id?: string;
   client_name: string | null;
   started_at: string | null;
   finished_at: string | null;

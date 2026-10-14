@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchClients, createClient, deleteClient, restartAgentAll, triggerBackupAll } from "../api/client";
 import { Client } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { fmtDate } from "../utils/date";
 import { Plus, Trash2, Eye, Copy, RotateCcw, Play } from "lucide-react";
 
 interface NewClientForm {
@@ -15,6 +16,7 @@ interface NewClientForm {
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [newKey, setNewKey] = useState<{ id: string; name: string; api_key: string } | null>(null);
   const [form, setForm] = useState<NewClientForm>({
@@ -25,8 +27,13 @@ export default function Clients() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const load = () => { fetchClients().then(setClients).finally(() => setLoading(false)); };
-  useEffect(() => { load(); }, []);
+  const load = useCallback(() => {
+    fetchClients()
+      .then((c) => { setClients(c); setLoadFailed(false); })
+      .catch(() => { setLoadFailed(true); toast("Erro ao carregar clientes.", "error"); })
+      .finally(() => setLoading(false));
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
 
   const handleCreate = async () => {
     if (!form.name.trim()) { toast("Nome obrigatório.", "error"); return; }
@@ -36,7 +43,7 @@ export default function Clients() {
         name: form.name,
         backup_hour: form.backup_hour,
         backup_minute: form.backup_minute,
-        email_to: form.email_to ? form.email_to.split(",").map(e => e.trim()) : [],
+        email_to: form.email_to.split(",").map(e => e.trim()).filter(Boolean),
         zip_password: form.zip_password || undefined,
         active: true,
       });
@@ -49,9 +56,11 @@ export default function Clients() {
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Excluir "${name}"? Todos os dados serão perdidos.`)) return;
-    await deleteClient(id);
-    toast("Cliente removido.", "success");
-    load();
+    try {
+      await deleteClient(id);
+      toast("Cliente removido.", "success");
+      load();
+    } catch { toast("Erro ao remover cliente.", "error"); }
   };
 
   const handleBulk = async (action: "restart" | "backup") => {
@@ -97,6 +106,11 @@ export default function Clients() {
 
       {loading ? (
         <div className="loading-state"><div className="spinner" /></div>
+      ) : loadFailed && clients.length === 0 ? (
+        <div className="empty-state">
+          <div>Não foi possível carregar os clientes.</div>
+          <button className="btn btn-secondary mt-2" onClick={() => { setLoading(true); load(); }}>Tentar novamente</button>
+        </div>
       ) : clients.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">🏢</div>
@@ -147,7 +161,7 @@ export default function Clients() {
                     {String(c.backup_hour).padStart(2,"0")}:{String(c.backup_minute).padStart(2,"0")}
                   </td>
                   <td className="text-secondary text-sm">
-                    {c.last_backup_at ? new Date(c.last_backup_at.endsWith("Z") ? c.last_backup_at : c.last_backup_at + "Z").toLocaleString("pt-BR") : "—"}
+                    {fmtDate(c.last_backup_at)}
                   </td>
                   <td>
                     <span className="font-mono text-xs text-muted">{c.api_key_prefix}…</span>

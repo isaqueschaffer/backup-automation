@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { fetchSettings, updateSettings, fetchAgentVersions, createAgentVersion, toggleAgentVersion, deleteAgentVersion, editAgentVersion } from "../api/client";
 import { useToast } from "../components/Toast";
+import { AgentVersion } from "../api/types";
 import { Save, Mail, Lock, Database, UploadCloud, Trash2, Power, PowerOff } from "lucide-react";
 
 function OtaManager() {
-  const [versions, setVersions] = useState<any[]>([]);
+  const [versions, setVersions] = useState<AgentVersion[]>([]);
   const { toast } = useToast();
 
   const loadVersions = () => fetchAgentVersions().then(setVersions).catch(() => toast("Erro ao carregar OTA", "error"));
@@ -31,7 +32,7 @@ function OtaManager() {
   const [editForm, setEditForm] = useState({ version: "", url_service: "", sha256_service: "", url_tray: "", sha256_tray: "" });
   const [createForm, setCreateForm] = useState({ version: "", url_service: "", sha256_service: "", url_tray: "", sha256_tray: "" });
 
-  const startEdit = (v: any) => {
+  const startEdit = (v: AgentVersion) => {
     setEditingId(v.id);
     setEditForm({ version: v.version, url_service: v.url_service, sha256_service: v.sha256_service, url_tray: v.url_tray || "", sha256_tray: v.sha256_tray || "" });
   };

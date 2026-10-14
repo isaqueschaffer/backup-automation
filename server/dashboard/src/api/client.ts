@@ -20,9 +20,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    const isLogin = String(err.config?.url || "").includes("/auth/login");
+    if (err.response?.status === 401 && !isLogin) {
       localStorage.removeItem("trilan_token");
-      window.location.href = "/login";
+      if (window.location.pathname !== "/login") window.location.href = "/login";
     }
     return Promise.reject(err);
   }
@@ -65,12 +66,6 @@ export const updateEquipamento = (clientId: string, eqId: string, data: Record<s
   api.put(`/machines/${clientId}/equipamentos/${eqId}`, data).then((r) => r.data);
 export const deleteEquipamento = (clientId: string, eqId: string) =>
   api.delete(`/machines/${clientId}/equipamentos/${eqId}`);
-
-// ── NVRs (mantido como alias para retrocompatibilidade) ───────
-export const fetchNVRs = fetchEquipamentos;
-export const createNVR = createEquipamento;
-export const updateNVR = updateEquipamento;
-export const deleteNVR = deleteEquipamento;
 
 // ── Backups ───────────────────────────────────────────────────
 export const fetchBackups = (params?: Record<string, unknown>) =>

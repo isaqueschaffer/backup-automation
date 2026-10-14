@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   fetchGroups, createGroup, deleteGroup,
@@ -8,6 +8,7 @@ import { ClientGroup } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { fmtDate } from "../utils/date";
 import {
   Plus, Trash2, Eye, ChevronDown, ChevronRight,
   CloudLightning, Download, Users, Edit2, Clock, RotateCcw
@@ -21,12 +22,6 @@ function healthLabel(health: ClientGroup["health"]) {
     NO_DATA: { label: "Sem dados", color: "var(--text-muted)", bg: "rgba(255,255,255,0.05)" },
   };
   return map[health] || map.NO_DATA;
-}
-
-function fmtDate(s: string | null) {
-  if (!s) return "—";
-  const str = s.endsWith("Z") ? s : s + "Z";
-  return new Date(str).toLocaleString("pt-BR");
 }
 
 interface GroupForm {
@@ -50,14 +45,20 @@ export default function Units() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const load = () => fetchGroups().then(setGroups).finally(() => setLoading(false));
+  const load = useCallback(() =>
+    fetchGroups()
+      .then(setGroups)
+      .catch(() => toast("Erro ao carregar clientes.", "error"))
+      .finally(() => setLoading(false)),
+  [toast]);
   useEffect(() => {
     load();
+    // Polling silencioso: falhas transitórias não geram toast nem rejeição sem tratamento
     const interval = setInterval(() => {
-      fetchGroups().then(setGroups);
+      fetchGroups().then(setGroups).catch(() => { /* tenta de novo no próximo ciclo */ });
     }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [load]);
 
   const toggleExpand = (id: string) =>
     setExpandedIds(prev => {
@@ -94,9 +95,11 @@ export default function Units() {
 
   const handleDelete = async (g: ClientGroup) => {
     if (!confirm(`Excluir unidade "${g.name}"? Os agentes vinculados ficarão sem unidade.`)) return;
-    await deleteGroup(g.id);
-    toast("Unidade removida.", "success");
-    load();
+    try {
+      await deleteGroup(g.id);
+      toast("Unidade removida.", "success");
+      load();
+    } catch { toast("Erro ao remover unidade.", "error"); }
   };
 
   const handleCancelQueue = async (g: ClientGroup) => {

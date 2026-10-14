@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from "react";
-import { fetchBackups, fetchClients, resendBackupEmail } from "../api/client";
-import api from "../api/client";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { fetchBackups, fetchClients, resendBackupEmail, downloadBackupZip } from "../api/client";
 import { Backup, Client, PaginatedBackups } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
+import { useToast } from "../components/Toast";
+import { fmtDate, localDateStr } from "../utils/date";
 import { Download, Search, Calendar } from "lucide-react";
 
 // Função auxiliar para formatar erros de blob
@@ -17,12 +18,6 @@ async function extractBlobError(err: unknown): Promise<string> {
     }
   } catch { /* ignora */ }
   return msg;
-}
-
-function fmtDate(s: string | null) {
-  if (!s) return "—";
-  const str = s.endsWith("Z") ? s : s + "Z";
-  return new Date(str).toLocaleString("pt-BR");
 }
 
 function fmtSize(n: number | null) {
@@ -159,11 +154,13 @@ export default function Backups() {
   const [data, setData] = useState<PaginatedBackups | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+  const loadSeq = useRef(0);
   const [page, setPage] = useState(1);
   const [clientFilter, setClientFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   
-  const today = new Date().toISOString().split("T")[0];
+  const today = localDateStr();
   const [dateFrom, setDateFrom] = useState(today);
   const [dateTo, setDateTo] = useState(today);
   
@@ -171,27 +168,37 @@ export default function Backups() {
   const [resendingEmailId, setResendingEmailId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     const params: Record<string, unknown> = { page, size: 20 };
     if (clientFilter) params.client_id = clientFilter;
     if (statusFilter) params.status = statusFilter;
     if (dateFrom) params.date_from = dateFrom;
     if (dateTo) params.date_to = dateTo;
-    const d = await fetchBackups(params);
-    setData(d);
-    setLoading(false);
-  }, [page, clientFilter, statusFilter, dateFrom, dateTo]);
+    try {
+      const d = await fetchBackups(params);
+      if (seq !== loadSeq.current) return; // resposta atrasada de um filtro anterior
+      setData(d);
+    } catch {
+      if (seq !== loadSeq.current) return;
+      toast("Erro ao carregar backups.", "error");
+    } finally {
+      if (seq === loadSeq.current) setLoading(false);
+    }
+  }, [page, clientFilter, statusFilter, dateFrom, dateTo, toast]);
 
-  useEffect(() => { fetchClients().then(setClients); }, []);
+  useEffect(() => {
+    fetchClients().then(setClients).catch(() => toast("Erro ao carregar clientes.", "error"));
+  }, [toast]);
   useEffect(() => { load(); }, [load]);
+  // Invalida respostas pendentes ao desmontar
+  useEffect(() => () => { loadSeq.current++; }, []);
 
   const handleDownload = async (backupId: string, filename: string) => {
     try {
       setDownloadingId(backupId);
-      const res = await api.get(`/backups/${backupId}/download`, {
-        responseType: "blob",
-      });
-      const url = URL.createObjectURL(new Blob([res.data], { type: "application/zip" }));
+      const data = await downloadBackupZip(backupId);
+      const url = URL.createObjectURL(new Blob([data], { type: "application/zip" }));
       const a = document.createElement("a");
       a.href = url;
       a.download = filename || "backup.zip";
@@ -202,7 +209,7 @@ export default function Backups() {
     } catch (err: unknown) {
       console.error("Erro ao baixar o backup:", err);
       const msg = await extractBlobError(err);
-      alert(msg);
+      toast(msg, "error");
     } finally {
       setDownloadingId(null);
     }
@@ -212,12 +219,12 @@ export default function Backups() {
     try {
       setResendingEmailId(backupId);
       await resendBackupEmail(backupId);
-      alert("E-mail reenviado com sucesso!");
+      toast("E-mail reenviado com sucesso!", "success");
       load();
     } catch (err: unknown) {
       console.error("Erro ao reenviar e-mail:", err);
       const axiosErr = err as { response?: { data?: { detail?: string } } };
-      alert(axiosErr?.response?.data?.detail || "Falha ao reenviar e-mail. Verifique as configurações de SMTP.");
+      toast(axiosErr?.response?.data?.detail || "Falha ao reenviar e-mail. Verifique as configurações de SMTP.", "error");
     } finally {
       setResendingEmailId(null);
     }
