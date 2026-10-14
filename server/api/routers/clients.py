@@ -1,16 +1,19 @@
+import logging
 from typing import List
 from uuid import UUID
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from auth import verify_admin_token, generate_api_key
 from database import get_db
-from models import Client, Backup
+from models import Client, ClientGroup, Backup, AgentLog
 from schemas import ClientCreate, ClientUpdate, ClientResponse, ClientWithKey, AgentLogResponse
 from services.crypto_service import encrypt
 from services.storage_service import move_client_to_trash
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/machines", tags=["Máquinas"])
 
@@ -45,7 +48,13 @@ def _to_response(client: Client) -> ClientResponse:
 
 @router.get("", response_model=List[ClientResponse], dependencies=[Depends(verify_admin_token)])
 def list_clients(db: Session = Depends(get_db)):
-    clients = db.query(Client).order_by(Client.created_at.desc()).all()
+    # Carrega equipamentos e grupo em lote para evitar N+1 em _to_response
+    clients = (
+        db.query(Client)
+        .options(selectinload(Client.nvrs), joinedload(Client.group))
+        .order_by(Client.created_at.desc())
+        .all()
+    )
     return [_to_response(c) for c in clients]
 
 
@@ -87,6 +96,12 @@ def update_client(client_id: UUID, body: ClientUpdate, db: Session = Depends(get
     if not client:
         raise HTTPException(status_code=404, detail="Máquina não encontrada")
         
+    # group_id informado precisa existir (evita IntegrityError 500 na FK)
+    if body.group_id is not None:
+        group_exists = db.query(ClientGroup.id).filter(ClientGroup.id == body.group_id).first()
+        if not group_exists:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
     time_changed = False
     for field, value in body.model_dump(exclude_none=True).items():
         if field in ("backup_hour", "backup_minute") and getattr(client, field) != value:
@@ -112,14 +127,22 @@ def delete_client(client_id: UUID, db: Session = Depends(get_db)):
     if not client:
         raise HTTPException(status_code=404, detail="Máquina não encontrada")
         
+    # Guarda os dados necessários antes do commit (o objeto fica inválido após o delete)
+    client_pk = client.id
+    client_name = client.name
+
     # Remove os backups associados no banco para evitar erro de Foreign Key
     db.query(Backup).filter(Backup.client_id == client_id).delete(synchronize_session=False)
-    
-    # Move a pasta de backups da máquina para a lixeira
-    move_client_to_trash(client.id, client.name)
-    
+
     db.delete(client)
     db.commit()
+
+    # Move a pasta de backups para a lixeira somente DEPOIS do commit do banco:
+    # se o commit falhar, os arquivos permanecem no lugar.
+    try:
+        move_client_to_trash(client_pk, client_name)
+    except Exception:
+        logger.exception("Máquina %s removida do banco, mas falhou ao mover os arquivos para a lixeira", client_pk)
 
 
 @router.post("/{client_id}/rotate-key", response_model=ClientWithKey,
@@ -145,7 +168,7 @@ def _flag_all_online(db: Session, flag: str) -> dict:
     clients = db.query(Client).filter(Client.active == True).all()
     queued = skipped = 0
     for c in clients:
-        if _to_response(c).is_online:
+        if check_client_online(c):
             setattr(c, flag, True)
             queued += 1
         else:
@@ -192,7 +215,6 @@ def get_client_logs(client_id: UUID, db: Session = Depends(get_db), limit: int =
     if not client:
         raise HTTPException(status_code=404, detail="Máquina não encontrada")
     
-    from models import AgentLog
     logs = db.query(AgentLog).filter(AgentLog.client_id == client_id).order_by(AgentLog.created_at.desc()).limit(limit).all()
     return logs
 

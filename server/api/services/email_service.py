@@ -1,7 +1,7 @@
 import smtplib
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
 from typing import List, Optional
@@ -15,13 +15,27 @@ logger = logging.getLogger(__name__)
 LIMIT_ATTACH_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
+def _norm_status(r: dict) -> str:
+    """Normaliza o status de um resultado de equipamento para OK / PARCIAL / ERRO.
+
+    Aceita PARTIAL/ERROR (inglês) e PARCIAL/ERRO; demais valores (ex: SEM_ARQUIVOS)
+    são mantidos em maiúsculas. Status ausente vira string vazia.
+    """
+    st = str(r.get("status") or "").strip().upper()
+    if st == "PARTIAL":
+        return "PARCIAL"
+    if st == "ERROR":
+        return "ERRO"
+    return st
+
+
 def _build_backup_section(nvr_results: List[dict], overall: str) -> str:
-    """Section 1 — Backup dos NVRs."""
+    """Seção 2 do e-mail — Backup dos equipamentos."""
     icon_map = {"OK": "✅", "PARCIAL": "⚠️", "PARTIAL": "⚠️", "ERRO": "❌", "ERROR": "❌", "SEM_ARQUIVOS": "ℹ️"}
 
     lines = "\n".join(
-        f"  {icon_map.get(r['status'], '❓')} {r['nome']}: "
-        f"{'OK' if r['status'] == 'OK' else 'Gravações OK (Backup de config. não suportado)' if r['status'] == 'SEM_ARQUIVOS' else 'FALHA — ' + r['status']}"
+        f"  {icon_map.get(_norm_status(r), '❓')} {r.get('nome', '?')}: "
+        f"{'OK' if _norm_status(r) == 'OK' else 'Gravações OK (Backup de config. não suportado)' if _norm_status(r) == 'SEM_ARQUIVOS' else 'FALHA — ' + (_norm_status(r) or 'DESCONHECIDO')}"
         for r in nvr_results
     )
 
@@ -36,7 +50,7 @@ def _build_backup_section(nvr_results: List[dict], overall: str) -> str:
 
 
 def _build_camera_section(nvr_results: List[dict]) -> str:
-    """Section 2 — Verificação de Câmeras e Gravações."""
+    """Seção 1 do e-mail — Verificação de Câmeras e Gravações."""
     total_nvrs = len(nvr_results)
     total_cameras = 0
     cameras_online = 0
@@ -46,7 +60,7 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
 
     for r in nvr_results:
         cameras = r.get("cameras") or []
-        nvr_nome = r["nome"]
+        nvr_nome = r.get("nome", "?")
         problemas: list[str] = []
 
         for cam in cameras:
@@ -105,15 +119,15 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
 
 
 def _build_result_section(nvr_results: List[dict]) -> str:
-    """Section 3 — Resultado do Serviço."""
+    """Seção 3 do e-mail — Resultado do Serviço."""
     has_cameras = any(r.get("cameras") for r in nvr_results)
 
-    backup_ok = all(r["status"] in ("OK",) for r in nvr_results)
-    has_unsupported_backup = any(r["status"] == "SEM_ARQUIVOS" for r in nvr_results)
+    backup_ok = all(_norm_status(r) == "OK" for r in nvr_results)
+    has_unsupported_backup = any(_norm_status(r) == "SEM_ARQUIVOS" for r in nvr_results)
     
     if backup_ok:
         backup_icon = "✅ Concluído"
-    elif has_unsupported_backup and all(r["status"] in ("OK", "SEM_ARQUIVOS") for r in nvr_results):
+    elif has_unsupported_backup and all(_norm_status(r) in ("OK", "SEM_ARQUIVOS") for r in nvr_results):
         backup_icon = "ℹ️ Concluído (alguns equipamentos não suportam backup de arquivo)"
     else:
         backup_icon = "⚠️ Concluído com ressalvas"
@@ -206,13 +220,13 @@ def send_backup_report(
 
     # ── Overall backup status ──
     overall = "✅ SUCESSO"
-    if any(r["status"] in ("ERRO", "ERROR") for r in nvr_results):
+    if any(_norm_status(r) == "ERRO" for r in nvr_results):
         overall = "❌ COM ERROS"
-    elif any(r["status"] in ("PARCIAL", "PARTIAL") for r in nvr_results):
+    elif any(_norm_status(r) == "PARCIAL" for r in nvr_results):
         overall = "⚠️ PARCIAL"
 
-    # ── Date/time formatting ──
-    now = datetime.now()
+    # ── Date/time formatting (BRT = UTC-3, independente do fuso do container) ──
+    now = datetime.utcnow() - timedelta(hours=3)
     date_hora_str = now.strftime("%d/%m/%Y – %H:%M")
 
     # ── Build email ──
@@ -255,7 +269,9 @@ def send_backup_report(
             body += f"  Acesso: {link_public}\n"
         if base_url:
             link_ddns = f"{base_url.rstrip('/')}/api/v1/backups/public-download/{backup_id}"
-            body += f"  Acesso: {link_ddns}\n"
+            # Evita repetir o mesmo link quando base_url coincide com a URL pública
+            if not public_url or link_ddns != link_public:
+                body += f"  Acesso: {link_ddns}\n"
         body += f"\n  O link não requer senha do painel e pode ser acessado de qualquer navegador.\n"
     elif zip_path and not attach:
         body += f"\n  Arquivado no servidor: {zip_path.name}\n"

@@ -1,5 +1,7 @@
-﻿import secrets
-import hashlib
+﻿import hashlib
+import hmac
+import secrets
+from uuid import UUID
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -72,11 +74,18 @@ def get_current_client(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing X-Client-ID or X-API-Key headers",
         )
-    client = db.query(Client).filter(Client.id == client_id, Client.active == True).first()
+    # X-Client-ID que não é UUID válido -> 401 (em vez de erro 500 no banco)
+    try:
+        client_uuid = UUID(client_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Client not found")
+
+    client = db.query(Client).filter(Client.id == client_uuid, Client.active == True).first()
     if not client:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Client not found")
 
-    if client.api_key_hash != hash_api_key(api_key):
+    # Comparação em tempo constante do hash da API key
+    if not hmac.compare_digest(client.api_key_hash.encode(), hash_api_key(api_key).encode()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
     return client

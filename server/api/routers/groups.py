@@ -2,20 +2,19 @@ import io
 import zipfile
 from typing import List
 from uuid import UUID
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from auth import verify_admin_token
 from database import get_db
-from models import Client, ClientGroup, Backup
+from models import Client, ClientGroup, Backup, AgentLog
 from schemas import (
     ClientGroupCreate,
     ClientGroupUpdate,
     ClientGroupResponse,
-    ClientResponse,
 )
 from routers.clients import _to_response as client_to_response, check_client_online
 from services.storage_service import get_zip_path
@@ -39,8 +38,16 @@ def _compute_health(clients: list) -> str:
     return "PARTIAL"
 
 
-def _to_response(group: ClientGroup, db: Session) -> ClientGroupResponse:
-    now = datetime.now(timezone.utc)
+def _load_groups_query(db: Session):
+    """Query de grupos com máquinas e equipamentos carregados em lote (evita N+1)."""
+    return db.query(ClientGroup).options(
+        selectinload(ClientGroup.clients).selectinload(Client.nvrs)
+    )
+
+
+def _to_response(group: ClientGroup, db: Session, commit: bool = True) -> ClientGroupResponse:
+    # NOTA: este helper também é usado em rotas GET e pode gravar (auto-destravamento
+    # da fila). Com commit=False o chamador fica responsável por dar o commit.
     clients_resp = [client_to_response(c) for c in group.clients]
     agents_online = sum(1 for c in clients_resp if c.is_online)
     last_backups = [c.last_backup_at for c in group.clients if c.last_backup_at]
@@ -56,7 +63,8 @@ def _to_response(group: ClientGroup, db: Session) -> ClientGroupResponse:
         if not curr_client or not check_client_online(curr_client):
             group.queue_active = False
             group.queue_current_index = None
-            db.commit()
+            if commit:
+                db.commit()
 
     return ClientGroupResponse(
         id=group.id,
@@ -77,8 +85,12 @@ def _to_response(group: ClientGroup, db: Session) -> ClientGroupResponse:
 
 @router.get("", response_model=List[ClientGroupResponse], dependencies=[Depends(verify_admin_token)])
 def list_groups(db: Session = Depends(get_db)):
-    groups = db.query(ClientGroup).order_by(ClientGroup.name).all()
-    return [_to_response(g, db) for g in groups]
+    groups = _load_groups_query(db).order_by(ClientGroup.name).all()
+    # Um único commit no final (um commit por grupo expiraria os objetos já carregados
+    # e reintroduziria o N+1). Esta rota GET grava apenas no auto-destravamento da fila.
+    result = [_to_response(g, db, commit=False) for g in groups]
+    db.commit()
+    return result
 
 
 @router.post("", response_model=ClientGroupResponse, status_code=status.HTTP_201_CREATED,
@@ -99,7 +111,7 @@ def create_group(body: ClientGroupCreate, db: Session = Depends(get_db)):
 
 @router.get("/{group_id}", response_model=ClientGroupResponse, dependencies=[Depends(verify_admin_token)])
 def get_group(group_id: UUID, db: Session = Depends(get_db)):
-    group = db.query(ClientGroup).filter(ClientGroup.id == group_id).first()
+    group = _load_groups_query(db).filter(ClientGroup.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
     return _to_response(group, db)
@@ -178,7 +190,6 @@ def trigger_group_backup(group_id: UUID, db: Session = Depends(get_db)):
     group.queue_current_index = first_idx
     first_online.backup_requested = True
 
-    from models import AgentLog
     db.add(AgentLog(
         client_id=first_online.id,
         event_type="queue_backup",

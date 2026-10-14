@@ -1,4 +1,6 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, status
+﻿import secrets
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from auth import create_access_token
@@ -22,7 +24,8 @@ def get_admin_password(db: Session) -> str:
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)):
     admin_pw = get_admin_password(db)
-    if body.password != admin_pw:
+    # Comparação em tempo constante (bytes, para aceitar caracteres não-ASCII)
+    if not secrets.compare_digest(body.password.encode(), admin_pw.encode()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong password")
     token = create_access_token({"sub": "admin"})
     return TokenResponse(access_token=token)

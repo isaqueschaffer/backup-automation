@@ -22,6 +22,8 @@ class Settings(BaseSettings):
 
     # Storage
     BACKUP_STORAGE_PATH: str = "/data/backups"
+    # Tamanho máximo aceito no upload de ZIP do agente (em MB)
+    MAX_UPLOAD_MB: int = 1024
 
     # SMTP
     SMTP_SERVER: Optional[str] = None

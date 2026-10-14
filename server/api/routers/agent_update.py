@@ -8,7 +8,7 @@ OTA Update router.
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from auth import get_current_client, verify_admin_token
@@ -33,22 +33,19 @@ def check_for_update(
     O agente envia sua versão atual como query param e recebe instruções de atualização.
     Exemplo: GET /api/v1/agent/update-check?current_version=1.0.0
     """
-    latest = (
-        db.query(AgentVersion)
-        .filter(AgentVersion.active == True)
-        .order_by(AgentVersion.created_at.desc())
-        .first()
-    )
-
-    if not latest:
-        return UpdateCheckResponse(has_update=False)
-
-    # Compara versões semânticas (simples split em ints)
+    # Compara versões semânticas X.Y.Z como tuplas numéricas
     def _parse(v: str):
         try:
             return tuple(int(x) for x in v.strip().split("."))
         except Exception:
             return (0, 0, 0)
+
+    # Escolhe a MAIOR versão ativa (e não a mais recentemente criada)
+    ativas = db.query(AgentVersion).filter(AgentVersion.active == True).all()
+    latest = max(ativas, key=lambda av: _parse(av.version), default=None)
+
+    if not latest:
+        return UpdateCheckResponse(has_update=False)
 
     if _parse(latest.version) > _parse(current_version):
         return UpdateCheckResponse(

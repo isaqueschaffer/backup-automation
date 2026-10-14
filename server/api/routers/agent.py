@@ -2,24 +2,32 @@
 Agent-facing router.
 Windows agent authenticates with X-Client-ID + X-API-Key headers.
 """
-from datetime import datetime, timezone
+import asyncio
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request, Query
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from auth import get_current_client
-from database import get_db
-from models import Client, Backup, NVR
+from database import get_db, SessionLocal
+from models import Client, Backup, NVR, NVRCamera, AgentLog
 from schemas import (
     AgentConfigResponse,
     AgentEquipamento,
     BackupReportCreate,
     BackupReportResponse,
+    NVRCameraNightImage,
     PingResponse,
     PingRequest,
+    RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
 )
+from routers.clients import check_client_online
 from services.crypto_service import decrypt
-from services.storage_service import save_zip
+from services.storage_service import save_zip_stream, UploadTooLargeError
 from services.email_service import send_backup_report
 from config import settings
 
@@ -63,47 +71,69 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
     )
 
 
-import asyncio
-from typing import Dict, Any
-
-# Global task dictionary for RTSP polling
-# Format: { client_id_str: {"task": dict, "event": asyncio.Event(), "result": None} }
+# Dicionário global de tarefas RTSP pendentes (long-polling entre dashboard e agente).
+# Formato: { client_id_str: {"task": dict, "event": asyncio.Event(), "result": None, "sent": bool} }
+# LIMITAÇÃO: o estado vive na memória do processo, então só funciona com 1 worker
+# uvicorn. Com múltiplos workers o ping do agente e o test-rtsp poderiam cair em
+# processos diferentes e a tarefa nunca seria entregue.
 pending_rtsp_tasks: Dict[str, Any] = {}
+
+
+def _read_request_flags(client_id: UUID) -> tuple[bool, bool]:
+    """Lê restart/backup solicitados usando uma sessão curta (não segura conexão no long-poll)."""
+    with SessionLocal() as session:
+        row = session.query(
+            Client.restart_requested, Client.backup_requested
+        ).filter(Client.id == client_id).first()
+    if not row:
+        return False, False
+    return bool(row[0]), bool(row[1])
+
 
 @router.post("/ping", response_model=PingResponse)
 async def ping_agent(
     body: PingRequest | None = None,
-    client: Client = Depends(get_current_client), 
+    client: Client = Depends(get_current_client),
     db: Session = Depends(get_db)
 ):
-    """Agent heartbeat. Uses long-polling (up to 30s) to deliver RTSP test commands instantly."""
-    # Commit imediato: o db.refresh() do long-polling abaixo descartaria last_seen/telemetry não persistidos
+    """Heartbeat do agente. Usa long-polling (5 iterações de 1s) para entregar comandos de teste RTSP rapidamente."""
+    # Commit imediato: persiste last_seen/telemetry antes de liberar a conexão para o long-polling
     client.last_seen = datetime.utcnow()
     if body and body.telemetry:
         client.telemetry = body.telemetry
     db.commit()
-    client_id_str = str(client.id)
+    client_id = client.id
+    client_id_str = str(client_id)
 
-    # ── Wait for tasks (Long Polling up to 5s) ──
+    # Libera a conexão do pool durante a espera: o long-poll não pode segurar a sessão
+    # do banco por vários segundos (esgotaria o pool com muitos agentes). A mesma
+    # sessão é reutilizada (nova transação) logo após o polling.
+    db.close()
+
+    # ── Espera por tarefas (long-polling: 5 iterações de 1s) ──
     for _ in range(5):
-        # Check if there is a pending RTSP task for this client
-        if client_id_str in pending_rtsp_tasks and not pending_rtsp_tasks[client_id_str].get("sent", False):
-            pending_rtsp_tasks[client_id_str]["sent"] = True
-            db.commit()
+        # Há tarefa RTSP pendente (ainda não entregue) para este cliente?
+        task_data = pending_rtsp_tasks.get(client_id_str)
+        if task_data is not None and not task_data.get("sent", False):
+            task_data["sent"] = True
             return PingResponse(
-                status="ok", 
-                restart=False, 
-                backup=False, 
-                rtsp_task=pending_rtsp_tasks[client_id_str]["task"]
+                status="ok",
+                restart=False,
+                backup=False,
+                rtsp_task=task_data["task"]
             )
-        
-        # Check normal restart/backup flags (only return immediately if they are set)
-        if client.restart_requested or client.backup_requested:
+
+        # Flags normais de restart/backup: só retorna imediatamente se estiverem marcadas
+        restart_flag, backup_flag = _read_request_flags(client_id)
+        if restart_flag or backup_flag:
             break
-            
-        # Fast exit if no tasks and 30s not reached yet
+
         await asyncio.sleep(1)
-        db.refresh(client)
+
+    # Recarrega o cliente na sessão (ela foi liberada antes do polling)
+    client = db.get(Client, client_id)
+    if client is None:
+        return PingResponse(status="ok", restart=False, backup=False)
 
     should_restart = bool(client.restart_requested)
     should_backup = bool(client.backup_requested)
@@ -113,7 +143,6 @@ async def ping_agent(
     # Não aciona se o cliente pertence a um grupo com fila ativa (a fila comanda o sequenciamento)
     is_in_active_queue = bool(getattr(client, "group", None) and getattr(client.group, "queue_active", False))
     if not should_backup and not is_in_active_queue and client.backup_hour is not None and client.backup_minute is not None:
-        from datetime import timedelta
         brt_tz = timezone(timedelta(hours=-3))
         now_brt = datetime.now(brt_tz)
         scheduled_time_today = now_brt.replace(hour=client.backup_hour, minute=client.backup_minute, second=0, microsecond=0)
@@ -145,7 +174,6 @@ async def ping_agent(
             if not made_backup_today and not already_recovered_today:
                 should_backup = True
                 client.backup_requested = False 
-                from models import AgentLog
                 log_msg = f"Ping recebido. Disparando BACKUP DE RECUPERACAO. Agente falhou em executar no horario agendado ({client.backup_hour:02d}:{client.backup_minute:02d})."
                 db.add(AgentLog(client_id=client.id, event_type="ping_recovery", message=log_msg))
 
@@ -154,21 +182,22 @@ async def ping_agent(
     if should_backup and client.backup_requested:
         client.backup_requested = False
 
-    from models import AgentLog
     log_msg = f"Ping recebido. Instruções pendentes: restart={should_restart}, backup={should_backup}"
     db.add(AgentLog(client_id=client.id, event_type="ping", message=log_msg))
     
-    from sqlalchemy import select, func
-    count = db.query(func.count(AgentLog.id)).filter(AgentLog.client_id == client.id).scalar()
-    if count > 50:
-        logs_to_delete = db.query(AgentLog).filter(AgentLog.client_id == client.id).order_by(AgentLog.created_at.asc()).limit(count - 50)
-        for lg in logs_to_delete:
-            db.delete(lg)
+    # Poda dos logs: mantém apenas os 50 mais recentes por cliente, com um único DELETE
+    db.flush()
+    ids_antigos = (
+        select(AgentLog.id)
+        .where(AgentLog.client_id == client.id)
+        .order_by(AgentLog.created_at.desc())
+        .offset(50)
+    )
+    db.execute(delete(AgentLog).where(AgentLog.id.in_(ids_antigos)))
 
     db.commit()
     return PingResponse(status="ok", restart=should_restart, backup=should_backup)
 
-from schemas import RTSPTestResponse
 @router.post("/rtsp-result")
 async def receive_rtsp_result(
     result: RTSPTestResponse,
@@ -176,14 +205,11 @@ async def receive_rtsp_result(
 ):
     """Agent posts the result of an RTSP task."""
     client_id_str = str(client.id)
-    if client_id_str in pending_rtsp_tasks:
-        task_data = pending_rtsp_tasks[client_id_str]
+    task_data = pending_rtsp_tasks.get(client_id_str)
+    if task_data is not None:
         task_data["result"] = result
         task_data["event"].set()
     return {"status": "ok"}
-
-from schemas import NVRCameraNightImage
-from models import NVRCamera
 
 @router.post("/nvr-cameras/night-image")
 def receive_night_image(
@@ -266,7 +292,6 @@ def receive_backup_report(
     if getattr(client, 'group_id', None) and getattr(client, 'group', None):
         group = client.group
         if group.queue_active:
-            from routers.clients import check_client_online
             active_clients = sorted(
                 [c for c in group.clients if c.active],
                 key=lambda c: c.queue_order
@@ -286,7 +311,6 @@ def receive_backup_report(
                     next_idx = idx
                     break
                 else:
-                    from models import AgentLog
                     db.add(AgentLog(
                         client_id=c.id,
                         event_type="queue_backup_skipped",
@@ -296,7 +320,6 @@ def receive_backup_report(
             if next_online_client is not None:
                 group.queue_current_index = next_idx
                 next_online_client.backup_requested = True
-                from models import AgentLog
                 db.add(AgentLog(
                     client_id=next_online_client.id,
                     event_type="queue_backup",
@@ -311,8 +334,10 @@ def receive_backup_report(
     return BackupReportResponse(backup_id=backup.id)
 
 
+# Rota síncrona (def): o FastAPI a executa no threadpool, então DB, disco e SMTP
+# (que pode levar dezenas de segundos) não bloqueiam o event loop.
 @router.post("/backup/upload/{backup_id}")
-async def upload_backup_zip(
+def upload_backup_zip(
     backup_id: str,
     request: Request,
     device_type: str = Query("NVR", description="Tipo de equipamento: NVR, OLT, ONU, PABX"),
@@ -321,8 +346,13 @@ async def upload_backup_zip(
     db: Session = Depends(get_db),
 ):
     """Agent uploads the ZIP file. Server stores it and sends email."""
+    try:
+        backup_uuid = UUID(backup_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="Backup record not found")
+
     backup = db.query(Backup).filter(
-        Backup.id == backup_id, Backup.client_id == client.id
+        Backup.id == backup_uuid, Backup.client_id == client.id
     ).first()
     if not backup:
         raise HTTPException(status_code=404, detail="Backup record not found")
@@ -335,26 +365,35 @@ async def upload_backup_zip(
         )
 
     date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
-    data = await file.read()
-
     filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"
 
-    zip_path = save_zip(
-        client_id=client.id,
-        client_name=client.name,
-        date_str=date_str,
-        device_type=clean_device_type,
-        filename=filename,
-        data=data,
-    )
+    # Grava em streaming (chunks) com limite de tamanho; o nome é sanitizado e o
+    # caminho final validado dentro do diretório do cliente (anti path traversal).
+    try:
+        zip_path, zip_size = save_zip_stream(
+            client_id=client.id,
+            client_name=client.name,
+            date_str=date_str,
+            device_type=clean_device_type,
+            filename=filename,
+            source=file.file,
+            max_bytes=settings.MAX_UPLOAD_MB * 1024 * 1024,
+        )
+    except UploadTooLargeError:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Arquivo excede o limite de {settings.MAX_UPLOAD_MB} MB",
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Nome de arquivo inválido")
 
     backup.zip_filename = zip_path.name
-    backup.zip_size = (backup.zip_size or 0) + len(data)
+    backup.zip_size = (backup.zip_size or 0) + zip_size
     db.commit()
 
     # Send email
     nvr_results = backup.nvr_results or []
-    
+
     email_sent = send_backup_report(
         client_name=client.name,
         date_str=date_str,
@@ -368,7 +407,6 @@ async def upload_backup_zip(
     )
     backup.email_sent = email_sent or backup.email_sent
 
-    from models import AgentLog
     if email_sent:
         recipients_str = ", ".join(client.email_to) if client.email_to else "destinatários configurados"
         db.add(AgentLog(
@@ -386,4 +424,4 @@ async def upload_backup_zip(
 
     db.commit()
 
-    return {"status": "ok", "zip_size": len(data), "email_sent": email_sent}
+    return {"status": "ok", "zip_size": zip_size, "email_sent": email_sent}

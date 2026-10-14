@@ -3,6 +3,7 @@ Router de Equipamentos.
 Substitui o antigo router de NVRs, agora suportando múltiplos tipos:
 NVR, OLT, ONU, PABX (e futuros).
 """
+import asyncio
 from typing import List, Optional
 from uuid import UUID
 
@@ -12,8 +13,12 @@ from sqlalchemy.orm import Session
 from auth import verify_admin_token
 from database import get_db
 from models import Client, NVR, NVRCamera
-from schemas import NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse, NVRCameraSetPerfect
-from services.crypto_service import encrypt
+from routers.agent import pending_rtsp_tasks
+from schemas import (
+    NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse,
+    NVRCameraSetPerfect, RTSPTestResponse,
+)
+from services.crypto_service import encrypt, decrypt
 
 router = APIRouter(prefix="/api/v1/machines/{client_id}/equipamentos", tags=["Equipamentos"])
 
@@ -124,7 +129,7 @@ def delete_equipamento(client_id: UUID, equipamento_id: UUID, db: Session = Depe
     db.delete(eq)
     db.commit()
 
-from schemas import RTSPTestResponse
+
 @router.post(
     "/{equipamento_id}/test-rtsp",
     response_model=RTSPTestResponse,
@@ -136,16 +141,21 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Op
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
     
-    from services.crypto_service import decrypt
-    import asyncio
-    from routers.agent import pending_rtsp_tasks
+    client_id_str = str(client_id)
+
+    # Só 1 teste RTSP por máquina por vez (o dicionário é indexado pelo cliente).
+    # LIMITAÇÃO: o estado fica na memória do processo; requer 1 worker uvicorn.
+    if client_id_str in pending_rtsp_tasks:
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe um teste RTSP em andamento para esta máquina. Aguarde a conclusão e tente novamente.",
+        )
 
     try:
         senha_pura = decrypt(eq.password) if eq.password else "navarro@123"
-    except:
+    except Exception:
         senha_pura = eq.password or "navarro@123"
 
-    client_id_str = str(client_id)
     event = asyncio.Event()
 
     task_data = {
@@ -158,26 +168,25 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Op
         "canal": canal,
     }
 
-    pending_rtsp_tasks[client_id_str] = {
+    entry = {
         "task": task_data,
         "event": event,
         "result": None,
         "sent": False
     }
+    pending_rtsp_tasks[client_id_str] = entry
 
     try:
-        # Wait up to 35 seconds for the agent to reply (Dashboard UI expects ~30s max usually, we give 35s)
+        # Aguarda até 35s a resposta do agente (o dashboard espera ~30s)
         await asyncio.wait_for(event.wait(), timeout=35.0)
     except asyncio.TimeoutError:
-        # Se timeout, removemos a tarefa e retornamos erro
-        if client_id_str in pending_rtsp_tasks:
-            del pending_rtsp_tasks[client_id_str]
         return RTSPTestResponse(success=False, error_message="FALHA: O Agente local não respondeu ao comando de teste a tempo. Verifique se o agente está online.")
-    
-    result = pending_rtsp_tasks[client_id_str].get("result")
-    if client_id_str in pending_rtsp_tasks:
-        del pending_rtsp_tasks[client_id_str]
-        
+    finally:
+        # Sempre remove a tarefa (timeout, cancelamento ou sucesso); pop evita KeyError
+        if pending_rtsp_tasks.get(client_id_str) is entry:
+            pending_rtsp_tasks.pop(client_id_str, None)
+
+    result = entry.get("result")
     if not result:
         return RTSPTestResponse(success=False, error_message="FALHA: Agente respondeu, mas sem dados válidos.")
 

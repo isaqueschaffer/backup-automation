@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import List, Optional, Any, Dict
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, field_validator
+import re
+from pydantic import BaseModel, Field, field_validator
 
 
 # ─────────────────────────────────────────────
@@ -87,8 +88,8 @@ class NVRCameraNightImage(BaseModel):
 # ─────────────────────────────────────────────
 class ClientBase(BaseModel):
     name: str
-    backup_hour: int = 2
-    backup_minute: int = 0
+    backup_hour: int = Field(2, ge=0, le=23)
+    backup_minute: int = Field(0, ge=0, le=59)
     email_to: List[str] = []
     active: bool = True
 
@@ -99,8 +100,8 @@ class ClientCreate(ClientBase):
 
 class ClientUpdate(BaseModel):
     name: Optional[str] = None
-    backup_hour: Optional[int] = None
-    backup_minute: Optional[int] = None
+    backup_hour: Optional[int] = Field(None, ge=0, le=23)
+    backup_minute: Optional[int] = Field(None, ge=0, le=59)
     email_to: Optional[List[str]] = None
     active: Optional[bool] = None
     zip_password: Optional[str] = None
@@ -109,6 +110,9 @@ class ClientUpdate(BaseModel):
 
 
 class ClientResponse(ClientBase):
+    # Sem limites na saída: registros antigos fora da faixa não podem derrubar a listagem (500)
+    backup_hour: int
+    backup_minute: int
     id: UUID
     api_key_prefix: str
     last_seen: Optional[datetime] = None
@@ -271,6 +275,24 @@ class AgentLogResponse(BaseModel):
 # ─────────────────────────────────────────────
 # Agent OTA (Over The Air Updates)
 # ─────────────────────────────────────────────
+_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _validate_version(v: Optional[str]) -> Optional[str]:
+    """Versão do agente precisa seguir o formato X.Y.Z (REGRA-009)."""
+    if v is not None and not _VERSION_RE.match(v.strip()):
+        raise ValueError("Versão inválida: use o formato X.Y.Z (ex: 2.1.0)")
+    return v.strip() if v is not None else v
+
+
+def _validate_sha256(v: Optional[str]) -> Optional[str]:
+    """SHA-256 precisa ter 64 caracteres hexadecimais, quando informado."""
+    if v is not None and not _SHA256_RE.match(v.strip()):
+        raise ValueError("SHA-256 inválido: deve ter 64 caracteres hexadecimais")
+    return v.strip() if v is not None else v
+
+
 class AgentVersionCreate(BaseModel):
     version: str                             # ex: "2.1.0"
     notes: Optional[str] = None
@@ -279,6 +301,16 @@ class AgentVersionCreate(BaseModel):
     sha256_service: str                      # SHA256 do service.exe (64 chars hex)
     sha256_tray: Optional[str] = None
 
+    @field_validator("version")
+    @classmethod
+    def _check_version(cls, v):
+        return _validate_version(v)
+
+    @field_validator("sha256_service", "sha256_tray")
+    @classmethod
+    def _check_sha256(cls, v):
+        return _validate_sha256(v)
+
 
 class AgentVersionUpdate(BaseModel):
     version: Optional[str] = None
@@ -286,6 +318,16 @@ class AgentVersionUpdate(BaseModel):
     sha256_service: Optional[str] = None
     url_tray: Optional[str] = None
     sha256_tray: Optional[str] = None
+
+    @field_validator("version")
+    @classmethod
+    def _check_version(cls, v):
+        return _validate_version(v)
+
+    @field_validator("sha256_service", "sha256_tray")
+    @classmethod
+    def _check_sha256(cls, v):
+        return _validate_sha256(v)
 
 
 class AgentVersionResponse(BaseModel):
@@ -320,8 +362,8 @@ class ClientGroupBase(BaseModel):
     name: str
     description: Optional[str] = None
     active: bool = True
-    backup_hour: int = 2
-    backup_minute: int = 0
+    backup_hour: int = Field(2, ge=0, le=23)
+    backup_minute: int = Field(0, ge=0, le=59)
 
 
 class ClientGroupCreate(ClientGroupBase):
@@ -332,11 +374,14 @@ class ClientGroupUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     active: Optional[bool] = None
-    backup_hour: Optional[int] = None
-    backup_minute: Optional[int] = None
+    backup_hour: Optional[int] = Field(None, ge=0, le=23)
+    backup_minute: Optional[int] = Field(None, ge=0, le=59)
 
 
 class ClientGroupResponse(ClientGroupBase):
+    # Sem limites na saída: registros antigos fora da faixa não podem derrubar a listagem (500)
+    backup_hour: int
+    backup_minute: int
     id: UUID
     created_at: datetime
     agents_total: int = 0
@@ -363,17 +408,9 @@ MachineWithKey = ClientWithKey
 
 
 
-# "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
+# ─────────────────────────────────────────────
 # Teste RTSP Automático
-# "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
-class RTSPTestRequest(BaseModel):
-    nome: str
-    ip: str
-    modelo: str
-    usuario: str = "admin"
-    senha: str = "navarro@123"
-    canal: Optional[int] = None
-
+# ─────────────────────────────────────────────
 class RTSPTestResponse(BaseModel):
     success: bool
     error_message: Optional[str] = None

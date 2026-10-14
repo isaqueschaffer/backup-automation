@@ -1,8 +1,9 @@
-from datetime import date, timedelta, datetime
+import logging
+from datetime import date
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func, cast, Date, text
+from sqlalchemy import func, cast, Date, text, inspect
 
 from database import Base, engine, get_db
 from models import Client, Backup
@@ -15,93 +16,89 @@ from routers.agent_update import agent_router as update_agent_router, admin_rout
 # ─── Create tables on startup ──────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
-from sqlalchemy import inspect
+logger = logging.getLogger("trilan.api")
 
-# Verifica colunas existentes antes de adicionar
-try:
-    insp = inspect(engine)
-    colunas_existentes = [col['name'] for col in insp.get_columns('clients')]
-    
-    # Cria tabela agent_versions se não existir (OTA)
+
+def _run_ddl(sql: str, descricao: str) -> None:
+    """Executa um DDL em transação própria: a falha de um não impede os demais."""
     try:
-        insp.get_columns('agent_versions')
-    except Exception:
         with engine.begin() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS agent_versions (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    version VARCHAR(20) NOT NULL UNIQUE,
-                    notes TEXT,
-                    url_service TEXT NOT NULL,
-                    url_tray TEXT,
-                    sha256_service VARCHAR(64) NOT NULL,
-                    sha256_tray VARCHAR(64),
-                    active BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-                );
-            """))
-    
-    # Verifica nvrs se a tabela existir
-    try:
-        colunas_nvrs = [col['name'] for col in insp.get_columns('nvrs')]
+            conn.execute(text(sql))
     except Exception:
-        colunas_nvrs = []
-    
-    # Cria tabela client_groups se não existir (Clientes)
+        logger.exception("Falha na migração (%s)", descricao)
+
+
+def _tem_tabela(nome: str) -> bool:
     try:
-        insp.get_columns('client_groups')
+        return inspect(engine).has_table(nome)
     except Exception:
-        with engine.begin() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS client_groups (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    name VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    active BOOLEAN NOT NULL DEFAULT TRUE,
-                    backup_hour INTEGER DEFAULT 2,
-                    backup_minute INTEGER DEFAULT 0,
-                    queue_active BOOLEAN NOT NULL DEFAULT FALSE,
-                    queue_current_index INTEGER,
-                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-                );
-            """))
+        logger.exception("Falha ao inspecionar tabela '%s'", nome)
+        return False
 
-    with engine.begin() as conn:
-        if 'last_seen' not in colunas_existentes:
-            conn.execute(text("ALTER TABLE clients ADD COLUMN last_seen TIMESTAMP WITHOUT TIME ZONE;"))
-            
-        if 'restart_requested' not in colunas_existentes:
-            conn.execute(text("ALTER TABLE clients ADD COLUMN restart_requested BOOLEAN NOT NULL DEFAULT FALSE;"))
 
-        if 'backup_requested' not in colunas_existentes:
-            conn.execute(text("ALTER TABLE clients ADD COLUMN backup_requested BOOLEAN NOT NULL DEFAULT FALSE;"))
+def _colunas(nome: str) -> list:
+    try:
+        return [col['name'] for col in inspect(engine).get_columns(nome)]
+    except Exception:
+        return []
 
-        if 'telemetry' not in colunas_existentes:
-            conn.execute(text("ALTER TABLE clients ADD COLUMN telemetry JSON;"))
 
-        if 'group_id' not in colunas_existentes:
-            conn.execute(text("ALTER TABLE clients ADD COLUMN group_id UUID REFERENCES client_groups(id) ON DELETE SET NULL;"))
+# ─── Migrações inline (sem Alembic) — idempotentes ────────────────────────
+# Cria tabela agent_versions se não existir (OTA)
+if not _tem_tabela('agent_versions'):
+    _run_ddl("""
+        CREATE TABLE IF NOT EXISTS agent_versions (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            version VARCHAR(20) NOT NULL UNIQUE,
+            notes TEXT,
+            url_service TEXT NOT NULL,
+            url_tray TEXT,
+            sha256_service VARCHAR(64) NOT NULL,
+            sha256_tray VARCHAR(64),
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+        );
+    """, "criar tabela agent_versions")
 
-        if 'queue_order' not in colunas_existentes:
-            conn.execute(text("ALTER TABLE clients ADD COLUMN queue_order INTEGER NOT NULL DEFAULT 0;"))
-            
-        if colunas_nvrs and 'last_recording_status' not in colunas_nvrs:
-            conn.execute(text("ALTER TABLE nvrs ADD COLUMN last_recording_status JSON;"))
+# Cria tabela client_groups se não existir (Clientes) — antes de clients.group_id (FK)
+if not _tem_tabela('client_groups'):
+    _run_ddl("""
+        CREATE TABLE IF NOT EXISTS client_groups (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name VARCHAR(255) NOT NULL,
+            description TEXT,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            backup_hour INTEGER DEFAULT 2,
+            backup_minute INTEGER DEFAULT 0,
+            queue_active BOOLEAN NOT NULL DEFAULT FALSE,
+            queue_current_index INTEGER,
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+        );
+    """, "criar tabela client_groups")
 
-        # Migrações para suporte a múltiplos tipos de equipamentos
-        if colunas_nvrs and 'tipo' not in colunas_nvrs:
-            conn.execute(text("ALTER TABLE nvrs ADD COLUMN tipo VARCHAR(20) NOT NULL DEFAULT 'NVR';"))
+# (tabela, coluna, DDL) — cada ALTER roda em transação separada
+_MIGRACOES_COLUNAS = [
+    ("clients", "last_seen", "ALTER TABLE clients ADD COLUMN last_seen TIMESTAMP WITHOUT TIME ZONE;"),
+    ("clients", "restart_requested", "ALTER TABLE clients ADD COLUMN restart_requested BOOLEAN NOT NULL DEFAULT FALSE;"),
+    ("clients", "backup_requested", "ALTER TABLE clients ADD COLUMN backup_requested BOOLEAN NOT NULL DEFAULT FALSE;"),
+    ("clients", "telemetry", "ALTER TABLE clients ADD COLUMN telemetry JSON;"),
+    ("clients", "group_id", "ALTER TABLE clients ADD COLUMN group_id UUID REFERENCES client_groups(id) ON DELETE SET NULL;"),
+    ("clients", "queue_order", "ALTER TABLE clients ADD COLUMN queue_order INTEGER NOT NULL DEFAULT 0;"),
+    ("nvrs", "last_recording_status", "ALTER TABLE nvrs ADD COLUMN last_recording_status JSON;"),
+    # Suporte a múltiplos tipos de equipamentos
+    ("nvrs", "tipo", "ALTER TABLE nvrs ADD COLUMN tipo VARCHAR(20) NOT NULL DEFAULT 'NVR';"),
+    ("nvrs", "config_extra", "ALTER TABLE nvrs ADD COLUMN config_extra JSON;"),
+    ("nvrs", "active", "ALTER TABLE nvrs ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE;"),
+    ("nvrs", "updated_at", "ALTER TABLE nvrs ADD COLUMN updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();"),
+]
 
-        if colunas_nvrs and 'config_extra' not in colunas_nvrs:
-            conn.execute(text("ALTER TABLE nvrs ADD COLUMN config_extra JSON;"))
-            
-        if colunas_nvrs and 'active' not in colunas_nvrs:
-            conn.execute(text("ALTER TABLE nvrs ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE;"))
-            
-        if colunas_nvrs and 'updated_at' not in colunas_nvrs:
-            conn.execute(text("ALTER TABLE nvrs ADD COLUMN updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();"))
-except Exception as e:
-    print(f"Erro ao executar migrações de colunas: {e}")
+_colunas_cache: dict = {}
+for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
+    if _tabela not in _colunas_cache:
+        _colunas_cache[_tabela] = _colunas(_tabela)
+    # tabela inexistente (lista vazia): nada a migrar
+    if _colunas_cache[_tabela] and _coluna not in _colunas_cache[_tabela]:
+        _run_ddl(_ddl, f"{_tabela}.{_coluna}")
 
 openapi_tags = [
     {"name": "auth", "description": "Autenticação administrativa"},
@@ -150,22 +147,24 @@ app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 @app.get("/api/v1/stats", response_model=StatsResponse, dependencies=[Depends(verify_admin_token)])
 def get_stats(db: Session = Depends(get_db)):
     today = date.today()
-    total = db.query(func.count(Client.id)).scalar() or 0
-    active = db.query(func.count(Client.id)).filter(Client.active == True).scalar() or 0
+    # Contagens agregadas em 2 queries (em vez de 5)
+    total, active = db.query(
+        func.count(Client.id),
+        func.count(Client.id).filter(Client.active == True),
+    ).one()
 
-    backups_today_q = db.query(Backup).filter(
-        cast(Backup.started_at, Date) == today
-    )
-    b_today = backups_today_q.count()
-    b_ok = backups_today_q.filter(Backup.status == "OK").count()
-    b_err = backups_today_q.filter(Backup.status == "ERROR").count()
+    b_today, b_ok, b_err = db.query(
+        func.count(Backup.id),
+        func.count(Backup.id).filter(Backup.status == "OK"),
+        func.count(Backup.id).filter(Backup.status == "ERROR"),
+    ).filter(cast(Backup.started_at, Date) == today).one()
 
     return StatsResponse(
-        total_clients=total,
-        active_clients=active,
-        backups_today=b_today,
-        backups_ok=b_ok,
-        backups_error=b_err,
+        total_clients=total or 0,
+        active_clients=active or 0,
+        backups_today=b_today or 0,
+        backups_ok=b_ok or 0,
+        backups_error=b_err or 0,
     )
 
 
