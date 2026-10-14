@@ -1,6 +1,6 @@
 import { Plus } from "lucide-react";
-import { EqForm, TipoEquipamento } from "../../../api/types";
-import Modal from "../../../components/Modal";
+import { EqForm, TipoEquipamento } from "../../../../api/types";
+import Modal from "../../../../components/Modal";
 import { TIPOS, TIPO_ICONE_EMOJI } from "../utils";
 
 export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, saving, onSave, onClose }: {
@@ -29,7 +29,7 @@ export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, s
       <div className="form-group">
         <label className="form-label">Nome *</label>
         <input className="form-input" type="text"
-          placeholder={`${eqForm.tipo}_Cliente1`}
+          placeholder={`${eqForm.tipo}_Maquina1`}
           value={eqForm.name} onChange={e => setEqForm({ ...eqForm, name: e.target.value })} />
       </div>
       {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA") && (

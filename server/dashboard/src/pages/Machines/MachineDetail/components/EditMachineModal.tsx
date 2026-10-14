@@ -1,27 +1,27 @@
-import { ClientGroup } from "../../../api/types";
-import Modal from "../../../components/Modal";
+import Modal from "../../../../components/Modal";
 
-// Campos editáveis da máquina (email_to como texto separado por vírgula)
-export interface EditClientForm {
+// Campos editáveis da máquina (email_to como texto separado por vírgula).
+// Cliente e posição na fila são alterados na tela do Cliente.
+export interface EditMachineForm {
   name: string;
   backup_hour: number;
   backup_minute: number;
-  group_id: string;
-  queue_order: number;
   email_to: string;
   zip_password: string;
 }
 
-export default function EditClientModal({ form, setForm, groups, saving, onSave, onClose }: {
-  form: EditClientForm;
-  setForm: React.Dispatch<React.SetStateAction<EditClientForm>>;
-  groups: ClientGroup[];
+export default function EditMachineModal({ form, setForm, customerName, saving, onSave, onClose }: {
+  form: EditMachineForm;
+  setForm: React.Dispatch<React.SetStateAction<EditMachineForm>>;
+  // Nome do cliente quando o horário vem dele (campo travado); null = horário próprio
+  customerName: string | null;
   saving: boolean;
   onSave: () => void;
   onClose: () => void;
 }) {
+  const locked = customerName !== null;
   return (
-    <Modal title="Editar Cliente" onClose={onClose}>
+    <Modal title="Editar Máquina" onClose={onClose}>
       <div className="form-group">
         <label className="form-label">Nome</label>
         <input className="form-input" value={form.name}
@@ -32,35 +32,21 @@ export default function EditClientModal({ form, setForm, groups, saving, onSave,
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <label className="form-label" style={{ fontSize: 11 }}>Hora (0-23)</label>
-            <input className="form-input" type="number" min={0} max={23} value={form.backup_hour}
+            <input className="form-input" type="number" min={0} max={23} value={form.backup_hour} disabled={locked}
               onChange={e => setForm({ ...form, backup_hour: +e.target.value })} />
           </div>
           <div>
             <label className="form-label" style={{ fontSize: 11 }}>Minuto (0-59)</label>
-            <input className="form-input" type="number" min={0} max={59} value={form.backup_minute}
+            <input className="form-input" type="number" min={0} max={59} value={form.backup_minute} disabled={locked}
               onChange={e => setForm({ ...form, backup_minute: +e.target.value })} />
           </div>
         </div>
+        {locked && (
+          <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+            Definido pelo cliente {customerName}. Para mudar, edite o horário na tela do cliente.
+          </div>
+        )}
       </div>
-      <div className="form-group">
-        <label className="form-label">Unidade (opcional)</label>
-        <select className="form-input"
-          value={form.group_id}
-          onChange={e => setForm({ ...form, group_id: e.target.value })}>
-          <option value="">— Sem unidade —</option>
-          {groups.map(g => (
-            <option key={g.id} value={g.id}>{g.name}</option>
-          ))}
-        </select>
-      </div>
-      {form.group_id && (
-        <div className="form-group">
-          <label className="form-label">Ordem na fila de backup da unidade (0, 1, 2...)</label>
-          <input className="form-input" type="number" min={0}
-            value={form.queue_order}
-            onChange={e => setForm({ ...form, queue_order: +e.target.value })} />
-        </div>
-      )}
       <div className="form-group">
         <label className="form-label">E-mails de Notificação (separados por vírgula)</label>
         <input className="form-input" value={form.email_to}

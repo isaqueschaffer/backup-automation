@@ -1,5 +1,5 @@
 import { Edit2, FolderOpen, Image, Network, Phone, RefreshCw, Trash2, Video, Wifi, WifiOff } from "lucide-react";
-import { NVR } from "../../../api/types";
+import { NVR } from "../../../../api/types";
 
 export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, onEdit, onToggleActive }: {
   eq: NVR;

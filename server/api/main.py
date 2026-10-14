@@ -6,11 +6,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, cast, Date, text, inspect
 
 from database import Base, engine, get_db
-from models import Client, Backup
+from models import Machine, Customer, Backup
 from schemas import StatsResponse
 from auth import verify_admin_token
 from config import settings
-from routers import auth_router, clients, nvrs, backups, agent, settings_router, equipamentos, groups
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -60,7 +60,8 @@ if not _tem_tabela('agent_versions'):
         );
     """, "criar tabela agent_versions")
 
-# Cria tabela client_groups se não existir (Clientes) — antes de clients.group_id (FK)
+# Cria tabela client_groups (Clientes) se não existir — antes de clients.group_id (FK)
+# Nomes de TABELA/COLUNA no SQL abaixo são os do banco: clients = Máquinas, client_groups = Clientes
 if not _tem_tabela('client_groups'):
     _run_ddl("""
         CREATE TABLE IF NOT EXISTS client_groups (
@@ -102,8 +103,8 @@ for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
 
 openapi_tags = [
     {"name": "auth", "description": "Autenticação administrativa"},
-    {"name": "Clientes", "description": "Gestão de Clientes (agrupamentos de máquinas, fila de backup e download consolidado)"},
-    {"name": "Máquinas", "description": "Gestão de Máquinas/Agentes (configuração individual, IP, status e chaves)"},
+    {"name": "Clientes", "description": "Gestão de Clientes (empresas atendidas: máquinas vinculadas, fila de backup e download consolidado)"},
+    {"name": "Máquinas", "description": "Gestão de Máquinas (computadores com o agente: configuração, status e chaves)"},
     {"name": "Equipamentos", "description": "Equipamentos vinculados às máquinas (NVR, OLT, ONU, PABX, etc.)"},
     {"name": "backups", "description": "Histórico e relatórios de backups"},
     {"name": "agent", "description": "Comunicação e heartbeat com os Agentes Windows"},
@@ -132,9 +133,9 @@ app.add_middleware(
 
 # ─── Routers ───────────────────────────────────────────────────────────────
 app.include_router(auth_router.router)
-app.include_router(groups.router)        # Clientes: /api/v1/clients
-app.include_router(clients.router)       # Máquinas: /api/v1/machines
-app.include_router(equipamentos.router)  # Equipamentos: /api/v1/machines/{client_id}/equipamentos
+app.include_router(customers.router)     # Clientes: /api/v1/clients
+app.include_router(machines.router)      # Máquinas: /api/v1/machines
+app.include_router(equipamentos.router)  # Equipamentos: /api/v1/machines/{machine_id}/equipamentos
 app.include_router(nvrs.router, include_in_schema=False)  # mantido para compatibilidade
 app.include_router(backups.router)
 app.include_router(agent.router)
@@ -147,11 +148,12 @@ app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 @app.get("/api/v1/stats", response_model=StatsResponse, dependencies=[Depends(verify_admin_token)])
 def get_stats(db: Session = Depends(get_db)):
     today = date.today()
-    # Contagens agregadas em 2 queries (em vez de 5)
-    total, active = db.query(
-        func.count(Client.id),
-        func.count(Client.id).filter(Client.active == True),
+    # Contagens agregadas em 3 queries
+    machines_total, machines_active = db.query(
+        func.count(Machine.id),
+        func.count(Machine.id).filter(Machine.active == True),
     ).one()
+    customers_total = db.query(func.count(Customer.id)).scalar()
 
     b_today, b_ok, b_err = db.query(
         func.count(Backup.id),
@@ -160,8 +162,9 @@ def get_stats(db: Session = Depends(get_db)):
     ).filter(cast(Backup.started_at, Date) == today).one()
 
     return StatsResponse(
-        total_clients=total or 0,
-        active_clients=active or 0,
+        machines_total=machines_total or 0,
+        machines_active=machines_active or 0,
+        customers_total=customers_total or 0,
         backups_today=b_today or 0,
         backups_ok=b_ok or 0,
         backups_error=b_err or 0,

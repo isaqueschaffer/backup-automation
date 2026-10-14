@@ -138,12 +138,13 @@ trilan-nvr-backup-automation/
 │   ├── nginx/nginx.conf
 │   ├── api/                     <- Backend FastAPI
 │   │   ├── main.py              <- App + migrações inline (sem Alembic)
-│   │   ├── models.py / schemas.py / auth.py / database.py / config.py
+│   │   ├── models.py            <- Machine (tabela clients), Customer (tabela client_groups), NVR, Backup...
+│   │   ├── schemas.py / auth.py / database.py / config.py
 │   │   ├── routers/
 │   │   │   ├── agent.py         <- /api/v1/agent/*
 │   │   │   ├── agent_update.py  <- OTA: /agent/update-check e /admin/agent-version/*
-│   │   │   ├── clients.py       <- /api/v1/machines/*  (máquinas = agentes; arquivo mantém o nome histórico)
-│   │   │   ├── groups.py        <- /api/v1/clients/*   (Clientes/Unidades que agrupam máquinas)
+│   │   │   ├── machines.py      <- /api/v1/machines/*  (Máquinas = computadores com o agente)
+│   │   │   ├── customers.py     <- /api/v1/clients/*   (Clientes = empresas; fila de backup)
 │   │   │   ├── equipamentos.py  <- /api/v1/machines/{id}/equipamentos/*
 │   │   │   ├── nvrs.py          <- legado, fora do schema (candidato a remoção)
 │   │   │   ├── backups.py       <- /api/v1/backups/*
@@ -156,8 +157,9 @@ trilan-nvr-backup-automation/
 │           ├── api/             <- client.ts (axios) e types.ts
 │           ├── components/ / utils/date.ts
 │           └── pages/
-│               ├── ClientDetail/    <- index.tsx, utils.ts, components/, hooks/
-│               ├── Clients.tsx (máquinas) / Units.tsx (clientes) / Backups.tsx / Overview.tsx / Settings.tsx
+│               ├── Customers/       <- CustomersPage (/clientes), CustomerDetail/ (/clientes/:id, fila arrastar-e-soltar)
+│               ├── Machines/        <- MachinesPage (/maquinas), MachineDetail/ (/maquinas/:id)
+│               └── Backups.tsx / Overview.tsx / Settings.tsx
 ├── tools/                       <- Utilitários avulsos (não entram em build nem deploy)
 ├── archive/legacy_scripts/      <- Código legado, só consulta
 └── .agents/                     <- Skills do Antigravity IDE
@@ -465,7 +467,7 @@ API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 | Metodo | Path | Descricao |
 |---|---|---|
 | POST | `/api/v1/auth/login` | Login — retorna JWT |
-| GET/POST | `/api/v1/machines` | Listar/criar máquinas (agentes) |
+| GET/POST | `/api/v1/machines` | Listar (filtros `customer_id`, `unassigned`) / criar máquina (`customer_id` opcional) |
 | GET/PUT/DELETE | `/api/v1/machines/{id}` | Detalhar/atualizar/deletar máquina |
 | POST | `/api/v1/machines/{id}/rotate-key` | Rotacionar API key |
 | POST | `/api/v1/machines/{id}/trigger-backup` | Solicitar backup manual |
@@ -477,11 +479,13 @@ API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 | POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/test-rtsp` | Tarefa RTSP via agente (409 se já houver uma pendente) |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras` | Galeria do NVR (une `nvr_cameras` + `last_recording_status`) |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/perfect-image` | Salvar imagem de referência |
-| GET/POST | `/api/v1/clients` | Listar/criar Clientes (grupos de máquinas — groups.py) |
+| GET/POST | `/api/v1/clients` | Listar/criar Clientes (customers.py) |
 | GET/PUT/DELETE | `/api/v1/clients/{id}` | Gerenciar Cliente |
 | POST | `/api/v1/clients/{id}/trigger-backup` · `/cancel-queue` | Fila sequencial de backup do Cliente |
+| POST/DELETE | `/api/v1/clients/{id}/machines/{machine_id}` | Vincular (herda horário) / remover máquina do Cliente (409 com fila ativa) |
+| PUT | `/api/v1/clients/{id}/queue-order` | Ordem da fila `{machine_ids:[...]}` (arrastar e soltar; 409 com fila ativa) |
 | GET | `/api/v1/clients/{id}/download-latest` | ZIP unificado do último backup do Cliente |
-| GET | `/api/v1/backups` | Listar backups (paginado) |
+| GET | `/api/v1/backups` | Listar backups (paginado; filtros `machine_id`, `customer_id`) |
 | GET | `/api/v1/backups/{id}/download` | Download de ZIP (admin) |
 | GET | `/api/v1/backups/public-download/{id}` | Download público por link de e-mail (sem auth; ver riscos abertos) |
 | POST | `/api/v1/backups/{id}/resend-email` | Reenviar e-mail do backup |
@@ -737,16 +741,22 @@ por incompatibilidade de tipo com o banco de dados existente.
 **Licao:** Qualquer alteracao de tipo de coluna datetime e CRITICA e exige analise
 de dados existentes, rollout gradual e plano de rollback.
 
-### ADR-007 — Rotas renomeadas: máquinas em `/machines`, Clientes (grupos) em `/clients`
+### ADR-007 — Nomenclatura: Cliente (empresa) e Máquina (computador com agente)
 
-**Data:** 13/10/2026 | **Status:** VIGENTE
+**Data:** 13-14/10/2026 | **Status:** VIGENTE
 
-**Decisao:** O que era `/api/v1/clients` (agentes) passou a `/api/v1/machines` e `/api/v1/machines/{id}/equipamentos`.
-`/api/v1/clients` agora é o agrupamento Cliente/Unidade (`groups.py`). Os arquivos mantêm os nomes históricos
-(`clients.py` = máquinas, `groups.py` = clientes). O dashboard (`Clients.tsx` = máquinas, `Units.tsx` = clientes) segue a mesma troca.
+**Decisao:** Cliente = empresa atendida (`Customer`, tabela `client_groups`, API `/api/v1/clients`, painel `/clientes`).
+Máquina = computador com o agente (`Machine`, tabela `clients`, API `/api/v1/machines`, painel `/maquinas`).
+Equipamento = NVR/OLT/etc. da máquina. Hierarquia Cliente → Máquinas → Equipamentos; máquina tem no máximo um cliente.
+Tabelas e colunas do banco NÃO foram renomeadas (sem migração): o ORM mapeia `customer_id` → coluna `group_id` e
+`machine_id` → coluna `client_id`. As rotas `/api/v1/agent/*`, os headers `X-Client-ID`/`X-API-Key` e o JSON trocado com
+o agente não mudaram. Termos "Unidade" e "grupo" foram eliminados da interface.
 
-**Licao:** Chamadas diretas `api.get('/clients/...')` no dashboard passaram despercebidas na renomeação (galeria e RTSP davam 404).
-Ao renomear rota, grep por todos os caminhos no dashboard, não só em `api/client.ts`.
+**Regras:** máquina vinculada usa o horário do cliente (copiado ao vincular e quando o cliente muda o horário; PUT da
+máquina com outro horário = 400). Vínculo e ordem da fila só pelas rotas do cliente. O painel antigo (`/units`,
+`/clients`, `/clients/:id`) redireciona para as rotas novas.
+
+**Licao:** Ao renomear rota, grep por todos os caminhos no dashboard, não só em `api/client.ts`.
 
 ---
 
@@ -783,6 +793,18 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-14] — Cliente e Máquina reorganizados; fila com arrastar e soltar
+
+**Alteração:** Nomenclatura única (ver ADR-007) em telas, código e API admin; telas planas por entidade.
+**Antes:** A lista de máquinas se chamava "Clientes" e criava "Novo Cliente"; clientes apareciam como "Unidade"; a posição na fila era digitada; não havia como remover máquina de um cliente; máquinas de um cliente eram vistas num acordeão.
+**Depois:**
+- Backend: `Machine`/`Customer` (ORM com colunas antigas), `routers/machines.py` e `routers/customers.py`; novas rotas para vincular/remover máquina e reordenar a fila (409 com fila ativa; fila renumerada ao remover); filtros `customer_id`/`unassigned` em máquinas e `machine_id`/`customer_id` em backups; `BackupResponse` com máquina e cliente; `StatsResponse` com `machines_total`, `machines_active`, `customers_total`; e-mail diz "Máquina:".
+- Dashboard: `/clientes`, `/clientes/:id` (fila com arrastar e soltar nativo, adicionar/remover máquina, backups do cliente), `/maquinas`, `/maquinas/:id` (cliente com link; horário travado quando herdado); Backups com colunas e filtros de Cliente e Máquina.
+- Contrato JSON admin: `group_id/group_name` → `customer_id/customer_name`; `agents_total/online` e `clients` → `machines_total/online` e `machines`; `client_id/client_name` em backups → `machine_id/machine_name`; NVR e logs usam `machine_id`.
+**Verificação:** simulação do app real (SQLite) cobrindo vínculo, fila, horário herdado, filtros e o fluxo do agente; as 42 chamadas do dashboard conferidas contra as 51 rotas do OpenAPI; `tsc` e `vite build` sem erros.
+**Breaking Change:** Sim para a API admin (só o dashboard a consome, atualizado junto). Não para o agente.
+**Branch:** isaque
 
 ### [2026-10-14] — Agente 1.1.5: correções da auditoria
 

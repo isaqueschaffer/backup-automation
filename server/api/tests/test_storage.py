@@ -17,7 +17,7 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from config import settings
 from services.storage_service import (
-    _get_client_dir_name,
+    _get_machine_dir_name,
     _sanitize_name,
     get_backup_dir,
     save_zip,
@@ -27,12 +27,12 @@ from services.storage_service import (
 from schemas import TIPOS_EQUIPAMENTO
 
 
-def test_sanitize_and_client_dir_name():
-    print("Testing _sanitize_name and _get_client_dir_name...")
+def test_sanitize_and_machine_dir_name():
+    print("Testing _sanitize_name and _get_machine_dir_name...")
     c_id = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
     
     name = "Teste 3"
-    dir_name = _get_client_dir_name(c_id, name)
+    dir_name = _get_machine_dir_name(c_id, name)
     assert dir_name == "550e8400-e29b-41d4-a716-446655440000_Teste_3", f"Got: {dir_name}"
 
     name_special = 'Empresa / Comércio: "Alpha" <SP>?'
@@ -152,7 +152,7 @@ def test_upload_device_type_validation():
 
 
 def run_all():
-    test_sanitize_and_client_dir_name()
+    test_sanitize_and_machine_dir_name()
     test_get_backup_dir_and_save_zip()
     test_get_zip_path_new_and_legacy()
     test_delete_old_backups()

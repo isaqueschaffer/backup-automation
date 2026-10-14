@@ -1,11 +1,11 @@
-import { useToast } from "../../components/Toast";
-import { EqForm, EquipamentoConfig, NVR, TipoEquipamento } from "../../api/types";
+import { useToast } from "../../../components/Toast";
+import { EqForm, EquipamentoConfig, NVR, TipoEquipamento } from "../../../api/types";
 
 export type ToastFn = ReturnType<typeof useToast>["toast"];
 
 // Intervalo de ping do agente (PING_INTERVAL_S em agent/service.py)
 export const AGENT_PING_INTERVAL_MS = 15 * 1000;
-// Após o horário previsto, consulta o cliente a cada 1s por este tempo para pegar o novo ping assim que chegar
+// Após o horário previsto, consulta a máquina a cada 1s por este tempo para pegar o novo ping assim que chegar
 export const OVERDUE_FAST_POLL_MS = 30 * 1000;
 
 // last_seen é naive em UTC (REGRA-001)

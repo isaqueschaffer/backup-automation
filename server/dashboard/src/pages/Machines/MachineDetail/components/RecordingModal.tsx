@@ -1,7 +1,7 @@
-import { CameraRecStatus } from "../../../api/types";
-import Modal from "../../../components/Modal";
-import StatusBadge from "../../../components/StatusBadge";
-import { fmtDate } from "../../../utils/date";
+import { CameraRecStatus } from "../../../../api/types";
+import Modal from "../../../../components/Modal";
+import StatusBadge from "../../../../components/StatusBadge";
+import { fmtDate } from "../../../../utils/date";
 import MiniCalendar from "./MiniCalendar";
 
 export default function RecordingModal({ nvrName, cameras, lastBackupAt, onClose }: {

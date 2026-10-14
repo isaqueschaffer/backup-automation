@@ -7,8 +7,8 @@ import pkg from "../../package.json";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Visão Geral" },
-  { to: "/units", icon: Users, label: "Clientes" },
-  { to: "/clients", icon: Server, label: "Máquinas" },
+  { to: "/clientes", icon: Users, label: "Clientes" },
+  { to: "/maquinas", icon: Server, label: "Máquinas" },
   { to: "/backups", icon: Archive, label: "Backups" },
   { to: "/settings", icon: Settings, label: "Configurações" },
 ];

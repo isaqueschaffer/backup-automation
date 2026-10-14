@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import * as XLSX from "xlsx";
-import { createEquipamento, deleteEquipamento } from "../../../api/client";
-import { NVR } from "../../../api/types";
+import { createEquipamento, deleteEquipamento } from "../../../../api/client";
+import { NVR } from "../../../../api/types";
 import { ToastFn } from "../utils";
 
 // Parser robusto de CSV (suporta aspas e delimitadores no meio do texto)
@@ -93,8 +93,8 @@ function summarize(ok: number, fail: number, okMsg: string, toast: ToastFn) {
 }
 
 // Importação (CSV/XLSX) e exclusão em massa de câmeras, sempre item a item
-export function useCameraImport({ clientId, cameras, setBusy, reload, toast }: {
-  clientId: string | undefined;
+export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: {
+  machineId: string | undefined;
   cameras: NVR[];
   setBusy: (busy: boolean) => void;
   reload: () => void;
@@ -104,7 +104,7 @@ export function useCameraImport({ clientId, cameras, setBusy, reload, toast }: {
 
   const importFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !clientId) return;
+    if (!file || !machineId) return;
     const isCsv = file.name.toLowerCase().endsWith(".csv");
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -125,7 +125,7 @@ export function useCameraImport({ clientId, cameras, setBusy, reload, toast }: {
         let fail = 0;
         for (const cam of rowsToCameras(rows)) {
           try {
-            await createEquipamento(clientId, {
+            await createEquipamento(machineId, {
               tipo: "CAMERA",
               name: cam.name,
               ip: cam.ip,
@@ -162,7 +162,7 @@ export function useCameraImport({ clientId, cameras, setBusy, reload, toast }: {
   };
 
   const deleteAll = async () => {
-    if (!clientId) return;
+    if (!machineId) return;
     if (cameras.length === 0) return toast("Nenhuma câmera para apagar.", "error");
     if (!window.confirm(`Tem certeza que deseja apagar as ${cameras.length} câmeras? Isso não pode ser desfeito.`)) return;
     setBusy(true);
@@ -171,7 +171,7 @@ export function useCameraImport({ clientId, cameras, setBusy, reload, toast }: {
       let fail = 0;
       for (const cam of cameras) {
         try {
-          await deleteEquipamento(clientId, cam.id);
+          await deleteEquipamento(machineId, cam.id);
           ok++;
         } catch (err) {
           console.error(err);

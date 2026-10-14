@@ -9,7 +9,8 @@ from sqlalchemy.orm import relationship
 from database import Base
 
 
-class ClientGroup(Base):
+class Customer(Base):
+    """Cliente: a empresa atendida. Agrupa Máquinas (tabela 'client_groups' mantida no BD)."""
     __tablename__ = "client_groups"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -23,10 +24,11 @@ class ClientGroup(Base):
     queue_current_index = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    clients = relationship("Client", back_populates="group", order_by="Client.queue_order")
+    machines = relationship("Machine", back_populates="customer", order_by="Machine.queue_order")
 
 
-class Client(Base):
+class Machine(Base):
+    """Máquina: o computador com o agente instalado (tabela 'clients' mantida no BD)."""
     __tablename__ = "clients"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -45,14 +47,14 @@ class Client(Base):
     restart_requested = Column(Boolean, default=False, nullable=False)
     backup_requested = Column(Boolean, default=False, nullable=False)
     telemetry = Column(JSON, nullable=True)  # Hardware stats (CPU, RAM, Disk, GPU)
-    group_id = Column(UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
+    # Cliente ao qual a máquina pertence (coluna 'group_id' mantida no BD)
+    customer_id = Column("group_id", UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
     queue_order = Column(Integer, default=0, nullable=False)
 
-    nvrs = relationship("NVR", back_populates="client", cascade="all, delete-orphan")
-    equipamentos = relationship("NVR", back_populates="client", cascade="all, delete-orphan", overlaps="nvrs")
-    backups = relationship("Backup", back_populates="client")
-    logs = relationship("AgentLog", back_populates="client", cascade="all, delete-orphan", order_by="desc(AgentLog.created_at)")
-    group = relationship("ClientGroup", back_populates="clients")
+    equipamentos = relationship("NVR", back_populates="machine", cascade="all, delete-orphan")
+    backups = relationship("Backup", back_populates="machine")
+    logs = relationship("AgentLog", back_populates="machine", cascade="all, delete-orphan", order_by="desc(AgentLog.created_at)")
+    customer = relationship("Customer", back_populates="machines")
 
 
 class NVR(Base):
@@ -60,7 +62,8 @@ class NVR(Base):
     __tablename__ = "nvrs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    client_id = Column(
+    machine_id = Column(
+        "client_id",
         UUID(as_uuid=True),
         ForeignKey("clients.id", ondelete="CASCADE"),
         nullable=False
@@ -75,7 +78,7 @@ class NVR(Base):
     active = Column(Boolean, default=True, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    client = relationship("Client", back_populates="nvrs", overlaps="equipamentos")
+    machine = relationship("Machine", back_populates="equipamentos")
     cameras_status = relationship("NVRCamera", back_populates="nvr", cascade="all, delete-orphan")
 
 
@@ -99,7 +102,7 @@ class Backup(Base):
     __tablename__ = "backups"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    machine_id = Column("client_id", UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     status = Column(String(20), nullable=False)  # OK, PARTIAL, ERROR
@@ -110,19 +113,19 @@ class Backup(Base):
     trigger = Column(String(50), default="scheduled")  # scheduled | manual
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    client = relationship("Client", back_populates="backups")
+    machine = relationship("Machine", back_populates="backups")
 
 
 class AgentLog(Base):
     __tablename__ = "agent_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    machine_id = Column("client_id", UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     event_type = Column(String(50), nullable=False)  # ex: ping, backup_trigger, restart_trigger
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    client = relationship("Client", back_populates="logs")
+    machine = relationship("Machine", back_populates="logs")
 
 
 class Setting(Base):

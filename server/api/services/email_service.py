@@ -171,7 +171,7 @@ def _build_result_section(nvr_results: List[dict]) -> str:
 
 
 def send_backup_report(
-    client_name: str,
+    machine_name: str,
     date_str: str,
     nvr_results: List[dict],
     recipients: List[str],
@@ -215,7 +215,7 @@ def send_backup_report(
                     clean_recipients.append(item)
 
     if not clean_recipients:
-        logger.warning(f"No valid recipients configured for '{client_name}' (received: {recipients}) — skipping email.")
+        logger.warning(f"No valid recipients configured for '{machine_name}' (received: {recipients}) — skipping email.")
         return False
 
     # ── Overall backup status ──
@@ -233,14 +233,14 @@ def send_backup_report(
     msg = EmailMessage()
     msg["From"] = smtp_email
     msg["To"] = ", ".join(clean_recipients)
-    msg["Subject"] = f"{client_name} POP - Verificação de câmeras e Backup dos equipamentos — {date_str}"
+    msg["Subject"] = f"{machine_name} POP - Verificação de câmeras e Backup dos equipamentos — {date_str}"
 
     # ── Header ──
     body = (
         f"{'═' * 50}\n"
-        f"  {client_name} POP - Verificação de câmeras e Backup dos equipamentos\n"
+        f"  {machine_name} POP - Verificação de câmeras e Backup dos equipamentos\n"
         f"{'═' * 50}\n\n"
-        f"Cliente: {client_name}\n"
+        f"Máquina: {machine_name}\n"
         f"Data e hora: {date_hora_str}\n\n"
         f"Serviço executado:\n"
         f"Backup das configurações dos equipamentos de rede/CFTV e verificação de status operacional.\n\n"

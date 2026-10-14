@@ -1,24 +1,12 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import { fetchBackups, fetchClients, resendBackupEmail, downloadBackupZip } from "../api/client";
-import { Backup, Client, PaginatedBackups } from "../api/types";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { Link } from "react-router-dom";
+import { fetchBackups, fetchMachines, fetchCustomers, resendBackupEmail, downloadBackupZip, BackupQuery } from "../api/client";
+import { Backup, Customer, Machine, PaginatedBackups } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
 import { fmtDate, localDateStr } from "../utils/date";
+import { extractBlobError, saveBlob } from "../utils/download";
 import { Download, Search, Calendar } from "lucide-react";
-
-// Função auxiliar para formatar erros de blob
-async function extractBlobError(err: unknown): Promise<string> {
-  let msg = "Erro ao baixar o arquivo.";
-  try {
-    const axiosErr = err as { response?: { data?: Blob } };
-    if (axiosErr?.response?.data instanceof Blob) {
-      const text = await axiosErr.response.data.text();
-      const json = JSON.parse(text);
-      if (json?.detail) msg = json.detail;
-    }
-  } catch { /* ignora */ }
-  return msg;
-}
 
 function fmtSize(n: number | null) {
   if (!n) return "—";
@@ -152,12 +140,14 @@ function EquipamentosCell({ results }: { results: any[] | null }) {
 
 export default function Backups() {
   const [data, setData] = useState<PaginatedBackups | null>(null);
-  const [clients, setClients] = useState<Client[]>([]);
+  const [machines, setMachines] = useState<Machine[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const loadSeq = useRef(0);
   const [page, setPage] = useState(1);
-  const [clientFilter, setClientFilter] = useState("");
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [machineFilter, setMachineFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   
   const today = localDateStr();
@@ -170,8 +160,9 @@ export default function Backups() {
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
     setLoading(true);
-    const params: Record<string, unknown> = { page, size: 20 };
-    if (clientFilter) params.client_id = clientFilter;
+    const params: BackupQuery = { page, size: 20 };
+    if (customerFilter) params.customer_id = customerFilter;
+    if (machineFilter) params.machine_id = machineFilter;
     if (statusFilter) params.status = statusFilter;
     if (dateFrom) params.date_from = dateFrom;
     if (dateTo) params.date_to = dateTo;
@@ -185,11 +176,18 @@ export default function Backups() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [page, clientFilter, statusFilter, dateFrom, dateTo, toast]);
+  }, [page, customerFilter, machineFilter, statusFilter, dateFrom, dateTo, toast]);
 
   useEffect(() => {
-    fetchClients().then(setClients).catch(() => toast("Erro ao carregar clientes.", "error"));
+    fetchMachines().then(setMachines).catch(() => toast("Erro ao carregar máquinas.", "error"));
+    fetchCustomers().then(setCustomers).catch(() => toast("Erro ao carregar clientes.", "error"));
   }, [toast]);
+
+  // No filtro de máquina, só as máquinas do cliente escolhido
+  const machineOptions = useMemo(
+    () => customerFilter ? machines.filter(m => m.customer_id === customerFilter) : machines,
+    [machines, customerFilter],
+  );
   useEffect(() => { load(); }, [load]);
   // Invalida respostas pendentes ao desmontar
   useEffect(() => () => { loadSeq.current++; }, []);
@@ -198,14 +196,7 @@ export default function Backups() {
     try {
       setDownloadingId(backupId);
       const data = await downloadBackupZip(backupId);
-      const url = URL.createObjectURL(new Blob([data], { type: "application/zip" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename || "backup.zip";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      saveBlob(data, filename || "backup.zip");
     } catch (err: unknown) {
       console.error("Erro ao baixar o backup:", err);
       const msg = await extractBlobError(err);
@@ -241,9 +232,15 @@ export default function Backups() {
 
       {/* Filters */}
       <div className="filters-bar" style={{ flexWrap: "wrap" }}>
-        <select className="form-input" value={clientFilter} onChange={e => { setClientFilter(e.target.value); setPage(1); }}>
+        <select className="form-input" value={customerFilter} title="Filtrar por cliente"
+          onChange={e => { setCustomerFilter(e.target.value); setMachineFilter(""); setPage(1); }}>
           <option value="">Todos os clientes</option>
-          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select className="form-input" value={machineFilter} title="Filtrar por máquina"
+          onChange={e => { setMachineFilter(e.target.value); setPage(1); }}>
+          <option value="">Todas as máquinas</option>
+          {machineOptions.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
         <select className="form-input" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }}>
           <option value="">Todos os status</option>
@@ -292,6 +289,7 @@ export default function Backups() {
               <thead>
                 <tr>
                   <th>Cliente</th>
+                  <th>Máquina</th>
                   <th>Data/Hora</th>
                   <th>Status</th>
                   <th>Equipamentos</th>
@@ -304,7 +302,16 @@ export default function Backups() {
               <tbody>
                 {data.items.map((b: Backup) => (
                   <tr key={b.id}>
-                    <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>{b.client_name}</td>
+                    <td>
+                      {b.customer_id
+                        ? <Link to={`/clientes/${b.customer_id}`}>{b.customer_name || "Cliente"}</Link>
+                        : <span className="text-muted">—</span>}
+                    </td>
+                    <td style={{ fontWeight: 600 }}>
+                      {b.machine_id
+                        ? <Link to={`/maquinas/${b.machine_id}`} style={{ color: "var(--text-primary)" }}>{b.machine_name || "—"}</Link>
+                        : (b.machine_name || "—")}
+                    </td>
                     <td className="text-sm text-secondary">{fmtDate(b.started_at)}</td>
                     <td><StatusBadge status={b.status} /></td>
                     <td className="text-secondary text-sm" style={{ verticalAlign: 'top', minWidth: '220px' }}>

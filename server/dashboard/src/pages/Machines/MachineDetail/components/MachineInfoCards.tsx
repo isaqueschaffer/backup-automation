@@ -1,7 +1,8 @@
 import { Archive, Building2, CalendarCheck, Clock, KeyRound, Mail, Network, Server, Wifi } from "lucide-react";
-import { Client } from "../../../api/types";
-import StatusBadge from "../../../components/StatusBadge";
-import { fmtDate } from "../../../utils/date";
+import { Machine } from "../../../../api/types";
+import StatusBadge from "../../../../components/StatusBadge";
+import { Link } from "react-router-dom";
+import { fmtDate, fmtSchedule } from "../../../../utils/date";
 import InfoPill from "./InfoPill";
 import TelemetryBar from "./TelemetryBar";
 
@@ -11,8 +12,8 @@ const cardTitleStyle: React.CSSProperties = {
 };
 
 // As três colunas do topo: Configuração, Status do Agente e Saúde do Servidor (telemetria)
-export default function ClientInfoCards({ client, isAgentOnline, nextPingStr, onCopy }: {
-  client: Client;
+export default function MachineInfoCards({ machine, isAgentOnline, nextPingStr, onCopy }: {
+  machine: Machine;
   isAgentOnline: boolean;
   nextPingStr: string;
   onCopy: (v: string) => void;
@@ -23,19 +24,20 @@ export default function ClientInfoCards({ client, isAgentOnline, nextPingStr, on
       {/* Coluna 1 — Configuração */}
       <div className="card" style={{ padding: "20px 24px" }}>
         <div style={cardTitleStyle}>
-          <Server size={13} /> Configuração do Cliente
+          <Server size={13} /> Configuração da Máquina
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <InfoPill icon={<KeyRound size={11} />} label="Client ID" value={client.id} mono copyValue={client.id} onCopy={onCopy} />
-          <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${client.api_key_prefix}…`} mono />
-          {client.group_name && (
-            <InfoPill icon={<Building2 size={11} />} label="Unidade"
-              value={`${client.group_name} (Posição ${(client.queue_order ?? 0) + 1} na fila)`} />
-          )}
+          <InfoPill icon={<Building2 size={11} />} label="Cliente"
+            value={machine.customer_id
+              ? <><Link to={`/clientes/${machine.customer_id}`}>{machine.customer_name || "Cliente"}</Link>
+                  <span className="text-muted" style={{ fontSize: 12 }}> (posição {(machine.queue_order ?? 0) + 1} na fila)</span></>
+              : <span className="text-muted">Sem cliente</span>} />
+          <InfoPill icon={<KeyRound size={11} />} label="ID da máquina (Client ID no agent.conf)" value={machine.id} mono copyValue={machine.id} onCopy={onCopy} />
+          <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${machine.api_key_prefix}…`} mono />
           <InfoPill icon={<Clock size={11} />} label="Horário do Backup"
-            value={`${String(client.backup_hour).padStart(2, "0")}:${String(client.backup_minute).padStart(2, "0")} (diário)`} />
+            value={`${fmtSchedule(machine.backup_hour, machine.backup_minute)} (diário)${machine.schedule_from_customer ? " — definido pelo cliente" : ""}`} />
           <InfoPill icon={<Mail size={11} />} label="E-mails de Notificação"
-            value={(client.email_to || []).join(", ") || "—"} />
+            value={(machine.email_to || []).join(", ") || "—"} />
         </div>
       </div>
 
@@ -46,15 +48,15 @@ export default function ClientInfoCards({ client, isAgentOnline, nextPingStr, on
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <InfoPill icon={<Wifi size={11} />} label="Conexão"
-            value={<StatusBadge status={isAgentOnline ? "ONLINE" : (client.active ? "OFFLINE" : "DESATIVADO")} />} />
+            value={<StatusBadge status={isAgentOnline ? "ONLINE" : (machine.active ? "OFFLINE" : "DESATIVADO")} />} />
           <InfoPill icon={<CalendarCheck size={11} />} label="Último contato"
-            value={client.last_seen ? fmtDate(client.last_seen) : "Nunca"} />
+            value={machine.last_seen ? fmtDate(machine.last_seen) : "Nunca"} />
           <InfoPill icon={<Clock size={11} />} label="Próximo contato (estimado)"
             value={isAgentOnline ? nextPingStr : "—"} />
           <InfoPill icon={<Archive size={11} />} label="Último Backup"
-            value={<StatusBadge status={client.last_backup_status} />} />
+            value={<StatusBadge status={machine.last_backup_status} />} />
           <InfoPill icon={<CalendarCheck size={11} />} label="Data do Último Backup"
-            value={fmtDate(client.last_backup_at)} />
+            value={fmtDate(machine.last_backup_at)} />
         </div>
       </div>
 
@@ -64,12 +66,12 @@ export default function ClientInfoCards({ client, isAgentOnline, nextPingStr, on
           <Network size={13} /> Saúde do Servidor
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {client.telemetry ? (
+          {machine.telemetry ? (
             <>
-              <TelemetryBar label="CPU" percent={client.telemetry.cpu_percent || 0} info={`${client.telemetry.cpu_percent || 0}%`} />
-              <TelemetryBar label="RAM" percent={client.telemetry.ram_percent || 0} info={`${client.telemetry.ram_used_gb || 0} GB / ${client.telemetry.ram_total_gb || 0} GB`} />
-              <TelemetryBar label="Disco (C:)" percent={client.telemetry.disk_percent || 0} info={`${client.telemetry.disk_free_gb || 0} GB Livre`} />
-              {client.telemetry.networks && client.telemetry.networks.map((net: { name: string; mbps_sent?: number; mbps_recv?: number }, i: number) => (
+              <TelemetryBar label="CPU" percent={machine.telemetry.cpu_percent || 0} info={`${machine.telemetry.cpu_percent || 0}%`} />
+              <TelemetryBar label="RAM" percent={machine.telemetry.ram_percent || 0} info={`${machine.telemetry.ram_used_gb || 0} GB / ${machine.telemetry.ram_total_gb || 0} GB`} />
+              <TelemetryBar label="Disco (C:)" percent={machine.telemetry.disk_percent || 0} info={`${machine.telemetry.disk_free_gb || 0} GB Livre`} />
+              {machine.telemetry.networks && machine.telemetry.networks.map((net: { name: string; mbps_sent?: number; mbps_recv?: number }, i: number) => (
                 <TelemetryBar
                   key={i}
                   label={`Rede: ${net.name}`}
@@ -77,8 +79,8 @@ export default function ClientInfoCards({ client, isAgentOnline, nextPingStr, on
                   info={`↑ ${net.mbps_sent} Mbps  ↓ ${net.mbps_recv} Mbps`}
                 />
               ))}
-              {client.telemetry.gpu_name && (
-                <TelemetryBar label="GPU" percent={client.telemetry.gpu_percent || 0} info={`${client.telemetry.gpu_name} (${client.telemetry.gpu_percent || 0}%)`} />
+              {machine.telemetry.gpu_name && (
+                <TelemetryBar label="GPU" percent={machine.telemetry.gpu_percent || 0} info={`${machine.telemetry.gpu_name} (${machine.telemetry.gpu_percent || 0}%)`} />
               )}
             </>
           ) : (

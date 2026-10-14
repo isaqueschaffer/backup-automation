@@ -1,5 +1,5 @@
 import { Plus, Trash2, Video } from "lucide-react";
-import { NVR } from "../../../api/types";
+import { NVR } from "../../../../api/types";
 import { RtspResult } from "../hooks/useRtspTest";
 import { safeFileName } from "../utils";
 
@@ -26,7 +26,7 @@ export default function CamerasSection({
     <div style={{ marginBottom: 24, marginTop: 24 }}>
       <div className="flex items-center justify-between mb-4">
         <div className="section-title mb-0">
-          <Video size={15} /> Câmeras do Cliente (Teste RTSP)
+          <Video size={15} /> Câmeras da Máquina (Teste RTSP)
           <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
             {cameras.length}
           </span>

@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from auth import get_current_client
+from auth import get_current_machine
 from database import get_db, SessionLocal
-from models import Client, Backup, NVR, NVRCamera, AgentLog
+from models import Machine, Backup, NVR, NVRCamera, AgentLog
 from schemas import (
     AgentConfigResponse,
     AgentEquipamento,
@@ -25,7 +25,7 @@ from schemas import (
     RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
 )
-from routers.clients import check_client_online
+from routers.machines import check_machine_online
 from services.crypto_service import decrypt
 from services.storage_service import save_zip_stream, UploadTooLargeError
 from services.email_service import send_backup_report
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 
 
 @router.get("/config", response_model=AgentConfigResponse)
-def get_agent_config(client: Client = Depends(get_current_client), db: Session = Depends(get_db)):
+def get_agent_config(machine: Machine = Depends(get_current_machine), db: Session = Depends(get_db)):
     """Return full config needed by the Windows agent."""
     equipamentos = [
         AgentEquipamento(
@@ -46,23 +46,24 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
             password=decrypt(nvr.password),
             config_extra=nvr.config_extra,
         )
-        for nvr in client.nvrs if nvr.active
+        for nvr in machine.equipamentos if nvr.active
     ]
-    zip_pw = decrypt(client.zip_password) if client.zip_password else None
+    zip_pw = decrypt(machine.zip_password) if machine.zip_password else None
 
-    # Usa horário do cliente se a máquina pertencer a um Cliente
-    backup_hour = client.backup_hour
-    backup_minute = client.backup_minute
-    if getattr(client, 'group_id', None) and getattr(client, 'group', None):
-        backup_hour = client.group.backup_hour
-        backup_minute = client.group.backup_minute
+    # Usa horário do Cliente se a máquina pertencer a um Cliente
+    backup_hour = machine.backup_hour
+    backup_minute = machine.backup_minute
+    if machine.customer is not None:
+        backup_hour = machine.customer.backup_hour
+        backup_minute = machine.customer.backup_minute
 
     # Update last_seen
-    client.last_seen = datetime.utcnow()
+    machine.last_seen = datetime.utcnow()
     db.commit()
-    
+
+    # `client_name` é campo do contrato JSON com o agente: não renomear
     return AgentConfigResponse(
-        client_name=client.name,
+        client_name=machine.name,
         backup_hour=backup_hour,
         backup_minute=backup_minute,
         zip_password=zip_pw,
@@ -72,19 +73,19 @@ def get_agent_config(client: Client = Depends(get_current_client), db: Session =
 
 
 # Dicionário global de tarefas RTSP pendentes (long-polling entre dashboard e agente).
-# Formato: { client_id_str: {"task": dict, "event": asyncio.Event(), "result": None, "sent": bool} }
+# Formato: { machine_id_str: {"task": dict, "event": asyncio.Event(), "result": None, "sent": bool} }
 # LIMITAÇÃO: o estado vive na memória do processo, então só funciona com 1 worker
 # uvicorn. Com múltiplos workers o ping do agente e o test-rtsp poderiam cair em
 # processos diferentes e a tarefa nunca seria entregue.
 pending_rtsp_tasks: Dict[str, Any] = {}
 
 
-def _read_request_flags(client_id: UUID) -> tuple[bool, bool]:
+def _read_request_flags(machine_id: UUID) -> tuple[bool, bool]:
     """Lê restart/backup solicitados usando uma sessão curta (não segura conexão no long-poll)."""
     with SessionLocal() as session:
         row = session.query(
-            Client.restart_requested, Client.backup_requested
-        ).filter(Client.id == client_id).first()
+            Machine.restart_requested, Machine.backup_requested
+        ).filter(Machine.id == machine_id).first()
     if not row:
         return False, False
     return bool(row[0]), bool(row[1])
@@ -93,17 +94,17 @@ def _read_request_flags(client_id: UUID) -> tuple[bool, bool]:
 @router.post("/ping", response_model=PingResponse)
 async def ping_agent(
     body: PingRequest | None = None,
-    client: Client = Depends(get_current_client),
+    machine: Machine = Depends(get_current_machine),
     db: Session = Depends(get_db)
 ):
     """Heartbeat do agente. Usa long-polling (5 iterações de 1s) para entregar comandos de teste RTSP rapidamente."""
     # Commit imediato: persiste last_seen/telemetry antes de liberar a conexão para o long-polling
-    client.last_seen = datetime.utcnow()
+    machine.last_seen = datetime.utcnow()
     if body and body.telemetry:
-        client.telemetry = body.telemetry
+        machine.telemetry = body.telemetry
     db.commit()
-    client_id = client.id
-    client_id_str = str(client_id)
+    machine_id = machine.id
+    machine_id_str = str(machine_id)
 
     # Libera a conexão do pool durante a espera: o long-poll não pode segurar a sessão
     # do banco por vários segundos (esgotaria o pool com muitos agentes). A mesma
@@ -112,8 +113,8 @@ async def ping_agent(
 
     # ── Espera por tarefas (long-polling: 5 iterações de 1s) ──
     for _ in range(5):
-        # Há tarefa RTSP pendente (ainda não entregue) para este cliente?
-        task_data = pending_rtsp_tasks.get(client_id_str)
+        # Há tarefa RTSP pendente (ainda não entregue) para esta máquina?
+        task_data = pending_rtsp_tasks.get(machine_id_str)
         if task_data is not None and not task_data.get("sent", False):
             task_data["sent"] = True
             return PingResponse(
@@ -124,40 +125,40 @@ async def ping_agent(
             )
 
         # Flags normais de restart/backup: só retorna imediatamente se estiverem marcadas
-        restart_flag, backup_flag = _read_request_flags(client_id)
+        restart_flag, backup_flag = _read_request_flags(machine_id)
         if restart_flag or backup_flag:
             break
 
         await asyncio.sleep(1)
 
-    # Recarrega o cliente na sessão (ela foi liberada antes do polling)
-    client = db.get(Client, client_id)
-    if client is None:
+    # Recarrega a máquina na sessão (ela foi liberada antes do polling)
+    machine = db.get(Machine, machine_id)
+    if machine is None:
         return PingResponse(status="ok", restart=False, backup=False)
 
-    should_restart = bool(client.restart_requested)
-    should_backup = bool(client.backup_requested)
+    should_restart = bool(machine.restart_requested)
+    should_backup = bool(machine.backup_requested)
     
     # ── Auto-recovery de backup perdido ──
     # Não aciona se should_backup já for True
-    # Não aciona se o cliente pertence a um grupo com fila ativa (a fila comanda o sequenciamento)
-    is_in_active_queue = bool(getattr(client, "group", None) and getattr(client.group, "queue_active", False))
-    if not should_backup and not is_in_active_queue and client.backup_hour is not None and client.backup_minute is not None:
+    # Não aciona se a máquina pertence a um Cliente com fila ativa (a fila comanda o sequenciamento)
+    is_in_active_queue = bool(machine.customer is not None and machine.customer.queue_active)
+    if not should_backup and not is_in_active_queue and machine.backup_hour is not None and machine.backup_minute is not None:
         brt_tz = timezone(timedelta(hours=-3))
         now_brt = datetime.now(brt_tz)
-        scheduled_time_today = now_brt.replace(hour=client.backup_hour, minute=client.backup_minute, second=0, microsecond=0)
+        scheduled_time_today = now_brt.replace(hour=machine.backup_hour, minute=machine.backup_minute, second=0, microsecond=0)
         
         if now_brt > scheduled_time_today + timedelta(minutes=30):
             # 1. Verifica se já concluiu backup hoje
             made_backup_today = False
-            if client.last_backup_at:
-                last_backup_brt = client.last_backup_at.replace(tzinfo=timezone.utc).astimezone(brt_tz)
+            if machine.last_backup_at:
+                last_backup_brt = machine.last_backup_at.replace(tzinfo=timezone.utc).astimezone(brt_tz)
                 if last_backup_brt.date() == now_brt.date():
                     made_backup_today = True
 
             # 2. Verifica se houve backup recente (últimas 2 horas) para evitar disparos duplicados
             recent_backup = db.query(Backup).filter(
-                Backup.client_id == client.id,
+                Backup.machine_id == machine.id,
                 Backup.created_at >= (datetime.utcnow() - timedelta(hours=2))
             ).first()
             if recent_backup:
@@ -166,30 +167,30 @@ async def ping_agent(
             # 3. Verifica se já disparou ping_recovery hoje
             today_utc_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
             already_recovered_today = db.query(AgentLog).filter(
-                AgentLog.client_id == client.id,
+                AgentLog.machine_id == machine.id,
                 AgentLog.event_type == "ping_recovery",
                 AgentLog.created_at >= today_utc_start
             ).first() is not None
 
             if not made_backup_today and not already_recovered_today:
                 should_backup = True
-                client.backup_requested = False 
-                log_msg = f"Ping recebido. Disparando BACKUP DE RECUPERACAO. Agente falhou em executar no horario agendado ({client.backup_hour:02d}:{client.backup_minute:02d})."
-                db.add(AgentLog(client_id=client.id, event_type="ping_recovery", message=log_msg))
+                machine.backup_requested = False 
+                log_msg = f"Ping recebido. Disparando BACKUP DE RECUPERACAO. Agente falhou em executar no horario agendado ({machine.backup_hour:02d}:{machine.backup_minute:02d})."
+                db.add(AgentLog(machine_id=machine.id, event_type="ping_recovery", message=log_msg))
 
     if should_restart:
-        client.restart_requested = False
-    if should_backup and client.backup_requested:
-        client.backup_requested = False
+        machine.restart_requested = False
+    if should_backup and machine.backup_requested:
+        machine.backup_requested = False
 
     log_msg = f"Ping recebido. Instruções pendentes: restart={should_restart}, backup={should_backup}"
-    db.add(AgentLog(client_id=client.id, event_type="ping", message=log_msg))
+    db.add(AgentLog(machine_id=machine.id, event_type="ping", message=log_msg))
     
-    # Poda dos logs: mantém apenas os 50 mais recentes por cliente, com um único DELETE
+    # Poda dos logs: mantém apenas os 50 mais recentes por máquina, com um único DELETE
     db.flush()
     ids_antigos = (
         select(AgentLog.id)
-        .where(AgentLog.client_id == client.id)
+        .where(AgentLog.machine_id == machine.id)
         .order_by(AgentLog.created_at.desc())
         .offset(50)
     )
@@ -201,11 +202,11 @@ async def ping_agent(
 @router.post("/rtsp-result")
 async def receive_rtsp_result(
     result: RTSPTestResponse,
-    client: Client = Depends(get_current_client),
+    machine: Machine = Depends(get_current_machine),
 ):
     """Agent posts the result of an RTSP task."""
-    client_id_str = str(client.id)
-    task_data = pending_rtsp_tasks.get(client_id_str)
+    machine_id_str = str(machine.id)
+    task_data = pending_rtsp_tasks.get(machine_id_str)
     if task_data is not None:
         task_data["result"] = result
         task_data["event"].set()
@@ -214,12 +215,12 @@ async def receive_rtsp_result(
 @router.post("/nvr-cameras/night-image")
 def receive_night_image(
     body: NVRCameraNightImage,
-    client: Client = Depends(get_current_client),
+    machine: Machine = Depends(get_current_machine),
     db: Session = Depends(get_db),
 ):
     """Agent posts the night image of an NVR channel."""
     nvr = db.query(NVR).filter(
-        NVR.client_id == client.id, 
+        NVR.machine_id == machine.id, 
         NVR.name == body.nvr_name,
         NVR.active == True
     ).first()
@@ -247,22 +248,22 @@ def receive_night_image(
 @router.post("/backup/report", response_model=BackupReportResponse, status_code=201)
 def receive_backup_report(
     body: BackupReportCreate,
-    client: Client = Depends(get_current_client),
+    machine: Machine = Depends(get_current_machine),
     db: Session = Depends(get_db),
 ):
     """Agent posts the backup result. Server creates a Backup record."""
     from datetime import datetime
     
-    # Usa a hora real do servidor, ignorando o relógio do cliente
+    # Usa a hora real do servidor, ignorando o relógio da máquina
     server_finished_at = datetime.utcnow()
-    # Subtrai o tempo que o cliente diz que levou para achar o "started_at" real do servidor
+    # Subtrai o tempo que a máquina diz que levou para achar o "started_at" real do servidor
     duration = body.finished_at - body.started_at
     server_started_at = server_finished_at - duration
 
     nvr_results_with_type = []
     for r in body.nvr_results:
         r_dict = r.model_dump()
-        nvr = db.query(NVR).filter(NVR.client_id == client.id, NVR.name == r.nome).first()
+        nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == r.nome).first()
         if nvr:
             r_dict["tipo"] = nvr.tipo
             if r.cameras is not None:
@@ -272,7 +273,7 @@ def receive_backup_report(
         nvr_results_with_type.append(r_dict)
 
     backup = Backup(
-        client_id=client.id,
+        machine_id=machine.id,
         started_at=server_started_at,
         finished_at=server_finished_at,
         status=body.status,
@@ -281,55 +282,54 @@ def receive_backup_report(
     )
     db.add(backup)
 
-    # Update client last backup info
-    client.last_backup_at = server_finished_at
-    client.last_backup_status = body.status
+    # Atualiza o último backup da máquina
+    machine.last_backup_at = server_finished_at
+    machine.last_backup_status = body.status
 
     db.commit()
     db.refresh(backup)
 
     # ── Avançar fila de backup sequencial do Cliente ──
-    if getattr(client, 'group_id', None) and getattr(client, 'group', None):
-        group = client.group
-        if group.queue_active:
-            active_clients = sorted(
-                [c for c in group.clients if c.active],
-                key=lambda c: c.queue_order
-            )
-            # Localiza a posição do cliente atual que está reportando
-            try:
-                reporting_idx = [c.id for c in active_clients].index(client.id)
-            except ValueError:
-                reporting_idx = group.queue_current_index if group.queue_current_index is not None else 0
+    customer = machine.customer
+    if customer is not None and customer.queue_active:
+        queue = sorted(
+            [m for m in customer.machines if m.active],
+            key=lambda m: m.queue_order
+        )
+        # Localiza a posição da máquina que está reportando
+        try:
+            reporting_idx = [m.id for m in queue].index(machine.id)
+        except ValueError:
+            reporting_idx = customer.queue_current_index if customer.queue_current_index is not None else 0
 
-            next_online_client = None
-            next_idx = None
-            for idx in range(reporting_idx + 1, len(active_clients)):
-                c = active_clients[idx]
-                if check_client_online(c):
-                    next_online_client = c
-                    next_idx = idx
-                    break
-                else:
-                    db.add(AgentLog(
-                        client_id=c.id,
-                        event_type="queue_backup_skipped",
-                        message=f"Máquina '{c.name}' está OFFLINE. Pulada na fila do Cliente '{group.name}'."
-                    ))
-
-            if next_online_client is not None:
-                group.queue_current_index = next_idx
-                next_online_client.backup_requested = True
-                db.add(AgentLog(
-                    client_id=next_online_client.id,
-                    event_type="queue_backup",
-                    message=f"Backup em fila disparado pelo Cliente '{group.name}'. Posição {next_idx + 1}/{len(active_clients)} ({next_online_client.name})."
-                ))
+        next_online_machine = None
+        next_idx = None
+        for idx in range(reporting_idx + 1, len(queue)):
+            m = queue[idx]
+            if check_machine_online(m):
+                next_online_machine = m
+                next_idx = idx
+                break
             else:
-                # Nenhum próximo online ou fim da fila atingido
-                group.queue_active = False
-                group.queue_current_index = None
-            db.commit()
+                db.add(AgentLog(
+                    machine_id=m.id,
+                    event_type="queue_backup_skipped",
+                    message=f"Máquina '{m.name}' está OFFLINE. Pulada na fila do Cliente '{customer.name}'."
+                ))
+
+        if next_online_machine is not None:
+            customer.queue_current_index = next_idx
+            next_online_machine.backup_requested = True
+            db.add(AgentLog(
+                machine_id=next_online_machine.id,
+                event_type="queue_backup",
+                message=f"Backup em fila disparado pelo Cliente '{customer.name}'. Posição {next_idx + 1}/{len(queue)} ({next_online_machine.name})."
+            ))
+        else:
+            # Nenhuma próxima máquina online ou fim da fila atingido
+            customer.queue_active = False
+            customer.queue_current_index = None
+        db.commit()
 
     return BackupReportResponse(backup_id=backup.id)
 
@@ -342,7 +342,7 @@ def upload_backup_zip(
     request: Request,
     device_type: str = Query("NVR", description="Tipo de equipamento: NVR, OLT, ONU, PABX"),
     file: UploadFile = File(...),
-    client: Client = Depends(get_current_client),
+    machine: Machine = Depends(get_current_machine),
     db: Session = Depends(get_db),
 ):
     """Agent uploads the ZIP file. Server stores it and sends email."""
@@ -352,7 +352,7 @@ def upload_backup_zip(
         raise HTTPException(status_code=404, detail="Backup record not found")
 
     backup = db.query(Backup).filter(
-        Backup.id == backup_uuid, Backup.client_id == client.id
+        Backup.id == backup_uuid, Backup.machine_id == machine.id
     ).first()
     if not backup:
         raise HTTPException(status_code=404, detail="Backup record not found")
@@ -368,11 +368,11 @@ def upload_backup_zip(
     filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"
 
     # Grava em streaming (chunks) com limite de tamanho; o nome é sanitizado e o
-    # caminho final validado dentro do diretório do cliente (anti path traversal).
+    # caminho final validado dentro do diretório da máquina (anti path traversal).
     try:
         zip_path, zip_size = save_zip_stream(
-            client_id=client.id,
-            client_name=client.name,
+            machine_id=machine.id,
+            machine_name=machine.name,
             date_str=date_str,
             device_type=clean_device_type,
             filename=filename,
@@ -395,10 +395,10 @@ def upload_backup_zip(
     nvr_results = backup.nvr_results or []
 
     email_sent = send_backup_report(
-        client_name=client.name,
+        machine_name=machine.name,
         date_str=date_str,
         nvr_results=nvr_results,
-        recipients=client.email_to or [],
+        recipients=machine.email_to or [],
         db=db,
         zip_path=zip_path,
         backup_id=backup_id,
@@ -408,16 +408,16 @@ def upload_backup_zip(
     backup.email_sent = email_sent or backup.email_sent
 
     if email_sent:
-        recipients_str = ", ".join(client.email_to) if client.email_to else "destinatários configurados"
+        recipients_str = ", ".join(machine.email_to) if machine.email_to else "destinatários configurados"
         db.add(AgentLog(
-            client_id=client.id,
+            machine_id=machine.id,
             event_type="email_sent",
             message=f"E-mail de relatório enviado com sucesso para: {recipients_str}."
         ))
     else:
-        recipients_str = ", ".join(client.email_to) if client.email_to else "nenhum destinatário cadastrado"
+        recipients_str = ", ".join(machine.email_to) if machine.email_to else "nenhum destinatário cadastrado"
         db.add(AgentLog(
-            client_id=client.id,
+            machine_id=machine.id,
             event_type="email_error",
             message=f"Falha no envio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
         ))

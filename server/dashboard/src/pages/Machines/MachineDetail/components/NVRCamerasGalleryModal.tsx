@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Image, Video } from "lucide-react";
-import api from "../../../api/client";
-import { NvrCamera } from "../../../api/types";
-import Modal from "../../../components/Modal";
-import { useToast } from "../../../components/Toast";
-import { fmtDate } from "../../../utils/date";
+import api from "../../../../api/client";
+import { NvrCamera } from "../../../../api/types";
+import Modal from "../../../../components/Modal";
+import { useToast } from "../../../../components/Toast";
+import { fmtDate } from "../../../../utils/date";
 import CameraImagePanel from "./CameraImagePanel";
 
-export default function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClose }: { clientId: string, nvrId: string, nvrName: string, onClose: () => void }) {
+export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onClose }: { machineId: string, nvrId: string, nvrName: string, onClose: () => void }) {
   const { toast } = useToast();
   const [cameras, setCameras] = useState<NvrCamera[]>([]);
   const [loading, setLoading] = useState(true);
@@ -15,7 +15,7 @@ export default function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClo
   const [selectedCanal, setSelectedCanal] = useState<number | null>(null);
   const [testingCanal, setTestingCanal] = useState<number | null>(null);
   // Atualiza a referência de todas as câmeras disponíveis (não OFFLINE), uma por vez:
-  // o servidor tem uma única vaga de tarefa RTSP por cliente.
+  // o servidor tem uma única vaga de tarefa RTSP por máquina.
   const [bulk, setBulk] = useState<{ done: number; total: number; falhas: string[] } | null>(null);
   const cancelBulk = useRef(false);
   // false após desmontar: interrompe o loop em lote e evita setState em componente desmontado
@@ -31,7 +31,7 @@ export default function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClo
     const fetchCams = async () => {
       setLoading(true);
       try {
-        const res = await api.get(`/machines/${clientId}/equipamentos/${nvrId}/cameras`);
+        const res = await api.get(`/machines/${machineId}/equipamentos/${nvrId}/cameras`);
         if (cancelled) return;
         setCameras(res.data);
         if (res.data && res.data.length > 0) {
@@ -46,17 +46,17 @@ export default function NVRCamerasGalleryModal({ clientId, nvrId, nvrName, onClo
     };
     fetchCams();
     return () => { cancelled = true; };
-  }, [clientId, nvrId, toast]);
+  }, [machineId, nvrId, toast]);
 
   // Captura e salva a referência de um canal. Retorna null se deu certo, ou a mensagem de erro.
   const capturarReferencia = async (canal: number, nome: string): Promise<string | null> => {
     try {
-      const resRtsp = await api.post(`/machines/${clientId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
+      const resRtsp = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
       const dataRtsp = resRtsp.data;
       if (!dataRtsp.success || !dataRtsp.image_base64) {
         return dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.";
       }
-      const resSave = await api.post(`/machines/${clientId}/equipamentos/${nvrId}/cameras/perfect-image`, {
+      const resSave = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/perfect-image`, {
         canal, nome, image_base64: dataRtsp.image_base64
       });
       const savedCam = resSave.data;

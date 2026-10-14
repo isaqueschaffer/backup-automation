@@ -1,6 +1,6 @@
 import { CloudLightning } from "lucide-react";
-import { AgentLog } from "../../../api/types";
-import { fmtDate } from "../../../utils/date";
+import { AgentLog } from "../../../../api/types";
+import { fmtDate } from "../../../../utils/date";
 
 export default function AgentLogs({ logs }: { logs: AgentLog[] }) {
   return (

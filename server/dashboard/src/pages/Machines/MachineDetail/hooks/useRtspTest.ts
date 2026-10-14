@@ -1,32 +1,32 @@
 import { useEffect, useRef, useState } from "react";
-import api from "../../../api/client";
-import { NVR } from "../../../api/types";
+import api from "../../../../api/client";
+import { NVR } from "../../../../api/types";
 import { ToastFn, safeFileName } from "../utils";
 
 export type RtspResult = { status: string; error?: string; image_base64?: string };
 
 // Teste RTSP de todas as câmeras (uma por vez) e download das imagens capturadas
-export function useRtspTest({ clientId, equipamentos, clientName, toast }: {
-  clientId: string | undefined;
+export function useRtspTest({ machineId, equipamentos, machineName, toast }: {
+  machineId: string | undefined;
   equipamentos: NVR[];
-  clientName: string | undefined;
+  machineName: string | undefined;
   toast: ToastFn;
 }) {
   const [isTesting, setIsTesting] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, RtspResult>>({});
-  // Token da execução atual: qualquer mudança de cliente/desmontagem invalida o loop em andamento
+  // Token da execução atual: qualquer mudança de máquina/desmontagem invalida o loop em andamento
   const runRef = useRef(0);
 
   useEffect(() => {
     setTestResults({});
     setIsTesting(false);
     return () => { runRef.current++; };
-  }, [clientId]);
+  }, [machineId]);
 
   const hasImages = Object.values(testResults).some(r => r.image_base64);
 
   const testAll = async () => {
-    if (!clientId) return;
+    if (!machineId) return;
     const cams = equipamentos.filter(e => e.tipo === "CAMERA");
     if (cams.length === 0) return;
     const run = ++runRef.current;
@@ -38,7 +38,7 @@ export function useRtspTest({ clientId, equipamentos, clientName, toast }: {
       if (stale()) return;
       setTestResults(prev => ({ ...prev, [cam.id]: { status: "testing" } }));
       try {
-        const res = await api.post(`/machines/${clientId}/equipamentos/${cam.id}/test-rtsp`);
+        const res = await api.post(`/machines/${machineId}/equipamentos/${cam.id}/test-rtsp`);
         if (stale()) return;
         if (res.data.success) {
           setTestResults(prev => ({ ...prev, [cam.id]: { status: "success", image_base64: res.data.image_base64 } }));
@@ -78,7 +78,7 @@ export function useRtspTest({ clientId, equipamentos, clientName, toast }: {
       const blob = await zip.generateAsync({ type: "blob" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `cameras_${clientName ? safeFileName(clientName) : "cliente"}.zip`;
+      a.download = `cameras_${machineName ? safeFileName(machineName) : "maquina"}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

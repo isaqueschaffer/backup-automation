@@ -1,39 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  fetchClient, fetchClientLogs, fetchGroups, fetchEquipamentos, createEquipamento, updateEquipamento,
-  deleteEquipamento, updateClient, rotateKey, fetchBackups, restartAgent, triggerBackup
-} from "../../api/client";
-import { AgentLog, Backup, CameraRecStatus, Client, ClientGroup, EqForm, NVR } from "../../api/types";
-import StatusBadge from "../../components/StatusBadge";
-import { useToast } from "../../components/Toast";
-import { fmtDate } from "../../utils/date";
-import {
-  ArrowLeft, Plus, RefreshCw, Edit2, Server, RotateCcw, Clock, CloudLightning
-} from "lucide-react";
+  fetchMachine, fetchMachineLogs, fetchEquipamentos, createEquipamento, updateEquipamento,
+  deleteEquipamento, updateMachine, rotateMachineKey, fetchBackups, restartMachineAgent, triggerMachineBackup
+} from "../../../api/client";
+import { AgentLog, Backup, CameraRecStatus, Machine, EqForm, NVR } from "../../../api/types";
+import { useToast } from "../../../components/Toast";
+import { apiErrorMessage } from "../../../utils/errors";
+import { Plus, Server } from "lucide-react";
 import {
   AGENT_PING_INTERVAL_MS, OVERDUE_FAST_POLL_MS, serverUtcMs,
   buildEqPayload, emptyEqForm, eqToForm, parseEmails
 } from "./utils";
 import { useCameraImport } from "./hooks/useCameraImport";
 import { useRtspTest } from "./hooks/useRtspTest";
-import ClientInfoCards from "./components/ClientInfoCards";
+import MachineHeader from "./components/MachineHeader";
+import MachineInfoCards from "./components/MachineInfoCards";
 import EqCard from "./components/EqCard";
 import BackupHistory from "./components/BackupHistory";
 import CamerasSection from "./components/CamerasSection";
 import AgentLogs from "./components/AgentLogs";
 import EquipamentoFormModal from "./components/EquipamentoFormModal";
-import EditClientModal, { EditClientForm } from "./components/EditClientModal";
+import EditMachineModal, { EditMachineForm } from "./components/EditMachineModal";
 import RotatedKeyModal from "./components/RotatedKeyModal";
 import RecordingModal from "./components/RecordingModal";
 import NVRCamerasGalleryModal from "./components/NVRCamerasGalleryModal";
 
-export default function ClientDetail() {
+export default function MachineDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const [client, setClient] = useState<Client | null>(null);
+  const [machine, setMachine] = useState<Machine | null>(null);
   const [equipamentos, setEquipamentos] = useState<NVR[]>([]);
   const [backups, setBackups] = useState<Backup[]>([]);
   const [logs, setLogs] = useState<AgentLog[]>([]);
@@ -46,11 +44,10 @@ export default function ClientDetail() {
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState<EqForm>(emptyEqForm());
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<EditClientForm>({
-    name: "", backup_hour: 2, backup_minute: 0, group_id: "", queue_order: 0, email_to: "", zip_password: "",
+  const [editForm, setEditForm] = useState<EditMachineForm>({
+    name: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
   });
   const [saving, setSaving] = useState(false);
-  const [groups, setGroups] = useState<ClientGroup[]>([]);
   // Diferença entre relógio do servidor e do navegador, para a contagem do próximo ping andar a cada segundo
   const [serverSkewMs, setServerSkewMs] = useState(0);
 
@@ -63,21 +60,20 @@ export default function ClientDetail() {
     const isCurrent = () => activeIdRef.current === reqId;
     if (!silent) setLoading(true);
     try {
-      const [c, eqs, b, lg, gs] = await Promise.all([
-        fetchClient(reqId),
+      const [m, eqs, b, lg] = await Promise.all([
+        fetchMachine(reqId),
         fetchEquipamentos(reqId),
-        fetchBackups({ client_id: reqId, size: 10 }),
-        fetchClientLogs(reqId),
-        fetchGroups().catch((): ClientGroup[] => []),
+        fetchBackups({ machine_id: reqId, size: 10 }),
+        fetchMachineLogs(reqId),
       ]);
       if (!isCurrent()) return;
-      setClient(c); setEquipamentos(eqs); setBackups(b.items); setLogs(lg); setGroups(gs);
-      if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
+      setMachine(m); setEquipamentos(eqs); setBackups(b.items); setLogs(lg);
+      if (m.current_server_time) setServerSkewMs(new Date(m.current_server_time).getTime() - Date.now());
     } catch (e) {
       // Polling (silent) falha em silêncio; carga explícita avisa o usuário
       if (!silent && isCurrent()) {
         console.error(e);
-        toast("Erro ao carregar dados do cliente.", "error");
+        toast("Erro ao carregar dados da máquina.", "error");
       }
     } finally {
       if (!silent && isCurrent()) setLoading(false);
@@ -97,8 +93,8 @@ export default function ClientDetail() {
     return () => { clearInterval(t1); clearInterval(t2); };
   }, [id, load]);
 
-  const nextPingMs = client?.last_seen && client.active && client.is_online
-    ? serverUtcMs(client.last_seen) + AGENT_PING_INTERVAL_MS
+  const nextPingMs = machine?.last_seen && machine.active && machine.is_online
+    ? serverUtcMs(machine.last_seen) + AGENT_PING_INTERVAL_MS
     : null;
   const overdueMs = nextPingMs === null ? -1 : now + serverSkewMs - nextPingMs;
   const fastPoll = overdueMs >= 0 && overdueMs < OVERDUE_FAST_POLL_MS;
@@ -107,9 +103,9 @@ export default function ClientDetail() {
     let cancelled = false;
     const t = setInterval(async () => {
       try {
-        const c = await fetchClient(id);
+        const c = await fetchMachine(id);
         if (cancelled) return;
-        setClient(c);
+        setMachine(c);
         if (c.current_server_time) setServerSkewMs(new Date(c.current_server_time).getTime() - Date.now());
       } catch { /* próxima tentativa em 1s */ }
     }, 1000);
@@ -120,10 +116,10 @@ export default function ClientDetail() {
   const otherEquipamentos = equipamentos.filter(e => e.tipo !== "CAMERA");
 
   const { fileInputRef, importFile, deleteAll } = useCameraImport({
-    clientId: id, cameras, setBusy: setLoading, reload: load, toast,
+    machineId: id, cameras, setBusy: setLoading, reload: load, toast,
   });
   const { isTesting, testResults, hasImages, testAll, downloadImages } = useRtspTest({
-    clientId: id, equipamentos, clientName: client?.name, toast,
+    machineId: id, equipamentos, machineName: machine?.name, toast,
   });
 
   const openEqModal = (form: EqForm, eqId: string | null) => {
@@ -171,15 +167,13 @@ export default function ClientDetail() {
     } catch { toast("Erro ao remover equipamento.", "error"); }
   };
 
-  const openEditClient = () => {
-    if (!client) return;
+  const openEditMachine = () => {
+    if (!machine) return;
     setEditForm({
-      name: client.name,
-      backup_hour: client.backup_hour,
-      backup_minute: client.backup_minute,
-      group_id: client.group_id || "",
-      queue_order: client.queue_order ?? 0,
-      email_to: (client.email_to || []).join(", "),
+      name: machine.name,
+      backup_hour: machine.backup_hour,
+      backup_minute: machine.backup_minute,
+      email_to: (machine.email_to || []).join(", "),
       zip_password: "",
     });
     setShowEditModal(true);
@@ -188,30 +182,30 @@ export default function ClientDetail() {
   const handleEditSave = async () => {
     setSaving(true);
     try {
-      // Só os campos editáveis; group_id apenas quando houver grupo selecionado
-      // (o backend rejeita group_id vazio com 422).
+      // Só os campos editáveis. Cliente e posição na fila mudam na tela do Cliente;
+      // com cliente, o horário vem dele e não é enviado.
       const payload: Record<string, unknown> = {
         name: editForm.name,
-        backup_hour: editForm.backup_hour,
-        backup_minute: editForm.backup_minute,
         email_to: parseEmails(editForm.email_to),
         zip_password: editForm.zip_password || undefined,
-        queue_order: editForm.queue_order,
       };
-      if (editForm.group_id) payload.group_id = editForm.group_id;
-      await updateClient(id!, payload);
-      toast("Cliente atualizado!", "success");
+      if (!machine?.schedule_from_customer) {
+        payload.backup_hour = editForm.backup_hour;
+        payload.backup_minute = editForm.backup_minute;
+      }
+      await updateMachine(id!, payload);
+      toast("Máquina atualizada!", "success");
       setShowEditModal(false);
       load();
-    } catch { toast("Erro ao salvar.", "error"); }
+    } catch (e) { toast(apiErrorMessage(e, "Erro ao salvar a máquina."), "error"); }
     finally { setSaving(false); }
   };
 
   const handleRotateKey = async () => {
     if (!confirm("Gerar nova API Key? A chave atual será invalidada.")) return;
     try {
-      const data = await rotateKey(id!);
-      setRotatedKey(data.api_key);
+      const data = await rotateMachineKey(id!);
+      setRotatedKey(data.api_key || null);
       load();
     } catch { toast("Erro ao gerar nova API Key.", "error"); }
   };
@@ -219,7 +213,7 @@ export default function ClientDetail() {
   const handleRestartAgent = async () => {
     if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (em poucos segundos se estiver online).")) return;
     try {
-      await restartAgent(id!);
+      await restartMachineAgent(id!);
       toast("Reinício agendado! O agente será reiniciado no próximo ping.", "success");
     } catch { toast("Erro ao solicitar reinício.", "error"); }
   };
@@ -227,13 +221,13 @@ export default function ClientDetail() {
   const handleTriggerBackup = async () => {
     if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (em poucos segundos se estiver online).")) return;
     try {
-      await triggerBackup(id!);
+      await triggerMachineBackup(id!);
       toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
     } catch { toast("Erro ao solicitar backup.", "error"); }
   };
 
   // is_online calculado no servidor — elimina bugs de fuso horário no navegador
-  const isAgentOnline = !!(client && client.active && client.is_online);
+  const isAgentOnline = !!(machine && machine.active && machine.is_online);
 
   const copyText = (t: string) => {
     navigator.clipboard.writeText(t).then(
@@ -243,10 +237,9 @@ export default function ClientDetail() {
   };
 
   if (loading) return <div className="loading-state"><div className="spinner" /></div>;
-  if (!client) return <div className="empty-state">Cliente não encontrado.</div>;
+  if (!machine) return <div className="empty-state">Máquina não encontrada.</div>;
 
   let nextPingStr = "—";
-  const isPendingAction = client.backup_requested || client.restart_requested;
   if (nextPingMs !== null) {
     if (overdueMs >= 0) {
       nextPingStr = "aguardando…";
@@ -258,51 +251,14 @@ export default function ClientDetail() {
 
   return (
     <>
-      {/* ── Header ── */}
-      <div className="page-header">
-        <div className="flex items-center gap-3">
-          <button className="btn-icon" onClick={() => navigate("/clients")} title="Voltar">
-            <ArrowLeft size={16} />
-          </button>
-          <div>
-            <h1 className="page-title">{client.name}</h1>
-            <p className="page-subtitle flex items-center gap-2">
-              <StatusBadge status={client.last_backup_status} />
-              {client.last_backup_at && `Último backup: ${fmtDate(client.last_backup_at)}`}
-            </p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={openEditClient}>
-            <Edit2 size={15} /> Editar
-          </button>
-          <button className="btn btn-secondary" onClick={handleRotateKey}>
-            <RefreshCw size={15} /> Rodar API Key
-          </button>
-          <button className="btn btn-secondary" onClick={handleTriggerBackup}
-            title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
-            <CloudLightning size={15} /> Gerar Backup
-          </button>
-          <button className="btn btn-secondary" onClick={handleRestartAgent}
-            title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
-            <RotateCcw size={15} /> Reiniciar Agent
-          </button>
-        </div>
-      </div>
-
-      {/* ── Banner de Comando Pendente ── */}
-      {isPendingAction && (
-        <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 6, padding: "12px 16px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ color: "#f59e0b", display: "flex" }}><Clock size={18} /></div>
-          <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
-            <strong>Comando na fila!</strong> O {client.backup_requested ? "backup manual" : "reinício"} começará no próximo contato do agente
-            {isAgentOnline && <span style={{ fontWeight: 600, color: "#f59e0b", marginLeft: 6 }}>({nextPingStr})</span>}.
-          </div>
-        </div>
-      )}
+      <MachineHeader
+        machine={machine} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr}
+        onBack={() => navigate("/maquinas")} onEdit={openEditMachine} onRotateKey={handleRotateKey}
+        onTriggerBackup={handleTriggerBackup} onRestartAgent={handleRestartAgent}
+      />
 
       {/* ── Layout de três colunas ── */}
-      <ClientInfoCards client={client} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} />
+      <MachineInfoCards machine={machine} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} />
 
       {/* ── Equipamentos ── */}
       <div style={{ marginBottom: 24 }}>
@@ -373,10 +329,11 @@ export default function ClientDetail() {
         />
       )}
 
-      {/* ── Modal: Editar Cliente ── */}
+      {/* ── Modal: Editar Máquina ── */}
       {showEditModal && (
-        <EditClientModal
-          form={editForm} setForm={setEditForm} groups={groups}
+        <EditMachineModal
+          form={editForm} setForm={setEditForm}
+          customerName={machine.schedule_from_customer ? (machine.customer_name || "vinculado") : null}
           saving={saving} onSave={handleEditSave} onClose={() => setShowEditModal(false)}
         />
       )}
@@ -391,7 +348,7 @@ export default function ClientDetail() {
         <RecordingModal
           nvrName={showRecordingModal.nvrName}
           cameras={showRecordingModal.cameras}
-          lastBackupAt={client.last_backup_at}
+          lastBackupAt={machine.last_backup_at}
           onClose={() => setShowRecordingModal({ show: false, nvrName: "", cameras: [] })}
         />
       )}
@@ -399,7 +356,7 @@ export default function ClientDetail() {
       {/* ── NVR Cameras Gallery Modal ── */}
       {showNVRCamerasModal.show && (
         <NVRCamerasGalleryModal
-          clientId={id!}
+          machineId={id!}
           nvrId={showNVRCamerasModal.nvrId}
           nvrName={showNVRCamerasModal.nvrName}
           onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "" })}

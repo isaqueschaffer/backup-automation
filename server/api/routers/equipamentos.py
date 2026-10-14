@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from auth import verify_admin_token
 from database import get_db
-from models import Client, NVR, NVRCamera
+from models import Machine, NVR, NVRCamera
 from routers.agent import pending_rtsp_tasks
 from schemas import (
     NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse,
@@ -20,25 +20,25 @@ from schemas import (
 )
 from services.crypto_service import encrypt, decrypt
 
-router = APIRouter(prefix="/api/v1/machines/{client_id}/equipamentos", tags=["Equipamentos"])
+router = APIRouter(prefix="/api/v1/machines/{machine_id}/equipamentos", tags=["Equipamentos"])
 
 
-def _get_client_or_404(client_id: UUID, db: Session) -> Client:
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client:
+def _get_machine_or_404(machine_id: UUID, db: Session) -> Machine:
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
         raise HTTPException(status_code=404, detail="Máquina não encontrada")
-    return client
+    return machine
 
 
 @router.get("", response_model=List[NVRResponse], dependencies=[Depends(verify_admin_token)])
 def list_equipamentos(
-    client_id: UUID,
+    machine_id: UUID,
     tipo: Optional[str] = Query(None, description="Filtrar por tipo: NVR, OLT, ONU, PABX"),
     db: Session = Depends(get_db),
 ):
     """Lista todos os equipamentos de uma máquina, com filtro opcional por tipo."""
-    _get_client_or_404(client_id, db)
-    q = db.query(NVR).filter(NVR.client_id == client_id)
+    _get_machine_or_404(machine_id, db)
+    q = db.query(NVR).filter(NVR.machine_id == machine_id)
     if tipo:
         if tipo.upper() not in TIPOS_EQUIPAMENTO:
             raise HTTPException(
@@ -55,9 +55,9 @@ def list_equipamentos(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(verify_admin_token)],
 )
-def create_equipamento(client_id: UUID, body: NVRCreate, db: Session = Depends(get_db)):
-    """Cadastra um novo equipamento para um cliente."""
-    _get_client_or_404(client_id, db)
+def create_equipamento(machine_id: UUID, body: NVRCreate, db: Session = Depends(get_db)):
+    """Cadastra um novo equipamento para uma máquina."""
+    _get_machine_or_404(machine_id, db)
 
     tipo = (body.tipo or "NVR").upper()
     if tipo not in TIPOS_EQUIPAMENTO:
@@ -67,7 +67,7 @@ def create_equipamento(client_id: UUID, body: NVRCreate, db: Session = Depends(g
         )
 
     equipamento = NVR(
-        client_id=client_id,
+        machine_id=machine_id,
         tipo=tipo,
         name=body.name,
         ip=body.ip,
@@ -88,13 +88,13 @@ def create_equipamento(client_id: UUID, body: NVRCreate, db: Session = Depends(g
     dependencies=[Depends(verify_admin_token)],
 )
 def update_equipamento(
-    client_id: UUID,
+    machine_id: UUID,
     equipamento_id: UUID,
     body: NVRUpdate,
     db: Session = Depends(get_db),
 ):
     """Atualiza um equipamento existente."""
-    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.client_id == client_id).first()
+    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
 
@@ -121,9 +121,9 @@ def update_equipamento(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(verify_admin_token)],
 )
-def delete_equipamento(client_id: UUID, equipamento_id: UUID, db: Session = Depends(get_db)):
+def delete_equipamento(machine_id: UUID, equipamento_id: UUID, db: Session = Depends(get_db)):
     """Remove um equipamento."""
-    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.client_id == client_id).first()
+    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
     db.delete(eq)
@@ -135,17 +135,17 @@ def delete_equipamento(client_id: UUID, equipamento_id: UUID, db: Session = Depe
     response_model=RTSPTestResponse,
     dependencies=[Depends(verify_admin_token)],
 )
-async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Optional[int] = Query(None), db: Session = Depends(get_db)):
+async def test_equipamento_rtsp(machine_id: UUID, equipamento_id: UUID, canal: Optional[int] = Query(None), db: Session = Depends(get_db)):
     """Testa a conexao RTSP delegando a tarefa ao agente local via long-polling."""
-    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.client_id == client_id).first()
+    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
     
-    client_id_str = str(client_id)
+    machine_id_str = str(machine_id)
 
-    # Só 1 teste RTSP por máquina por vez (o dicionário é indexado pelo cliente).
+    # Só 1 teste RTSP por máquina por vez (o dicionário é indexado pela máquina).
     # LIMITAÇÃO: o estado fica na memória do processo; requer 1 worker uvicorn.
-    if client_id_str in pending_rtsp_tasks:
+    if machine_id_str in pending_rtsp_tasks:
         raise HTTPException(
             status_code=409,
             detail="Já existe um teste RTSP em andamento para esta máquina. Aguarde a conclusão e tente novamente.",
@@ -180,7 +180,7 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Op
         "result": None,
         "sent": False
     }
-    pending_rtsp_tasks[client_id_str] = entry
+    pending_rtsp_tasks[machine_id_str] = entry
 
     try:
         # Aguarda até 35s a resposta do agente (o dashboard espera ~30s)
@@ -189,8 +189,8 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Op
         return RTSPTestResponse(success=False, error_message="FALHA: O Agente local não respondeu ao comando de teste a tempo. Verifique se o agente está online.")
     finally:
         # Sempre remove a tarefa (timeout, cancelamento ou sucesso); pop evita KeyError
-        if pending_rtsp_tasks.get(client_id_str) is entry:
-            pending_rtsp_tasks.pop(client_id_str, None)
+        if pending_rtsp_tasks.get(machine_id_str) is entry:
+            pending_rtsp_tasks.pop(machine_id_str, None)
 
     result = entry.get("result")
     if not result:
@@ -203,13 +203,13 @@ async def test_equipamento_rtsp(client_id: UUID, equipamento_id: UUID, canal: Op
 
 @router.get("/{id}/cameras", response_model=List[NVRCameraResponse])
 def get_nvr_cameras(
-    client_id: UUID,
+    machine_id: UUID,
     id: UUID,
     db: Session = Depends(get_db),
     admin: dict = Depends(verify_admin_token)
 ):
     """Retorna todas as câmeras de um NVR específico (com suas imagens)."""
-    nvr = db.query(NVR).filter(NVR.id == id, NVR.client_id == client_id).first()
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="NVR não encontrado")
     
@@ -272,14 +272,14 @@ def get_nvr_cameras(
 
 @router.post("/{id}/cameras/perfect-image", response_model=NVRCameraResponse)
 def set_perfect_image(
-    client_id: UUID,
+    machine_id: UUID,
     id: UUID,
     payload: NVRCameraSetPerfect,
     db: Session = Depends(get_db),
     admin: dict = Depends(verify_admin_token)
 ):
     """Salva a 'Imagem Perfeita' de um canal específico."""
-    nvr = db.query(NVR).filter(NVR.id == id, NVR.client_id == client_id).first()
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="NVR não encontrado")
 

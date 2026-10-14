@@ -21,7 +21,7 @@ export interface EquipamentoConfig {
   [key: string]: unknown;
 }
 
-// Estado do formulário de equipamento (ClientDetail)
+// Estado do formulário de equipamento (MachineDetail)
 export interface EqForm {
   tipo: TipoEquipamento;
   name: string;
@@ -69,7 +69,7 @@ export interface AgentVersion {
 
 export interface NVR {
   id: string;
-  client_id: string;
+  machine_id?: string;
   tipo: TipoEquipamento;
   name: string;
   ip: string;
@@ -82,7 +82,8 @@ export interface NVR {
 // Alias semântico
 export type Equipamento = NVR;
 
-export interface Client {
+// Máquina: computador com o agente instalado (pertence a no máximo 1 Cliente)
+export interface Machine {
   id: string;
   name: string;
   api_key_prefix: string;
@@ -103,9 +104,11 @@ export interface Client {
   // Campos calculados no servidor (fonte única da verdade para status online)
   is_online?: boolean;
   current_server_time?: string;
-  group_id?: string | null;
-  group_name?: string | null;
   queue_order?: number;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  // true quando a máquina tem cliente: o horário vem do cliente
+  schedule_from_customer?: boolean;
 }
 
 export interface NVRResult {
@@ -117,8 +120,10 @@ export interface NVRResult {
 
 export interface Backup {
   id: string;
-  client_id?: string;
-  client_name: string | null;
+  machine_id?: string;
+  machine_name: string | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
   started_at: string | null;
   finished_at: string | null;
   status: string;
@@ -138,8 +143,9 @@ export interface PaginatedBackups {
 }
 
 export interface Stats {
-  total_clients: number;
-  active_clients: number;
+  machines_total: number;
+  machines_active: number;
+  customers_total: number;
   backups_today: number;
   backups_ok: number;
   backups_error: number;
@@ -152,7 +158,8 @@ export interface Settings {
   retention_days: string | null;
 }
 
-export interface ClientGroup {
+// Cliente: a empresa atendida (Cliente → Máquinas → Equipamentos)
+export interface Customer {
   id: string;
   name: string;
   description: string | null;
@@ -160,11 +167,12 @@ export interface ClientGroup {
   backup_hour: number;
   backup_minute: number;
   created_at: string;
-  agents_total: number;
-  agents_online: number;
+  machines_total: number;
+  machines_online: number;
   health: "ALL_OK" | "PARTIAL" | "ALL_ERROR" | "NO_DATA";
   last_backup_at: string | null;
   queue_active: boolean;
-  clients: Client[];
+  queue_current_index?: number | null;
+  machines: Machine[]; // ordenadas por queue_order
 }
 

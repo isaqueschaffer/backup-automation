@@ -11,9 +11,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from auth import get_current_client, verify_admin_token
+from auth import get_current_machine, verify_admin_token
 from database import get_db
-from models import AgentVersion, Client
+from models import AgentVersion, Machine
 from schemas import AgentVersionCreate, AgentVersionResponse, UpdateCheckResponse, AgentVersionUpdate
 
 # ── Router para o agente (autenticado por X-Client-ID + X-API-Key) ──────────
@@ -26,7 +26,7 @@ admin_router = APIRouter(prefix="/api/v1/admin", tags=["admin-update"])
 @agent_router.get("/update-check", response_model=UpdateCheckResponse)
 def check_for_update(
     current_version: str = "0.0.0",
-    client: Client = Depends(get_current_client),
+    machine: Machine = Depends(get_current_machine),
     db: Session = Depends(get_db),
 ):
     """

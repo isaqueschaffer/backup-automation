@@ -15,6 +15,11 @@ export function fmtDate(s: string | null | undefined, opts: FmtDateOpts = {}): s
     : d.toLocaleString("pt-BR");
 }
 
+// Horário diário de backup (HH:MM)
+export function fmtSchedule(hour: number, minute: number): string {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 // Data local no formato YYYY-MM-DD (para <input type="date">), sem converter para UTC.
 export function localDateStr(d: Date = new Date()): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");

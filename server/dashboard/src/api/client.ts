@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { ClientGroup } from "./types";
+import { Customer, Machine, PaginatedBackups } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -36,39 +36,50 @@ export const login = (password: string) =>
 // ── Stats ─────────────────────────────────────────────────────
 export const fetchStats = () => api.get("/stats").then((r) => r.data);
 
-// ── Machines (Máquinas / Agentes) ───────────────────────────
-export const fetchClients = () => api.get("/machines").then((r) => r.data);
-export const fetchClient = (id: string) => api.get(`/machines/${id}`).then((r) => r.data);
-export const createClient = (data: Record<string, unknown>) =>
+// ── Máquinas (computadores com o agente) ──────────────────────
+export const fetchMachines = (params?: { customer_id?: string; unassigned?: boolean }): Promise<Machine[]> =>
+  api.get("/machines", { params }).then((r) => r.data);
+export const fetchMachine = (id: string): Promise<Machine> =>
+  api.get(`/machines/${id}`).then((r) => r.data);
+export const createMachine = (data: Record<string, unknown>): Promise<Machine> =>
   api.post("/machines", data).then((r) => r.data);
-export const updateClient = (id: string, data: Record<string, unknown>) =>
+export const updateMachine = (id: string, data: Record<string, unknown>): Promise<Machine> =>
   api.put(`/machines/${id}`, data).then((r) => r.data);
-export const deleteClient = (id: string) => api.delete(`/machines/${id}`);
-export const rotateKey = (id: string) =>
+export const deleteMachine = (id: string) => api.delete(`/machines/${id}`);
+export const rotateMachineKey = (id: string): Promise<Machine> =>
   api.post(`/machines/${id}/rotate-key`).then((r) => r.data);
-export const restartAgent = (id: string) =>
+export const restartMachineAgent = (id: string) =>
   api.post(`/machines/${id}/restart-agent`).then((r) => r.data);
-export const triggerBackup = (id: string) =>
+export const triggerMachineBackup = (id: string) =>
   api.post(`/machines/${id}/trigger-backup`).then((r) => r.data);
 export const triggerBackupAll = () =>
   api.post("/machines/trigger-backup-all").then((r) => r.data);
 export const restartAgentAll = () =>
   api.post("/machines/restart-agent-all").then((r) => r.data);
-export const fetchClientLogs = (id: string) =>
+export const fetchMachineLogs = (id: string) =>
   api.get(`/machines/${id}/logs`).then((r) => r.data);
 
 // ── Equipamentos ──────────────────────────────────────────────
-export const fetchEquipamentos = (clientId: string) =>
-  api.get(`/machines/${clientId}/equipamentos`).then((r) => r.data);
-export const createEquipamento = (clientId: string, data: Record<string, unknown>) =>
-  api.post(`/machines/${clientId}/equipamentos`, data).then((r) => r.data);
-export const updateEquipamento = (clientId: string, eqId: string, data: Record<string, unknown>) =>
-  api.put(`/machines/${clientId}/equipamentos/${eqId}`, data).then((r) => r.data);
-export const deleteEquipamento = (clientId: string, eqId: string) =>
-  api.delete(`/machines/${clientId}/equipamentos/${eqId}`);
+export const fetchEquipamentos = (machineId: string) =>
+  api.get(`/machines/${machineId}/equipamentos`).then((r) => r.data);
+export const createEquipamento = (machineId: string, data: Record<string, unknown>) =>
+  api.post(`/machines/${machineId}/equipamentos`, data).then((r) => r.data);
+export const updateEquipamento = (machineId: string, eqId: string, data: Record<string, unknown>) =>
+  api.put(`/machines/${machineId}/equipamentos/${eqId}`, data).then((r) => r.data);
+export const deleteEquipamento = (machineId: string, eqId: string) =>
+  api.delete(`/machines/${machineId}/equipamentos/${eqId}`);
 
 // ── Backups ───────────────────────────────────────────────────
-export const fetchBackups = (params?: Record<string, unknown>) =>
+export interface BackupQuery {
+  page?: number;
+  size?: number;
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  machine_id?: string;
+  customer_id?: string;
+}
+export const fetchBackups = (params?: BackupQuery): Promise<PaginatedBackups> =>
   api.get("/backups", { params }).then((r) => r.data);
 export const downloadBackupZip = (backupId: string) =>
   api.get(`/backups/${backupId}/download`, { responseType: 'blob' }).then((r) => r.data);
@@ -91,48 +102,60 @@ export const deleteAgentVersion = (id: string) =>
 export const editAgentVersion = (id: string, data: Record<string, string>) =>
   api.put(`/admin/agent-version/${id}`, data).then((r) => r.data);
 
-// ── Clientes (antigos Groups / Unidades) ──────────────────────
-export const fetchGroups = (): Promise<ClientGroup[]> =>
+// ── Clientes (empresas atendidas; cada um agrupa Máquinas) ────
+export const fetchCustomers = (): Promise<Customer[]> =>
   api.get("/clients").then((r) => r.data);
 
-export const fetchGroup = (id: string): Promise<ClientGroup> =>
+export const fetchCustomer = (id: string): Promise<Customer> =>
   api.get(`/clients/${id}`).then((r) => r.data);
 
-export const createGroup = (data: {
+export const createCustomer = (data: {
   name: string;
   description?: string;
   backup_hour: number;
   backup_minute: number;
   active: boolean;
-}): Promise<ClientGroup> => api.post("/clients", data).then((r) => r.data);
+}): Promise<Customer> => api.post("/clients", data).then((r) => r.data);
 
-export const updateGroup = (
+export const updateCustomer = (
   id: string,
   data: Partial<{
     name: string;
-    description: string;
+    description: string | null;
     backup_hour: number;
     backup_minute: number;
     active: boolean;
   }>
-): Promise<ClientGroup> => api.put(`/clients/${id}`, data).then((r) => r.data);
+): Promise<Customer> => api.put(`/clients/${id}`, data).then((r) => r.data);
 
-export const deleteGroup = (id: string): Promise<void> =>
+export const deleteCustomer = (id: string): Promise<void> =>
   api.delete(`/clients/${id}`).then((r) => r.data);
 
-export const triggerGroupBackup = (id: string): Promise<void> =>
+export const triggerCustomerBackup = (id: string): Promise<void> =>
   api.post(`/clients/${id}/trigger-backup`).then((r) => r.data);
 
-export const cancelGroupQueue = (id: string): Promise<void> =>
+export const cancelCustomerQueue = (id: string): Promise<void> =>
   api.post(`/clients/${id}/cancel-queue`).then((r) => r.data);
 
-export const downloadGroupZip = async (id: string, groupName: string): Promise<void> => {
+// Vincula a máquina ao cliente (entra no fim da fila e herda o horário)
+export const attachMachine = (customerId: string, machineId: string): Promise<Customer> =>
+  api.post(`/clients/${customerId}/machines/${machineId}`).then((r) => r.data);
+
+// Desvincula a máquina do cliente (ela mantém o horário atual)
+export const detachMachine = (customerId: string, machineId: string): Promise<Customer> =>
+  api.delete(`/clients/${customerId}/machines/${machineId}`).then((r) => r.data);
+
+// Grava a ordem da fila: machineIds precisa conter exatamente as máquinas do cliente
+export const reorderCustomerQueue = (customerId: string, machineIds: string[]): Promise<Customer> =>
+  api.put(`/clients/${customerId}/queue-order`, { machine_ids: machineIds }).then((r) => r.data);
+
+export const downloadCustomerZip = async (id: string, customerName: string): Promise<void> => {
   const res = await api.get(`/clients/${id}/download-latest`, { responseType: "blob" });
   const blob = new Blob([res.data], { type: "application/zip" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   const date = new Date().toLocaleDateString("pt-BR").replace(/\//g, "-");
-  a.download = `cliente_${groupName.replace(/ /g, "_")}_${date}.zip`;
+  a.download = `cliente_${customerName.replace(/ /g, "_")}_${date}.zip`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

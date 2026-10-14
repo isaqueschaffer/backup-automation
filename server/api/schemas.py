@@ -36,18 +36,11 @@ class NVRUpdate(BaseModel):
 
 class NVRResponse(NVRBase):
     id: UUID
-    client_id: UUID
+    machine_id: UUID
     last_recording_status: Optional[Any] = None
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
-
-
-# Alias para nomenclatura de equipamentos
-EquipamentoBase = NVRBase
-EquipamentoCreate = NVRCreate
-EquipamentoUpdate = NVRUpdate
-EquipamentoResponse = NVRResponse
 
 
 # ─────────────────────────────────────────────
@@ -84,9 +77,9 @@ class NVRCameraNightImage(BaseModel):
 
 
 # ─────────────────────────────────────────────
-# Client
+# Máquina (computador com o agente instalado)
 # ─────────────────────────────────────────────
-class ClientBase(BaseModel):
+class MachineBase(BaseModel):
     name: str
     backup_hour: int = Field(2, ge=0, le=23)
     backup_minute: int = Field(0, ge=0, le=59)
@@ -94,22 +87,23 @@ class ClientBase(BaseModel):
     active: bool = True
 
 
-class ClientCreate(ClientBase):
+class MachineCreate(MachineBase):
     zip_password: Optional[str] = None
+    # Opcional: vincula ao Cliente (fim da fila) e herda o horário dele
+    customer_id: Optional[UUID] = None
 
 
-class ClientUpdate(BaseModel):
+class MachineUpdate(BaseModel):
+    # Vínculo com Cliente e ordem na fila só pelas rotas /api/v1/clients/{id}/...
     name: Optional[str] = None
     backup_hour: Optional[int] = Field(None, ge=0, le=23)
     backup_minute: Optional[int] = Field(None, ge=0, le=59)
     email_to: Optional[List[str]] = None
     active: Optional[bool] = None
     zip_password: Optional[str] = None
-    group_id: Optional[UUID] = None
-    queue_order: Optional[int] = None
 
 
-class ClientResponse(ClientBase):
+class MachineResponse(MachineBase):
     # Sem limites na saída: registros antigos fora da faixa não podem derrubar a listagem (500)
     backup_hour: int
     backup_minute: int
@@ -126,14 +120,16 @@ class ClientResponse(ClientBase):
     # Calculado no servidor — nunca depende do relógio do navegador
     is_online: bool = False
     current_server_time: Optional[datetime] = None
-    group_id: Optional[UUID] = None
-    group_name: Optional[str] = None
+    customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
+    # True quando o horário vem do Cliente (máquina vinculada)
+    schedule_from_customer: bool = False
     queue_order: int = 0
 
     model_config = {"from_attributes": True}
 
 
-class ClientWithKey(ClientResponse):
+class MachineWithKey(MachineResponse):
     """Returned only on creation — contains the raw API key."""
     api_key: str
 
@@ -162,8 +158,11 @@ class BackupReportResponse(BaseModel):
 
 class BackupResponse(BaseModel):
     id: UUID
-    client_id: UUID
-    client_name: Optional[str] = None
+    machine_id: UUID
+    machine_name: Optional[str] = None
+    # Cliente da máquina hoje (não histórico)
+    customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     status: str
@@ -252,8 +251,9 @@ class SettingsResponse(BaseModel):
 # Stats (overview dashboard)
 # ─────────────────────────────────────────────
 class StatsResponse(BaseModel):
-    total_clients: int
-    active_clients: int
+    machines_total: int
+    machines_active: int
+    customers_total: int
     backups_today: int
     backups_ok: int
     backups_error: int
@@ -264,7 +264,7 @@ class StatsResponse(BaseModel):
 # ─────────────────────────────────────────────
 class AgentLogResponse(BaseModel):
     id: UUID
-    client_id: UUID
+    machine_id: UUID
     event_type: str
     message: str
     created_at: datetime
@@ -385,9 +385,9 @@ class UpdateCheckResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────
-# Clientes (antigas Unidades)
+# Cliente (empresa atendida; agrupa Máquinas)
 # ─────────────────────────────────────────────
-class ClientGroupBase(BaseModel):
+class CustomerBase(BaseModel):
     name: str
     description: Optional[str] = None
     active: bool = True
@@ -395,46 +395,39 @@ class ClientGroupBase(BaseModel):
     backup_minute: int = Field(0, ge=0, le=59)
 
 
-class ClientGroupCreate(ClientGroupBase):
+class CustomerCreate(CustomerBase):
     pass
 
 
-class ClientGroupUpdate(BaseModel):
+class CustomerUpdate(BaseModel):
     name: Optional[str] = None
+    # Enviar "" ou null limpa a descrição (detectado via model_fields_set)
     description: Optional[str] = None
     active: Optional[bool] = None
     backup_hour: Optional[int] = Field(None, ge=0, le=23)
     backup_minute: Optional[int] = Field(None, ge=0, le=59)
 
 
-class ClientGroupResponse(ClientGroupBase):
+class CustomerResponse(CustomerBase):
     # Sem limites na saída: registros antigos fora da faixa não podem derrubar a listagem (500)
     backup_hour: int
     backup_minute: int
     id: UUID
     created_at: datetime
-    agents_total: int = 0
-    agents_online: int = 0
+    machines_total: int = 0
+    machines_online: int = 0
     health: str = "NO_DATA"  # ALL_OK | PARTIAL | ALL_ERROR | NO_DATA
     last_backup_at: Optional[datetime] = None
     queue_active: bool = False
-    clients: List["ClientResponse"] = []
+    queue_current_index: Optional[int] = None
+    machines: List[MachineResponse] = []  # ordenadas por queue_order
 
     model_config = {"from_attributes": True}
 
 
-# Aliases semânticos para a API
-ClienteBase = ClientGroupBase
-ClienteCreate = ClientGroupCreate
-ClienteUpdate = ClientGroupUpdate
-ClienteResponse = ClientGroupResponse
-
-MachineBase = ClientBase
-MachineCreate = ClientCreate
-MachineUpdate = ClientUpdate
-MachineResponse = ClientResponse
-MachineWithKey = ClientWithKey
-
+class CustomerQueueOrder(BaseModel):
+    """Nova ordem da fila: precisa conter exatamente as máquinas do Cliente."""
+    machine_ids: List[UUID]
 
 
 # ─────────────────────────────────────────────

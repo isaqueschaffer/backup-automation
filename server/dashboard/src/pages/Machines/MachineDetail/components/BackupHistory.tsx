@@ -1,7 +1,7 @@
 import { Archive, ChevronRight } from "lucide-react";
-import { Backup } from "../../../api/types";
-import StatusBadge from "../../../components/StatusBadge";
-import { fmtDate } from "../../../utils/date";
+import { Backup } from "../../../../api/types";
+import StatusBadge from "../../../../components/StatusBadge";
+import { fmtDate } from "../../../../utils/date";
 
 export default function BackupHistory({ backups }: { backups: Backup[] }) {
   return (
