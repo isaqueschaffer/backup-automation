@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { fetchBackups, fetchClients } from "../api/client";
+import { fetchBackups, fetchClients, resendBackupEmail } from "../api/client";
 import api from "../api/client";
 import { Backup, Client, PaginatedBackups } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
@@ -168,6 +168,7 @@ export default function Backups() {
   const [dateTo, setDateTo] = useState(today);
   
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [resendingEmailId, setResendingEmailId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -204,6 +205,21 @@ export default function Backups() {
       alert(msg);
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  const handleResendEmail = async (backupId: string) => {
+    try {
+      setResendingEmailId(backupId);
+      await resendBackupEmail(backupId);
+      alert("E-mail reenviado com sucesso!");
+      load();
+    } catch (err: unknown) {
+      console.error("Erro ao reenviar e-mail:", err);
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      alert(axiosErr?.response?.data?.detail || "Falha ao reenviar e-mail. Verifique as configurações de SMTP.");
+    } finally {
+      setResendingEmailId(null);
     }
   };
 
@@ -288,7 +304,25 @@ export default function Backups() {
                       <EquipamentosCell results={b.nvr_results} />
                     </td>
                     <td className="text-secondary text-sm">{fmtSize(b.zip_size)}</td>
-                    <td>{b.email_sent ? "✅" : "—"}</td>
+                    <td>
+                      {b.email_sent ? (
+                        <span title="E-mail enviado com sucesso">✅</span>
+                      ) : (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: "2px 6px", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4 }}
+                          onClick={() => handleResendEmail(b.id)}
+                          disabled={resendingEmailId === b.id}
+                          title="Tentar reenviar e-mail de relatório"
+                        >
+                          {resendingEmailId === b.id ? (
+                            <span className="spinner spinner-sm" style={{ width: 10, height: 10, borderWidth: 2 }} />
+                          ) : (
+                            "✉️ Reenviar"
+                          )}
+                        </button>
+                      )}
+                    </td>
                     <td className="text-secondary text-sm">{b.trigger}</td>
                     <td>
                       {b.zip_filename && (

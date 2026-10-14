@@ -3,7 +3,7 @@ from uuid import UUID
 from datetime import date
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, cast, Date
@@ -116,4 +116,60 @@ def public_download_backup_zip(backup_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Arquivo ZIP nao encontrado no servidor.")
 
     return FileResponse(path=str(path), filename=b.zip_filename, media_type="application/zip")
+
+
+@router.post("/{backup_id}/resend-email", dependencies=[Depends(verify_admin_token)])
+def resend_backup_email(backup_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """Reenvia o relatório de e-mail de um backup já existente."""
+    b = db.query(Backup).options(joinedload(Backup.client)).filter(Backup.id == backup_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Backup não encontrado")
+    if not b.client:
+        raise HTTPException(status_code=400, detail="Cliente associado ao backup não encontrado")
+
+    date_str = (b.started_at or b.created_at).strftime("%d-%m-%Y")
+    zip_path = None
+    if b.zip_filename:
+        zip_path = get_zip_path(b.client_id, b.client.name, b.zip_filename, date_str=date_str)
+
+    from services.email_service import send_backup_report
+    from config import settings
+    from models import AgentLog
+
+    nvr_results = b.nvr_results or []
+    email_sent = send_backup_report(
+        client_name=b.client.name,
+        date_str=date_str,
+        nvr_results=nvr_results,
+        recipients=b.client.email_to or [],
+        db=db,
+        zip_path=zip_path,
+        backup_id=str(b.id),
+        base_url=str(request.base_url),
+        public_url=settings.PUBLIC_URL,
+    )
+
+    b.email_sent = email_sent or b.email_sent
+
+    if email_sent:
+        recipients_str = ", ".join(b.client.email_to) if b.client.email_to else "destinatários configurados"
+        db.add(AgentLog(
+            client_id=b.client.id,
+            event_type="email_sent",
+            message=f"Reenvio de e-mail de relatório realizado com sucesso para: {recipients_str}."
+        ))
+    else:
+        recipients_str = ", ".join(b.client.email_to) if b.client.email_to else "nenhum destinatário cadastrado"
+        db.add(AgentLog(
+            client_id=b.client.id,
+            event_type="email_error",
+            message=f"Falha no reenvio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
+        ))
+
+    db.commit()
+
+    if not email_sent:
+        raise HTTPException(status_code=500, detail="Falha ao reenviar e-mail. Verifique os logs e configurações SMTP.")
+
+    return {"status": "ok", "message": "E-mail reenviado com sucesso!"}
 

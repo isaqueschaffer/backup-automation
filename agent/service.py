@@ -72,6 +72,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.hWaitStop = win32event.CreateEvent(None, 1, 0, None)
         self.hPingResp = win32event.CreateEvent(None, 0, 0, None)
         self.ping_responses = queue.Queue()
+        self.last_backup_finished_at = 0.0
 
         sec_desc = win32security.SECURITY_DESCRIPTOR()
         sec_desc.SetSecurityDescriptorDacl(1, None, 0)
@@ -241,6 +242,20 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             if ping_resp.get("backup"):
                 log("Geracao de backup manual solicitada pelo dashboard!")
                 self._executar_backup(agent_mod, "manual_dashboard")
+                # Drena quaisquer pings repetidos com comando de backup que acumularam na fila durante a execução
+                backup_drained = 0
+                while not self.ping_responses.empty():
+                    try:
+                        discarded = self.ping_responses.get_nowait()
+                        if discarded.get("restart"):
+                            self._restart_service()
+                            return True
+                        if discarded.get("backup"):
+                            backup_drained += 1
+                    except queue.Empty:
+                        break
+                if backup_drained > 0:
+                    log(f"Descartadas {backup_drained} instrucoes repetidas de backup acumuladas durante a execucao.")
 
             if check_and_apply_update(conf):
                 log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
@@ -282,11 +297,18 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     def _executar_backup(self, agent_mod, trigger: str):
         if self.stop_requested:
             return
+        agora = time.monotonic()
+        if agora - getattr(self, "last_backup_finished_at", 0.0) < 60:
+            log(f"IGNORANDO BACKUP DUPLICADO ({trigger}) — Ultimo backup finalizou ha menos de 60 segundos.")
+            return
+
         log(f"INICIANDO BACKUP — {trigger.upper()}")
         try:
             agent_mod.run_backup(trigger)
+            self.last_backup_finished_at = time.monotonic()
             log("BACKUP FINALIZADO.")
         except Exception:
+            self.last_backup_finished_at = time.monotonic()
             log(f"ERRO NO BACKUP:\n{traceback.format_exc()}", is_error=True)
 
 

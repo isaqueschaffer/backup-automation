@@ -73,6 +73,8 @@ export const fetchBackups = (params?: Record<string, unknown>) =>
   api.get("/backups", { params }).then((r) => r.data);
 export const downloadBackupZip = (backupId: string) =>
   api.get(`/backups/${backupId}/download`, { responseType: 'blob' }).then((r) => r.data);
+export const resendBackupEmail = (backupId: string) =>
+  api.post(`/backups/${backupId}/resend-email`).then((r) => r.data);
 
 // ── Settings ──────────────────────────────────────────────────
 export const fetchSettings = () => api.get("/settings").then((r) => r.data);

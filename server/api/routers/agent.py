@@ -109,20 +109,40 @@ async def ping_agent(
     should_backup = bool(client.backup_requested)
     
     # ── Auto-recovery de backup perdido ──
-    if not should_backup and client.backup_hour is not None and client.backup_minute is not None:
+    # Não aciona se should_backup já for True
+    # Não aciona se o cliente pertence a um grupo com fila ativa (a fila comanda o sequenciamento)
+    is_in_active_queue = bool(getattr(client, "group", None) and getattr(client.group, "queue_active", False))
+    if not should_backup and not is_in_active_queue and client.backup_hour is not None and client.backup_minute is not None:
         from datetime import timedelta
         brt_tz = timezone(timedelta(hours=-3))
         now_brt = datetime.now(brt_tz)
         scheduled_time_today = now_brt.replace(hour=client.backup_hour, minute=client.backup_minute, second=0, microsecond=0)
         
         if now_brt > scheduled_time_today + timedelta(minutes=30):
+            # 1. Verifica se já concluiu backup hoje
             made_backup_today = False
             if client.last_backup_at:
                 last_backup_brt = client.last_backup_at.replace(tzinfo=timezone.utc).astimezone(brt_tz)
                 if last_backup_brt.date() == now_brt.date():
                     made_backup_today = True
-            
-            if not made_backup_today:
+
+            # 2. Verifica se houve backup recente (últimas 2 horas) para evitar disparos duplicados
+            recent_backup = db.query(Backup).filter(
+                Backup.client_id == client.id,
+                Backup.created_at >= (datetime.utcnow() - timedelta(hours=2))
+            ).first()
+            if recent_backup:
+                made_backup_today = True
+
+            # 3. Verifica se já disparou ping_recovery hoje
+            today_utc_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            already_recovered_today = db.query(AgentLog).filter(
+                AgentLog.client_id == client.id,
+                AgentLog.event_type == "ping_recovery",
+                AgentLog.created_at >= today_utc_start
+            ).first() is not None
+
+            if not made_backup_today and not already_recovered_today:
                 should_backup = True
                 client.backup_requested = False 
                 from models import AgentLog
@@ -251,10 +271,15 @@ def receive_backup_report(
                 [c for c in group.clients if c.active],
                 key=lambda c: c.queue_order
             )
-            current_idx = group.queue_current_index if group.queue_current_index is not None else 0
+            # Localiza a posição do cliente atual que está reportando
+            try:
+                reporting_idx = [c.id for c in active_clients].index(client.id)
+            except ValueError:
+                reporting_idx = group.queue_current_index if group.queue_current_index is not None else 0
+
             next_online_client = None
             next_idx = None
-            for idx in range(current_idx + 1, len(active_clients)):
+            for idx in range(reporting_idx + 1, len(active_clients)):
                 c = active_clients[idx]
                 if check_client_online(c):
                     next_online_client = c
@@ -342,6 +367,23 @@ async def upload_backup_zip(
         public_url=settings.PUBLIC_URL,
     )
     backup.email_sent = email_sent or backup.email_sent
+
+    from models import AgentLog
+    if email_sent:
+        recipients_str = ", ".join(client.email_to) if client.email_to else "destinatários configurados"
+        db.add(AgentLog(
+            client_id=client.id,
+            event_type="email_sent",
+            message=f"E-mail de relatório enviado com sucesso para: {recipients_str}."
+        ))
+    else:
+        recipients_str = ", ".join(client.email_to) if client.email_to else "nenhum destinatário cadastrado"
+        db.add(AgentLog(
+            client_id=client.id,
+            event_type="email_error",
+            message=f"Falha no envio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
+        ))
+
     db.commit()
 
     return {"status": "ok", "zip_size": len(data), "email_sent": email_sent}

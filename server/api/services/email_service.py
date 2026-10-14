@@ -1,5 +1,6 @@
 import smtplib
 import logging
+import time
 from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
@@ -183,11 +184,24 @@ def send_backup_report(
     smtp_password = smtp_password_setting.value if smtp_password_setting and smtp_password_setting.value else settings.SMTP_PASSWORD
 
     if not smtp_server or not smtp_email:
-        logger.warning("SMTP not configured — skipping email.")
+        logger.warning(f"SMTP not configured (server='{smtp_server}', email='{smtp_email}') — skipping email.")
         return False
 
-    if not recipients:
-        logger.warning("No recipients configured — skipping email.")
+    # ── Limpeza e validação de destinatários ──
+    clean_recipients: List[str] = []
+    for r in (recipients or []):
+        if not r:
+            continue
+        # Trata múltiplos emails separados por vírgula ou ponto-e-vírgula na mesma entrada
+        parts = str(r).replace(";", ",").split(",")
+        for part in parts:
+            item = part.strip()
+            if item and "@" in item and "." in item:
+                if item not in clean_recipients:
+                    clean_recipients.append(item)
+
+    if not clean_recipients:
+        logger.warning(f"No valid recipients configured for '{client_name}' (received: {recipients}) — skipping email.")
         return False
 
     # ── Overall backup status ──
@@ -204,7 +218,7 @@ def send_backup_report(
     # ── Build email ──
     msg = EmailMessage()
     msg["From"] = smtp_email
-    msg["To"] = ", ".join(recipients)
+    msg["To"] = ", ".join(clean_recipients)
     msg["Subject"] = f"{client_name} POP - Verificação de câmeras e Backup dos equipamentos — {date_str}"
 
     # ── Header ──
@@ -267,13 +281,35 @@ def send_backup_report(
             filename=zip_path.name,
         )
 
-    try:
-        with smtplib.SMTP(smtp_server, smtp_port, timeout=60) as server:
-            server.starttls()
-            server.login(smtp_email, smtp_password or "")
-            server.send_message(msg)
-        logger.info(f"Email sent to {recipients}")
-        return True
-    except Exception as exc:
-        logger.error(f"Failed to send email: {exc}")
-        return False
+    # ── Envio SMTP com retentativas e suporte a SSL/STARTTLS ──
+    max_retries = 3
+    last_error = None
+    timeout_s = 30
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"[SMTP] Tentativa {attempt}/{max_retries} para {clean_recipients} via {smtp_server}:{smtp_port}...")
+            if smtp_port == 465:
+                server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout_s)
+            else:
+                server = smtplib.SMTP(smtp_server, smtp_port, timeout=timeout_s)
+                server.ehlo()
+                if server.has_extn("STARTTLS"):
+                    server.starttls()
+                    server.ehlo()
+
+            with server:
+                if smtp_password:
+                    server.login(smtp_email, smtp_password)
+                server.send_message(msg)
+
+            logger.info(f"[SMTP] E-mail enviado com sucesso para {clean_recipients} na tentativa {attempt}.")
+            return True
+        except Exception as exc:
+            last_error = exc
+            logger.warning(f"[SMTP] Tentativa {attempt}/{max_retries} falhou: {exc}")
+            if attempt < max_retries:
+                time.sleep(2 * attempt)
+
+    logger.error(f"[SMTP] Falha definitiva no envio de e-mail para {clean_recipients} após {max_retries} tentativas: {last_error}")
+    return False
