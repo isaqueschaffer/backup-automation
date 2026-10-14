@@ -1,5 +1,5 @@
-import json
 import logging
+import re
 import shutil
 import sys
 import requests
@@ -10,7 +10,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from src.core.config import load_conf, DIR_AGENT
+from src.core.config import load_conf, parse_config_extra, DIR_AGENT
 from src.application.api_client import fetch_server_config, post_report, upload_zip
 from src.nvr.factory import verificar_gravacao_nvr
 from src.olt.unm2000 import realizar_backup_olt
@@ -44,7 +44,12 @@ def setup_logging():
 # PROCESSADORES POR TIPO DE EQUIPAMENTO
 # ─────────────────────────────────────────────────────────────
 
-def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dict:
+def nome_seguro(nome: str) -> str:
+    """Nome de equipamento seguro para caminhos/comandos (espacos viram '_')."""
+    return re.sub(r"[^\w.-]", "_", nome or "")
+
+
+def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None) -> dict:
     """Processa backup de NVR (Hikvision/Motorola/Digifort)."""
     nome, ip, user, pwd = (
         equipamento["name"], equipamento["ip"],
@@ -55,12 +60,7 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
     pasta_nvr = pasta_data
     pasta_nvr.mkdir(parents=True, exist_ok=True)
 
-    config_extra = equipamento.get("config_extra") or {}
-    if isinstance(config_extra, str):
-        try:
-            config_extra = json.loads(config_extra)
-        except Exception:
-            config_extra = {}
+    config_extra = parse_config_extra(equipamento)
     marca = config_extra.get("marca")
 
     retorno = verificar_gravacao_nvr(ip, user, pwd, marca)
@@ -111,8 +111,8 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path) -> dic
 
     # Captura a foto da madrugada para câmeras compatíveis
     from src.application.api_client import upload_night_image
-    from src.core.config import load_conf
-    conf = load_conf()
+    if conf is None:
+        conf = load_conf()
 
     if cameras_status:
         from src.camera.rtsp_client import capture_night_image, capture_night_image_motorola
@@ -180,12 +180,7 @@ def processar_olt(
 
     tipo = (equipamento.get("tipo") or "").lower()
 
-    config_extra = equipamento.get("config_extra") or {}
-    if isinstance(config_extra, str):
-        try:
-            config_extra = json.loads(config_extra)
-        except Exception:
-            config_extra = {}
+    config_extra = parse_config_extra(equipamento)
 
     fabricante = (
         equipamento.get("fabricante")
@@ -259,7 +254,7 @@ def processar_defense(equipamento: dict, pasta_data: Path) -> dict:
     return realizar_backup_defense(equipamento, pasta_data)
 
 
-def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path) -> dict:
+def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None) -> dict:
     """
     Despachante principal — roteia o processamento pelo tipo do equipamento.
     Tipos suportados: NVR, OLT, PABX
@@ -268,7 +263,7 @@ def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path
     tipo = (equipamento.get("tipo") or "NVR").upper()
 
     if tipo == "NVR":
-        return processar_nvr(equipamento, zip_password, pasta_data)
+        return processar_nvr(equipamento, zip_password, pasta_data, conf)
 
     if tipo == "OLT" or tipo == "DIGIFORT":
         return processar_olt(equipamento, pasta_data)
@@ -341,13 +336,13 @@ def run_backup(trigger: str = "scheduled"):
     for eq in equipamentos:
         tipo = (eq.get("tipo") or "NVR").upper()
         nome = eq.get("name", "equipamento")
-        nome_safe = nome.replace(" ", "_")
+        nome_safe = nome_seguro(nome)
 
         # Diretório temporário de trabalho
         pasta_trabalho = TEMP_DIR_WORK / f"{tipo}_{nome_safe}"
         pasta_trabalho.mkdir(parents=True, exist_ok=True)
 
-        res = processar_equipamento(eq, zip_password, pasta_trabalho)
+        res = processar_equipamento(eq, zip_password, pasta_trabalho, conf)
         res["tipo"] = tipo
         resultados.append(res)
 

@@ -1,3 +1,4 @@
+import logging
 import datetime
 import csv
 import io
@@ -119,11 +120,11 @@ def carregar_dicionario_cameras(caminho_arquivo):
                 if ip:
                     dicionario_ip[ip] = info
                     
-            print(f"[OK] {len(lista_unicas)} cameras carregadas do arquivo {caminho_arquivo}")
+            logging.info(f"[OK] {len(lista_unicas)} cameras carregadas do arquivo {caminho_arquivo}")
         except Exception as e:
-            print(f"[ERRO] ao ler {caminho_arquivo}: {e}")
+            logging.error(f"[ERRO] ao ler {caminho_arquivo}: {e}")
     else:
-        print(f"[AVISO] Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
+        logging.warning(f"[AVISO] Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
         
     return dicionario_nome, dicionario_ip, lista_unicas
 
@@ -203,9 +204,9 @@ def rodar_sniffer_snmp():
     sniffer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sniffer_socket.bind(('0.0.0.0', PORTA_SNMP))
-        print(f"[OK] Sniffer SNMP rodando na porta {PORTA_SNMP}...")
+        logging.info(f"[OK] Sniffer SNMP rodando na porta {PORTA_SNMP}...")
     except Exception as e:
-        print(f"[ERRO] ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}")
+        logging.error(f"[ERRO] ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}")
         return
 
     while True:
@@ -247,12 +248,12 @@ def rodar_sniffer_snmp():
                         if not nome.isdigit() and (nome.lower() in texto_lower or normalizar_texto(nome) in normalizar_texto(texto_limpo)):
                             camera_identificada = info
                             break
-            except:
-                pass
+            except Exception:
+                logging.debug("Falha ao interpretar trap SNMP", exc_info=True)
                 
         if camera_identificada and status_encontrado != "Outro Evento":
             registrar_queda(camera_identificada['Nome'], status_encontrado)
-            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] SNMP TRAP: {camera_identificada['Nome']} | {status_encontrado}")
+            logging.info(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] SNMP TRAP: {camera_identificada['Nome']} | {status_encontrado}")
 
 snmp_thread = None
 
@@ -281,7 +282,7 @@ def start_webhook(caminho_csv_export: str, caminho_log: str):
     snmp_thread = threading.Thread(target=rodar_sniffer_snmp, daemon=True)
     snmp_thread.start()
     
-    print(f"[OK] Agente Digifort iniciado (Modo SNMP na {PORTA_SNMP}).")
+    logging.info(f"[OK] Agente Digifort iniciado (Modo SNMP na {PORTA_SNMP}).")
 
 def stop_webhook():
     global snmp_thread, sniffer_socket
@@ -289,7 +290,7 @@ def stop_webhook():
         sniffer_socket.close()
         sniffer_socket = None
     snmp_thread = None
-    print("[PARADO] Agente Digifort SNMP parado.")
+    logging.info("[PARADO] Agente Digifort SNMP parado.")
 
 def rodar_servidor():
     start_webhook(ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV)

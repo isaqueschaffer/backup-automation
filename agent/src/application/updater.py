@@ -11,6 +11,7 @@ Fluxo:
 import hashlib
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -96,14 +97,21 @@ def check_and_apply_update(conf: dict) -> bool:
 
     new_version = data.get("version", "?")
     url_service = data.get("url_service")
-    expected_hash = data.get("sha256_service", "").lower()
-    
+    expected_hash = (data.get("sha256_service") or "").lower()
+
     url_tray = data.get("url_tray")
-    expected_tray_hash = data.get("sha256_tray", "").lower() if data.get("sha256_tray") else ""
+    expected_tray_hash = (data.get("sha256_tray") or "").lower()
 
     if not url_service or not expected_hash:
         logger.error("[OTA] Dados de atualização incompletos recebidos do servidor.")
         return False
+
+    if not str(url_service).lower().startswith("https://"):
+        logger.error("[OTA] url_service nao usa https://. Atualização ignorada.")
+        return False
+    if url_tray and not str(url_tray).lower().startswith("https://"):
+        logger.warning("[OTA] url_tray nao usa https://. O Tray não será atualizado.")
+        url_tray = None
 
     logger.info(f"[OTA] Atualização encontrada! Versão atual: {CURRENT_VERSION} -> Nova versão disponível: {new_version}. Iniciando atualização...")
 
@@ -111,70 +119,74 @@ def check_and_apply_update(conf: dict) -> bool:
     tmp_dir = tempfile.mkdtemp(prefix="trilan_update_")
     tmp_exe = os.path.join(tmp_dir, "TrilanAgentService_new.exe")
     tmp_tray_exe = os.path.join(tmp_dir, "TrilanAgentTray_new.exe")
+    aplicado = False
+    try:
+        if not _download_file(url_service, tmp_exe):
+            logger.error("[OTA] Download falhou. Atualização cancelada.")
+            return False
 
-    if not _download_file(url_service, tmp_exe):
-        logger.error("[OTA] Download falhou. Atualização cancelada.")
-        return False
-
-    # Verifica integridade SHA256 do Service
-    actual_hash = _sha256_file(tmp_exe)
-    if actual_hash != expected_hash:
-        logger.error(
-            f"[OTA] FALHA DE INTEGRIDADE NO SERVICE! "
-            f"Esperado: {expected_hash} | Recebido: {actual_hash}. "
-            "Atualização cancelada por segurança."
-        )
-        os.remove(tmp_exe)
-        return False
+        # Verifica integridade SHA256 do Service
+        actual_hash = _sha256_file(tmp_exe)
+        if actual_hash != expected_hash:
+            logger.error(
+                f"[OTA] FALHA DE INTEGRIDADE NO SERVICE! "
+                f"Esperado: {expected_hash} | Recebido: {actual_hash}. "
+                "Atualização cancelada por segurança."
+            )
+            return False
         
-    # Download e verificação do Tray (opcional)
-    has_tray_update = False
-    if url_tray and expected_tray_hash:
-        logger.info("[OTA] Atualização de Tray encontrada. Iniciando download do Tray...")
-        if _download_file(url_tray, tmp_tray_exe):
-            actual_tray_hash = _sha256_file(tmp_tray_exe)
-            if actual_tray_hash == expected_tray_hash:
-                has_tray_update = True
-                logger.info(f"[OTA] Hash do Tray verificado com sucesso.")
+        # Download e verificação do Tray (opcional)
+        has_tray_update = False
+        if url_tray and expected_tray_hash:
+            logger.info("[OTA] Atualização de Tray encontrada. Iniciando download do Tray...")
+            if _download_file(url_tray, tmp_tray_exe):
+                actual_tray_hash = _sha256_file(tmp_tray_exe)
+                if actual_tray_hash == expected_tray_hash:
+                    has_tray_update = True
+                    logger.info(f"[OTA] Hash do Tray verificado com sucesso.")
+                else:
+                    logger.warning(f"[OTA] Falha de integridade no Tray (Esperado: {expected_tray_hash} | Recebido: {actual_tray_hash}). O Tray não será atualizado.")
             else:
-                logger.warning(f"[OTA] Falha de integridade no Tray (Esperado: {expected_tray_hash} | Recebido: {actual_tray_hash}). O Tray não será atualizado.")
-        else:
-            logger.warning("[OTA] Download do Tray falhou. Apenas o serviço será atualizado.")
+                logger.warning("[OTA] Download do Tray falhou. Apenas o serviço será atualizado.")
 
-    logger.info(f"[OTA] Verificações concluídas com sucesso. Construindo script de deploy...")
+        logger.info(f"[OTA] Verificações concluídas com sucesso. Construindo script de deploy...")
 
-    # Caminho do executável atual (Service)
-    current_exe = sys.executable
-    base_dir = os.path.dirname(current_exe)
-    tray_exe = os.path.join(base_dir, "TrilanAgentTray.exe")
+        # Caminho do executável atual (Service)
+        current_exe = sys.executable
+        base_dir = os.path.dirname(current_exe)
+        tray_exe = os.path.join(base_dir, "TrilanAgentTray.exe")
 
-    # Script batch para substituir o exe e reiniciar o serviço
-    # Roda FORA do processo do serviço (detached) para poder substituir arquivos em uso
-    bat_content = f"@echo off\n"
-    bat_content += "timeout /t 4 /nobreak >nul\n"
-    bat_content += "sc stop TrilanAgentNVR >nul 2>&1\n"
+        # Script batch para substituir o exe e reiniciar o serviço
+        # Roda FORA do processo do serviço (detached) para poder substituir arquivos em uso
+        bat_content = f"@echo off\n"
+        bat_content += "timeout /t 4 /nobreak >nul\n"
+        bat_content += "sc stop TrilanAgentNVR >nul 2>&1\n"
     
-    if has_tray_update:
-        # Mata o Tray para destravar o arquivo e permitir a substituição
-        bat_content += "taskkill /F /IM TrilanAgentTray.exe >nul 2>&1\n"
+        if has_tray_update:
+            # Mata o Tray para destravar o arquivo e permitir a substituição
+            bat_content += "taskkill /F /IM TrilanAgentTray.exe >nul 2>&1\n"
         
-    bat_content += "timeout /t 3 /nobreak >nul\n"
-    bat_content += f'copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1\n'
+        bat_content += "timeout /t 3 /nobreak >nul\n"
+        bat_content += f'copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1\n'
     
-    if has_tray_update:
-        bat_content += f'copy /y "{tmp_tray_exe}" "{tray_exe}" >nul 2>&1\n'
+        if has_tray_update:
+            bat_content += f'copy /y "{tmp_tray_exe}" "{tray_exe}" >nul 2>&1\n'
         
-    bat_content += "timeout /t 2 /nobreak >nul\n"
-    bat_content += "sc start TrilanAgentNVR >nul 2>&1\n"
-    bat_content += 'del "%~f0"\n'
-    bat_path = os.path.join(tmp_dir, "apply_update.bat")
-    with open(bat_path, "w") as f:
-        f.write(bat_content)
+        bat_content += "timeout /t 2 /nobreak >nul\n"
+        bat_content += "sc start TrilanAgentNVR >nul 2>&1\n"
+        bat_content += 'del "%~f0"\n'
+        bat_path = os.path.join(tmp_dir, "apply_update.bat")
+        with open(bat_path, "w") as f:
+            f.write(bat_content)
 
-    logger.info("[OTA] Aplicando atualização via script batch. Serviço reiniciará em instantes...")
-    subprocess.Popen(
-        ["cmd", "/c", bat_path],
-        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-    )
+        logger.info("[OTA] Aplicando atualização via script batch. Serviço reiniciará em instantes...")
+        subprocess.Popen(
+            ["cmd", "/c", bat_path],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+        )
 
-    return True  # Sinaliza ao chamador que o serviço vai reiniciar
+        aplicado = True  # o .bat (destacado) ainda usa tmp_dir
+        return True  # Sinaliza ao chamador que o serviço vai reiniciar
+    finally:
+        if not aplicado:
+            shutil.rmtree(tmp_dir, ignore_errors=True)

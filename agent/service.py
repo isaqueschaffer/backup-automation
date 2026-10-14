@@ -7,7 +7,6 @@ Start:    python service.py start
 Stop:     python service.py stop
 Remove:   python service.py remove
 """
-import json
 import os
 import queue
 import sys
@@ -91,7 +90,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         try:
             from src.application.updater import get_current_version
             v = get_current_version()
-        except:
+        except Exception:
             v = "Desconhecida"
 
         log("=" * 60)
@@ -109,13 +108,13 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         if str(DIRETORIO) not in sys.path:
             sys.path.insert(0, str(DIRETORIO))
 
-        from src.core.config import load_conf
+        from src.core.config import load_conf, ConfigError, parse_config_extra
         from src.application.api_client import fetch_server_config
 
         log(f"Lendo configuracoes de: {DIRETORIO / 'agent.conf'}")
         try:
             conf = load_conf()
-        except SystemExit as e:
+        except ConfigError as e:
             log(str(e), is_error=True)
             return
 
@@ -135,12 +134,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 tipo = (eq.get("tipo") or "").upper()
                 if tipo == "DIGIFORT":
                     # config_extra é anulável no banco; uma exceção aqui marcaria config_loaded=False e causaria restart em loop
-                    cfg_ext = eq.get("config_extra") or {}
-                    if isinstance(cfg_ext, str):
-                        try:
-                            cfg_ext = json.loads(cfg_ext)
-                        except Exception:
-                            cfg_ext = {}
+                    cfg_ext = parse_config_extra(eq)
                     caminho_csv = cfg_ext.get("caminho_csv", "")
                     caminho_log = cfg_ext.get("caminho_log_csv", "")
                     
@@ -176,6 +170,18 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.stop_requested = True
         win32event.SetEvent(self.hWaitStop)
 
+    @staticmethod
+    def _resumo_ping(ping_resp) -> str:
+        """Resumo do ping seguro para log (rtsp_task contem usuario/senha da camera)."""
+        if not isinstance(ping_resp, dict):
+            return "<resposta invalida>"
+        resumo = {k: v for k, v in ping_resp.items() if k != "rtsp_task"}
+        task = ping_resp.get("rtsp_task")
+        if task:
+            t = task if isinstance(task, dict) else {}
+            resumo["rtsp_task"] = {k: t.get(k) for k in ("equipamento_id", "ip", "canal")}
+        return str(resumo)
+
     def _ping_loop(self, conf: dict):
         """Pinga em cadência fixa (início a início), independente de backups em andamento no loop principal."""
         from src.application.api_client import ping_server
@@ -187,7 +193,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             try:
                 ping_resp = ping_server(conf)
                 if ping_resp:
-                    log(f"Ping recebido pelo servidor. Instrucoes: {ping_resp}")
+                    log(f"Ping recebido pelo servidor. Instrucoes: {self._resumo_ping(ping_resp)}")
                     if time.monotonic() - last_successful_ping > 300:
                         log("Servidor voltou a responder apos periodo de desconexao!")
                     last_successful_ping = time.monotonic()
@@ -206,6 +212,25 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             if win32event.WaitForSingleObject(self.hWaitStop, int(espera * 1000)) == win32event.WAIT_OBJECT_0:
                 return
 
+    def _disparar_rtsp(self, ping_resp: dict, conf: dict):
+        """Dispara em thread o teste RTSP pedido pelo dashboard, se houver."""
+        task = ping_resp.get("rtsp_task")
+        if not task:
+            return
+        log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
+        from src.camera.rtsp_client import test_rtsp_camera
+        from src.application.api_client import send_rtsp_result
+
+        def run_and_send_rtsp(task=task):
+            try:
+                result = test_rtsp_camera(task)
+                send_rtsp_result(conf, result)
+                log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
+            except Exception as e:
+                log(f"Falha no teste RTSP: {e}", is_error=True)
+
+        threading.Thread(target=run_and_send_rtsp, daemon=True).start()
+
     def _process_ping_responses(self, agent_mod, conf: dict, config_loaded: bool) -> bool:
         """Executa as instruções recebidas nos pings. Retorna True se o serviço deve encerrar."""
         from src.application.updater import check_and_apply_update
@@ -222,17 +247,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 self._restart_service()
                 return True
 
-            if ping_resp.get("rtsp_task"):
-                log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
-                from src.camera.rtsp_client import test_rtsp_camera
-                from src.application.api_client import send_rtsp_result
-
-                def run_and_send_rtsp(task=ping_resp["rtsp_task"]):
-                    result = test_rtsp_camera(task)
-                    send_rtsp_result(conf, result)
-                    log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
-
-                threading.Thread(target=run_and_send_rtsp, daemon=True).start()
+            self._disparar_rtsp(ping_resp, conf)
 
             if ping_resp.get("restart"):
                 log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
@@ -247,6 +262,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 while not self.ping_responses.empty():
                     try:
                         discarded = self.ping_responses.get_nowait()
+                        self._disparar_rtsp(discarded, conf)
                         if discarded.get("restart"):
                             self._restart_service()
                             return True
@@ -257,7 +273,12 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 if backup_drained > 0:
                     log(f"Descartadas {backup_drained} instrucoes repetidas de backup acumuladas durante a execucao.")
 
-            if check_and_apply_update(conf):
+            try:
+                atualizou = check_and_apply_update(conf)
+            except Exception:
+                log(f"[OTA] Erro inesperado na verificacao de atualizacao:\n{traceback.format_exc()}", is_error=True)
+                atualizou = False
+            if atualizou:
                 log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
                 self.stop_requested = True
                 win32event.SetEvent(self.hWaitStop)

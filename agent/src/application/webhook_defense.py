@@ -1,3 +1,4 @@
+import logging
 import os
 import csv
 import datetime
@@ -33,7 +34,7 @@ def registrar_evento_defense(nome_camera, status_evento):
             
         # O agente l "FALHA" e "OK" para gerar o status das cameras
         writer.writerow([data, hora, nome_camera, status_evento])
-        print(f"[DEFENSE WEBHOOK] {data} {hora} - {nome_camera}: {status_evento}")
+        logging.info(f"[DEFENSE WEBHOOK] {data} {hora} - {nome_camera}: {status_evento}")
 
 class DefenseWebhookHandler(BaseHTTPRequestHandler):
     """
@@ -77,10 +78,10 @@ def rodar_servidor_http():
     global servidor_http
     try:
         servidor_http = HTTPServer(('0.0.0.0', PORTA_WEBHOOK), DefenseWebhookHandler)
-        print(f"[OK] Webhook Defense IA rodando na porta {PORTA_WEBHOOK}...")
+        logging.info(f"[OK] Webhook Defense IA rodando na porta {PORTA_WEBHOOK}...")
         servidor_http.serve_forever()
     except Exception as e:
-        print(f"[ERRO] ao iniciar Webhook Defense IA na porta {PORTA_WEBHOOK}: {e}")
+        logging.error(f"[ERRO] ao iniciar Webhook Defense IA na porta {PORTA_WEBHOOK}: {e}")
 
 def start_webhook_defense(caminho_log: str = ""):
     global ARQUIVO_CSV_DEFENSE, webhook_thread
@@ -100,7 +101,7 @@ def stop_webhook_defense():
         servidor_http.server_close()
         servidor_http = None
     webhook_thread = None
-    print("[PARADO] Webhook Defense IA parado.")
+    logging.info("[PARADO] Webhook Defense IA parado.")
 
 if __name__ == '__main__':
     print("="*60)

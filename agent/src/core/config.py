@@ -1,3 +1,4 @@
+import json
 import sys
 import configparser
 from pathlib import Path
@@ -5,9 +6,24 @@ from pathlib import Path
 DIR_AGENT = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent.parent
 CONF_FILE = DIR_AGENT / "agent.conf"
 
+class ConfigError(Exception):
+    """agent.conf ausente ou mal formatado."""
+
+
+def parse_config_extra(equipamento: dict) -> dict:
+    """Retorna o config_extra do equipamento como dict (aceita None, dict ou string JSON)."""
+    cfg = (equipamento or {}).get("config_extra") or {}
+    if isinstance(cfg, str):
+        try:
+            cfg = json.loads(cfg)
+        except Exception:
+            return {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
 def load_conf() -> dict:
     if not CONF_FILE.exists():
-        sys.exit(f"ERRO: {CONF_FILE} nao encontrado. Copie agent.conf.example e configure.")
+        raise ConfigError(f"ERRO: {CONF_FILE} nao encontrado. Copie agent.conf.example e configure.")
     
     cfg = configparser.ConfigParser()
     try:
@@ -22,4 +38,4 @@ def load_conf() -> dict:
             "api_key": cfg["auth"]["api_key"],
         }
     except (configparser.Error, KeyError) as e:
-        sys.exit(f"ERRO FATAL: Arquivo agent.conf mal formatado ou faltando informacoes. Detalhe: {e}")
+        raise ConfigError(f"ERRO FATAL: Arquivo agent.conf mal formatado ou faltando informacoes. Detalhe: {e}") from e

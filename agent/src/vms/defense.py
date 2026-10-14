@@ -1,9 +1,12 @@
 import logging
 import subprocess
 import os
+import re
 import shutil
 from pathlib import Path
 from datetime import datetime
+
+from src.core.config import parse_config_extra
 
 def realizar_backup_defense(equipamento: dict, pasta_destino: Path) -> dict:
     """
@@ -16,13 +19,7 @@ def realizar_backup_defense(equipamento: dict, pasta_destino: Path) -> dict:
     logging.info(f"\n{'='*50}\n{nome} [DEFENSE]\n{'='*50}")
 
     # Extrai configurações que podem vir do painel
-    config_extra = equipamento.get("config_extra") or {}
-    if isinstance(config_extra, str):
-        import json
-        try:
-            config_extra = json.loads(config_extra)
-        except:
-            config_extra = {}
+    config_extra = parse_config_extra(equipamento)
 
     pasta_origem_str = config_extra.get("pasta_origem")
 
@@ -68,7 +65,8 @@ def realizar_backup_defense(equipamento: dict, pasta_destino: Path) -> dict:
     db_name = config_extra.get("db_name", "defense") # Nome provável do BD
     
     data_atual = datetime.now().strftime("%Y%m%d_%H%M%S")
-    arquivo_dump = pasta_destino / f"DUMP_{nome.replace(' ', '_')}_{data_atual}.sql"
+    nome_safe = re.sub(r"[^\w.-]", "_", nome)
+    arquivo_dump = pasta_destino / f"DUMP_{nome_safe}_{data_atual}.sql"
 
     # Define a variável de ambiente para a senha do MySQL
     env = os.environ.copy()
@@ -92,11 +90,16 @@ def realizar_backup_defense(equipamento: dict, pasta_destino: Path) -> dict:
     
     try:
         with open(arquivo_dump, 'w', encoding='utf-8') as f_out:
-            subprocess.run(comando, env=env, stdout=f_out, stderr=subprocess.PIPE, text=True, check=True)
+            subprocess.run(comando, env=env, stdout=f_out, stderr=subprocess.PIPE, text=True, check=True, timeout=600)
             
         logging.info(f"  [DEFENSE] Dump gerado com sucesso: {arquivo_dump.name}")
         return {"nome": nome, "status": "OK", "cameras": None}
         
+    except subprocess.TimeoutExpired:
+        logging.error("  Erro: mysqldump excedeu o tempo limite (600s) e foi interrompido.")
+        if arquivo_dump.exists():
+            arquivo_dump.unlink()
+        return {"nome": nome, "status": "ERRO", "cameras": None}
     except FileNotFoundError:
         logging.error("  Erro: Utilitário 'mysqldump' não encontrado. Verifique se o MySQL Client está instalado e no PATH do sistema.")
         return {"nome": nome, "status": "ERRO", "cameras": None}

@@ -1,5 +1,6 @@
 from paramiko import ssh_exception
 import paramiko
+import re
 import time
 import logging
 from pathlib import Path
@@ -8,7 +9,7 @@ def realizar_backup_mikrotik(equipamento: dict, pasta_destino: Path) -> dict:
     ip = equipamento.get("ip")
     username = equipamento.get("username")
     password = equipamento.get("password")
-    nome = equipamento.get("name", "Mikrotik").replace(" ", "_")
+    nome = re.sub(r"[^\w.-]", "_", equipamento.get("name") or "Mikrotik")
     
     res = {"nome": nome, "status": "ERRO", "cameras": None}
     
@@ -30,13 +31,15 @@ def realizar_backup_mikrotik(equipamento: dict, pasta_destino: Path) -> dict:
         
         # 1. Gerar o arquivo .backup (binário criptografado)
         logging.info(f"[MIKROTIK] Gerando arquivo .backup em {ip}...")
-        stdin, stdout, stderr = ssh.exec_command(f"/system backup save name={file_base}")
-        stdout.read() # Espera o comando terminar
+        stdin, stdout, stderr = ssh.exec_command(f"/system backup save name={file_base}", timeout=120)
+        stdout.channel.settimeout(120)
+        stdout.read() # Espera o comando terminar (com timeout)
         
         # 2. Gerar o arquivo .rsc (texto puro - script de configuração)
         logging.info(f"[MIKROTIK] Gerando arquivo .rsc em {ip}...")
-        stdin, stdout, stderr = ssh.exec_command(f"/export file={file_base}")
-        stdout.read() # Espera o comando terminar
+        stdin, stdout, stderr = ssh.exec_command(f"/export file={file_base}", timeout=120)
+        stdout.channel.settimeout(120)
+        stdout.read() # Espera o comando terminar (com timeout)
         
         # MikroTik leva uns segundos para salvar o arquivo rsc no disco
         time.sleep(3)
@@ -44,6 +47,7 @@ def realizar_backup_mikrotik(equipamento: dict, pasta_destino: Path) -> dict:
         # 3. Baixar os arquivos via SFTP
         logging.info(f"[MIKROTIK] Iniciando transferencia SFTP de {ip}...")
         sftp = ssh.open_sftp()
+        sftp.get_channel().settimeout(600)
         
         backup_file = f"{file_base}.backup"
         rsc_file = f"{file_base}.rsc"

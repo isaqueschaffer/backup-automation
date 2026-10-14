@@ -1,5 +1,6 @@
-import os
 import base64
+import logging
+import re
 import urllib.parse
 import subprocess
 from datetime import timezone
@@ -52,7 +53,13 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return {"success": False, "error_message": f"ERRO INTERNO NO AGENTE (FFmpeg): {str(e)}"}
 
+def _mascarar(txt: str) -> str:
+    """Oculta credenciais de URLs (rtsp://user:senha@host) antes de logar/enviar stderr do ffmpeg."""
+    return re.sub(r'//[^@/\s]*@', '//***@', txt or "")
+
+
 def _motivo_ffmpeg(stderr: str) -> str:
+    stderr = _mascarar(stderr)
     if "401 " in stderr or "401 Unauthorized" in stderr:
         return "Usuário/senha RTSP recusados"
     if any(e in stderr for e in ["400 Bad Request", "404 Not Found", "453 Not Enough Bandwidth"]):
@@ -87,7 +94,7 @@ def _frame_motorola(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, timeout=15)
     result = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if result.returncode == 0 and len(result.stdout) > 1000:
         return result.stdout, ""
-    return None, result.stderr.decode('utf-8', errors='ignore')
+    return None, _mascarar(result.stderr.decode('utf-8', errors='ignore'))
 
 
 def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: int, date_str: str, sessao=None) -> dict:
@@ -189,11 +196,7 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
     Tenta conectar via RTSP no stream de playback do NVR Hikvision
     e captura um frame da madrugada. Retorna um dicionário com o status e motivo.
     """
-    import urllib.parse
     import imageio_ffmpeg
-    import subprocess
-    import base64
-    import logging
     from datetime import datetime, timedelta
     from src.nvr.hikvision.recordings import buscar_trechos
 
@@ -219,12 +222,6 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
     
     if trechos is not None:
         if len(trechos) == 0:
-            result_dict["status"] = "SEM_GRAVACAO"
-            result_dict["motivo"] = "Sem gravação na madrugada (00h-06h)"
-            return result_dict
-            
-        trechos = [t for t in trechos if t[0] != "dummy"]
-        if not trechos:
             result_dict["status"] = "SEM_GRAVACAO"
             result_dict["motivo"] = "Sem gravação na madrugada (00h-06h)"
             return result_dict
@@ -286,7 +283,7 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
                 result_dict["motivo"] = None
                 return result_dict
             else:
-                stderr_text = result.stderr.decode('utf-8', errors='ignore')
+                stderr_text = _mascarar(result.stderr.decode('utf-8', errors='ignore'))
                 if "400 Bad Request" in stderr_text and trechos is None:
                     continue
                 else:

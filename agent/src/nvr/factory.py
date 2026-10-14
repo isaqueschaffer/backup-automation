@@ -9,6 +9,22 @@ from src.nvr.hikvision.recordings import tem_gravacao_no_dia
 
 DIAS_VERIFICAR = 15
 
+def _probe_hikvision(nvr_ip, usuario, senha):
+    """Sonda NVR (IP) e DVR (analogico). Retorna (cameras, tipo) ou ({}, None) se nenhum respondeu."""
+    cameras_nvr = buscar_cameras_nvr(nvr_ip, usuario, senha)
+    cameras_dvr = buscar_cameras_dvr(nvr_ip, usuario, senha)
+
+    if cameras_nvr and cameras_dvr:
+        logging.info(f"  [{nvr_ip}] NVR híbrido detectado: {len(cameras_nvr)} câmera(s) IP + {len(cameras_dvr)} canal(is) analógico(s).")
+        cameras_nvr.update(cameras_dvr)
+        return cameras_nvr, "NVR"
+    if cameras_nvr:
+        return cameras_nvr, "NVR"
+    if cameras_dvr:
+        return cameras_dvr, "DVR"
+    return {}, None
+
+
 def buscar_cameras(nvr_ip, usuario, senha, marca=None):
     if marca:
         marca = marca.upper()
@@ -16,29 +32,13 @@ def buscar_cameras(nvr_ip, usuario, senha, marca=None):
             cameras, sessao = buscar_cameras_motorola(nvr_ip, usuario, senha)
             return cameras, "MOTOROLA", sessao
         elif marca == "HIKVISION":
-            cameras_nvr = buscar_cameras_nvr(nvr_ip, usuario, senha)
-            cameras_dvr = buscar_cameras_dvr(nvr_ip, usuario, senha)
-            if cameras_nvr and cameras_dvr:
-                cameras_nvr.update(cameras_dvr)
-                return cameras_nvr, "NVR", None
-            if cameras_nvr: return cameras_nvr, "NVR", None
-            if cameras_dvr: return cameras_dvr, "DVR", None
-            return {}, "DESCONHECIDO", None
+            cameras, tipo = _probe_hikvision(nvr_ip, usuario, senha)
+            return (cameras, tipo, None) if cameras else ({}, "DESCONHECIDO", None)
 
     # Fallback: probe both
-    cameras_nvr = buscar_cameras_nvr(nvr_ip, usuario, senha)
-    cameras_dvr = buscar_cameras_dvr(nvr_ip, usuario, senha)
-
-    if cameras_nvr and cameras_dvr:
-        logging.info(f"  [{nvr_ip}] NVR híbrido detectado: {len(cameras_nvr)} câmera(s) IP + {len(cameras_dvr)} canal(is) analógico(s).")
-        cameras_nvr.update(cameras_dvr)
-        return cameras_nvr, "NVR", None
-
-    if cameras_nvr:
-        return cameras_nvr, "NVR", None
-
-    if cameras_dvr:
-        return cameras_dvr, "DVR", None
+    cameras, tipo = _probe_hikvision(nvr_ip, usuario, senha)
+    if cameras:
+        return cameras, tipo, None
 
     cameras, sessao = buscar_cameras_motorola(nvr_ip, usuario, senha)
     if cameras:

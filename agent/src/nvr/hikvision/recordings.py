@@ -9,7 +9,9 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 TIMEOUT = 20
 
-def buscar_trechos(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=1):
+def _buscar(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=1):
+    """Retorna (trechos, num_matches) ou None se a busca falhou.
+    num_matches e o numOfMatches informado pelo NVR (None se ausente/invalido)."""
     try:
         canal_numero = int(canal_id)
     except ValueError:
@@ -58,6 +60,7 @@ def buscar_trechos(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=1)
     ns_map = {"hik": ns} if ns else {}
 
     trechos = []
+    num_matches = None
     path_item = ".//hik:searchMatchItem" if ns else ".//searchMatchItem"
     itens = root.findall(path_item, ns_map) if ns_map else root.findall(path_item)
     
@@ -69,24 +72,34 @@ def buscar_trechos(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=1)
             if start_el is not None and start_el.text and end_el is not None and end_el.text:
                 trechos.append((start_el.text.strip(), end_el.text.strip()))
                 
-    if not trechos:
-        path_num = ".//hik:numOfMatches" if ns else ".//numOfMatches"
-        num_matches_el = root.find(path_num, ns_map) if ns_map else root.find(path_num)
-        if num_matches_el is not None and num_matches_el.text:
-            try:
-                if int(num_matches_el.text.strip()) > 0:
-                    trechos.append(("dummy", "dummy"))
-            except ValueError:
-                pass
+    path_num = ".//hik:numOfMatches" if ns else ".//numOfMatches"
+    num_matches_el = root.find(path_num, ns_map) if ns_map else root.find(path_num)
+    if num_matches_el is not None and num_matches_el.text:
+        try:
+            num_matches = int(num_matches_el.text.strip())
+        except ValueError:
+            pass
 
+    return trechos, num_matches
+
+
+def buscar_trechos(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=1):
+    """Lista de (inicio, fim) dos trechos; [] se confirmadamente sem gravacao;
+    None se a busca foi inconclusiva (erro, ou numOfMatches>0 sem itens parseaveis)."""
+    r = _buscar(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results)
+    if r is None:
+        return None
+    trechos, num_matches = r
+    if not trechos and num_matches and num_matches > 0:
+        return None
     return trechos
 
 def tem_gravacao_no_dia(nvr_ip, usuario, senha, canal_id, data):
     inicio_dia = data.replace(hour=0, minute=0, second=0, microsecond=0)
     fim_dia = inicio_dia + timedelta(days=1) - timedelta(seconds=1)
     
-    trechos = buscar_trechos(nvr_ip, usuario, senha, canal_id, inicio_dia, fim_dia, max_results=1)
-    if trechos is None:
+    r = _buscar(nvr_ip, usuario, senha, canal_id, inicio_dia, fim_dia, max_results=1)
+    if r is None:
         return None
-
-    return len(trechos) > 0
+    trechos, num_matches = r
+    return len(trechos) > 0 or bool(num_matches and num_matches > 0)
