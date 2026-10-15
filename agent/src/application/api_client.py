@@ -84,6 +84,9 @@ def _get_telemetry() -> dict:
     except Exception as e:
         pass # Ignora se nao tiver GPUtil ou GPU
         
+    # O servidor não fecha a rodada do Cliente enquanto a máquina ainda está fazendo o backup
+    from src.application import estado
+    telemetry["backup_em_andamento"] = estado.backup_em_andamento
     return telemetry
 
 def _json_safe(obj):

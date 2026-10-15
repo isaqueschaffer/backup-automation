@@ -78,6 +78,9 @@ def _motivo_ffmpeg(stderr: str) -> str:
         return ultima_linha[:150]
     return "Erro desconhecido"
 
+# Falhas de vídeo seguidas (por câmera) antes de desistir da imagem da noite no backup
+MAX_FALHAS_CAPTURA = 2
+
 # Interpretação do horário de playback que funcionou por NVR: "local" ou "utc"
 _MODO_HORARIO_MOTOROLA = {}
 
@@ -167,7 +170,7 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
                         return 0
                     return min(abs((t[0] - ideal).total_seconds()), abs((t[1] - ideal).total_seconds()))
                 alvos = []
-                for st, en in sorted(na_madrugada, key=distancia)[:2]:
+                for st, en in sorted(na_madrugada, key=distancia)[:1]:
                     alvo = min(max(ideal, st + timedelta(seconds=1)), max(st, en - timedelta(seconds=3)))
                     alvos.append(alvo)
                 tentativas.append((modo, alvos))
@@ -218,7 +221,6 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
     result_dict = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
 
     senha_enc = urllib.parse.quote(senha_pura, safe='')
-    date_clean = date_str.replace("-", "")
     canal_str = f"{canal}01"
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -233,91 +235,89 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
     
     trechos = buscar_trechos(ip, usuario, senha_pura, canal, inicio_madrugada, fim_madrugada, max_results=40)
     
-    horarios_tenta = []
-    
+    horarios_tenta = []  # (início, fim, horário exibido): datetimes do relógio do NVR
+
     if trechos is not None:
         if len(trechos) == 0:
             result_dict["status"] = "SEM_GRAVACAO"
             result_dict["motivo"] = "Sem gravação na madrugada (00h-06h)"
             return result_dict
-            
+
         for (st, end) in trechos:
             try:
-                st_str = st.replace("Z", "")
-                end_str = end.replace("Z", "")
-                st_dt = datetime.strptime(st_str, "%Y-%m-%dT%H:%M:%S")
-                end_dt = datetime.strptime(end_str, "%Y-%m-%dT%H:%M:%S")
-                
-                alvo = data_obj.replace(hour=2, minute=0, second=0)
-                
-                if alvo < st_dt + timedelta(seconds=2):
-                    alvo = st_dt + timedelta(seconds=2)
-                if alvo > end_dt - timedelta(seconds=5):
-                    alvo = end_dt - timedelta(seconds=5)
-                    
-                if alvo < st_dt or alvo > end_dt:
-                    continue
-                    
-                hr = alvo.strftime("%H%M%S")
-                fim_alvo = alvo + timedelta(seconds=10)
-                if fim_alvo > end_dt:
-                    fim_alvo = end_dt
-                hr_end = fim_alvo.strftime("%H%M%S")
-                
-                horarios_tenta.append((hr, hr_end, alvo.strftime("%Y-%m-%dT%H:%M:%S")))
+                st_dt = datetime.strptime(st.replace("Z", "")[:19], "%Y-%m-%dT%H:%M:%S")
+                end_dt = datetime.strptime(end.replace("Z", "")[:19], "%Y-%m-%dT%H:%M:%S")
             except ValueError:
-                pass
+                continue
+            # Trecho que atravessa a meia-noite (ou o fim da madrugada): corta na janela, para o
+            # início/fim da URL ficarem no dia certo e a imagem ser mesmo da madrugada.
+            st_dt = max(st_dt, inicio_madrugada)
+            end_dt = min(end_dt, fim_madrugada)
+
+            alvo = data_obj.replace(hour=2, minute=0, second=0)
+            if alvo < st_dt + timedelta(seconds=2):
+                alvo = st_dt + timedelta(seconds=2)
+            if alvo > end_dt - timedelta(seconds=5):
+                alvo = end_dt - timedelta(seconds=5)
+            if alvo < st_dt or alvo > end_dt:
+                continue  # trecho curto demais para ler um quadro
+
+            fim_alvo = min(alvo + timedelta(seconds=10), end_dt)
+            horarios_tenta.append((alvo, fim_alvo, alvo.strftime("%Y-%m-%dT%H:%M:%S")))
     else:
-        for hr in ["020000", "030000", "040000", "010000", "000000", "050000"]:
-            hr_end = hr[:4] + "05"
-            hr_date = f"{date_str}T{hr[:2]}:{hr[2:4]}:{hr[4:6]}"
-            horarios_tenta.append((hr, hr_end, hr_date))
+        for h in (2, 3, 4, 1, 0, 5):
+            alvo = data_obj.replace(hour=h)
+            horarios_tenta.append((alvo, alvo + timedelta(seconds=5), alvo.strftime("%Y-%m-%dT%H:%M:%S")))
 
     if not horarios_tenta:
         result_dict["status"] = "SEM_GRAVACAO"
         result_dict["motivo"] = "Sem gravação na madrugada (00h-06h)"
         return result_dict
 
-    for hr, hr_end, hr_date in horarios_tenta:
+    falhas = 0
+    for alvo, fim_alvo, hr_date in horarios_tenta:
         if prazo is not None and time.monotonic() > prazo:
             result_dict["motivo"] = result_dict["motivo"] or "Tempo limite da captura esgotado"
             break
-        start_time = f"{date_clean}T{hr}Z"
-        end_time = f"{date_clean}T{hr_end}Z"
-        
+        start_time = alvo.strftime("%Y%m%dT%H%M%SZ")
+        end_time = fim_alvo.strftime("%Y%m%dT%H%M%SZ")
+
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/tracks/{canal_str}?starttime={start_time}&endtime={end_time}"
-        
+
         try:
             cmd = [
                 ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
                 "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
             ]
             result = subprocess.run(cmd, capture_output=True, timeout=25)
-            
+
             if result.returncode == 0 and len(result.stdout) > 1000:
                 result_dict["image"] = base64.b64encode(result.stdout).decode('utf-8')
                 result_dict["horario"] = hr_date
                 result_dict["status"] = "OK"
                 result_dict["motivo"] = None
                 return result_dict
-            else:
-                stderr_text = _mascarar(result.stderr.decode('utf-8', errors='ignore'))
-                if "400 Bad Request" in stderr_text and trechos is None:
-                    continue
-                else:
-                    motivo = _motivo_ffmpeg(stderr_text)
-                    result_dict["motivo"] = motivo
-                    result_dict["status"] = "FALHA"
-                    logging.warning(f"FFmpeg canal {canal} ({hr}): stdout len: {len(result.stdout)}, stderr: {stderr_text}")
+            stderr_text = _mascarar(result.stderr.decode('utf-8', errors='ignore'))
+            if "400 Bad Request" in stderr_text and trechos is None:
+                continue  # NVR sem busca: horário fixo sem gravação responde 400 na hora; não conta como falha
+            result_dict["motivo"] = _motivo_ffmpeg(stderr_text)
+            result_dict["status"] = "FALHA"
+            logging.warning(f"FFmpeg canal {canal} ({alvo:%H:%M:%S}): {result_dict['motivo']}")
         except subprocess.TimeoutExpired:
             result_dict["motivo"] = _motivo_ffmpeg("TIMEOUT_25S")
             result_dict["status"] = "FALHA"
-            logging.warning(f"FFmpeg timeout no canal {canal} ({hr})")
+            logging.warning(f"FFmpeg timeout no canal {canal} ({alvo:%H:%M:%S})")
         except Exception as e:
             result_dict["motivo"] = f"Erro no agente: {str(e)[:100]}"
             result_dict["status"] = "FALHA"
             logging.error(f"FFmpeg exception no canal {canal}: {e}")
-            
+
+        falhas += 1
+        if falhas >= MAX_FALHAS_CAPTURA:
+            # O NVR não está entregando o vídeo desta câmera: insistir só atrasa o backup (25 s cada)
+            logging.warning(f"Canal {canal}: {falhas} falhas seguidas, passando para a próxima câmera.")
+            break
+
     return result_dict
 
 

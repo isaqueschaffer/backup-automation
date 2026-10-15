@@ -2,6 +2,7 @@ import logging
 import re
 import shutil
 import sys
+import time
 import requests
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,8 @@ from src.backup.downloader import baixar_arquivo
 from src.backup.archiver import criar_zip, data_hoje
 
 TEMP_DIR = DIR_AGENT / "tmp_backup"
+# Orçamento de tempo das imagens da madrugada por NVR (as câmeras restantes ficam sem imagem)
+LIMITE_IMAGENS_NVR_S = 20 * 60
 
 def setup_logging():
     log_dir = DIR_AGENT / "logs"
@@ -119,16 +122,24 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
         if tipo_nvr == "MOTOROLA":
             from src.nvr.motorola.cameras import buscar_cameras as login_motorola
             _, sessao_motorola = login_motorola(ip, user, pwd)  # um login para todas as câmeras
-            capturar = lambda ip_, u_, p_, canal_, data_: capture_night_image_motorola(
-                ip_, u_, p_, canal_, data_, sessao=sessao_motorola)
+            capturar = lambda ip_, u_, p_, canal_, data_, prazo=None: capture_night_image_motorola(
+                ip_, u_, p_, canal_, data_, sessao=sessao_motorola, prazo=prazo)
         else:
             capturar = capture_night_image
+        # Tempo máximo para todas as imagens da noite deste NVR: o resto do backup (e o relatório) não espera mais que isso
+        limite_imagens = time.monotonic() + LIMITE_IMAGENS_NVR_S
         logging.info("  Iniciando extração de imagens noturnas (Playback RTSP) para os canais gravados...")
         for cam_st in cameras_status:
             dias_gravacao = cam_st.get("dias_com_gravacao", [])
             if not dias_gravacao:
                 cam_st["imagem_noite"] = {"status": "SEM_GRAVACAO", "motivo": "Sem gravação nos últimos 15 dias", "horario": None}
                 logging.warning(f"    [FALHA] Canal {cam_st['canal']}: Sem gravação nos últimos 15 dias.")
+                continue
+
+            if time.monotonic() > limite_imagens:
+                cam_st["imagem_noite"] = {"status": "FALHA", "horario": None,
+                                          "motivo": "Tempo limite da captura de imagens deste NVR esgotado"}
+                logging.warning(f"    [FALHA] Canal {cam_st['canal']}: tempo limite do NVR esgotado.")
                 continue
 
             dias_ordenados = sorted(dias_gravacao)
@@ -141,7 +152,7 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
                 data_alvo = dias_ordenados[-1]
 
             try:
-                ret = capturar(ip, user, pwd, cam_st["canal"], data_alvo)
+                ret = capturar(ip, user, pwd, cam_st["canal"], data_alvo, prazo=limite_imagens)
                 cam_st["imagem_noite"] = {
                     "status": ret["status"],
                     "motivo": ret["motivo"],

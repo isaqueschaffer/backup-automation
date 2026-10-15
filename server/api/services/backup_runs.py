@@ -238,9 +238,26 @@ def compute_run_status(entries: List[dict]) -> str:
     return "PARCIAL"
 
 
+def _still_running(run: CustomerBackupRun, now: datetime) -> bool:
+    """Alguma máquina esperada, ainda sem relatório, está fazendo o backup agora (agente >= 1.1.8)?"""
+    customer = run.customer
+    if customer is None or now >= run.started_at + timedelta(hours=settings.RUN_MAX_HOURS):
+        return False
+    latest = _latest_backup_by_machine(run)
+    pendentes = {mid for mid in (run.expected_machine_ids or []) if mid not in latest}
+    for m in customer.machines:
+        if str(m.id) not in pendentes:
+            continue
+        ativo = bool((m.telemetry or {}).get("backup_em_andamento"))
+        # O ping chega a cada ~15 s; sem ping recente o agente caiu e não vale esperar
+        if ativo and m.last_seen is not None and (now - m.last_seen).total_seconds() < 120:
+            return True
+    return False
+
+
 def _is_due(run: CustomerBackupRun, now: datetime) -> bool:
     if now >= run.deadline_at:
-        return True
+        return not _still_running(run, now)
     latest = _latest_backup_by_machine(run)
     expected = list(run.expected_machine_ids or [])
     if not expected or any(mid not in latest for mid in expected):

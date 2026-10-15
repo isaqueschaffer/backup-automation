@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Rodadas de backup do Cliente (1 e-mail por rodada)
     # Prazo máximo da rodada a partir do início (horas)
     RUN_DEADLINE_HOURS: int = 2
+    # Limite absoluto: passado o prazo, a rodada espera até este total as máquinas que ainda
+    # estão fazendo o backup (agente >= 1.1.8 informa `backup_em_andamento` no ping)
+    RUN_MAX_HOURS: int = 6
     # Espera após o último relatório antes de fechar (tempo para o ZIP chegar)
     RUN_UPLOAD_GRACE_SECONDS: int = 90
 

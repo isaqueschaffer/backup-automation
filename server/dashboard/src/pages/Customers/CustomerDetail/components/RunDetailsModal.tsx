@@ -53,7 +53,8 @@ export default function RunDetailsModal({ run, onClose }: { run: CustomerRun; on
 
       {open && (
         <div className="text-xs text-muted" style={{ marginTop: 12 }}>
-          A rodada fecha quando todas as máquinas reportarem (e o ZIP chegar) ou no prazo. Máquinas sem relatório no
+          A rodada fecha quando todas as máquinas reportarem (e o ZIP chegar) ou no prazo. Passado o prazo, ela
+          espera as máquinas que ainda estão fazendo o backup (até 6 h no total). Máquinas sem relatório no
           fechamento aparecem como "Não executou" e o e-mail do cliente é enviado.
         </div>
       )}

@@ -323,7 +323,9 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             log(f"IGNORANDO BACKUP DUPLICADO ({trigger}) — Ultimo backup finalizou ha menos de 60 segundos.")
             return
 
+        from src.application import estado
         log(f"INICIANDO BACKUP — {trigger.upper()}")
+        estado.backup_em_andamento = True
         try:
             agent_mod.run_backup(trigger)
             self.last_backup_finished_at = time.monotonic()
@@ -331,6 +333,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         except Exception:
             self.last_backup_finished_at = time.monotonic()
             log(f"ERRO NO BACKUP:\n{traceback.format_exc()}", is_error=True)
+        finally:
+            estado.backup_em_andamento = False
 
 
 if __name__ == "__main__":
