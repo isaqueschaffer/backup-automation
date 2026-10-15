@@ -1,5 +1,6 @@
 import io
 import zipfile
+import tempfile
 from typing import List
 from uuid import UUID
 from datetime import datetime
@@ -353,37 +354,46 @@ def download_customer_zip(customer_id: UUID, db: Session = Depends(get_db)):
     """Gera e retorna um ZIP agrupado com os backups mais recentes de cada máquina do cliente."""
     customer = _get_customer_or_404(customer_id, db)
 
-    zip_buffer = io.BytesIO()
+    tmp = tempfile.SpooledTemporaryFile(max_size=32 * 1024 * 1024)
     found_any = False
+    used_folders = set()
 
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for machine in sorted(customer.machines, key=lambda m: m.queue_order):
-            latest = (
-                db.query(Backup)
-                .filter(Backup.machine_id == machine.id, Backup.zip_filename.isnot(None))
-                .order_by(Backup.started_at.desc())
-                .first()
-            )
-            if not latest or not latest.zip_filename:
-                continue
-            date_str = (latest.started_at or latest.created_at).strftime("%d-%m-%Y")
-            zip_path = get_zip_path(machine.id, machine.name, latest.zip_filename, date_str=date_str)
-            if not zip_path or not zip_path.exists():
-                continue
-            safe_name = machine.name.replace(" ", "_").replace("/", "_")
-            zf.write(str(zip_path), arcname=f"{safe_name}/{latest.zip_filename}")
-            found_any = True
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+            for machine in sorted(customer.machines, key=lambda m: m.queue_order):
+                latest = (
+                    db.query(Backup)
+                    .filter(Backup.machine_id == machine.id, Backup.zip_filename.isnot(None))
+                    .order_by(Backup.started_at.desc())
+                    .first()
+                )
+                if not latest or not latest.zip_filename:
+                    continue
+                date_str = (latest.started_at or latest.created_at).strftime("%d-%m-%Y")
+                zip_path = get_zip_path(machine.id, machine.name, latest.zip_filename, date_str=date_str)
+                if not zip_path or not zip_path.exists():
+                    continue
+                safe_name = machine.name.replace(" ", "_").replace("/", "_")
+                if safe_name in used_folders:
+                    safe_name = f"{safe_name}_{str(machine.id)[:8]}"
+                used_folders.add(safe_name)
+                zf.write(str(zip_path), arcname=f"{safe_name}/{latest.zip_filename}")
+                found_any = True
+    except Exception:
+        tmp.close()
+        raise
 
     if not found_any:
+        tmp.close()
         raise HTTPException(status_code=404, detail="Nenhum backup disponível para as máquinas deste cliente")
 
-    zip_buffer.seek(0)
+    tmp.seek(0)
     safe_customer_name = customer.name.replace(" ", "_").replace("/", "_")
     date_today = datetime.now().strftime("%d-%m-%Y")
     filename = f"cliente_{safe_customer_name}_{date_today}.zip"
 
     return StreamingResponse(
-        zip_buffer,
+        iter_file(tmp),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
