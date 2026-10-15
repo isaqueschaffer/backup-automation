@@ -10,6 +10,7 @@ RUN_UPLOAD_GRACE_SECONDS (tempo para o ZIP chegar), ou `now >= deadline_at`.
 Datetimes gravados são naive UTC (REGRA-001).
 """
 import logging
+from pathlib import Path
 import tempfile
 import zipfile
 from datetime import datetime, timedelta
