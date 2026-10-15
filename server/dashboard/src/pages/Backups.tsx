@@ -196,17 +196,17 @@ export default function Backups() {
     try {
       setDownloadingId(b.id);
       if (b.customer_id) {
-        // Prioridade de download: baixa o ZIP consolidado do cliente (com senha do cliente se houver)
         if (b.run_id) {
           const safeName = (b.customer_name || "cliente").replace(/\s+/g, "_");
           const dateStr = b.started_at ? fmtDate(b.started_at).split(" ")[0].replace(/\//g, "-") : "backup";
           await downloadCustomerRunZip(b.customer_id, b.run_id, `cliente_${safeName}_${dateStr}.zip`);
         } else {
-          await downloadCustomerZip(b.customer_id, b.customer_name || "cliente");
+          const data = await downloadBackupZip(b.id, { direct_machine: false });
+          saveBlob(data, `cliente_${(b.customer_name || "cliente").replace(/\s+/g, "_")}_${b.zip_filename || "backup.zip"}`);
         }
       } else {
         // Máquina sem cliente: baixa o ZIP individual da máquina (senha da máquina)
-        const data = await downloadBackupZip(b.id);
+        const data = await downloadBackupZip(b.id, { direct_machine: true });
         saveBlob(data, b.zip_filename || "backup.zip");
       }
     } catch (err: unknown) {
