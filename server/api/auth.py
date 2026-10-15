@@ -1,5 +1,7 @@
-﻿import secrets
-import hashlib
+﻿import hashlib
+import hmac
+import secrets
+from uuid import UUID
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -10,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
-from models import Client
+from models import Machine
 
 # ──────────────────────────────────────────────────────────────
 # JWT (Admin dashboard authentication)
@@ -62,21 +64,29 @@ def generate_api_key() -> tuple[str, str]:
     return raw, hash_api_key(raw)
 
 
-def get_current_client(
+def get_current_machine(
     client_id: Optional[str] = Security(CLIENT_ID_HEADER),
     api_key: Optional[str] = Security(API_KEY_HEADER),
     db: Session = Depends(get_db),
-) -> Client:
+) -> Machine:
+    """Autentica a Máquina pelos headers X-Client-ID / X-API-Key (contrato do agente: não mudar)."""
     if not client_id or not api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing X-Client-ID or X-API-Key headers",
         )
-    client = db.query(Client).filter(Client.id == client_id, Client.active == True).first()
-    if not client:
+    # X-Client-ID que não é UUID válido -> 401 (em vez de erro 500 no banco)
+    try:
+        machine_uuid = UUID(client_id)
+    except (ValueError, AttributeError, TypeError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Client not found")
 
-    if client.api_key_hash != hash_api_key(api_key):
+    machine = db.query(Machine).filter(Machine.id == machine_uuid, Machine.active == True).first()
+    if not machine:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Client not found")
+
+    # Comparação em tempo constante do hash da API key
+    if not hmac.compare_digest(machine.api_key_hash.encode(), hash_api_key(api_key).encode()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
-    return client
+    return machine

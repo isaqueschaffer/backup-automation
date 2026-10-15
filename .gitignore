@@ -42,3 +42,17 @@ node_modules/
 scratch/
 agent/scratch/
 Check_Status_gravacao/
+
+# Python (qualquer nível)
+__pycache__/
+
+# Artefatos locais / dados que nunca devem ser versionados
+*.timestamp-*.mjs
+*.sql
+*.dat
+scratch_test/
+agent/index.xml
+test*.jpg
+
+# Configuração local do Claude Code (permissões pessoais)
+.claude/

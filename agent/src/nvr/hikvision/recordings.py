@@ -9,15 +9,15 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 TIMEOUT = 20
 
-def tem_gravacao_no_dia(nvr_ip, usuario, senha, canal_id, data):
+def _buscar(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=1):
+    """Retorna (trechos, num_matches) ou None se a busca falhou.
+    num_matches e o numOfMatches informado pelo NVR (None se ausente/invalido)."""
     try:
         canal_numero = int(canal_id)
     except ValueError:
         return None
 
     track_id = (canal_numero * 100) + 1
-    inicio_dia = data.replace(hour=0, minute=0, second=0, microsecond=0)
-    fim_dia = inicio_dia + timedelta(days=1) - timedelta(seconds=1)
     search_id = "{" + str(uuid.uuid4()) + "}"
     url_search = f"http://{nvr_ip}/ISAPI/ContentMgmt/search"
 
@@ -27,11 +27,11 @@ def tem_gravacao_no_dia(nvr_ip, usuario, senha, canal_id, data):
     <trackIDList><trackID>{track_id}</trackID></trackIDList>
     <timeSpanList>
         <timeSpan>
-            <startTime>{inicio_dia.strftime("%Y-%m-%dT%H:%M:%SZ")}</startTime>
-            <endTime>{fim_dia.strftime("%Y-%m-%dT%H:%M:%SZ")}</endTime>
+            <startTime>{inicio.strftime("%Y-%m-%dT%H:%M:%SZ")}</startTime>
+            <endTime>{fim.strftime("%Y-%m-%dT%H:%M:%SZ")}</endTime>
         </timeSpan>
     </timeSpanList>
-    <maxResults>1</maxResults>
+    <maxResults>{max_results}</maxResults>
     <searchResultPostion>0</searchResultPostion>
     <metadataList><metadataDescriptor>//recordType.meta.std-cgi.com</metadataDescriptor></metadataList>
 </CMSearchDescription>"""
@@ -59,15 +59,47 @@ def tem_gravacao_no_dia(nvr_ip, usuario, senha, canal_id, data):
     ns = detectar_namespace(root)
     ns_map = {"hik": ns} if ns else {}
 
+    trechos = []
+    num_matches = None
+    path_item = ".//hik:searchMatchItem" if ns else ".//searchMatchItem"
+    itens = root.findall(path_item, ns_map) if ns_map else root.findall(path_item)
+    
+    for item in itens:
+        time_span = item.find("hik:timeSpan", ns_map) if ns else item.find("timeSpan")
+        if time_span is not None:
+            start_el = time_span.find("hik:startTime", ns_map) if ns else time_span.find("startTime")
+            end_el = time_span.find("hik:endTime", ns_map) if ns else time_span.find("endTime")
+            if start_el is not None and start_el.text and end_el is not None and end_el.text:
+                trechos.append((start_el.text.strip(), end_el.text.strip()))
+                
     path_num = ".//hik:numOfMatches" if ns else ".//numOfMatches"
     num_matches_el = root.find(path_num, ns_map) if ns_map else root.find(path_num)
-    
     if num_matches_el is not None and num_matches_el.text:
         try:
-            return int(num_matches_el.text.strip()) > 0
+            num_matches = int(num_matches_el.text.strip())
         except ValueError:
             pass
 
-    path_item = ".//hik:searchMatchItem" if ns else ".//searchMatchItem"
-    itens = root.findall(path_item, ns_map) if ns_map else root.findall(path_item)
-    return len(itens) > 0
+    return trechos, num_matches
+
+
+def buscar_trechos(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=1):
+    """Lista de (inicio, fim) dos trechos; [] se confirmadamente sem gravacao;
+    None se a busca foi inconclusiva (erro, ou numOfMatches>0 sem itens parseaveis)."""
+    r = _buscar(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results)
+    if r is None:
+        return None
+    trechos, num_matches = r
+    if not trechos and num_matches and num_matches > 0:
+        return None
+    return trechos
+
+def tem_gravacao_no_dia(nvr_ip, usuario, senha, canal_id, data):
+    inicio_dia = data.replace(hour=0, minute=0, second=0, microsecond=0)
+    fim_dia = inicio_dia + timedelta(days=1) - timedelta(seconds=1)
+    
+    r = _buscar(nvr_ip, usuario, senha, canal_id, inicio_dia, fim_dia, max_results=1)
+    if r is None:
+        return None
+    trechos, num_matches = r
+    return len(trechos) > 0 or bool(num_matches and num_matches > 0)

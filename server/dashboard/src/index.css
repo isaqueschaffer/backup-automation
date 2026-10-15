@@ -43,6 +43,21 @@
   --sidebar-w: 240px;
   --header-h: 64px;
   --transition: 0.2s ease;
+
+  /* Aliases (nomes usados em estilos inline) */
+  --primary:       var(--accent);
+  --primary-light: var(--accent-light);
+  --primary-dark:  #6d28d9;
+  --brand-primary: var(--accent);
+  --surface:       var(--bg-surface);
+  --surface-2:     var(--bg-elevated);
+  --surface-50:    var(--bg-elevated);
+  --surface-hover: var(--bg-hover);
+  --background:    var(--bg-base);
+  --radius:        var(--radius-md);
+  --text:          var(--text-primary);
+  --text-color:    var(--text-primary);
+  --danger:        var(--err);
 }
 
 /* ── Reset ───────────────────────────────────────────── */

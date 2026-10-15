@@ -12,7 +12,9 @@ const map: Record<string, { cls: string; dot: string; label: string }> = {
   COM_GRAVACAO: { cls: "ok", dot: "ok", label: "Gravando" },
   SEM_GRAVACAO: { cls: "warn", dot: "warn", label: "Sem Gravação" },
   NAO_VERIFICADO: { cls: "muted", dot: "muted", label: "Não Verificado" },
-  SEM_ARQUIVOS: { cls: "ok", dot: "ok", label: "Apenas Gravações (Sem Backup de Config)" },
+  EM_ANDAMENTO: { cls: "warn", dot: "warn", label: "Em andamento" },
+  NAO_EXECUTOU: { cls: "err", dot: "", label: "Não executou" },
+  SEM_ARQUIVOS:{ cls: "ok", dot: "ok", label: "Apenas Gravações (Sem Backup de Config)" },
 };
 
 export default function StatusBadge({ status }: Props) {
