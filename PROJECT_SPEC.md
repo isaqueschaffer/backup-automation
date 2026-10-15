@@ -798,6 +798,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-15] — Reinício do agente espera o backup terminar
+
+**Alteração:** No `/agent/ping`, se o agente informa `telemetry.backup_em_andamento` (>= 1.1.8), o servidor não entrega `restart` e mantém `restart_requested` até o ping seguinte sem backup em andamento (evita perder o backup por "Reiniciar"/"Reiniciar todos" no meio). O dashboard mostra "Reinício agendado" no cabeçalho da máquina. Agentes antigos reiniciam como antes. Backup manual não é afetado.
+**Arquivos:** server/api/routers/agent.py, server/dashboard/src/pages/Machines/MachineDetail/components/MachineHeader.tsx
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-15] — Imagem da noite: limite de falhas; rodada espera máquina em backup (agente 1.1.8)
 
 **Alteração:** (1) `capture_night_image` (Hikvision) desiste da câmera após 2 falhas de vídeo (`MAX_FALHAS_CAPTURA`) em vez de testar até 40 trechos de 25 s; Motorola testa 1 trecho por modo de horário (local/utc), no máximo 2 falhas. Há também um orçamento de 20 min por NVR para todas as imagens da noite (`LIMITE_IMAGENS_NVR_S`); câmeras restantes ficam com "Tempo limite…". (2) Trecho que atravessa a meia-noite é cortado em 00:00 (a URL usava a data pedida para início e fim, gerando intervalo invertido e 400). (3) O ping do agente informa `telemetry.backup_em_andamento`; passado o prazo (`RUN_DEADLINE_HOURS`), a rodada do Cliente espera a máquina esperada que ainda não reportou e está em backup (ping < 120 s), até `RUN_MAX_HOURS` (6 h) desde o início. Agentes < 1.1.8 mantêm o fechamento no prazo. (4) Log do agente grava só o motivo do ffmpeg, não o banner inteiro.

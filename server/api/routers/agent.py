@@ -109,6 +109,8 @@ async def ping_agent(
     db.commit()
     machine_id = machine.id
     machine_id_str = str(machine_id)
+    # Agente >= 1.1.8 informa que está fazendo backup: o reinício espera ele terminar (senão o backup se perde)
+    em_backup = bool((body.telemetry or {}).get("backup_em_andamento")) if body else False
 
     # Libera a conexão do pool durante a espera: o long-poll não pode segurar a sessão
     # do banco por vários segundos (esgotaria o pool com muitos agentes). A mesma
@@ -130,7 +132,7 @@ async def ping_agent(
 
         # Flags normais de restart/backup: só retorna imediatamente se estiverem marcadas
         restart_flag, backup_flag = _read_request_flags(machine_id)
-        if restart_flag or backup_flag:
+        if (restart_flag and not em_backup) or backup_flag:
             break
 
         await asyncio.sleep(1)
@@ -140,7 +142,7 @@ async def ping_agent(
     if machine is None:
         return PingResponse(status="ok", restart=False, backup=False)
 
-    should_restart = bool(machine.restart_requested)
+    should_restart = bool(machine.restart_requested) and not em_backup
     should_backup = bool(machine.backup_requested)
     
     # ── Auto-recovery de backup perdido ──

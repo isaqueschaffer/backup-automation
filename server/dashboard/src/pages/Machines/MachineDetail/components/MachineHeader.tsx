@@ -16,6 +16,7 @@ export default function MachineHeader({ machine, isAgentOnline, nextPingStr, onB
   onRestartAgent: () => void;
 }) {
   const isPendingAction = machine.backup_requested || machine.restart_requested;
+  const emBackup = !!machine.telemetry?.backup_em_andamento; // agente >= 1.1.8
   return (
     <>
       <div className="page-header">
@@ -61,8 +62,14 @@ export default function MachineHeader({ machine, isAgentOnline, nextPingStr, onB
         <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 6, padding: "12px 16px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ color: "#f59e0b", display: "flex" }}><Clock size={18} /></div>
           <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
-            <strong>Comando na fila!</strong> O {machine.backup_requested ? "backup manual" : "reinício"} começará no próximo contato do agente
-            {isAgentOnline && <span style={{ fontWeight: 600, color: "#f59e0b", marginLeft: 6 }}>({nextPingStr})</span>}.
+            {emBackup && !machine.backup_requested ? (
+              <><strong>Reinício agendado.</strong> A máquina está fazendo backup; o agente reinicia assim que ele terminar.</>
+            ) : (
+              <>
+                <strong>Comando na fila!</strong> O {machine.backup_requested ? "backup manual" : "reinício"} começará no próximo contato do agente
+                {isAgentOnline && <span style={{ fontWeight: 600, color: "#f59e0b", marginLeft: 6 }}>({nextPingStr})</span>}.
+              </>
+            )}
           </div>
         </div>
       )}
