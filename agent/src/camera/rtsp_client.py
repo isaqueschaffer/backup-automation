@@ -140,6 +140,7 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
             modos = ["local", "utc"]
             if _MODO_HORARIO_MOTOROLA.get(ip) == "utc":
                 modos.reverse()
+            local_tinha = False
             for modo in modos:
                 exibidos = []
                 for st_utc, en_utc in brutos:
@@ -150,7 +151,15 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
                         exibidos.append((st_utc.astimezone(timezone.utc).replace(tzinfo=None),
                                          en_utc.astimezone(timezone.utc).replace(tzinfo=None)))
                 na_madrugada = [t for t in exibidos if t[0] < fim_madrugada and t[1] > inicio_madrugada]
+                if modo == "local":
+                    local_tinha = bool(na_madrugada)
                 if not na_madrugada:
+                    continue
+                # O modo "utc" só vale para NVR que exibe o relógio em UTC (já confirmado antes) ou quando a
+                # gravação existe no horário local mas o NVR não entregou o vídeo. Sem gravação na madrugada
+                # local, tentar "utc" só testa horários deslocados (~3h) onde não há gravação: cada
+                # tentativa espera o timeout inteiro e falha.
+                if modo == "utc" and _MODO_HORARIO_MOTOROLA.get(ip) != "utc" and not local_tinha:
                     continue
 
                 def distancia(t):
