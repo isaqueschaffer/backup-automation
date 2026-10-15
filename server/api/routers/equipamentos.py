@@ -4,6 +4,7 @@ Substitui o antigo router de NVRs, agora suportando múltiplos tipos:
 NVR, OLT, ONU, PABX (e futuros).
 """
 import asyncio
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -21,6 +22,17 @@ from schemas import (
 from services.crypto_service import encrypt, decrypt
 
 router = APIRouter(prefix="/api/v1/machines/{machine_id}/equipamentos", tags=["Equipamentos"])
+
+
+def _canal_int(valor):
+    # Motorola (agentes < 1.1.4) reportava o canal como GUID "{0000000N-0000-...}"
+    try:
+        return int(valor)
+    except (ValueError, TypeError):
+        try:
+            return int(str(valor).strip("{}").split("-")[0], 16)
+        except ValueError:
+            return None
 
 
 def _get_machine_or_404(machine_id: UUID, db: Session) -> Machine:
@@ -135,12 +147,26 @@ def delete_equipamento(machine_id: UUID, equipamento_id: UUID, db: Session = Dep
     response_model=RTSPTestResponse,
     dependencies=[Depends(verify_admin_token)],
 )
-async def test_equipamento_rtsp(machine_id: UUID, equipamento_id: UUID, canal: Optional[int] = Query(None), db: Session = Depends(get_db)):
-    """Testa a conexao RTSP delegando a tarefa ao agente local via long-polling."""
+async def test_equipamento_rtsp(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    canal: Optional[int] = Query(None),
+    modo: str = Query("ao_vivo", pattern="^(ao_vivo|referencia|noite)$"),
+    nome: Optional[str] = Query(None, max_length=200),
+    db: Session = Depends(get_db),
+):
+    """Captura um frame delegando a tarefa ao agente local via long-polling.
+
+    modo "ao_vivo": frame ao vivo (teste de conexão).
+    modo "referencia": ao vivo; se a câmera estiver offline, o frame mais recente da gravação (agente >= 1.1.6).
+    modo "noite": madrugada mais recente com gravação; o servidor já salva como imagem da noite do canal.
+    """
     eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
-    
+    if modo != "ao_vivo" and not canal:
+        raise HTTPException(status_code=422, detail="Informe o canal para capturar da gravação.")
+
     machine_id_str = str(machine_id)
 
     # Só 1 teste RTSP por máquina por vez (o dicionário é indexado pela máquina).
@@ -172,6 +198,7 @@ async def test_equipamento_rtsp(machine_id: UUID, equipamento_id: UUID, canal: O
         "username": eq.username or "admin",
         "password": senha_pura,
         "canal": canal,
+        "modo": modo,  # agentes < 1.1.6 ignoram e capturam ao vivo
     }
 
     entry = {
@@ -181,12 +208,15 @@ async def test_equipamento_rtsp(machine_id: UUID, equipamento_id: UUID, canal: O
         "sent": False
     }
     pending_rtsp_tasks[machine_id_str] = entry
+    # Libera a conexão do banco durante a espera (a captura pela gravação pode levar ~2 min)
+    db.close()
 
+    # Ao vivo: até 35s. Pela gravação: busca dia a dia no NVR (o agente desiste em ~100s + envio).
+    espera = 35.0 if modo == "ao_vivo" else 130.0
     try:
-        # Aguarda até 35s a resposta do agente (o dashboard espera ~30s)
-        await asyncio.wait_for(event.wait(), timeout=35.0)
+        await asyncio.wait_for(event.wait(), timeout=espera)
     except asyncio.TimeoutError:
-        return RTSPTestResponse(success=False, error_message="FALHA: O Agente local não respondeu ao comando de teste a tempo. Verifique se o agente está online.")
+        return RTSPTestResponse(success=False, error_message="FALHA: O Agente local não respondeu ao comando a tempo. Verifique se o agente está online.")
     finally:
         # Sempre remove a tarefa (timeout, cancelamento ou sucesso); pop evita KeyError
         if pending_rtsp_tasks.get(machine_id_str) is entry:
@@ -196,7 +226,41 @@ async def test_equipamento_rtsp(machine_id: UUID, equipamento_id: UUID, canal: O
     if not result:
         return RTSPTestResponse(success=False, error_message="FALHA: Agente respondeu, mas sem dados válidos.")
 
+    if modo == "noite" and result.success:
+        if not result.horario:
+            # Agente antigo capturou ao vivo: não é imagem da noite
+            return RTSPTestResponse(success=False, error_message="Atualize o agente desta máquina para a versão 1.1.6 ou superior para capturar a imagem da noite pelo painel.")
+        _salvar_imagem_noite(db, equipamento_id, canal, nome, result)
+
     return result
+
+
+def _salvar_imagem_noite(db: Session, nvr_id: UUID, canal: int, nome: Optional[str], result: RTSPTestResponse) -> None:
+    """Salva a imagem da noite capturada pelo painel, como o envio do backup faria."""
+    try:
+        horario = datetime.fromisoformat(result.horario)  # horário exibido no NVR (naive), igual ao backup
+    except ValueError:
+        horario = None
+    nvr = db.query(NVR).filter(NVR.id == nvr_id).first()
+    if nvr is None:
+        return
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr_id, NVRCamera.canal == canal).first()
+    if camera is None:
+        camera = NVRCamera(nvr_id=nvr_id, canal=canal, nome=nome or f"Canal {canal}")
+        db.add(camera)
+    elif nome:
+        camera.nome = nome
+    camera.night_image_base64 = result.image_base64
+    camera.night_image_date = horario
+
+    # O status da captura mostrado na galeria vem do último relatório: marca este canal como OK
+    status_rel = []
+    for st in nvr.last_recording_status or []:
+        if isinstance(st, dict) and _canal_int(st.get("canal")) == canal:
+            st = {**st, "imagem_noite": {"status": "OK", "motivo": None, "horario": result.horario}}
+        status_rel.append(st)
+    nvr.last_recording_status = status_rel
+    db.commit()
 
 
 # ─── NVR Cameras Gallery ───────────────────────────────────────────────────
@@ -217,16 +281,6 @@ def get_nvr_cameras(
     db_dict = {c.canal: c for c in cameras_db}
     
     report_status = nvr.last_recording_status or []
-    
-    def _canal_int(valor):
-        # Motorola (agentes < 1.1.4) reportava o canal como GUID "{0000000N-0000-...}"
-        try:
-            return int(valor)
-        except (ValueError, TypeError):
-            try:
-                return int(str(valor).strip("{}").split("-")[0], 16)
-            except ValueError:
-                return None
 
     report_by_ch = {}
     for st in report_status:

@@ -514,3 +514,6 @@ class RTSPTestResponse(BaseModel):
     success: bool
     error_message: Optional[str] = None
     image_base64: Optional[str] = None
+    # Agente >= 1.1.6: horário exibido no NVR do frame da gravação e origem ("ao_vivo" | "gravacao")
+    horario: Optional[str] = None
+    origem: Optional[str] = None

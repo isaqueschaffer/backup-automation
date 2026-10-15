@@ -798,6 +798,17 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-15] — Captura pela gravação: referência de câmera offline e imagem da noite sob demanda (agente 1.1.6)
+
+**Alteração:** `POST .../equipamentos/{id}/test-rtsp` ganhou `modo` (`ao_vivo` padrão | `referencia` | `noite`) e `nome`. A tarefa vai ao agente com `modo`; agentes < 1.1.6 ignoram e capturam ao vivo.
+- `referencia`: ao vivo; se falhar (câmera offline), o agente usa o frame do fim do trecho gravado mais recente, buscando do agora para trás até 15 dias (Hikvision: ISAPI em janelas de 6h; Motorola: `queryChlRecLog`).
+- `noite`: madrugada (00h–06h) mais recente com gravação, da noite mais nova para a mais antiga, até 15 dias (desiste após 2 falhas de vídeo). O servidor salva em `nvr_cameras.night_image_*` e marca `imagem_noite` OK no `last_recording_status` do canal. Resposta sem `horario` (agente antigo) é recusada.
+- `RTSPTestResponse` ganhou `horario` e `origem` ("ao_vivo" | "gravacao"). Espera do servidor: 35s ao vivo, 130s pela gravação (o agente encerra em ~100s); a sessão do banco é liberada durante a espera. Envio do resultado pelo agente: timeout 10s → 60s.
+- Galeria: "Capturar referência" (com fallback), "Capturar imagem da noite" e "Enviar imagem"; "Atualizar todas as referências" agora inclui câmeras offline.
+**Arquivos:** agent/src/camera/rtsp_client.py, agent/service.py, agent/src/application/api_client.py, agent/src/application/updater.py, agent/installer.iss, server/api/routers/equipamentos.py, server/api/schemas.py, server/dashboard/src/pages/Machines/MachineDetail/components/NVRCamerasGalleryModal.tsx, server/dashboard/package.json
+**Breaking Change:** Não (sem `modo` o comportamento é o anterior; agente antigo recebe a tarefa como ao vivo).
+**Branch:** isaque
+
 ### [2026-10-15] — Upload da imagem de referência; acesso às máquinas pela fila do Cliente
 
 **Alteração:** Na Galeria do NVR, além de "Capturar da câmera" (RTSP pelo agente), o botão "Enviar imagem" sobe um arquivo do computador como referência do canal. O navegador converte para JPEG (qualidade 0,9; lado maior até 3840 px) e usa o mesmo endpoint `POST .../cameras/perfect-image`. `NVRCameraSetPerfect.image_base64` agora é validado: base64 válido, JPEG (`FF D8`), até 10 MB; aceita prefixo `data:`. Na fila do Cliente, a linha da máquina (ou o botão "Abrir") abre `/maquinas/:id`; na máquina, o cabeçalho mostra "Cliente: X › Máquina" e o voltar retorna ao Cliente.
