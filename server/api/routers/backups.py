@@ -136,13 +136,36 @@ def public_download_backup_zip(backup_id: UUID, db: Session = Depends(get_db)):
 
 @router.get("/public-run-download/{run_id}")
 def public_download_run_zip(run_id: UUID, db: Session = Depends(get_db)):
-    """Endpoint público (link do e-mail do Cliente): ZIP unificado da rodada, usando o ID da rodada como token."""
+    """Endpoint público (link do e-mail do Cliente): ZIP unificado da rodada, usando o ID da rodada como token.
+
+    Se o cliente tiver senha configurada, gera ZIP com senha (desencriptando os ZIPs das máquinas).
+    Caso contrário, retorna o ZIP sem senha com os ZIPs das máquinas como estão.
+    """
     from models import CustomerBackupRun
-    from services.backup_runs import build_run_zip, iter_file, run_zip_filename
+    from services.backup_runs import build_run_zip, build_client_zip_with_password, iter_file, run_zip_filename
+    from services.crypto_service import decrypt as crypto_decrypt
 
     run = db.query(CustomerBackupRun).filter(CustomerBackupRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Rodada não encontrada")
+
+    # Se o cliente tem senha, gera ZIP do cliente com senha (desencriptando os ZIPs das máquinas)
+    customer = run.customer
+    if customer and customer.zip_password:
+        try:
+            client_password = crypto_decrypt(customer.zip_password)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Erro ao recuperar a senha do cliente.")
+        f = build_client_zip_with_password(db, run, client_password)
+        if f is None:
+            raise HTTPException(status_code=404, detail="Nenhum ZIP disponível nesta rodada")
+        return StreamingResponse(
+            iter_file(f),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{run_zip_filename(run)}"'},
+        )
+
+    # Sem senha: retorna ZIP tradicional (com os ZIPs das máquinas dentro)
     f = build_run_zip(db, run)
     if f is None:
         raise HTTPException(status_code=404, detail="Nenhum ZIP disponível nesta rodada")

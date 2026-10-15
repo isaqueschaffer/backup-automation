@@ -9,10 +9,12 @@ export interface CustomerForm {
   backup_minute: number;
   // E-mails do relatório como texto separado por vírgula (vira lista ao salvar)
   email_to: string;
+  zip_password?: string;
+  has_zip_password?: boolean;
 }
 
 export const emptyCustomerForm = (): CustomerForm => ({
-  name: "", description: "", backup_hour: 2, backup_minute: 0, email_to: "",
+  name: "", description: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
 });
 
 // "a@x.com, , b@y.com" → ["a@x.com", "b@y.com"] (trim, sem vazios, sem repetidos)
@@ -48,6 +50,21 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
           onChange={e => setForm({ ...form, email_to: e.target.value })} />
         <div className="text-xs text-muted" style={{ marginTop: 6 }}>
           Um único e-mail por rodada com o relatório de todas as máquinas. Substitui os e-mails próprios das máquinas deste cliente.
+        </div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">
+          Senha do ZIP do cliente {isEdit && <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(vazio = manter atual)</span>}
+        </label>
+        <input
+          className="form-input"
+          type="password"
+          placeholder={isEdit && form.has_zip_password ? "•••••••• (senha já configurada)" : "Senha opcional para o ZIP consolidado"}
+          value={form.zip_password || ""}
+          onChange={e => setForm({ ...form, zip_password: e.target.value })}
+        />
+        <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+          Prioridade de download: ao baixar o backup por cliente, o ZIP será protegido por esta senha e os arquivos internos de cada máquina ficam diretamente acessíveis sem senha.
         </div>
       </div>
       <div className="flex gap-3">

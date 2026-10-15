@@ -399,17 +399,87 @@ def run_to_dict(db: Session, run: CustomerBackupRun) -> dict:
     }
 
 
-def build_run_zip(db: Session, run: CustomerBackupRun):
-    """Gera o ZIP unificado da rodada (uma pasta por máquina com o ZIP do backup).
-
-    Usa arquivo temporário em disco (SpooledTemporaryFile) para não carregar tudo em memória.
-    Retorna o arquivo posicionado no início, ou None se nenhum ZIP foi encontrado.
+def write_extracted_backup(
+    zf_out,
+    path: Path,
+    machine_name: str,
+    machine_id: UUID,
+    machine_zip_password: Optional[str],
+    backup_filename: str,
+    used_folders: set,
+) -> bool:
+    """Extrai os arquivos do ZIP individual da máquina (desencriptando com a senha da máquina se houver)
+    e grava diretamente no ZIP do cliente sob a pasta da máquina, sem senha interna.
     """
-    tmp = tempfile.SpooledTemporaryFile(max_size=32 * 1024 * 1024)
+    import pyzipper
+    from services.crypto_service import decrypt as crypto_decrypt
+
+    folder = _sanitize_name(machine_name)
+    if folder in used_folders:
+        folder = f"{folder}_{str(machine_id)[:8]}"
+    used_folders.add(folder)
+
+    machine_pw_plain = None
+    if machine_zip_password:
+        try:
+            machine_pw_plain = crypto_decrypt(machine_zip_password)
+        except Exception:
+            logger.warning("Falha ao decriptar a senha da máquina %s — tentando sem senha.", machine_name)
+
+    extracted_any = False
+    try:
+        with pyzipper.AESZipFile(str(path), "r") as zf_in:
+            if machine_pw_plain:
+                zf_in.setpassword(machine_pw_plain.encode())
+            for inner_name in zf_in.namelist():
+                try:
+                    data = zf_in.read(inner_name)
+                    arcname = f"{folder}/{inner_name}"
+                    zf_out.writestr(arcname, data)
+                    extracted_any = True
+                except Exception as ex:
+                    logger.warning("Falha ao extrair '%s' do ZIP de %s: %s", inner_name, machine_name, ex)
+    except Exception as ex:
+        logger.warning("Não foi possível abrir/decriptar o ZIP de %s: %s — incluindo o ZIP original.", machine_name, ex)
+        zf_out.write(str(path), arcname=f"{folder}/{backup_filename}")
+        extracted_any = True
+
+    return extracted_any
+
+
+def build_run_zip(db: Session, run: CustomerBackupRun, client_password: Optional[str] = None):
+    """Gera o ZIP consolidado da rodada do cliente.
+
+    Se `client_password` for informado (ou configurado no cliente), protege o ZIP do cliente com essa senha (AES-WZ).
+    Os arquivos dentro das pastas das máquinas ficam descompactados/sem senha interna.
+    """
+    import pyzipper
+
+    if client_password is None and run.customer and run.customer.zip_password:
+        from services.crypto_service import decrypt as crypto_decrypt
+        try:
+            client_password = crypto_decrypt(run.customer.zip_password)
+        except Exception:
+            logger.warning("Falha ao decriptar senha do cliente %s", run.customer.name)
+
+    tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
     found_any = False
     used_folders: set = set()
+
     try:
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+        if client_password:
+            zf_context = pyzipper.AESZipFile(
+                tmp, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES
+            )
+        else:
+            zf_context = pyzipper.AESZipFile(
+                tmp, "w", compression=pyzipper.ZIP_DEFLATED
+            )
+
+        with zf_context as zf_out:
+            if client_password:
+                zf_out.setpassword(client_password.encode())
+
             for e in run_entries(db, run):
                 b, m = e["backup"], e["machine"]
                 if b is None or m is None or not b.zip_filename:
@@ -418,20 +488,83 @@ def build_run_zip(db: Session, run: CustomerBackupRun):
                 path = get_zip_path(m.id, m.name, b.zip_filename, date_str=date_str)
                 if not path or not path.exists():
                     continue
-                folder = _sanitize_name(m.name)
-                if folder in used_folders:
-                    folder = f"{folder}_{str(m.id)[:8]}"
-                used_folders.add(folder)
-                zf.write(str(path), arcname=f"{folder}/{b.zip_filename}")
-                found_any = True
+
+                if write_extracted_backup(zf_out, path, m.name, m.id, m.zip_password, b.zip_filename, used_folders):
+                    found_any = True
     except Exception:
         tmp.close()
         raise
+
     if not found_any:
         tmp.close()
         return None
     tmp.seek(0)
     return tmp
+
+
+def build_client_zip_with_password(db: Session, run: CustomerBackupRun, client_password: str):
+    """Alias compatível com código existente: chama build_run_zip com a senha informada."""
+    return build_run_zip(db, run, client_password=client_password)
+
+
+def build_customer_latest_zip(db: Session, customer: Customer, client_password: Optional[str] = None):
+    """Gera o ZIP com os backups mais recentes de todas as máquinas do cliente.
+    Se o cliente possuir senha configurada, protege o ZIP com essa senha (AES-WZ).
+    Os arquivos dentro das pastas das máquinas ficam sem senha interna.
+    """
+    import pyzipper
+
+    if client_password is None and customer.zip_password:
+        from services.crypto_service import decrypt as crypto_decrypt
+        try:
+            client_password = crypto_decrypt(customer.zip_password)
+        except Exception:
+            logger.warning("Falha ao decriptar senha do cliente %s", customer.name)
+
+    tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+    found_any = False
+    used_folders: set = set()
+
+    try:
+        if client_password:
+            zf_context = pyzipper.AESZipFile(
+                tmp, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES
+            )
+        else:
+            zf_context = pyzipper.AESZipFile(
+                tmp, "w", compression=pyzipper.ZIP_DEFLATED
+            )
+
+        with zf_context as zf_out:
+            if client_password:
+                zf_out.setpassword(client_password.encode())
+
+            for machine in sorted(customer.machines, key=lambda m: m.queue_order):
+                latest = (
+                    db.query(Backup)
+                    .filter(Backup.machine_id == machine.id, Backup.zip_filename.isnot(None))
+                    .order_by(Backup.started_at.desc())
+                    .first()
+                )
+                if not latest or not latest.zip_filename:
+                    continue
+                date_str = (latest.started_at or latest.created_at).strftime("%d-%m-%Y")
+                path = get_zip_path(machine.id, machine.name, latest.zip_filename, date_str=date_str)
+                if not path or not path.exists():
+                    continue
+
+                if write_extracted_backup(zf_out, path, machine.name, machine.id, machine.zip_password, latest.zip_filename, used_folders):
+                    found_any = True
+    except Exception:
+        tmp.close()
+        raise
+
+    if not found_any:
+        tmp.close()
+        return None
+    tmp.seek(0)
+    return tmp
+
 
 
 def iter_file(f, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:

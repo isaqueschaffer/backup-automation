@@ -117,6 +117,7 @@ export const createCustomer = (data: {
   backup_minute: number;
   email_to: string[];
   active: boolean;
+  zip_password?: string;
 }): Promise<Customer> => api.post("/clients", data).then((r) => r.data);
 
 export const updateCustomer = (
@@ -128,6 +129,7 @@ export const updateCustomer = (
     backup_minute: number;
     email_to: string[];
     active: boolean;
+    zip_password: string | null;
   }>
 ): Promise<Customer> => api.put(`/clients/${id}`, data).then((r) => r.data);
 
