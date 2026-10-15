@@ -98,6 +98,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
   };
 
   const selectedCam = cameras.find(c => c.canal === selectedCanal);
+  const semReferencia = cameras.filter(c => !c.perfect_image_base64).length;
 
   return (
     <>
@@ -113,6 +114,12 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
               <div style={{ padding: "0 16px", marginBottom: 12, fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em" }}>
                 CANAIS ({cameras.length})
               </div>
+              {semReferencia > 0 && (
+                <div style={{ margin: "0 16px 12px", padding: "8px 10px", borderRadius: 6, fontSize: 12, background: "var(--warn-bg)", color: "var(--warn)" }}
+                  title="A imagem de referência é anexada no e-mail quando a câmera fica offline. Sem ela, o e-mail só avisa que falta a imagem.">
+                  {semReferencia} câmera(s) sem imagem de referência — ela é anexada no e-mail quando a câmera fica offline.
+                </div>
+              )}
               <div style={{ padding: "0 16px", marginBottom: 12 }}>
                 {bulk && bulk.done < bulk.total && !cancelBulk.current ? (
                   <>
@@ -160,7 +167,11 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
                       <span style={{ fontWeight: isSelected ? 600 : 500, color: isSelected ? "var(--primary-dark)" : "var(--text)" }}>
                         {cam.nome || `Canal ${cam.canal}`}
                       </span>
-                      <div style={{ fontSize: 11, marginTop: 4, display: "flex", alignItems: "center" }}>
+                      <div style={{ fontSize: 11, marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        {!cam.perfect_image_base64 && (
+                          <span style={{ background: "var(--warn-bg)", color: "var(--warn)", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}
+                            title="Sem imagem de referência: não será anexada no e-mail se a câmera ficar offline">Sem referência</span>
+                        )}
                         {cam.status_comunicacao === "OFFLINE" ? (
                           <span style={{ background: "var(--err-bg)", color: "var(--err)", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>OFFLINE</span>
                         ) : cam.captura_status === "OK" ? (
