@@ -117,6 +117,8 @@ _MIGRACOES_COLUNAS = [
     # Rodadas de backup do Cliente
     ("backups", "run_id", "ALTER TABLE backups ADD COLUMN run_id UUID REFERENCES customer_backup_runs(id) ON DELETE SET NULL;"),
     ("client_groups", "email_to", "ALTER TABLE client_groups ADD COLUMN email_to TEXT[] NOT NULL DEFAULT '{}';"),
+    # Senha do ZIP do cliente (Fernet-encrypted) — prioridade de download por cliente
+    ("client_groups", "zip_password", "ALTER TABLE client_groups ADD COLUMN zip_password TEXT;"),
 ]
 
 _colunas_cache: dict = {}

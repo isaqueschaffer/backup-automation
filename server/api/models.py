@@ -24,6 +24,8 @@ class Customer(Base):
     queue_current_index = Column(Integer, nullable=True)
     # Destinatários do e-mail único por rodada de backup do Cliente
     email_to = Column(ARRAY(String), default=[], nullable=False)
+    # Senha do ZIP do cliente (Fernet-encrypted); None = sem senha
+    zip_password = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     machines = relationship("Machine", back_populates="customer", order_by="Machine.queue_order")

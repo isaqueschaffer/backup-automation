@@ -1,5 +1,6 @@
 import io
 import zipfile
+import tempfile
 from typing import List
 from uuid import UUID
 from datetime import datetime
@@ -22,6 +23,8 @@ from routers.machines import machine_to_response, check_machine_online, next_que
 from services.storage_service import get_zip_path
 from services.backup_runs import (
     build_run_zip,
+    build_client_zip_with_password,
+    build_customer_latest_zip,
     close_queue_run_on_cancel,
     iter_file,
     open_queue_run,
@@ -29,6 +32,7 @@ from services.backup_runs import (
     run_zip_filename,
     send_run_email,
 )
+from services.crypto_service import encrypt as crypto_encrypt, decrypt as crypto_decrypt
 
 router = APIRouter(prefix="/api/v1/clients", tags=["Clientes"])
 
@@ -121,6 +125,7 @@ def _to_response(customer: Customer, db: Session, commit: bool = True) -> Custom
         last_backup_at=last_backup_at,
         queue_active=customer.queue_active,
         queue_current_index=customer.queue_current_index,
+        has_zip_password=bool(customer.zip_password),
         machines=machines_resp,
     )
 
@@ -138,6 +143,7 @@ def list_customers(db: Session = Depends(get_db)):
 @router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(verify_admin_token)])
 def create_customer(body: CustomerCreate, db: Session = Depends(get_db)):
+    encrypted_pw = crypto_encrypt(body.zip_password) if body.zip_password else None
     customer = Customer(
         name=body.name,
         description=body.description or None,
@@ -145,6 +151,7 @@ def create_customer(body: CustomerCreate, db: Session = Depends(get_db)):
         backup_hour=body.backup_hour,
         backup_minute=body.backup_minute,
         email_to=body.email_to,
+        zip_password=encrypted_pw,
     )
     db.add(customer)
     db.commit()
@@ -170,13 +177,18 @@ def update_customer(customer_id: UUID, body: CustomerUpdate, db: Session = Depen
     )
 
     for field, value in body.model_dump(exclude_none=True).items():
-        if field == "description":
+        if field in ("description", "zip_password"):
             continue
         setattr(customer, field, value)
 
     # Descrição: "" ou null explícito limpam o campo; ausente mantém
     if "description" in body.model_fields_set:
         customer.description = (body.description or "").strip() or None
+
+    # Senha do ZIP do cliente: "" ou null explícito remove; valor novo encripta
+    if "zip_password" in body.model_fields_set:
+        raw_pw = (body.zip_password or "").strip()
+        customer.zip_password = crypto_encrypt(raw_pw) if raw_pw else None
 
     # Propaga horário para todas as máquinas do cliente e solicita restart
     if schedule_changed:
@@ -350,40 +362,21 @@ def cancel_customer_queue(customer_id: UUID, db: Session = Depends(get_db)):
 
 @router.get("/{customer_id}/download-latest", dependencies=[Depends(verify_admin_token)])
 def download_customer_zip(customer_id: UUID, db: Session = Depends(get_db)):
-    """Gera e retorna um ZIP agrupado com os backups mais recentes de cada máquina do cliente."""
+    """Gera e retorna um ZIP agrupado com os backups mais recentes de cada máquina do cliente.
+    Se o cliente possuir senha configurada, o ZIP do cliente é protegido com ela,
+    e os arquivos internos de cada máquina ficam sem senha.
+    """
     customer = _get_customer_or_404(customer_id, db)
-
-    zip_buffer = io.BytesIO()
-    found_any = False
-
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for machine in sorted(customer.machines, key=lambda m: m.queue_order):
-            latest = (
-                db.query(Backup)
-                .filter(Backup.machine_id == machine.id, Backup.zip_filename.isnot(None))
-                .order_by(Backup.started_at.desc())
-                .first()
-            )
-            if not latest or not latest.zip_filename:
-                continue
-            date_str = (latest.started_at or latest.created_at).strftime("%d-%m-%Y")
-            zip_path = get_zip_path(machine.id, machine.name, latest.zip_filename, date_str=date_str)
-            if not zip_path or not zip_path.exists():
-                continue
-            safe_name = machine.name.replace(" ", "_").replace("/", "_")
-            zf.write(str(zip_path), arcname=f"{safe_name}/{latest.zip_filename}")
-            found_any = True
-
-    if not found_any:
+    f = build_customer_latest_zip(db, customer)
+    if f is None:
         raise HTTPException(status_code=404, detail="Nenhum backup disponível para as máquinas deste cliente")
 
-    zip_buffer.seek(0)
     safe_customer_name = customer.name.replace(" ", "_").replace("/", "_")
     date_today = datetime.now().strftime("%d-%m-%Y")
     filename = f"cliente_{safe_customer_name}_{date_today}.zip"
 
     return StreamingResponse(
-        zip_buffer,
+        iter_file(f),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -418,8 +411,29 @@ def list_customer_runs(customer_id: UUID, limit: int = Query(20, ge=1, le=200), 
 
 @router.get("/{customer_id}/runs/{run_id}/download", dependencies=[Depends(verify_admin_token)])
 def download_customer_run_zip(customer_id: UUID, run_id: UUID, db: Session = Depends(get_db)):
-    """ZIP unificado da rodada: uma pasta por máquina com o ZIP do backup."""
+    """ZIP unificado da rodada.
+
+    Se o cliente tiver senha configurada, gera ZIP com senha (desencriptando os ZIPs das máquinas —
+    os arquivos internos ficam sem senha dentro do ZIP do cliente).
+    Caso contrário, retorna o ZIP sem senha com os ZIPs das máquinas como estão.
+    """
     run = _get_run_or_404(customer_id, run_id, db)
+    customer = run.customer
+
+    if customer and customer.zip_password:
+        try:
+            client_password = crypto_decrypt(customer.zip_password)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Erro ao recuperar a senha do cliente.")
+        f = build_client_zip_with_password(db, run, client_password)
+        if f is None:
+            raise HTTPException(status_code=404, detail="Nenhum ZIP disponível nesta rodada")
+        return StreamingResponse(
+            iter_file(f),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{run_zip_filename(run)}"'},
+        )
+
     f = build_run_zip(db, run)
     if f is None:
         raise HTTPException(status_code=404, detail="Nenhum ZIP disponível nesta rodada")

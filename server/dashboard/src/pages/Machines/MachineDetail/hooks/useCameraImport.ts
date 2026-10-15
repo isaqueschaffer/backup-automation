@@ -6,6 +6,7 @@ import { ToastFn } from "../utils";
 
 // Parser robusto de CSV (suporta aspas e delimitadores no meio do texto)
 function parseCsv(text: string): string[][] {
+  text = text.replace(/^\uFEFF/, "").replace(/^ï»¿/, "");
   const rows: string[][] = [];
   const delimiter = (text.indexOf(";") !== -1 && text.indexOf(";") < (text.indexOf("\n") === -1 ? 9999 : text.indexOf("\n"))) ? ";" : ",";
 
@@ -40,18 +41,89 @@ function parseCsv(text: string): string[][] {
 
 interface CameraRow { name: string; ip: string; password: string; modelo: string }
 
+function cleanCell(val: unknown): string {
+  if (val === null || val === undefined) return "";
+  return String(val).replace(/^\uFEFF/, "").replace(/^ï»¿/, "").replace(/\0/g, "").trim();
+}
+
 // Converte linhas (CSV/XLSX) em câmeras a importar
 function rowsToCameras(rows: unknown[][]): CameraRow[] {
-  const headers = (rows[0] || []).map(h => String(h).trim().toLowerCase());
+  if (!rows || rows.length === 0) return [];
 
+  // 1. Localiza a linha do cabeçalho real (linha 0 ou linhas subsequentes se houver metadados do NVR no topo)
+  let headerRowIdx = 0;
+  for (let r = 0; r < Math.min(rows.length, 5); r++) {
+    const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+    if (
+      rowStr.some(c =>
+        c.includes("ip camera address") ||
+        c.includes("ip do dispositivo") ||
+        c.includes("endere") ||
+        c.includes("descri")
+      )
+    ) {
+      headerRowIdx = r;
+      break;
+    }
+  }
+
+  const headers = (rows[headerRowIdx] || []).map(h => cleanCell(h).toLowerCase());
+
+  // Detecção específica do NVR Hikvision (exportação nativa do equipamento DS-*)
+  const isHikvisionNvr =
+    headers.some(h => h.includes("ip camera address")) ||
+    (rows[0] && cleanCell(rows[0][0]).toLowerCase().includes("device type"));
+
+  const out: CameraRow[] = [];
+
+  if (isHikvisionNvr) {
+    const idxName = headers.findIndex(h => h.includes("ip camera no") || h.includes("camera no") || h === "no" || h === "nº");
+    const idxIp = headers.findIndex(h => h.includes("ip camera address") || h === "ip");
+    const idxProto = headers.findIndex(h => h.includes("protocol") && !h.includes("transfer"));
+    const idxPass = headers.findIndex(h => h.includes("password") || h.includes("senha"));
+
+    for (let i = headerRowIdx + 1; i < rows.length; i++) {
+      const cols = rows[i];
+      if (!cols || cols.length === 0) continue;
+
+      const ip = cleanCell(idxIp >= 0 ? cols[idxIp] : cols[1]);
+      // Descarta linhas sem IP, cabeçalhos repetidos ou rodapés vazios com ;;;
+      if (!ip || !ip.includes(".") || ip.toLowerCase().includes("camera")) continue;
+
+      let name = cleanCell(idxName >= 0 ? cols[idxName] : cols[0]);
+      // Se o nome for apenas números (ex: "58", "195"), prefixa com CAM para ficar padronizado
+      if (/^\d+$/.test(name)) {
+        name = `CAM ${name.padStart(2, "0")}`;
+      } else if (!name) {
+        name = `CAM ${String(out.length + 1).padStart(2, "0")}`;
+      }
+
+      const pass = cleanCell(idxPass >= 0 ? cols[idxPass] : cols[6]);
+      const proto = cleanCell(idxProto >= 0 ? cols[idxProto] : cols[2]).toUpperCase();
+
+      let modelo = "Hikvision";
+      if (proto.includes("INTELBRAS")) modelo = "Intelbras";
+      else if (proto.includes("ONVIF")) modelo = "ONVIF";
+      else if (proto.includes("GRANDSTREAM")) modelo = "Grandstream";
+
+      out.push({
+        name,
+        ip,
+        password: pass || "navarro@123",
+        modelo,
+      });
+    }
+    return out;
+  }
+
+  // Demais formatos: Digifort, Intelbras Defense e Genéricos
   let idxDesc = headers.findIndex(h => h.includes("desc"));
   if (idxDesc === -1) idxDesc = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
 
   const idxIp = headers.findIndex(h => h.includes("ip") || h.includes("endere"));
   const idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
 
-  const out: CameraRow[] = [];
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = headerRowIdx + 1; i < rows.length; i++) {
     const cols = rows[i];
     if (!cols || cols.length === 0 || (!cols[0] && !cols[1])) continue;
 
@@ -60,29 +132,27 @@ function rowsToCameras(rows: unknown[][]): CameraRow[] {
     let pass = "";
 
     if (idxDesc >= 0 || idxIp >= 0) {
-      desc = idxDesc >= 0 ? String(cols[idxDesc] || "") : String(cols[0] || "");
-      ender = idxIp >= 0 ? String(cols[idxIp] || "") : String(cols[1] || "");
-      pass = idxPass >= 0 ? String(cols[idxPass] || "") : "";
+      desc = cleanCell(idxDesc >= 0 ? cols[idxDesc] : cols[0]);
+      ender = cleanCell(idxIp >= 0 ? cols[idxIp] : cols[1]);
+      pass = cleanCell(idxPass >= 0 ? cols[idxPass] : "");
     } else {
-      // Fallback absoluto caso não ache nenhum cabeçalho
-      desc = String(cols[1] || "");
-      ender = String(cols[3] || "");
-      pass = String(cols[6] || "");
+      desc = cleanCell(cols[1]);
+      ender = cleanCell(cols[3]);
+      pass = cleanCell(cols[6]);
     }
 
-    // Limpar caracteres nulos (0x00) que quebram o banco de dados (PostgreSQL)
-    desc = desc.replace(/\0/g, "").trim();
-    ender = ender.replace(/\0/g, "").trim();
-    pass = pass.replace(/\0/g, "").trim();
+    if (!ender || !ender.includes(".")) continue;
 
     const rowStr = cols.join(" ").toUpperCase();
     let modelo = "Hikvision";
-    if (rowStr.includes("HIKVISION")) modelo = "Hikvision";
-    else if (rowStr.includes("INTELBRAS")) modelo = "Intelbras";
+    if (rowStr.includes("INTELBRAS") || rowStr.includes("CÂMERA IP") || rowStr.includes("CAMERA IP")) modelo = "Intelbras";
+    else if (rowStr.includes("HIKVISION")) modelo = "Hikvision";
     else if (rowStr.includes("GRANDSTREAM")) modelo = "Grandstream";
     else if (rowStr.includes("ONVIF")) modelo = "ONVIF";
 
-    if (desc && ender) out.push({ name: desc, ip: ender, password: pass, modelo });
+    if (desc && ender) {
+      out.push({ name: desc, ip: ender, password: pass || "navarro@123", modelo });
+    }
   }
   return out;
 }
@@ -112,7 +182,14 @@ export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: 
       try {
         let rows: unknown[][] = [];
         if (isCsv) {
-          rows = parseCsv(evt.target?.result as string);
+          const buf = new Uint8Array(evt.target?.result as ArrayBuffer);
+          let text = "";
+          try {
+            text = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+          } catch {
+            text = new TextDecoder("iso-8859-1").decode(buf);
+          }
+          rows = parseCsv(text);
         } else {
           const data = new Uint8Array(evt.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: "array" });
@@ -154,11 +231,7 @@ export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: 
       if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
-    if (isCsv) {
-      reader.readAsText(file, "ISO-8859-1");
-    } else {
-      reader.readAsArrayBuffer(file);
-    }
+    reader.readAsArrayBuffer(file);
   };
 
   const deleteAll = async () => {

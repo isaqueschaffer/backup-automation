@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
-import { fetchBackups, fetchMachines, fetchCustomers, resendBackupEmail, downloadBackupZip, BackupQuery } from "../api/client";
+import { fetchBackups, fetchMachines, fetchCustomers, resendBackupEmail, downloadBackupZip, downloadCustomerRunZip, downloadCustomerZip, BackupQuery } from "../api/client";
 import { Backup, Customer, Machine, PaginatedBackups } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
@@ -192,11 +192,23 @@ export default function Backups() {
   // Invalida respostas pendentes ao desmontar
   useEffect(() => () => { loadSeq.current++; }, []);
 
-  const handleDownload = async (backupId: string, filename: string) => {
+  const handleDownload = async (b: Backup) => {
     try {
-      setDownloadingId(backupId);
-      const data = await downloadBackupZip(backupId);
-      saveBlob(data, filename || "backup.zip");
+      setDownloadingId(b.id);
+      if (b.customer_id) {
+        // Prioridade de download: baixa o ZIP consolidado do cliente (com senha do cliente se houver)
+        if (b.run_id) {
+          const safeName = (b.customer_name || "cliente").replace(/\s+/g, "_");
+          const dateStr = b.started_at ? fmtDate(b.started_at).split(" ")[0].replace(/\//g, "-") : "backup";
+          await downloadCustomerRunZip(b.customer_id, b.run_id, `cliente_${safeName}_${dateStr}.zip`);
+        } else {
+          await downloadCustomerZip(b.customer_id, b.customer_name || "cliente");
+        }
+      } else {
+        // Máquina sem cliente: baixa o ZIP individual da máquina (senha da máquina)
+        const data = await downloadBackupZip(b.id);
+        saveBlob(data, b.zip_filename || "backup.zip");
+      }
     } catch (err: unknown) {
       console.error("Erro ao baixar o backup:", err);
       const msg = await extractBlobError(err);
@@ -226,7 +238,7 @@ export default function Backups() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Backups</h1>
-          <p className="page-subtitle">Histórico completo de todos os backups</p>
+          <p className="page-subtitle">Histórico completo de backups • Downloads priorizam o ZIP consolidado por cliente (senha do cliente)</p>
         </div>
       </div>
 
@@ -339,11 +351,15 @@ export default function Backups() {
                     </td>
                     <td className="text-secondary text-sm">{b.trigger}</td>
                     <td>
-                      {b.zip_filename && (
+                      {(b.zip_filename || b.customer_id) && (
                         <button
-                          onClick={() => handleDownload(b.id, b.zip_filename!)}
+                          onClick={() => handleDownload(b)}
                           className="btn-icon"
-                          title="Baixar ZIP"
+                          title={
+                            b.customer_id
+                              ? `Baixar ZIP do cliente "${b.customer_name || "Cliente"}" (prioridade de cliente com senha no ZIP externo)`
+                              : "Baixar ZIP da máquina (protegido com a senha da máquina)"
+                          }
                           disabled={downloadingId === b.id}
                         >
                           {downloadingId === b.id ? (

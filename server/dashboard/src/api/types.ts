@@ -179,6 +179,8 @@ export interface Customer {
   last_backup_at: string | null;
   queue_active: boolean;
   queue_current_index?: number | null;
+  // true quando o cliente tem senha configurada no ZIP do cliente
+  has_zip_password: boolean;
   machines: Machine[]; // ordenadas por queue_order
 }
 

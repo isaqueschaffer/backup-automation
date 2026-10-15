@@ -437,6 +437,8 @@ def _clean_email_list(v: Optional[List[str]]) -> Optional[List[str]]:
 class CustomerCreate(CustomerBase):
     # Destinatários do e-mail único por rodada de backup
     email_to: List[str] = []
+    # Senha do ZIP do cliente (plaintext; armazenada criptografada)
+    zip_password: Optional[str] = None
 
     @field_validator("email_to")
     @classmethod
@@ -452,6 +454,8 @@ class CustomerUpdate(BaseModel):
     backup_hour: Optional[int] = Field(None, ge=0, le=23)
     backup_minute: Optional[int] = Field(None, ge=0, le=59)
     email_to: Optional[List[str]] = None
+    # Senha do ZIP do cliente (plaintext); "" ou null remove a senha
+    zip_password: Optional[str] = None
 
     @field_validator("email_to")
     @classmethod
@@ -472,6 +476,8 @@ class CustomerResponse(CustomerBase):
     last_backup_at: Optional[datetime] = None
     queue_active: bool = False
     queue_current_index: Optional[int] = None
+    # Informa ao frontend se o cliente tem senha no ZIP (sem expor a senha)
+    has_zip_password: bool = False
     machines: List[MachineResponse] = []  # ordenadas por queue_order
 
     model_config = {"from_attributes": True}

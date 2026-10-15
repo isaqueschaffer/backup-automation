@@ -46,6 +46,7 @@ export default function CustomersPage() {
         backup_minute: form.backup_minute,
         email_to: parseEmailList(form.email_to),
         active: true,
+        zip_password: form.password_mode === "custom" && form.zip_password?.trim() ? form.zip_password.trim() : undefined,
       });
       toast("Cliente criado!", "success");
       setShowCreate(false);
