@@ -266,6 +266,7 @@ def send_run_email(db: Session, run: CustomerBackupRun, base_url: Optional[str] 
             run_trigger=run.trigger,
             started_at=run.started_at,
             entries=[{
+                "machine_id": e["machine"].id if e["machine"] is not None else None,
                 "name": e["name"],
                 "status": e["backup"].status if e["backup"] is not None else None,
                 "nvr_results": (e["backup"].nvr_results or []) if e["backup"] is not None else [],

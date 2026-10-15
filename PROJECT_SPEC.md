@@ -798,6 +798,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-14] — E-mail anexa a imagem de referência das câmeras offline
+
+**Alteração:** O e-mail de relatório (máquina avulsa e rodada do Cliente) anexa a imagem perfeita (`nvr_cameras.perfect_image_base64`) de cada câmera não ONLINE, para o técnico identificar a câmera no local. Sem mudança no agente nem no banco.
+**Regras:** só câmeras offline (mesmo critério da seção de câmeras); só a imagem de referência (não a da noite); arquivo `<nome da câmera>.jpg` (caracteres inválidos viram `_`, nomes repetidos ganham ` (2)`); no máximo 10 imagens por e-mail (`MAX_OFFLINE_IMAGES`). O corpo informa quantas foram anexadas, quantas passaram do limite e quantas câmeras offline não têm imagem cadastrada. A câmera é achada pelo NVR (máquina + nome, como no recebimento do relatório) e pelo canal.
+**Arquivos:** server/api/services/email_service.py, server/api/services/backup_runs.py, server/api/routers/agent.py, server/api/routers/backups.py, server/api/tests/test_email_offline_images.py
+**Breaking Change:** Não (`machine_id` é parâmetro opcional; sem ele o e-mail sai sem imagens).
+**Branch:** isaque
+
 ### [2026-10-14] — Backup e e-mail por Cliente (rodadas)
 
 **Alteração:** Cliente com várias máquinas recebe 1 e-mail por rodada de backup, com o relatório de todas as máquinas e um ZIP unificado.
