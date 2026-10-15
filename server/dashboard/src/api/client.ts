@@ -82,8 +82,10 @@ export interface BackupQuery {
 }
 export const fetchBackups = (params?: BackupQuery): Promise<PaginatedBackups> =>
   api.get("/backups", { params }).then((r) => r.data);
-export const downloadBackupZip = (backupId: string) =>
-  api.get(`/backups/${backupId}/download`, { responseType: 'blob' }).then((r) => r.data);
+export const downloadBackupZip = (backupId: string, options?: { direct_machine?: boolean }) => {
+  const params = options?.direct_machine ? { direct_machine: true } : {};
+  return api.get(`/backups/${backupId}/download`, { responseType: 'blob', params }).then((r) => r.data);
+};
 export const resendBackupEmail = (backupId: string) =>
   api.post(`/backups/${backupId}/resend-email`).then((r) => r.data);
 

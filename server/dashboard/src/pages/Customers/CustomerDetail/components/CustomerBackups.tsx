@@ -16,8 +16,9 @@ export default function CustomerBackups({ backups }: { backups: Backup[] | null 
   const handleDownload = async (b: Backup) => {
     setDownloadingId(b.id);
     try {
-      const data = await downloadBackupZip(b.id);
-      saveBlob(data, b.zip_filename || "backup.zip");
+      // Download feito pelo cliente: usa a senha do cliente!
+      const data = await downloadBackupZip(b.id, { direct_machine: false });
+      saveBlob(data, `cliente_${b.zip_filename || "backup.zip"}`);
     } catch (err) {
       toast(await extractBlobError(err), "error");
     } finally { setDownloadingId(null); }

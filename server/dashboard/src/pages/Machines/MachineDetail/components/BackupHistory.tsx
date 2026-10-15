@@ -14,7 +14,8 @@ export default function BackupHistory({ backups }: { backups: Backup[] }) {
   const handleDownload = async (backupId: string, filename: string) => {
     try {
       setDownloadingId(backupId);
-      const data = await downloadBackupZip(backupId);
+      // Download direto na máquina: usa a senha da máquina!
+      const data = await downloadBackupZip(backupId, { direct_machine: true });
       saveBlob(data, filename || "backup.zip");
     } catch (err: unknown) {
       console.error("Erro ao baixar o backup da máquina:", err);

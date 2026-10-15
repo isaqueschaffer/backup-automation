@@ -429,7 +429,10 @@ def write_extracted_backup(
 ) -> bool:
     """Extrai os arquivos do ZIP individual da máquina (desencriptando com a senha da máquina se houver)
     e grava diretamente no ZIP do cliente sob a pasta da máquina, sem senha interna.
+    Se encontrar zips aninhados gerados pelo agente (ex: backup.zip de cada equipamento), extrai
+    o conteúdo diretamente para a pasta do equipamento, evitando que o usuário encontre um ZIP dentro de outro ZIP.
     """
+    import io
     import pyzipper
     from services.crypto_service import decrypt as crypto_decrypt
 
@@ -447,23 +450,114 @@ def write_extracted_backup(
 
     extracted_any = False
     try:
+        # Tenta abrir com pyzipper (suporta AES e padrão)
         with pyzipper.AESZipFile(str(path), "r") as zf_in:
             if machine_pw_plain:
                 zf_in.setpassword(machine_pw_plain.encode())
             for inner_name in zf_in.namelist():
+                if inner_name.endswith("/"):
+                    continue
                 try:
                     data = zf_in.read(inner_name)
+                    # Se o arquivo interno for um backup.zip gerado pelo agente, descompacta os arquivos reais
+                    if inner_name.lower().endswith(".zip") and data.startswith(b"PK\x03\x04"):
+                        try:
+                            with zipfile.ZipFile(io.BytesIO(data), "r") as nested_zf:
+                                parent_dir = inner_name.rsplit("/", 1)[0] if "/" in inner_name else ""
+                                for nested_name in nested_zf.namelist():
+                                    if not nested_name.endswith("/"):
+                                        nested_data = nested_zf.read(nested_name)
+                                        target_name = f"{folder}/{parent_dir}/{nested_name}" if parent_dir else f"{folder}/{nested_name}"
+                                        zf_out.writestr(target_name, nested_data)
+                                extracted_any = True
+                                continue
+                        except Exception as e_nested:
+                            logger.debug("Arquivo %s não é um zip aninhado válido: %s", inner_name, e_nested)
+
                     arcname = f"{folder}/{inner_name}"
                     zf_out.writestr(arcname, data)
                     extracted_any = True
                 except Exception as ex:
                     logger.warning("Falha ao extrair '%s' do ZIP de %s: %s", inner_name, machine_name, ex)
     except Exception as ex:
-        logger.warning("Não foi possível abrir/decriptar o ZIP de %s: %s — incluindo o ZIP original.", machine_name, ex)
-        zf_out.write(str(path), arcname=f"{folder}/{backup_filename}")
-        extracted_any = True
+        logger.warning("Não foi possível abrir/decriptar o ZIP de %s: %s — tentando com zipfile padrão.", machine_name, ex)
+        try:
+            with zipfile.ZipFile(str(path), "r") as zf_std:
+                if machine_pw_plain:
+                    zf_std.setpassword(machine_pw_plain.encode())
+                for inner_name in zf_std.namelist():
+                    if inner_name.endswith("/"):
+                        continue
+                    data = zf_std.read(inner_name)
+                    arcname = f"{folder}/{inner_name}"
+                    zf_out.writestr(arcname, data)
+                    extracted_any = True
+        except Exception as ex2:
+            logger.error("Falha total ao abrir o ZIP de %s: %s — incluindo o ZIP original.", machine_name, ex2)
+            zf_out.write(str(path), arcname=f"{folder}/{backup_filename}")
+            extracted_any = True
 
     return extracted_any
+
+
+def build_single_backup_zip_with_customer_password(
+    db: Session,
+    backup: Backup,
+    client_password: Optional[str] = None,
+):
+    """Gera o arquivo de um backup individual de máquina utilizando a senha do Cliente.
+    Se o cliente possuir senha configurada, protege o ZIP com a senha do cliente (AES-WZ).
+    Se o cliente usar padrão (sem senha), gera o ZIP sem senha.
+    Os arquivos internos da máquina são desencriptados com a senha da máquina e gravados sem senha interna.
+    """
+    import pyzipper
+    from services.crypto_service import decrypt as crypto_decrypt
+
+    machine = backup.machine
+    if not machine or not backup.zip_filename:
+        return None
+
+    date_str = (backup.started_at or backup.created_at).strftime("%d-%m-%Y")
+    path = get_zip_path(machine.id, machine.name, backup.zip_filename, date_str=date_str)
+    if not path or not path.exists():
+        return None
+
+    customer = machine.customer
+    if client_password is None and customer and customer.zip_password:
+        try:
+            client_password = crypto_decrypt(customer.zip_password)
+        except Exception:
+            logger.warning("Falha ao decriptar senha do cliente %s", customer.name)
+
+    tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+    found_any = False
+    used_folders: set = set()
+
+    try:
+        if client_password:
+            zf_context = pyzipper.AESZipFile(
+                tmp, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES
+            )
+        else:
+            zf_context = pyzipper.AESZipFile(
+                tmp, "w", compression=pyzipper.ZIP_DEFLATED
+            )
+
+        with zf_context as zf_out:
+            if client_password:
+                zf_out.setpassword(client_password.encode())
+
+            if write_extracted_backup(zf_out, path, machine.name, machine.id, machine.zip_password, backup.zip_filename, used_folders):
+                found_any = True
+    except Exception:
+        tmp.close()
+        raise
+
+    if not found_any:
+        tmp.close()
+        return None
+    tmp.seek(0)
+    return tmp
 
 
 def build_run_zip(db: Session, run: CustomerBackupRun, client_password: Optional[str] = None):
