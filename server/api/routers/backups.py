@@ -233,6 +233,7 @@ def resend_backup_email(backup_id: UUID, request: Request, db: Session = Depends
         backup_id=str(b.id),
         base_url=str(request.base_url),
         public_url=settings.PUBLIC_URL,
+        machine_id=b.machine_id,
     )
 
     b.email_sent = email_sent or b.email_sent

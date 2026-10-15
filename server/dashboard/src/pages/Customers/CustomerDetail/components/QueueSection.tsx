@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { GripVertical, ListOrdered, Plus, UserMinus } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ChevronRight, GripVertical, ListOrdered, Plus, UserMinus } from "lucide-react";
 import { Customer, Machine } from "../../../../api/types";
 import StatusBadge from "../../../../components/StatusBadge";
 import { fmtDate } from "../../../../utils/date";
@@ -26,6 +26,7 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
   onDetach: (m: Machine) => void;
   onAdd: () => void;
 }) {
+  const navigate = useNavigate();
   const machines = customer.machines;
   const locked = customer.queue_active;
   const canDrag = !locked && !saving && machines.length > 1;
@@ -112,7 +113,10 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
                 onDragOver={e => onDragOver(e, idx)}
                 onDrop={onDrop}
                 onDragEnd={resetDrag}
-                style={{
+                // Clique na linha abre a máquina (exceto na alça e nos botões/links)
+                onClick={e => { if (!(e.target as HTMLElement).closest("button, a, [data-drag-handle]")) navigate(`/maquinas/${m.id}`); }}
+                title="Abrir a máquina"
+                style={{ cursor: "pointer",
                   position: "relative", display: "flex", alignItems: "center", gap: 14, padding: "12px 16px",
                   borderBottom: idx < machines.length - 1 ? "1px solid var(--border)" : "none",
                   opacity: isDragged ? 0.4 : 1,
@@ -145,6 +149,10 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
                   </div>
                 </div>
                 <StatusBadge status={m.last_backup_status} />
+                <Link to={`/maquinas/${m.id}`} className="btn btn-secondary btn-sm" title="Abrir a máquina (equipamentos, galeria, backups)"
+                  style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  Abrir <ChevronRight size={13} />
+                </Link>
                 <button className="btn btn-secondary btn-sm" disabled={locked || saving} onClick={() => onDetach(m)}
                   title={locked ? "Aguarde a fila terminar" : "Tirar esta máquina do cliente (ela continua cadastrada)"}
                   style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--err)" }}>

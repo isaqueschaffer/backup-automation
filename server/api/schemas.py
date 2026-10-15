@@ -68,6 +68,22 @@ class NVRCameraSetPerfect(BaseModel):
     nome: str
     image_base64: str
 
+    @field_validator("image_base64")
+    @classmethod
+    def _jpeg_valido(cls, v: str) -> str:
+        """Captura RTSP ou upload do painel (já convertido para JPEG no navegador)."""
+        import base64, binascii
+        v = v.split(",", 1)[1] if v.startswith("data:") else v
+        try:
+            dados = base64.b64decode(v, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("Imagem inválida (base64)")
+        if not dados.startswith(b"\xff\xd8"):
+            raise ValueError("A imagem de referência precisa ser JPEG")
+        if len(dados) > 10 * 1024 * 1024:
+            raise ValueError("Imagem de referência maior que 10 MB")
+        return v
+
 class NVRCameraNightImage(BaseModel):
     nvr_name: str
     canal: int
@@ -504,3 +520,6 @@ class RTSPTestResponse(BaseModel):
     success: bool
     error_message: Optional[str] = None
     image_base64: Optional[str] = None
+    # Agente >= 1.1.6: horário exibido no NVR do frame da gravação e origem ("ao_vivo" | "gravacao")
+    horario: Optional[str] = None
+    origem: Optional[str] = None

@@ -425,6 +425,7 @@ def upload_backup_zip(
         backup_id=backup_id,
         base_url=str(request.base_url),
         public_url=settings.PUBLIC_URL,
+        machine_id=machine.id,
     )
     backup.email_sent = email_sent or backup.email_sent
 

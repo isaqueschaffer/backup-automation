@@ -117,7 +117,7 @@ def send_rtsp_result(conf: dict, result: dict) -> bool:
     try:
         r = requests.post(
             f"{conf['server_url']}/api/v1/agent/rtsp-result",
-            json=result, headers=headers, timeout=10, verify=False,
+            json=result, headers=headers, timeout=60, verify=False,
         )
         r.raise_for_status()
         return True

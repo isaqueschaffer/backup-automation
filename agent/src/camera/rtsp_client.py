@@ -3,6 +3,7 @@ import logging
 import re
 import urllib.parse
 import subprocess
+import time
 from datetime import timezone
 from typing import Dict, Any
 
@@ -97,12 +98,14 @@ def _frame_motorola(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, timeout=15)
     return None, _mascarar(result.stderr.decode('utf-8', errors='ignore'))
 
 
-def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: int, date_str: str, sessao=None) -> dict:
+def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: int, date_str: str, sessao=None,
+                                 prazo=None) -> dict:
     """
     Captura um frame da madrugada (00h-06h) via playback RTSP de um NVR Motorola (NVMS-9000).
     Busca os trechos reais com queryChlRecLog e usa 02:00 limitado ao trecho (como no Hikvision).
     Horário sem gravação faz o NVR segurar a conexão; por isso, se a busca falhar, o fallback
     por horários fixos usa timeout curto.
+    `prazo` (time.monotonic) interrompe as tentativas (captura pedida pelo painel).
     """
     import imageio_ffmpeg
     import logging
@@ -137,6 +140,7 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
             modos = ["local", "utc"]
             if _MODO_HORARIO_MOTOROLA.get(ip) == "utc":
                 modos.reverse()
+            local_tinha = False
             for modo in modos:
                 exibidos = []
                 for st_utc, en_utc in brutos:
@@ -147,7 +151,15 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
                         exibidos.append((st_utc.astimezone(timezone.utc).replace(tzinfo=None),
                                          en_utc.astimezone(timezone.utc).replace(tzinfo=None)))
                 na_madrugada = [t for t in exibidos if t[0] < fim_madrugada and t[1] > inicio_madrugada]
+                if modo == "local":
+                    local_tinha = bool(na_madrugada)
                 if not na_madrugada:
+                    continue
+                # O modo "utc" só vale para NVR que exibe o relógio em UTC (já confirmado antes) ou quando a
+                # gravação existe no horário local mas o NVR não entregou o vídeo. Sem gravação na madrugada
+                # local, tentar "utc" só testa horários deslocados (~3h) onde não há gravação: cada
+                # tentativa espera o timeout inteiro e falha.
+                if modo == "utc" and _MODO_HORARIO_MOTOROLA.get(ip) != "utc" and not local_tinha:
                     continue
 
                 def distancia(t):
@@ -170,6 +182,9 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
 
     for modo, alvos in tentativas:
         for alvo in alvos:
+            if prazo is not None and time.monotonic() > prazo:
+                result_dict["motivo"] = result_dict["motivo"] or "Tempo limite da captura esgotado"
+                return result_dict
             try:
                 jpeg, stderr_text = _frame_motorola(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo)
                 if jpeg:
@@ -191,7 +206,7 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
     return result_dict
 
 
-def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date_str: str) -> dict:
+def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date_str: str, prazo=None) -> dict:
     """
     Tenta conectar via RTSP no stream de playback do NVR Hikvision
     e captura um frame da madrugada. Retorna um dicionário com o status e motivo.
@@ -264,6 +279,9 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
         return result_dict
 
     for hr, hr_end, hr_date in horarios_tenta:
+        if prazo is not None and time.monotonic() > prazo:
+            result_dict["motivo"] = result_dict["motivo"] or "Tempo limite da captura esgotado"
+            break
         start_time = f"{date_clean}T{hr}Z"
         end_time = f"{date_clean}T{hr_end}Z"
         
@@ -301,3 +319,213 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
             logging.error(f"FFmpeg exception no canal {canal}: {e}")
             
     return result_dict
+
+
+# ─── Captura pela gravação (pedida pelo painel) ────────────────────────────
+# Câmera offline não tem vídeo ao vivo, mas o NVR pode ter gravação. O servidor espera
+# até 130s pela resposta; o agente encerra as tentativas em PRAZO_GRAVACAO_S.
+PRAZO_GRAVACAO_S = 100
+DIAS_BUSCA = 15
+
+
+def _eh_motorola(task: Dict[str, Any]) -> bool:
+    return "motorola" in (task.get("marca") or "").lower() or "motorola" in (task.get("modelo") or "").lower()
+
+
+def _sem_playback(task: Dict[str, Any]) -> bool:
+    """Equipamentos sem playback RTSP suportado (câmeras avulsas/outras marcas)."""
+    modelo = task.get("modelo") or ""
+    return any(m in modelo for m in ("Grandstream", "Intelbras", "ONVIF"))
+
+
+def _resultado(r: dict, origem: str) -> Dict[str, Any]:
+    if r.get("status") == "OK" and r.get("image"):
+        return {"success": True, "error_message": None, "image_base64": r["image"],
+                "horario": r.get("horario"), "origem": origem}
+    return {"success": False, "error_message": r.get("motivo") or "Falha ao capturar da gravação."}
+
+
+def _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho):
+    """Lê um frame do playback Hikvision em `alvo` (horário exibido no NVR). Retorna (jpeg|None, stderr)."""
+    from datetime import timedelta
+    fim = max(alvo, min(alvo + timedelta(seconds=10), fim_trecho))
+    rtsp_url = (
+        f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/tracks/{canal}01"
+        f"?starttime={alvo:%Y%m%dT%H%M%S}Z&endtime={fim:%Y%m%dT%H%M%S}Z"
+    )
+    cmd = [ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
+           "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]
+    result = subprocess.run(cmd, capture_output=True, timeout=25)
+    if result.returncode == 0 and len(result.stdout) > 1000:
+        return result.stdout, ""
+    return None, _mascarar(result.stderr.decode('utf-8', errors='ignore'))
+
+
+def _gravacao_recente_hikvision(task, prazo) -> dict:
+    """Frame do fim do trecho gravado mais recente, buscando em janelas de 6h do agora para trás."""
+    import imageio_ffmpeg
+    from datetime import datetime, timedelta
+    from src.nvr.hikvision.recordings import buscar_trechos
+
+    ip, usuario, senha = task.get("ip", "").strip(), task.get("username", "admin"), task.get("password", "")
+    canal = int(task["canal"])
+    r = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    senha_enc = urllib.parse.quote(senha, safe='')
+
+    fim_janela = datetime.now().replace(microsecond=0)
+    limite = fim_janela - timedelta(days=DIAS_BUSCA)
+    while fim_janela > limite:
+        if time.monotonic() > prazo:
+            r["motivo"] = r["motivo"] or "Tempo limite da busca na gravação esgotado"
+            return r
+        inicio_janela = max(limite, fim_janela - timedelta(hours=6))
+        trechos = buscar_trechos(ip, usuario, senha, canal, inicio_janela, fim_janela, max_results=100)
+        if trechos is None:
+            r["motivo"] = "NVR não respondeu à busca de gravações"
+            return r
+        validos = []
+        for st, en in trechos:
+            try:
+                validos.append((datetime.strptime(st.replace("Z", "")[:19], "%Y-%m-%dT%H:%M:%S"),
+                                datetime.strptime(en.replace("Z", "")[:19], "%Y-%m-%dT%H:%M:%S")))
+            except ValueError:
+                continue
+        for st, en in sorted(validos, key=lambda t: t[1], reverse=True)[:2]:
+            if time.monotonic() > prazo:
+                break
+            en = min(en, fim_janela)
+            alvo = max(st + timedelta(seconds=1), en - timedelta(seconds=5))
+            try:
+                jpeg, stderr = _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, en)
+            except subprocess.TimeoutExpired:
+                jpeg, stderr = None, "TIMEOUT_25S"
+            if jpeg:
+                return {"image": base64.b64encode(jpeg).decode('utf-8'), "horario": alvo.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "status": "OK", "motivo": None}
+            r["motivo"] = _motivo_ffmpeg(stderr)
+            logging.warning(f"Captura da gravação canal {canal} ({alvo}): {stderr[-300:]}")
+        if validos:
+            return r  # havia gravação, mas o NVR não entregou o vídeo
+        fim_janela = inicio_janela
+    r["status"] = "SEM_GRAVACAO"
+    r["motivo"] = f"Sem gravação nos últimos {DIAS_BUSCA} dias"
+    return r
+
+
+def _gravacao_recente_motorola(task, sessao, prazo) -> dict:
+    """Frame do fim do trecho gravado mais recente (queryChlRecLog dos últimos DIAS_BUSCA dias)."""
+    import imageio_ffmpeg
+    from datetime import datetime, timedelta
+    from src.nvr.motorola.recordings import buscar_trechos_motorola
+
+    ip, usuario, senha = task.get("ip", "").strip(), task.get("username", "admin"), task.get("password", "")
+    canal = int(task["canal"])
+    r = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
+    agora = datetime.now().replace(microsecond=0)
+    brutos = buscar_trechos_motorola(ip, sessao, canal, agora - timedelta(days=DIAS_BUSCA), agora, max_results=None)
+    if brutos is None:
+        r["motivo"] = "NVR não respondeu à busca de gravações"
+        return r
+    if not brutos:
+        r["status"] = "SEM_GRAVACAO"
+        r["motivo"] = f"Sem gravação nos últimos {DIAS_BUSCA} dias"
+        return r
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    senha_enc = urllib.parse.quote(senha, safe='')
+    modos = ["local", "utc"]
+    if _MODO_HORARIO_MOTOROLA.get(ip) == "utc":
+        modos.reverse()
+    for modo in modos:
+        for st, en in sorted(brutos, key=lambda t: t[1], reverse=True)[:2]:
+            if modo == "utc":  # mesma conversão de capture_night_image_motorola
+                st = st.astimezone(timezone.utc).replace(tzinfo=None)
+                en = en.astimezone(timezone.utc).replace(tzinfo=None)
+            if time.monotonic() > prazo:
+                r["motivo"] = r["motivo"] or "Tempo limite da busca na gravação esgotado"
+                return r
+            alvo = max(st + timedelta(seconds=1), en - timedelta(seconds=5))
+            try:
+                jpeg, stderr = _frame_motorola(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo)
+            except subprocess.TimeoutExpired:
+                jpeg, stderr = None, "NVR não entregou o vídeo (tempo esgotado)"
+            if jpeg:
+                _MODO_HORARIO_MOTOROLA[ip] = modo
+                return {"image": base64.b64encode(jpeg).decode('utf-8'), "horario": alvo.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "status": "OK", "motivo": None}
+            r["motivo"] = _motivo_ffmpeg(stderr)
+            logging.warning(f"Captura da gravação Motorola canal {canal} ({alvo}, {modo}): {stderr[-300:]}")
+    return r
+
+
+def _noite_recente(task, sessao, prazo) -> dict:
+    """Imagem da madrugada (00h-06h) da noite mais recente com gravação, voltando até DIAS_BUSCA dias."""
+    from datetime import datetime, timedelta
+    ip, usuario, senha = task.get("ip", "").strip(), task.get("username", "admin"), task.get("password", "")
+    canal = int(task["canal"])
+    agora = datetime.now()
+    dia = agora if agora.hour >= 6 else agora - timedelta(days=1)  # madrugada de hoje só depois das 06h
+    r = {"image": None, "horario": None, "status": "SEM_GRAVACAO",
+         "motivo": f"Sem gravação na madrugada (00h-06h) nos últimos {DIAS_BUSCA} dias"}
+    falhas = 0
+    for _ in range(DIAS_BUSCA):
+        if time.monotonic() > prazo:
+            if r["status"] != "FALHA":
+                r = {**r, "status": "FALHA", "motivo": "Tempo limite da busca na gravação esgotado"}
+            return r
+        data_str = dia.strftime("%Y-%m-%d")
+        if _eh_motorola(task):
+            ret = capture_night_image_motorola(ip, usuario, senha, canal, data_str, sessao=sessao, prazo=prazo)
+        else:
+            ret = capture_night_image(ip, usuario, senha, canal, data_str, prazo=prazo)
+        if ret["status"] == "OK":
+            return ret
+        if ret["status"] == "FALHA":
+            r = ret
+            falhas += 1
+            if falhas >= 2:  # havia gravação mas o NVR não entregou o vídeo duas vezes: desiste
+                return r
+        dia -= timedelta(days=1)
+    return r
+
+
+def executar_tarefa_rtsp(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Tarefa de captura pedida pelo painel.
+    modo "ao_vivo" (padrão): frame ao vivo. "referencia": ao vivo e, se falhar (câmera offline),
+    o frame mais recente da gravação. "noite": madrugada mais recente com gravação."""
+    modo = task.get("modo") or "ao_vivo"
+    if modo == "ao_vivo":
+        return test_rtsp_camera(task)
+    if not task.get("canal"):
+        return {"success": False, "error_message": "Canal não informado."}
+
+    erro_vivo = None
+    if modo == "referencia":
+        vivo = test_rtsp_camera(task)
+        if vivo.get("success"):
+            vivo.update(origem="ao_vivo", horario=None)
+            return vivo
+        erro_vivo = vivo.get("error_message")
+        logging.info(f"Ao vivo falhou no canal {task.get('canal')} ({erro_vivo}); buscando na gravação...")
+
+    if _sem_playback(task):
+        return {"success": False, "error_message": erro_vivo or "Captura pela gravação não suportada neste equipamento."}
+
+    prazo = time.monotonic() + PRAZO_GRAVACAO_S
+    sessao = None
+    if _eh_motorola(task):
+        from src.nvr.motorola.cameras import buscar_cameras as login_motorola
+        _, sessao = login_motorola(task.get("ip", "").strip(), task.get("username", "admin"), task.get("password", ""))
+        if sessao is None:
+            return {"success": False, "error_message": "Falha no login do NVR Motorola."}
+
+    if modo == "noite":
+        return _resultado(_noite_recente(task, sessao, prazo), "gravacao")
+
+    ret = (_gravacao_recente_motorola(task, sessao, prazo) if _eh_motorola(task)
+           else _gravacao_recente_hikvision(task, prazo))
+    res = _resultado(ret, "gravacao")
+    if not res["success"]:
+        res["error_message"] = f"Ao vivo: câmera sem vídeo. Gravação: {ret.get('motivo') or 'falhou'}"
+    return res

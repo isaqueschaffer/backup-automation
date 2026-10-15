@@ -1,11 +1,36 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Video } from "lucide-react";
+import { Image, Moon, Upload, Video } from "lucide-react";
 import api from "../../../../api/client";
 import { NvrCamera } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
 import { fmtDate } from "../../../../utils/date";
 import CameraImagePanel from "./CameraImagePanel";
+
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // arquivo original
+const MAX_LADO = 3840; // reduz imagens maiores que 4K
+
+// Converte qualquer imagem (PNG, JPG, WEBP...) em JPEG base64 (sem o prefixo data:),
+// o mesmo formato da captura RTSP e dos anexos do e-mail.
+function imagemParaJpegBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new window.Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const escala = Math.min(1, MAX_LADO / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.naturalWidth * escala);
+      canvas.height = Math.round(img.naturalHeight * escala);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { reject(new Error("Navegador não conseguiu processar a imagem.")); return; }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.9).split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Arquivo não é uma imagem válida.")); };
+    img.src = url;
+  });
+}
 
 export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onClose }: { machineId: string, nvrId: string, nvrName: string, onClose: () => void }) {
   const { toast } = useToast();
@@ -20,6 +45,9 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
   const cancelBulk = useRef(false);
   // false após desmontar: interrompe o loop em lote e evita setState em componente desmontado
   const aliveRef = useRef(true);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploadingCanal, setUploadingCanal] = useState<number | null>(null);
+  const [nightCanal, setNightCanal] = useState<number | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -48,10 +76,12 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
     return () => { cancelled = true; };
   }, [machineId, nvrId, toast]);
 
-  // Captura e salva a referência de um canal. Retorna null se deu certo, ou a mensagem de erro.
-  const capturarReferencia = async (canal: number, nome: string): Promise<string | null> => {
+  // Captura e salva a referência de um canal: ao vivo e, se a câmera estiver offline, o frame mais
+  // recente da gravação (agente >= 1.1.6). Retorna null se deu certo, ou a mensagem de erro.
+  const capturarReferencia = async (canal: number, nome: string, avisarGravacao = false): Promise<string | null> => {
     try {
-      const resRtsp = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/test-rtsp?canal=${canal}`);
+      const resRtsp = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/test-rtsp`, null,
+        { params: { canal, modo: "referencia" } });
       const dataRtsp = resRtsp.data;
       if (!dataRtsp.success || !dataRtsp.image_base64) {
         return dataRtsp.error_message || "Falha ao capturar imagem. Verifique se o Agente está online.";
@@ -62,6 +92,9 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
       const savedCam = resSave.data;
       if (aliveRef.current) {
         setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: savedCam.perfect_image_base64, id: savedCam.id } : c));
+        if (avisarGravacao && dataRtsp.origem === "gravacao") {
+          toast(`Câmera sem vídeo ao vivo: referência tirada da gravação de ${fmtDate(dataRtsp.horario)}.`, "info");
+        }
       }
       return null;
     } catch (e: unknown) {
@@ -70,18 +103,65 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
     }
   };
 
+  // Envia uma imagem do computador como referência do canal selecionado
+  const uploadPerfectImage = async (file: File, canal: number, nome: string) => {
+    if (!file.type.startsWith("image/")) { toast("Selecione um arquivo de imagem (JPG, PNG...).", "error"); return; }
+    if (file.size > MAX_UPLOAD_BYTES) { toast("Imagem muito grande (máximo 20 MB).", "error"); return; }
+    setUploadingCanal(canal);
+    try {
+      const image_base64 = await imagemParaJpegBase64(file);
+      const res = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/perfect-image`, { canal, nome, image_base64 });
+      if (!aliveRef.current) return;
+      setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: res.data.perfect_image_base64, id: res.data.id } : c));
+      toast("Imagem de referência enviada.", "success");
+    } catch (e: unknown) {
+      // 422 do FastAPI vem como lista [{msg: "Value error, ..."}]
+      const detail = (e as { response?: { data?: { detail?: string | { msg?: string }[] } } })?.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail[0]?.msg?.replace(/^Value error, /, "") : detail;
+      toast(msg || (e instanceof Error ? e.message : "Erro ao enviar a imagem."), "error");
+    }
+    if (aliveRef.current) setUploadingCanal(null);
+  };
+
   const capturePerfectImage = async (canal: number, nome: string) => {
     setTestingCanal(canal);
-    const erro = await capturarReferencia(canal, nome);
+    const erro = await capturarReferencia(canal, nome, true);
     if (!aliveRef.current) return;
     if (erro) toast(erro, "error");
     setTestingCanal(null);
   };
 
+  // Imagem da noite sob demanda: madrugada (00h-06h) mais recente com gravação, da mais nova para a
+  // mais antiga (até 15 dias). O servidor já salva como imagem da noite do canal.
+  const captureNightImage = async (canal: number, nome: string) => {
+    setNightCanal(canal);
+    try {
+      const res = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/test-rtsp`, null,
+        { params: { canal, modo: "noite", nome } });
+      if (!aliveRef.current) return;
+      if (res.data.success && res.data.image_base64) {
+        const horario = res.data.horario ?? null;
+        setCameras(prev => prev.map(c => c.canal === canal ? {
+          ...c, night_image_base64: res.data.image_base64, night_image_date: horario,
+          captura_status: "OK", captura_motivo: undefined, captura_horario: horario,
+        } : c));
+        toast(`Imagem da noite capturada (${fmtDate(horario)}).`, "success");
+      } else {
+        toast(res.data.error_message || "Não foi possível capturar a imagem da noite.", "error");
+      }
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      if (aliveRef.current) toast(typeof detail === "string" ? detail : "Erro ao comunicar com o servidor.", "error");
+    }
+    if (aliveRef.current) setNightCanal(null);
+  };
+
   const updateAllReferences = async () => {
-    const alvo = cameras.filter(c => c.status_comunicacao !== "OFFLINE");
-    if (alvo.length === 0) { toast("Nenhuma câmera disponível para atualizar.", "info"); return; }
-    if (!confirm(`Atualizar a imagem de referência de ${alvo.length} câmera(s)?\nLeva cerca de 15 a 20 segundos por câmera.`)) return;
+    const alvo = cameras;
+    const offline = alvo.filter(c => c.status_comunicacao === "OFFLINE").length;
+    if (alvo.length === 0) { toast("Nenhuma câmera para atualizar.", "info"); return; }
+    if (!confirm(`Atualizar a imagem de referência de ${alvo.length} câmera(s)?\nLeva cerca de 15 a 20 segundos por câmera`
+      + (offline ? `; as ${offline} offline usam a gravação mais recente e podem levar até 2 minutos cada.` : "."))) return;
     cancelBulk.current = false;
     const falhas: string[] = [];
     setBulk({ done: 0, total: alvo.length, falhas });
@@ -98,6 +178,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
   };
 
   const selectedCam = cameras.find(c => c.canal === selectedCanal);
+  const semReferencia = cameras.filter(c => !c.perfect_image_base64).length;
 
   return (
     <>
@@ -113,6 +194,12 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
               <div style={{ padding: "0 16px", marginBottom: 12, fontSize: 12, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.05em" }}>
                 CANAIS ({cameras.length})
               </div>
+              {semReferencia > 0 && (
+                <div style={{ margin: "0 16px 12px", padding: "8px 10px", borderRadius: 6, fontSize: 12, background: "var(--warn-bg)", color: "var(--warn)" }}
+                  title="A imagem de referência é anexada no e-mail quando a câmera fica offline. Sem ela, o e-mail só avisa que falta a imagem.">
+                  {semReferencia} câmera(s) sem imagem de referência — ela é anexada no e-mail quando a câmera fica offline.
+                </div>
+              )}
               <div style={{ padding: "0 16px", marginBottom: 12 }}>
                 {bulk && bulk.done < bulk.total && !cancelBulk.current ? (
                   <>
@@ -127,7 +214,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
                   </>
                 ) : (
                   <button className="btn btn-secondary" style={{ width: "100%", justifyContent: "center", gap: 6 }}
-                    onClick={updateAllReferences} disabled={testingCanal !== null}>
+                    onClick={updateAllReferences} disabled={testingCanal !== null || nightCanal !== null || uploadingCanal !== null}>
                     <Image size={14} /> Atualizar todas as referências
                   </button>
                 )}
@@ -160,7 +247,11 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
                       <span style={{ fontWeight: isSelected ? 600 : 500, color: isSelected ? "var(--primary-dark)" : "var(--text)" }}>
                         {cam.nome || `Canal ${cam.canal}`}
                       </span>
-                      <div style={{ fontSize: 11, marginTop: 4, display: "flex", alignItems: "center" }}>
+                      <div style={{ fontSize: 11, marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        {!cam.perfect_image_base64 && (
+                          <span style={{ background: "var(--warn-bg)", color: "var(--warn)", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}
+                            title="Sem imagem de referência: não será anexada no e-mail se a câmera ficar offline">Sem referência</span>
+                        )}
                         {cam.status_comunicacao === "OFFLINE" ? (
                           <span style={{ background: "var(--err-bg)", color: "var(--err)", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>OFFLINE</span>
                         ) : cam.captura_status === "OK" ? (
@@ -190,15 +281,44 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
                         Último backup: {selectedCam.captura_horario || selectedCam.night_image_date ? fmtDate(selectedCam.captura_horario || selectedCam.night_image_date) : "Desconhecido"}
                       </p>
                     </div>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => capturePerfectImage(selectedCam.canal, selectedCam.nome || "")}
-                      disabled={testingCanal === selectedCam.canal}
-                      style={{ display: "flex", gap: 8, alignItems: "center" }}
-                    >
-                      <Image size={16} />
-                      {testingCanal === selectedCam.canal ? "Capturando..." : "Atualizar Imagem de Referência"}
-                    </button>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input ref={fileInput} type="file" accept="image/*" style={{ display: "none" }}
+                        onChange={e => {
+                          const f = e.target.files?.[0];
+                          e.target.value = ""; // permite escolher o mesmo arquivo de novo
+                          if (f) uploadPerfectImage(f, selectedCam.canal, selectedCam.nome || "");
+                        }} />
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => fileInput.current?.click()}
+                        disabled={testingCanal !== null || nightCanal !== null || uploadingCanal !== null}
+                        title="Enviar uma imagem do computador como referência deste canal"
+                        style={{ display: "flex", gap: 8, alignItems: "center" }}
+                      >
+                        <Upload size={16} />
+                        {uploadingCanal === selectedCam.canal ? "Enviando..." : "Enviar imagem"}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => captureNightImage(selectedCam.canal, selectedCam.nome || "")}
+                        disabled={testingCanal !== null || nightCanal !== null || uploadingCanal !== null}
+                        title="Busca a madrugada (00h–06h) mais recente com gravação, até 15 dias atrás. Funciona com a câmera offline."
+                        style={{ display: "flex", gap: 8, alignItems: "center" }}
+                      >
+                        <Moon size={16} />
+                        {nightCanal === selectedCam.canal ? "Buscando na gravação..." : "Capturar imagem da noite"}
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => capturePerfectImage(selectedCam.canal, selectedCam.nome || "")}
+                        disabled={testingCanal !== null || nightCanal !== null || uploadingCanal !== null}
+                        title="Imagem ao vivo da câmera; se ela estiver offline, usa a gravação mais recente"
+                        style={{ display: "flex", gap: 8, alignItems: "center" }}
+                      >
+                        <Image size={16} />
+                        {testingCanal === selectedCam.canal ? "Capturando..." : "Capturar referência"}
+                      </button>
+                    </div>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>

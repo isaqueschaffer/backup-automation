@@ -1,3 +1,6 @@
+import base64
+import binascii
+import re
 import smtplib
 import logging
 import time
@@ -8,11 +11,12 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from config import settings
-from models import Setting
+from models import NVR, NVRCamera, Setting
 
 logger = logging.getLogger(__name__)
 
 LIMIT_ATTACH_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_OFFLINE_IMAGES = 10  # máx. de imagens de referência (câmeras offline) anexadas por e-mail
 
 
 def _norm_status(r: dict) -> str:
@@ -170,6 +174,106 @@ def _build_result_section(nvr_results: List[dict]) -> str:
     )
 
 
+def _cam_is_online(cam: dict) -> bool:
+    """Mesmo critério da seção de câmeras: só ONLINE conta como online."""
+    status_comunicacao = cam.get("status_comunicacao")
+    if not status_comunicacao:
+        status_comunicacao = "ONLINE" if cam.get("online") else "OFFLINE"
+    return status_comunicacao == "ONLINE"
+
+
+def _canal_int(valor) -> Optional[int]:
+    # Motorola (agentes < 1.1.4) reportava o canal como GUID "{0000000N-0000-...}"
+    try:
+        return int(valor)
+    except (ValueError, TypeError):
+        try:
+            return int(str(valor).strip("{}").split("-")[0], 16)
+        except ValueError:
+            return None
+
+
+def _image_filename(cam_nome: str, used: set) -> str:
+    """Nome do arquivo = nome da câmera (sem caracteres inválidos); repetidos ganham sufixo."""
+    base = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", cam_nome).strip(" .") or "camera"
+    name = f"{base}.jpg"
+    n = 2
+    while name.lower() in used:
+        name = f"{base} ({n}).jpg"
+        n += 1
+    used.add(name.lower())
+    return name
+
+
+def _collect_offline_images(db: Session, groups: List[tuple]) -> dict:
+    """Imagem de referência (perfeita) das câmeras offline.
+
+    `groups`: lista de (machine_id, nvr_results). O NVR é achado por máquina + nome,
+    como no recebimento do relatório (routers/agent.py). Retorna `attachments`
+    (no máx. MAX_OFFLINE_IMAGES, como (filename, bytes)), `with_image` (offline com
+    imagem cadastrada) e `without_image` (offline sem imagem).
+    """
+    attachments: List[tuple] = []
+    used: set = set()
+    with_image = 0
+    without_image = 0
+
+    for machine_id, nvr_results in groups:
+        for r in nvr_results or []:
+            offline = [c for c in (r.get("cameras") or []) if not _cam_is_online(c)]
+            if not offline:
+                continue
+            nvr = None
+            if machine_id is not None:
+                nvr = db.query(NVR).filter(NVR.machine_id == machine_id, NVR.name == r.get("nome")).first()
+            imgs = {}
+            if nvr is not None:
+                imgs = {
+                    c.canal: c.perfect_image_base64
+                    for c in db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id).all()
+                    if c.perfect_image_base64
+                }
+            for cam in offline:
+                b64 = imgs.get(_canal_int(cam.get("canal")))
+                if not b64:
+                    without_image += 1
+                    continue
+                with_image += 1
+                if len(attachments) >= MAX_OFFLINE_IMAGES:
+                    continue
+                try:
+                    data = base64.b64decode(b64.split(",", 1)[-1], validate=False)
+                except (binascii.Error, ValueError):
+                    logger.warning(f"Imagem de referência inválida: {r.get('nome')} / canal {cam.get('canal')}")
+                    with_image -= 1
+                    without_image += 1
+                    continue
+                cam_nome = cam.get("nome") or f"Canal {cam.get('canal', '?')}"
+                attachments.append((_image_filename(cam_nome, used), data))
+
+    return {"attachments": attachments, "with_image": with_image, "without_image": without_image}
+
+
+def _offline_images_note(info: dict) -> str:
+    """Texto do corpo sobre as imagens anexadas (vazio se não houver câmera offline)."""
+    total = info["with_image"] + info["without_image"]
+    if total == 0:
+        return ""
+    anexadas = len(info["attachments"])
+    note = f"\n📷 Imagens de referência das câmeras offline: {anexadas} em anexo"
+    if info["with_image"] > anexadas:
+        note += f" (limite de {MAX_OFFLINE_IMAGES}; {info['with_image'] - anexadas} não anexada(s), ver no painel)"
+    note += ".\n"
+    if info["without_image"]:
+        note += f"  {info['without_image']} câmera(s) offline sem imagem de referência cadastrada.\n"
+    return note
+
+
+def _attach_offline_images(msg: EmailMessage, info: dict) -> None:
+    for filename, data in info["attachments"]:
+        msg.add_attachment(data, maintype="image", subtype="jpeg", filename=filename)
+
+
 def _smtp_config(db: Session) -> Optional[dict]:
     """Lê a configuração SMTP (tabela settings com fallback para variáveis de ambiente).
 
@@ -267,8 +371,12 @@ def send_backup_report(
     backup_id: Optional[str] = None,
     base_url: Optional[str] = None,
     public_url: Optional[str] = None,
+    machine_id=None,
 ) -> bool:
-    """Send backup report email (máquina sem Cliente). Returns True on success."""
+    """Send backup report email (máquina sem Cliente). Returns True on success.
+
+    Com `machine_id`, anexa a imagem de referência das câmeras offline (máx. MAX_OFFLINE_IMAGES).
+    """
     cfg = _smtp_config(db)
     if cfg is None:
         return False
@@ -305,6 +413,8 @@ def send_backup_report(
 
     # ── Section 1: Câmeras e Gravações ──
     body += _build_camera_section(nvr_results)
+    offline_images = _collect_offline_images(db, [(machine_id, nvr_results)])
+    body += _offline_images_note(offline_images)
 
     # ── Section 2: Backup ──
     body += _build_backup_section(nvr_results, overall)
@@ -353,6 +463,7 @@ def send_backup_report(
             subtype="zip",
             filename=zip_path.name,
         )
+    _attach_offline_images(msg, offline_images)
 
     return _smtp_send(msg, cfg, clean_recipients)
 
@@ -398,8 +509,10 @@ def send_customer_report(
     """Envia o e-mail único da rodada do Cliente. Retorna True em caso de sucesso.
 
     `entries`: uma por máquina esperada (ordem da rodada), com chaves
-    `name`, `status` (status do backup ou None se não executou) e `nvr_results`.
-    Sem anexo: o ZIP unificado da rodada fica disponível por link público.
+    `name`, `status` (status do backup ou None se não executou), `nvr_results` e,
+    opcionalmente, `machine_id`.
+    O ZIP unificado da rodada fica disponível por link público (não vai anexo); anexos
+    são só as imagens de referência das câmeras offline (máx. MAX_OFFLINE_IMAGES no e-mail).
     """
     cfg = _smtp_config(db)
     if cfg is None:
@@ -458,6 +571,12 @@ def send_customer_report(
         body += _build_camera_section(nvr_results)
         body += _build_backup_section(nvr_results, _overall_status(nvr_results))
 
+    # ── Imagens de referência das câmeras offline (todas as máquinas) ──
+    offline_images = _collect_offline_images(
+        db, [(e.get("machine_id"), e.get("nvr_results") or []) for e in reported]
+    )
+    body += _offline_images_note(offline_images)
+
     # ── Link do ZIP unificado da rodada ──
     if has_zip:
         links = []
@@ -483,4 +602,5 @@ def send_customer_report(
     )
 
     msg.set_content(body)
+    _attach_offline_images(msg, offline_images)
     return _smtp_send(msg, cfg, clean_recipients)

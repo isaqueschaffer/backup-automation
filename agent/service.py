@@ -179,7 +179,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         task = ping_resp.get("rtsp_task")
         if task:
             t = task if isinstance(task, dict) else {}
-            resumo["rtsp_task"] = {k: t.get(k) for k in ("equipamento_id", "ip", "canal")}
+            resumo["rtsp_task"] = {k: t.get(k) for k in ("equipamento_id", "ip", "canal", "modo")}
         return str(resumo)
 
     def _ping_loop(self, conf: dict):
@@ -218,12 +218,12 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         if not task:
             return
         log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
-        from src.camera.rtsp_client import test_rtsp_camera
+        from src.camera.rtsp_client import executar_tarefa_rtsp
         from src.application.api_client import send_rtsp_result
 
         def run_and_send_rtsp(task=task):
             try:
-                result = test_rtsp_camera(task)
+                result = executar_tarefa_rtsp(task)
                 send_rtsp_result(conf, result)
                 log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
             except Exception as e:

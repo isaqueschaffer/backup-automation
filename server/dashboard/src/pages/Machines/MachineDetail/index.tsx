@@ -268,7 +268,7 @@ export default function MachineDetail() {
     <>
       <MachineHeader
         machine={machine} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr}
-        onBack={() => navigate("/maquinas")} onEdit={openEditMachine} onRotateKey={handleRotateKey}
+        onBack={() => navigate(machine.customer_id ? `/clientes/${machine.customer_id}` : "/maquinas")}onEdit={openEditMachine} onRotateKey={handleRotateKey}
         onTriggerBackup={handleTriggerBackup} onRestartAgent={handleRestartAgent}
       />
 
