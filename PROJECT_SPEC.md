@@ -798,6 +798,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-15] — Upload da imagem de referência; acesso às máquinas pela fila do Cliente
+
+**Alteração:** Na Galeria do NVR, além de "Capturar da câmera" (RTSP pelo agente), o botão "Enviar imagem" sobe um arquivo do computador como referência do canal. O navegador converte para JPEG (qualidade 0,9; lado maior até 3840 px) e usa o mesmo endpoint `POST .../cameras/perfect-image`. `NVRCameraSetPerfect.image_base64` agora é validado: base64 válido, JPEG (`FF D8`), até 10 MB; aceita prefixo `data:`. Na fila do Cliente, a linha da máquina (ou o botão "Abrir") abre `/maquinas/:id`; na máquina, o cabeçalho mostra "Cliente: X › Máquina" e o voltar retorna ao Cliente.
+**Arquivos:** server/api/schemas.py, server/dashboard/src/pages/Machines/MachineDetail/components/NVRCamerasGalleryModal.tsx, server/dashboard/src/pages/Machines/MachineDetail/components/MachineHeader.tsx, server/dashboard/src/pages/Machines/MachineDetail/index.tsx, server/dashboard/src/pages/Customers/CustomerDetail/components/QueueSection.tsx
+**Breaking Change:** Não (a captura RTSP do agente já envia JPEG).
+**Branch:** isaque
+
 ### [2026-10-14] — E-mail anexa a imagem de referência das câmeras offline
 
 **Alteração:** O e-mail de relatório (máquina avulsa e rodada do Cliente) anexa a imagem perfeita (`nvr_cameras.perfect_image_base64`) de cada câmera não ONLINE, para o técnico identificar a câmera no local. Sem mudança no agente nem no banco.

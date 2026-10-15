@@ -1,4 +1,5 @@
 import { ArrowLeft, Clock, CloudLightning, Edit2, RefreshCw, RotateCcw } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Machine } from "../../../../api/types";
 import StatusBadge from "../../../../components/StatusBadge";
 import { fmtDate } from "../../../../utils/date";
@@ -19,10 +20,18 @@ export default function MachineHeader({ machine, isAgentOnline, nextPingStr, onB
     <>
       <div className="page-header">
         <div className="flex items-center gap-3">
-          <button className="btn-icon" onClick={onBack} title="Voltar para Máquinas">
+          <button className="btn-icon" onClick={onBack} title={machine.customer_id ? `Voltar para o cliente ${machine.customer_name || ""}` : "Voltar para Máquinas"}>
             <ArrowLeft size={16} />
           </button>
           <div>
+            {machine.customer_id && (
+              <div className="text-xs text-muted" style={{ marginBottom: 2 }}>
+                <Link to={`/clientes/${machine.customer_id}`} style={{ color: "var(--text-muted)" }}>
+                  Cliente: {machine.customer_name || "vinculado"}
+                </Link>
+                {" › "}{machine.name}
+              </div>
+            )}
             <h1 className="page-title">{machine.name}</h1>
             <p className="page-subtitle flex items-center gap-2">
               <StatusBadge status={machine.last_backup_status} />

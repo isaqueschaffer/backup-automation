@@ -1,11 +1,36 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Video } from "lucide-react";
+import { Image, Upload, Video } from "lucide-react";
 import api from "../../../../api/client";
 import { NvrCamera } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
 import { fmtDate } from "../../../../utils/date";
 import CameraImagePanel from "./CameraImagePanel";
+
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // arquivo original
+const MAX_LADO = 3840; // reduz imagens maiores que 4K
+
+// Converte qualquer imagem (PNG, JPG, WEBP...) em JPEG base64 (sem o prefixo data:),
+// o mesmo formato da captura RTSP e dos anexos do e-mail.
+function imagemParaJpegBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new window.Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const escala = Math.min(1, MAX_LADO / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.naturalWidth * escala);
+      canvas.height = Math.round(img.naturalHeight * escala);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { reject(new Error("Navegador não conseguiu processar a imagem.")); return; }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.9).split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Arquivo não é uma imagem válida.")); };
+    img.src = url;
+  });
+}
 
 export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onClose }: { machineId: string, nvrId: string, nvrName: string, onClose: () => void }) {
   const { toast } = useToast();
@@ -20,6 +45,8 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
   const cancelBulk = useRef(false);
   // false após desmontar: interrompe o loop em lote e evita setState em componente desmontado
   const aliveRef = useRef(true);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploadingCanal, setUploadingCanal] = useState<number | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -68,6 +95,26 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       return detail || "Erro ao comunicar com o servidor.";
     }
+  };
+
+  // Envia uma imagem do computador como referência do canal selecionado
+  const uploadPerfectImage = async (file: File, canal: number, nome: string) => {
+    if (!file.type.startsWith("image/")) { toast("Selecione um arquivo de imagem (JPG, PNG...).", "error"); return; }
+    if (file.size > MAX_UPLOAD_BYTES) { toast("Imagem muito grande (máximo 20 MB).", "error"); return; }
+    setUploadingCanal(canal);
+    try {
+      const image_base64 = await imagemParaJpegBase64(file);
+      const res = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/perfect-image`, { canal, nome, image_base64 });
+      if (!aliveRef.current) return;
+      setCameras(prev => prev.map(c => c.canal === canal ? { ...c, perfect_image_base64: res.data.perfect_image_base64, id: res.data.id } : c));
+      toast("Imagem de referência enviada.", "success");
+    } catch (e: unknown) {
+      // 422 do FastAPI vem como lista [{msg: "Value error, ..."}]
+      const detail = (e as { response?: { data?: { detail?: string | { msg?: string }[] } } })?.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail[0]?.msg?.replace(/^Value error, /, "") : detail;
+      toast(msg || (e instanceof Error ? e.message : "Erro ao enviar a imagem."), "error");
+    }
+    if (aliveRef.current) setUploadingCanal(null);
   };
 
   const capturePerfectImage = async (canal: number, nome: string) => {
@@ -201,15 +248,34 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
                         Último backup: {selectedCam.captura_horario || selectedCam.night_image_date ? fmtDate(selectedCam.captura_horario || selectedCam.night_image_date) : "Desconhecido"}
                       </p>
                     </div>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => capturePerfectImage(selectedCam.canal, selectedCam.nome || "")}
-                      disabled={testingCanal === selectedCam.canal}
-                      style={{ display: "flex", gap: 8, alignItems: "center" }}
-                    >
-                      <Image size={16} />
-                      {testingCanal === selectedCam.canal ? "Capturando..." : "Atualizar Imagem de Referência"}
-                    </button>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input ref={fileInput} type="file" accept="image/*" style={{ display: "none" }}
+                        onChange={e => {
+                          const f = e.target.files?.[0];
+                          e.target.value = ""; // permite escolher o mesmo arquivo de novo
+                          if (f) uploadPerfectImage(f, selectedCam.canal, selectedCam.nome || "");
+                        }} />
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => fileInput.current?.click()}
+                        disabled={uploadingCanal !== null || testingCanal === selectedCam.canal}
+                        title="Enviar uma imagem do computador como referência deste canal"
+                        style={{ display: "flex", gap: 8, alignItems: "center" }}
+                      >
+                        <Upload size={16} />
+                        {uploadingCanal === selectedCam.canal ? "Enviando..." : "Enviar imagem"}
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => capturePerfectImage(selectedCam.canal, selectedCam.nome || "")}
+                        disabled={testingCanal === selectedCam.canal || uploadingCanal !== null}
+                        title="Capturar a imagem ao vivo da câmera pelo agente"
+                        style={{ display: "flex", gap: 8, alignItems: "center" }}
+                      >
+                        <Image size={16} />
+                        {testingCanal === selectedCam.canal ? "Capturando..." : "Capturar da câmera"}
+                      </button>
+                    </div>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
