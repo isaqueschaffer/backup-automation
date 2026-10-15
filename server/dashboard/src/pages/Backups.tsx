@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
-import { fetchBackups, fetchMachines, fetchCustomers, resendBackupEmail, downloadBackupZip, downloadCustomerRunZip, downloadCustomerZip, BackupQuery } from "../api/client";
+import { fetchBackups, fetchMachines, fetchCustomers, resendBackupEmail, downloadBackupZip, downloadCustomerRunZip, BackupQuery } from "../api/client";
 import { Backup, Customer, Machine, PaginatedBackups } from "../api/types";
 import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
