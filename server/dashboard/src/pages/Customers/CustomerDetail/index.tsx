@@ -161,7 +161,9 @@ export default function CustomerDetail() {
         backup_minute: form.backup_minute,
         email_to: parseEmailList(form.email_to),
       };
-      if (form.zip_password && form.zip_password.trim()) {
+      if (form.password_mode === "default") {
+        updatePayload.zip_password = "";
+      } else if (form.zip_password && form.zip_password.trim()) {
         updatePayload.zip_password = form.zip_password.trim();
       }
       const updated = await updateCustomer(c.id, updatePayload);
@@ -238,6 +240,7 @@ export default function CustomerDetail() {
           initial={{
             name: c.name, description: c.description || "", backup_hour: c.backup_hour, backup_minute: c.backup_minute,
             email_to: (c.email_to || []).join(", "),
+            password_mode: c.has_zip_password ? "custom" : "default",
             zip_password: "",
             has_zip_password: c.has_zip_password,
           }}
