@@ -75,9 +75,15 @@ def _setup(n_cams, with_image=lambda ch: True):
 
 
 def _capture():
-    sent = {}
+    sent = {"messages": []}
     email_service._smtp_config = lambda db: {"server": "x", "port": 25, "email": "a@b.com", "password": None}
-    email_service._smtp_send = lambda msg, cfg, rcpt: sent.setdefault("msg", msg) is not None
+
+    def _fake_send(msg, cfg, rcpt):
+        sent["messages"].append(msg)
+        sent.setdefault("msg", msg)
+        return True
+
+    email_service._smtp_send = _fake_send
     return sent
 
 
@@ -85,16 +91,31 @@ def _images(msg):
     return [(p.get_filename(), p.get_content()) for p in msg.iter_attachments() if p.get_content_maintype() == "image"]
 
 
-def test_only_offline_with_limit():
+def test_offline_images_threading_over_limit():
     machine_id, db, results = _setup(12)
     sent = _capture()
     assert send_backup_report("Maq", "14-10-2026", results, ["t@x.com"], db, machine_id=machine_id)
-    imgs = _images(sent["msg"])
-    assert len(imgs) == MAX_OFFLINE_IMAGES == 10
-    assert imgs[0] == ("Cam 1.jpg", JPEG)
-    assert "Online.jpg" not in [f for f, _ in imgs]
-    body = sent["msg"].get_body().get_content()
-    assert "10 em anexo" in body and "2 não anexada(s)" in body
+    assert len(sent["messages"]) == 2
+
+    # E-mail 1 (principal)
+    main_msg = sent["messages"][0]
+    imgs_main = _images(main_msg)
+    assert len(imgs_main) == MAX_OFFLINE_IMAGES == 10
+    assert imgs_main[0] == ("Cam 1.jpg", JPEG)
+    assert "Online.jpg" not in [f for f, _ in imgs_main]
+    body = main_msg.get_body().get_content()
+    assert "10 de 12 em anexo" in body and "2 imagem(ns) foram enviadas em resposta" in body
+
+    # E-mail 2 (resposta encadeada)
+    reply_msg = sent["messages"][1]
+    imgs_reply = _images(reply_msg)
+    assert len(imgs_reply) == 2
+    assert imgs_reply[0] == ("Cam 11.jpg", JPEG)
+    assert imgs_reply[1] == ("Cam 12.jpg", JPEG)
+    assert reply_msg["In-Reply-To"] == main_msg["Message-ID"]
+    assert reply_msg["References"] == main_msg["Message-ID"]
+    assert reply_msg["Subject"] == f"Re: {main_msg['Subject']}"
+    assert "11 a 12 de 12 em anexo" in reply_msg.get_body().get_content()
 
 
 def test_without_image_and_filename_sanitize():
@@ -119,6 +140,25 @@ def test_duplicate_names_and_customer_report():
         ["t@x.com"], db,
     )
     assert [f for f, _ in _images(sent["msg"])] == ["Cam 1.jpg", "Cam 1 (2).jpg"]
+
+
+def test_customer_report_threading_over_limit():
+    m1, db1, r1 = _setup(8)
+    m2, db2, r2 = _setup(6)
+    db = _FakeDB(db1.data[NVR] + db2.data[NVR], db1.data[NVRCamera] + db2.data[NVRCamera])
+    sent = _capture()
+    send_customer_report(
+        "Cliente", str(uuid.uuid4()), "scheduled", None,
+        [{"machine_id": m1, "name": "A", "status": "OK", "nvr_results": r1},
+         {"machine_id": m2, "name": "B", "status": "OK", "nvr_results": r2}],
+        ["t@x.com"], db,
+    )
+    assert len(sent["messages"]) == 2
+    assert len(_images(sent["messages"][0])) == 10
+    assert len(_images(sent["messages"][1])) == 4
+    assert sent["messages"][1]["In-Reply-To"] == sent["messages"][0]["Message-ID"]
+    assert sent["messages"][1]["References"] == sent["messages"][0]["Message-ID"]
+    assert sent["messages"][1]["Subject"] == f"Re: {sent['messages'][0]['Subject']}"
 
 
 def test_no_offline_no_note():
