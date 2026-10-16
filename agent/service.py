@@ -380,7 +380,7 @@ if __name__ == "__main__":
     else:
         # Se for instalação e não especificou --startup, define como auto por padrão
         if len(sys.argv) > 1 and sys.argv[1].lower() == "install" and not any(a.startswith("--startup") for a in sys.argv):
-            sys.argv.insert(2, "--startup=auto")
+            sys.argv.insert(1, "--startup=auto")  # pywin32 (getopt) só lê opções antes da ação
         win32serviceutil.HandleCommandLine(TrilanAgentService)
         # Após install ou update, garante inicialização automática e recuperação de falhas no Windows
         if len(sys.argv) > 1 and sys.argv[1].lower() in ("install", "update"):
