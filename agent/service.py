@@ -431,7 +431,7 @@ if __name__ == "__main__":
         servicemanager.PrepareToHostSingle(TrilanAgentService)
         servicemanager.StartServiceCtrlDispatcher()
     else:
-        # Se for instalação e não especificou --startup, define como auto por padrão
+        # Se for instalação e não especificou --startup, define como auto por padrão (opções devem vir antes do comando)
         if len(sys.argv) > 1 and sys.argv[1].lower() == "install" and not any(a.startswith("--startup") for a in sys.argv):
             sys.argv.insert(1, "--startup=auto")  # pywin32 (getopt) só lê opções antes da ação
         win32serviceutil.HandleCommandLine(TrilanAgentService)

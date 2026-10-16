@@ -6,6 +6,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from email.utils import make_msgid
 from pathlib import Path
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -239,8 +240,6 @@ def _collect_offline_images(db: Session, groups: List[tuple]) -> dict:
                     without_image += 1
                     continue
                 with_image += 1
-                if len(attachments) >= MAX_OFFLINE_IMAGES:
-                    continue
                 try:
                     data = base64.b64decode(b64.split(",", 1)[-1], validate=False)
                 except (binascii.Error, ValueError):
@@ -259,19 +258,72 @@ def _offline_images_note(info: dict) -> str:
     total = info["with_image"] + info["without_image"]
     if total == 0:
         return ""
-    anexadas = len(info["attachments"])
-    note = f"\n📷 Imagens de referência das câmeras offline: {anexadas} em anexo"
-    if info["with_image"] > anexadas:
-        note += f" (limite de {MAX_OFFLINE_IMAGES}; {info['with_image'] - anexadas} não anexada(s), ver no painel)"
-    note += ".\n"
+    total_anexos = len(info["attachments"])
+    if total_anexos <= MAX_OFFLINE_IMAGES:
+        note = f"\n📷 Imagens de referência das câmeras offline: {total_anexos} em anexo.\n"
+    else:
+        restantes = total_anexos - MAX_OFFLINE_IMAGES
+        note = (
+            f"\n📷 Imagens de referência das câmeras offline: {MAX_OFFLINE_IMAGES} de {total_anexos} em anexo "
+            f"(as demais {restantes} imagem(ns) foram enviadas em resposta a este e-mail).\n"
+        )
     if info["without_image"]:
         note += f"  {info['without_image']} câmera(s) offline sem imagem de referência cadastrada.\n"
     return note
 
 
-def _attach_offline_images(msg: EmailMessage, info: dict) -> None:
-    for filename, data in info["attachments"]:
+def _attach_offline_images(msg: EmailMessage, info_or_list) -> None:
+    attachments = info_or_list["attachments"] if isinstance(info_or_list, dict) else info_or_list
+    for filename, data in attachments:
         msg.add_attachment(data, maintype="image", subtype="jpeg", filename=filename)
+
+
+def _send_offline_images_replies(
+    cfg: dict,
+    clean_recipients: List[str],
+    original_subject: str,
+    parent_msg_id: str,
+    remaining_attachments: List[tuple],
+    context_name: str,
+    total_images: int,
+) -> bool:
+    """Envia e-mails de resposta encadeados (In-Reply-To/References) com os lotes restantes de imagens."""
+    all_ok = True
+    current_start = MAX_OFFLINE_IMAGES + 1
+    re_subject = original_subject if original_subject.lower().startswith("re:") else f"Re: {original_subject}"
+
+    for i in range(0, len(remaining_attachments), MAX_OFFLINE_IMAGES):
+        batch = remaining_attachments[i : i + MAX_OFFLINE_IMAGES]
+        batch_end = current_start + len(batch) - 1
+
+        reply_msg = EmailMessage()
+        reply_msg["From"] = cfg["email"]
+        reply_msg["To"] = ", ".join(clean_recipients)
+        reply_msg["Subject"] = re_subject
+        reply_msg["In-Reply-To"] = parent_msg_id
+        reply_msg["References"] = parent_msg_id
+        reply_msg["Message-ID"] = make_msgid()
+
+        body = (
+            f"{'═' * 50}\n"
+            f"  {context_name} - Imagens de Câmeras Offline (Continuação)\n"
+            f"{'═' * 50}\n\n"
+            f"📷 Imagens de referência das câmeras offline: {current_start} a {batch_end} de {total_images} em anexo.\n\n"
+            f"{'═' * 50}\n"
+            f"  Relatório gerado automaticamente — Trilan CFTV\n"
+            f"{'═' * 50}\n"
+        )
+        reply_msg.set_content(body)
+        _attach_offline_images(reply_msg, batch)
+
+        sent = _smtp_send(reply_msg, cfg, clean_recipients)
+        if not sent:
+            logger.error(f"[SMTP] Falha ao enviar resposta encadeada ({current_start}-{batch_end}) para {clean_recipients}")
+            all_ok = False
+
+        current_start += len(batch)
+
+    return all_ok
 
 
 def _smtp_config(db: Session) -> Optional[dict]:
@@ -396,6 +448,8 @@ def send_backup_report(
 
     # ── Build email ──
     msg = EmailMessage()
+    msg_id = make_msgid()
+    msg["Message-ID"] = msg_id
     msg["From"] = cfg["email"]
     msg["To"] = ", ".join(clean_recipients)
     msg["Subject"] = f"{machine_name} POP - Verificação de câmeras e Backup dos equipamentos — {date_str}"
@@ -463,9 +517,28 @@ def send_backup_report(
             subtype="zip",
             filename=zip_path.name,
         )
-    _attach_offline_images(msg, offline_images)
+    all_attachments = offline_images.get("attachments") or []
+    first_batch = all_attachments[:MAX_OFFLINE_IMAGES]
+    remaining_batch = all_attachments[MAX_OFFLINE_IMAGES:]
 
-    return _smtp_send(msg, cfg, clean_recipients)
+    _attach_offline_images(msg, first_batch)
+
+    sent = _smtp_send(msg, cfg, clean_recipients)
+    if not sent:
+        return False
+
+    if remaining_batch:
+        _send_offline_images_replies(
+            cfg=cfg,
+            clean_recipients=clean_recipients,
+            original_subject=msg["Subject"],
+            parent_msg_id=msg_id,
+            remaining_attachments=remaining_batch,
+            context_name=machine_name,
+            total_images=len(all_attachments),
+        )
+
+    return True
 
 
 # ─── E-mail único por rodada do Cliente ────────────────────────────────────
@@ -535,6 +608,8 @@ def send_customer_report(
         tipo = f"Avulso ({manual_machine_name})"
 
     msg = EmailMessage()
+    msg_id = make_msgid()
+    msg["Message-ID"] = msg_id
     msg["From"] = cfg["email"]
     msg["To"] = ", ".join(clean_recipients)
     msg["Subject"] = subject
@@ -602,5 +677,26 @@ def send_customer_report(
     )
 
     msg.set_content(body)
-    _attach_offline_images(msg, offline_images)
-    return _smtp_send(msg, cfg, clean_recipients)
+
+    all_attachments = offline_images.get("attachments") or []
+    first_batch = all_attachments[:MAX_OFFLINE_IMAGES]
+    remaining_batch = all_attachments[MAX_OFFLINE_IMAGES:]
+
+    _attach_offline_images(msg, first_batch)
+
+    sent = _smtp_send(msg, cfg, clean_recipients)
+    if not sent:
+        return False
+
+    if remaining_batch:
+        _send_offline_images_replies(
+            cfg=cfg,
+            clean_recipients=clean_recipients,
+            original_subject=msg["Subject"],
+            parent_msg_id=msg_id,
+            remaining_attachments=remaining_batch,
+            context_name=customer_name,
+            total_images=len(all_attachments),
+        )
+
+    return True
