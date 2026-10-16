@@ -798,6 +798,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-16] — Agente 1.1.12: reinício pelo painel e atualização OTA confiáveis
+
+**Problema:** "Reiniciar todos" parava os agentes e eles não voltavam. Causa: o script que religa o serviço era iniciado com `DETACHED_PROCESS`; sem console o PowerShell fecha sem executar nada (1.1.9–1.1.11). Até a 1.1.8, `ping 3s && sc start` tentava uma vez só, cedo demais. No .bat da OTA, `timeout /t` não espera sem console (as pausas fixas nunca aconteceram).
+**Alteração:** (1) Scripts auxiliares iniciados com `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP` e stdin/stdout/stderr nulos (nunca `DETACHED_PROCESS`). (2) Reinício por dois caminhos independentes: `SCRIPT_REINICIO` espera o processo do serviço (o bootloader) sair, tenta `Start-Service` até 5x, confere e registra em `logs/reinicio.log`; e o processo termina com `os._exit(1)`, para a recuperação do Windows (`sc failure ... restart/5000/10000/30000`, reaplicada a cada início por `garantir_recuperacao_windows`) religar em 5 s. (3) .bat da OTA: espera o processo antigo sair (até 90 s), copia com novas tentativas, inicia e confere `RUNNING` (até 5x), pausas com `ping`, log em `logs/atualizacao.log`. Uma OTA para a 1.1.12 ainda é aplicada pelo .bat da versão antiga.
+**Arquivos:** agent/service.py, agent/src/application/updater.py
+**Breaking Change:** Não. Cada reinício pelo painel gera no Visualizador de Eventos um aviso de "serviço terminou inesperadamente" (é o gatilho da recuperação).
+**Branch:** isaque
+
 ### [2026-10-16] — Agente 1.1.11: backup sem imagem da noite; captura sem imagem cinza; galeria reorganizada
 
 **Alteração:** (1) O backup (manual e agendado) não captura mais a imagem da noite — atrasava muito o backup. A captura é só sob demanda pela Galeria (tarefa RTSP `modo=noite`). (2) Todas as capturas ffmpeg usam `-skip_frame nokey` antes do `-i`: só quadros-chave são decodificados; antes, a conexão que começava entre dois quadros-chave gerava imagem cinza (H.265, intermitente). (3) Servidor: o relatório do agente substitui `last_recording_status`; `_manter_imagem_noite` preserva o `imagem_noite` anterior nos canais sem esse campo; falha da captura da noite pelo painel grava `FALHA`+motivo no canal (`_marcar_imagem_noite`). (4) Galeria: ações em lote no topo por tipo (Referência / Noite) com contador "x/y com imagem", "Capturar faltantes (n)" (padrão) e "Todas", progresso, cancelamento e lista de falhas; lateral com filtros Todas / Sem referência / Sem noite e chips REF/NOITE por câmera; botões de cada imagem abaixo do respectivo painel.
