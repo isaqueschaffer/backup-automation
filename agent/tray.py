@@ -21,6 +21,7 @@ PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR
 ARQUIVO_LOG = PASTA_LOG / "servico.log"
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
+_mutex = None  # mantém o mutex vivo enquanto a bandeja roda
 
 
 # ─────────────────────────────────────────────────────────────
@@ -62,11 +63,15 @@ def servico_rodando() -> bool:
 
 
 def reiniciar_servico(icone, _):
-    def _fn():
-        cmd_servico("stop")
-        time.sleep(2)
-        cmd_servico("start")
-    threading.Thread(target=_fn, daemon=True).start()
+    # Um único comando elevado (1 confirmação do UAC) que espera o serviço parar antes de iniciar de novo.
+    # Antes eram dois "sc" separados com 2 s de intervalo: o "start" rodava com o serviço ainda parando e falhava.
+    try:
+        import ctypes
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", "powershell.exe",
+            f'-NoProfile -WindowStyle Hidden -Command "Restart-Service -Name {SERVICO} -Force"', None, 0)
+    except Exception as e:
+        icone.notify(f"Erro ao reiniciar o servico: {e}", "Trilan Agente NVR")
 
 
 def monitorar_servico(icone):
@@ -96,7 +101,7 @@ def executar_backup_agora(icone, _):
 
 def abrir_log_tempo_real(icone, _):
     try:
-        ARQUIVO_LOG.parent.mkdir(exist_ok=True)
+        ARQUIVO_LOG.parent.mkdir(parents=True, exist_ok=True)
         if not ARQUIVO_LOG.exists():
             ARQUIVO_LOG.touch()
         
@@ -128,7 +133,20 @@ def criar_menu():
 # ─────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────
+def ja_esta_aberta() -> bool:
+    """Evita ícones duplicados (atalho de inicialização + 'iniciar agora' do instalador)."""
+    global _mutex
+    import ctypes
+    # use_last_error preserva o código de erro entre a chamada e a leitura (GetLastError direto não é confiável)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    _mutex = kernel32.CreateMutexW(None, False, r"Local\TrilanAgentTray")
+    return ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
+
+
 def main():
+    if ja_esta_aberta():
+        return
     while True:
         try:
             icone = pystray.Icon("TrilanAgentNVR", criar_icone(), "Trilan Agente NVR", criar_menu())
