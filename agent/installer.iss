@@ -20,7 +20,7 @@ Name: "{group}\Trilan Agent Tray"; Filename: "{app}\TrilanAgentTray.exe"
 Name: "{commonstartup}\Trilan Agent Tray"; Filename: "{app}\TrilanAgentTray.exe"
 
 [Run]
-Filename: "{app}\TrilanAgentService.exe"; Parameters: "install --startup=auto"; Flags: runhidden
+Filename: "{app}\TrilanAgentService.exe"; Parameters: "--startup auto install"; Flags: runhidden
 Filename: "sc.exe"; Parameters: "config TrilanAgentNVR start= auto"; Flags: runhidden
 Filename: "sc.exe"; Parameters: "failure TrilanAgentNVR reset= 86400 actions= restart/5000/restart/10000/restart/30000"; Flags: runhidden
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "start"; Flags: runhidden
