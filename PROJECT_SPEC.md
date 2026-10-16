@@ -798,6 +798,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-16] — Agente 1.1.11: backup sem imagem da noite; captura sem imagem cinza; galeria reorganizada
+
+**Alteração:** (1) O backup (manual e agendado) não captura mais a imagem da noite — atrasava muito o backup. A captura é só sob demanda pela Galeria (tarefa RTSP `modo=noite`). (2) Todas as capturas ffmpeg usam `-skip_frame nokey` antes do `-i`: só quadros-chave são decodificados; antes, a conexão que começava entre dois quadros-chave gerava imagem cinza (H.265, intermitente). (3) Servidor: o relatório do agente substitui `last_recording_status`; `_manter_imagem_noite` preserva o `imagem_noite` anterior nos canais sem esse campo; falha da captura da noite pelo painel grava `FALHA`+motivo no canal (`_marcar_imagem_noite`). (4) Galeria: ações em lote no topo por tipo (Referência / Noite) com contador "x/y com imagem", "Capturar faltantes (n)" (padrão) e "Todas", progresso, cancelamento e lista de falhas; lateral com filtros Todas / Sem referência / Sem noite e chips REF/NOITE por câmera; botões de cada imagem abaixo do respectivo painel.
+**Arquivos:** agent/src/application/backup_job.py, agent/src/camera/rtsp_client.py, server/api/routers/agent.py, server/api/routers/equipamentos.py, server/dashboard/src/pages/Machines/MachineDetail/components/NVRCamerasGalleryModal.tsx
+**Breaking Change:** Não (agentes antigos continuam capturando a noite no backup; o servidor aceita os dois).
+**Branch:** isaque
+
 ### [2026-10-16] — Agente 1.1.10: instalador, bandeja e reabertura da bandeja após atualização
 
 **Alteração:** (1) Instalador: `--startup=auto` antes da ação (pywin32 usa getopt e ignorava a opção após `install`); `remove` antes do `install`; `PrepareToInstall` para o serviço e fecha a bandeja antes de copiar os arquivos. (2) Bandeja: "Reiniciar serviço" em um único `Restart-Service` elevado; instância única por mutex `Local\TrilanAgentTray` (por sessão). (3) A atualização OTA fecha a bandeja para trocar o arquivo; ao iniciar, o serviço (SYSTEM, sessão 0) a reabre como o usuário de cada sessão ativa/desconectada que não a tem aberta (`WTSQueryUserToken` + `CreateProcessAsUser`), só se o `TrilanAgentTray.exe` foi trocado nos últimos 15 min — não reabre uma bandeja fechada pelo usuário num reinício comum. Na atualização 1.1.9 → 1.1.10 quem aplica é o atualizador antigo; a reabertura funciona porque é feita pelo serviço novo ao iniciar.

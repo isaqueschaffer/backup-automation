@@ -41,7 +41,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     
     try:
         cmd = [
-            ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
+            ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
             "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
         ]
         result = subprocess.run(cmd, capture_output=True, timeout=15)
@@ -54,6 +54,9 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return {"success": False, "error_message": f"ERRO INTERNO NO AGENTE (FFmpeg): {str(e)}"}
 
+# Todas as capturas usam "-skip_frame nokey": o ffmpeg só decodifica quadros-chave (completos).
+# Sem isso, a conexão que começa entre dois quadros-chave decodifica um quadro de diferenças sem
+# base e a imagem sai cinza (intermitente, mais comum em H.265). Custa até um intervalo de quadro-chave.
 def _mascarar(txt: str) -> str:
     """Oculta credenciais de URLs (rtsp://user:senha@host) antes de logar/enviar stderr do ffmpeg."""
     return re.sub(r'//[^@/\s]*@', '//***@', txt or "")
@@ -92,7 +95,7 @@ def _frame_motorola(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, timeout=15)
         f"&date={alvo.strftime('%Y-%m-%d')}&time={alvo.strftime('%H:%M:%S')}&timelen=10&streamType=main"
     )
     cmd = [
-        ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
+        ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
         "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
     ]
     result = subprocess.run(cmd, capture_output=True, timeout=timeout)
@@ -286,7 +289,7 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
 
         try:
             cmd = [
-                ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
+                ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
                 "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
             ]
             result = subprocess.run(cmd, capture_output=True, timeout=25)
@@ -353,7 +356,7 @@ def _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho
         f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/tracks/{canal}01"
         f"?starttime={alvo:%Y%m%dT%H%M%S}Z&endtime={fim:%Y%m%dT%H%M%S}Z"
     )
-    cmd = [ffmpeg_exe, "-y", "-rtsp_transport", "tcp",
+    cmd = [ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
            "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]
     result = subprocess.run(cmd, capture_output=True, timeout=25)
     if result.returncode == 0 and len(result.stdout) > 1000:
