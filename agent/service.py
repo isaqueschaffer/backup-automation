@@ -63,6 +63,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     _svc_name_ = "TrilanAgentNVR"
     _svc_display_name_ = "Trilan — Agente Backup NVR"
     _svc_description_ = "Executa backups automaticos de NVRs e envia os arquivos ao servidor Trilan."
+    _svc_start_type_ = win32service.SERVICE_AUTO_START
 
     def __init__(self, args):
         super().__init__(args)
@@ -72,6 +73,10 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.hPingResp = win32event.CreateEvent(None, 0, 0, None)
         self.ping_responses = queue.Queue()
         self.last_backup_finished_at = 0.0
+        self.schedule_hour = 2
+        self.schedule_minute = 0
+        self.config_loaded = False
+        self.schedule_updated = False
 
         sec_desc = win32security.SECURITY_DESCRIPTOR()
         sec_desc.SetSecurityDescriptorDacl(1, None, 0)
@@ -103,12 +108,35 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         log("TRILAN AGENT NVR ENCERRADO")
         log("=" * 60)
 
+    def _init_webhooks(self, server_cfg: dict):
+        """Inicializa integrações locais de webhook (Digifort / Defense) de forma segura."""
+        from src.core.config import parse_config_extra
+        for eq in server_cfg.get("equipamentos", []):
+            tipo = (eq.get("tipo") or "").upper()
+            if tipo == "DIGIFORT":
+                cfg_ext = parse_config_extra(eq)
+                caminho_csv = cfg_ext.get("caminho_csv", "")
+                caminho_log = cfg_ext.get("caminho_log_csv", "")
+                try:
+                    from src.application.webhook_digifort import start_webhook
+                    start_webhook(caminho_csv, caminho_log)
+                    log("Agente Webhook Digifort integrado e iniciado com sucesso.")
+                except Exception as e:
+                    log(f"Falha ao iniciar Agente Webhook Digifort: {e}", is_error=True)
+            elif tipo == "DEFENSE":
+                try:
+                    from src.application.webhook_defense import start_webhook_defense
+                    start_webhook_defense()
+                    log("Agente Webhook Defense IA iniciado com sucesso na porta 8181.")
+                except Exception as e:
+                    log(f"Falha ao iniciar Agente Webhook Defense IA: {e}", is_error=True)
+
     def _load_schedule_and_run(self):
         """Load schedule from server config and run the event loop."""
         if str(DIRETORIO) not in sys.path:
             sys.path.insert(0, str(DIRETORIO))
 
-        from src.core.config import load_conf, ConfigError, parse_config_extra
+        from src.core.config import load_conf, ConfigError
         from src.application.api_client import fetch_server_config
 
         log(f"Lendo configuracoes de: {DIRETORIO / 'agent.conf'}")
@@ -121,50 +149,38 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         log(f"Servidor configurado: {conf['server_url']}")
         log(f"Client ID: {conf['client_id']}")
 
-        config_loaded = True
         log(f"Testando comunicacao com o servidor: {conf['server_url']}/api/v1/agent/config ...")
         try:
             server_cfg = fetch_server_config(conf)
-            hora = int(server_cfg.get("backup_hour", 2))
-            minuto = int(server_cfg.get("backup_minute", 0))
+            self.schedule_hour = int(server_cfg.get("backup_hour", 2))
+            self.schedule_minute = int(server_cfg.get("backup_minute", 0))
+            self.config_loaded = True
             log("COMUNICACAO BEM SUCEDIDA! Configuracoes do servidor recebidas.")
-            
-            # Start Webhook for Digifort/Defense if needed
-            for eq in server_cfg.get("equipamentos", []):
-                tipo = (eq.get("tipo") or "").upper()
-                if tipo == "DIGIFORT":
-                    # config_extra é anulável no banco; uma exceção aqui marcaria config_loaded=False e causaria restart em loop
-                    cfg_ext = parse_config_extra(eq)
-                    caminho_csv = cfg_ext.get("caminho_csv", "")
-                    caminho_log = cfg_ext.get("caminho_log_csv", "")
-                    
-                    try:
-                        from src.application.webhook_digifort import start_webhook
-                        start_webhook(caminho_csv, caminho_log)
-                        log("Agente Webhook Digifort integrado e iniciado com sucesso.")
-                    except Exception as e:
-                        log(f"Falha ao iniciar Agente Webhook Digifort: {e}", is_error=True)
-                
-                elif tipo == "DEFENSE":
-                    try:
-                        from src.application.webhook_defense import start_webhook_defense
-                        start_webhook_defense()
-                        log("Agente Webhook Defense IA iniciado com sucesso na porta 8181.")
-                    except Exception as e:
-                        log(f"Falha ao iniciar Agente Webhook Defense IA: {e}", is_error=True)
+            self._init_webhooks(server_cfg)
         except Exception as e:
             log(f"FALHA na comunicacao com o servidor: {e}", is_error=True)
-            log("Usando horario padrao 02:00 para o proximo backup.")
-            hora, minuto = 2, 0
-            config_loaded = False
+            log("Usando horario padrao 02:00 para o proximo backup (sincronizara automaticamente quando a conexao voltar).")
+            self.schedule_hour, self.schedule_minute = 2, 0
+            self.config_loaded = False
 
         headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
-        self._run_loop(hora, minuto, conf["server_url"], headers, conf, config_loaded)
+        self._run_loop(conf["server_url"], headers, conf)
 
     def _restart_service(self):
         import subprocess
+        # Script PowerShell resiliente: aguarda o servico parar completamente antes de iniciar
+        ps_cmd = (
+            "$svc = 'TrilanAgentNVR'; "
+            "Start-Sleep -Seconds 2; "
+            "$elapsed = 0; "
+            "while ((Get-Service -Name $svc -ErrorAction SilentlyContinue).Status -ne 'Stopped' -and $elapsed -lt 30) { "
+            "    Start-Sleep -Seconds 1; "
+            "    $elapsed++; "
+            "}; "
+            "Start-Service -Name $svc"
+        )
         subprocess.Popen(
-            ["cmd", "/c", "ping 127.0.0.1 -n 4 >nul && sc start TrilanAgentNVR"],
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
         )
         self.stop_requested = True
@@ -231,7 +247,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
         threading.Thread(target=run_and_send_rtsp, daemon=True).start()
 
-    def _process_ping_responses(self, agent_mod, conf: dict, config_loaded: bool) -> bool:
+    def _process_ping_responses(self, agent_mod, conf: dict) -> bool:
         """Executa as instruções recebidas nos pings. Retorna True se o serviço deve encerrar."""
         from src.application.updater import check_and_apply_update
 
@@ -241,11 +257,25 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             except queue.Empty:
                 return False
 
-            # Se ligou sem internet/servidor, reinicia agora para baixar a config correta
-            if not config_loaded:
-                log("Servidor voltou a responder! Reiniciando servico para buscar configuracoes e horario corretos...")
-                self._restart_service()
-                return True
+            # Se ligou sem internet/servidor, busca a configuração em memória sem derrubar o serviço
+            if not self.config_loaded:
+                log("Servidor voltou a responder! Sincronizando configuracoes em execucao...")
+                try:
+                    from src.application.api_client import fetch_server_config
+                    server_cfg = fetch_server_config(conf)
+                    nova_hora = int(server_cfg.get("backup_hour", 2))
+                    novo_minuto = int(server_cfg.get("backup_minute", 0))
+                    self._init_webhooks(server_cfg)
+                    self.config_loaded = True
+                    if (nova_hora, novo_minuto) != (self.schedule_hour, self.schedule_minute):
+                        self.schedule_hour = nova_hora
+                        self.schedule_minute = novo_minuto
+                        self.schedule_updated = True
+                        log(f"Horario de backup atualizado com sucesso: {self.schedule_hour:02d}:{self.schedule_minute:02d}")
+                    else:
+                        log("Configuracoes e agendamento sincronizados com sucesso.")
+                except Exception as e:
+                    log(f"Falha ao sincronizar configuracoes apos reconexao: {e}", is_error=True)
 
             self._disparar_rtsp(ping_resp, conf)
 
@@ -284,19 +314,24 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 win32event.SetEvent(self.hWaitStop)
                 return True
 
-    def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict, conf: dict, config_loaded: bool = True):
+    def _run_loop(self, server_url: str, headers: dict, conf: dict):
         import agent as agent_mod
 
         threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:
             agora = datetime.now()
-            proximo = agora.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+            proximo = agora.replace(hour=self.schedule_hour, minute=self.schedule_minute, second=0, microsecond=0)
             if proximo <= agora:
                 proximo += timedelta(days=1)
             log(f"Proximo backup: {proximo.strftime('%d/%m/%Y %H:%M')}")
 
             while not self.stop_requested:
+                # Se as configurações foram atualizadas dinamicamente, recalcula o próximo backup
+                if self.schedule_updated:
+                    self.schedule_updated = False
+                    break
+
                 segundos = (proximo - datetime.now()).total_seconds()
                 if segundos <= 0:
                     self._executar_backup(agent_mod, "scheduled")
@@ -312,7 +347,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 elif resultado == win32event.WAIT_OBJECT_0 + 1:
                     self._executar_backup(agent_mod, "manual")
                 elif resultado == win32event.WAIT_OBJECT_0 + 2:
-                    if self._process_ping_responses(agent_mod, conf, config_loaded):
+                    if self._process_ping_responses(agent_mod, conf):
                         return
 
     def _executar_backup(self, agent_mod, trigger: str):
@@ -343,5 +378,19 @@ if __name__ == "__main__":
         servicemanager.PrepareToHostSingle(TrilanAgentService)
         servicemanager.StartServiceCtrlDispatcher()
     else:
+        # Se for instalação e não especificou --startup, define como auto por padrão
+        if len(sys.argv) > 1 and sys.argv[1].lower() == "install" and not any(a.startswith("--startup") for a in sys.argv):
+            sys.argv.insert(2, "--startup=auto")
         win32serviceutil.HandleCommandLine(TrilanAgentService)
+        # Após install ou update, garante inicialização automática e recuperação de falhas no Windows
+        if len(sys.argv) > 1 and sys.argv[1].lower() in ("install", "update"):
+            import subprocess
+            try:
+                subprocess.run(["sc.exe", "config", "TrilanAgentNVR", "start=", "auto"], capture_output=True)
+                subprocess.run(
+                    ["sc.exe", "failure", "TrilanAgentNVR", "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000"],
+                    capture_output=True
+                )
+            except Exception:
+                pass
 
