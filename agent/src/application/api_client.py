@@ -65,10 +65,66 @@ def _get_telemetry() -> dict:
         telemetry["ram_total_gb"] = round(mem.total / (1024 ** 3), 2)
         telemetry["ram_used_gb"] = round(mem.used / (1024 ** 3), 2)
         
-        disk = psutil.disk_usage('C:\\')
-        telemetry["disk_percent"] = disk.percent
-        telemetry["disk_total_gb"] = round(disk.total / (1024 ** 3), 2)
-        telemetry["disk_free_gb"] = round(disk.free / (1024 ** 3), 2)
+        # Coleta de todos os discos / partições montadas
+        disks = []
+        try:
+            partitions = psutil.disk_partitions(all=False)
+        except Exception as e:
+            logging.error(f"Erro ao listar particoes de disco: {e}")
+            partitions = []
+
+        seen_mountpoints = set()
+        for p in partitions:
+            norm_mount = (p.mountpoint or "").strip().upper()
+            if not norm_mount or norm_mount in seen_mountpoints:
+                continue
+            if 'cdrom' in p.opts or not p.fstype:
+                continue
+            try:
+                usage = psutil.disk_usage(p.mountpoint)
+                seen_mountpoints.add(norm_mount)
+                
+                device_name = p.device.rstrip('\\') if p.device else p.mountpoint.rstrip('\\')
+                if not device_name:
+                    device_name = p.mountpoint
+                
+                disks.append({
+                    "device": device_name,
+                    "mountpoint": p.mountpoint,
+                    "fstype": p.fstype,
+                    "percent": usage.percent,
+                    "total_gb": round(usage.total / (1024 ** 3), 2),
+                    "used_gb": round(usage.used / (1024 ** 3), 2),
+                    "free_gb": round(usage.free / (1024 ** 3), 2)
+                })
+            except Exception:
+                continue
+
+        # Mantém compatibilidade com versões anteriores da UI/API
+        if disks:
+            c_disk = next((d for d in disks if d["mountpoint"].upper().startswith("C:")), disks[0])
+            telemetry["disk_percent"] = c_disk["percent"]
+            telemetry["disk_total_gb"] = c_disk["total_gb"]
+            telemetry["disk_free_gb"] = c_disk["free_gb"]
+        else:
+            try:
+                disk = psutil.disk_usage('C:\\')
+                telemetry["disk_percent"] = disk.percent
+                telemetry["disk_total_gb"] = round(disk.total / (1024 ** 3), 2)
+                telemetry["disk_free_gb"] = round(disk.free / (1024 ** 3), 2)
+                disks.append({
+                    "device": "C:",
+                    "mountpoint": "C:\\",
+                    "fstype": "NTFS",
+                    "percent": disk.percent,
+                    "total_gb": round(disk.total / (1024 ** 3), 2),
+                    "used_gb": round(disk.used / (1024 ** 3), 2),
+                    "free_gb": round(disk.free / (1024 ** 3), 2)
+                })
+            except Exception:
+                pass
+
+        telemetry["disks"] = disks
     except Exception as e:
         logging.error(f"Erro ao coletar psutil: {e}")
         
