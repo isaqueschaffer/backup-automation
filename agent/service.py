@@ -59,6 +59,57 @@ def log(msg, is_error=False):
         pass
 
 
+# Janela após a troca do TrilanAgentTray.exe em que o serviço ainda a reabre ao iniciar.
+# Só reabre se o arquivo foi trocado agora (atualização), para não reabrir uma bandeja que o usuário fechou.
+JANELA_REABRIR_BANDEJA_S = 15 * 60
+
+
+def reabrir_bandeja_atualizada():
+    """A atualização OTA fecha a bandeja para trocar o arquivo e não a abre de novo.
+
+    O serviço roda como SYSTEM na sessão 0 e não consegue mostrar janelas; por isso a bandeja é
+    iniciada como o usuário de cada sessão logada (console ou RDP) que ainda não a tem aberta.
+    """
+    tray = DIRETORIO / "TrilanAgentTray.exe"
+    try:
+        if not tray.exists() or time.time() - tray.stat().st_mtime > JANELA_REABRIR_BANDEJA_S:
+            return
+        import win32process
+        import win32profile
+        import win32ts
+
+        servidor = win32ts.WTS_CURRENT_SERVER_HANDLE
+        com_bandeja = {
+            sessao for (sessao, _pid, nome, _sid) in win32ts.WTSEnumerateProcesses(servidor, 1, 0)
+            if (nome or "").lower() == "trilanagenttray.exe"
+        }
+        for info in win32ts.WTSEnumerateSessions(servidor, 1, 0):
+            sessao = info["SessionId"]
+            if sessao == 0 or sessao in com_bandeja:
+                continue
+            if info["State"] not in (win32ts.WTSActive, win32ts.WTSDisconnected):
+                continue
+            token = None
+            try:
+                token = win32ts.WTSQueryUserToken(sessao)  # requer SYSTEM (privilégio SE_TCB)
+                ambiente = win32profile.CreateEnvironmentBlock(token, False)
+                si = win32process.STARTUPINFO()
+                si.lpDesktop = "winsta0\\default"
+                win32process.CreateProcessAsUser(
+                    token, str(tray), None, None, None, False,
+                    win32process.CREATE_UNICODE_ENVIRONMENT | win32process.NORMAL_PRIORITY_CLASS,
+                    ambiente, str(DIRETORIO), si,
+                )
+                log(f"Bandeja reaberta apos atualizacao na sessao {sessao}.")
+            except Exception as e:
+                log(f"Nao foi possivel reabrir a bandeja na sessao {sessao}: {e}", is_error=True)
+            finally:
+                if token is not None:
+                    token.Close()
+    except Exception as e:
+        log(f"Falha ao verificar a bandeja apos atualizacao: {e}", is_error=True)
+
+
 class TrilanAgentService(win32serviceutil.ServiceFramework):
     _svc_name_ = "TrilanAgentNVR"
     _svc_display_name_ = "Trilan — Agente Backup NVR"
@@ -101,6 +152,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         log("=" * 60)
         log(f"TRILAN AGENT NVR INICIADO (Versão: {v})")
         log(f"Diretorio: {DIRETORIO}")
+        # Em thread: nunca atrasa nem derruba a inicialização do serviço
+        threading.Thread(target=reabrir_bandeja_atualizada, daemon=True).start()
         try:
             self._load_schedule_and_run()
         except Exception:
