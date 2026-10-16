@@ -20,7 +20,9 @@ Name: "{group}\Trilan Agent Tray"; Filename: "{app}\TrilanAgentTray.exe"
 Name: "{commonstartup}\Trilan Agent Tray"; Filename: "{app}\TrilanAgentTray.exe"
 
 [Run]
-Filename: "{app}\TrilanAgentService.exe"; Parameters: "install"; Flags: runhidden
+Filename: "{app}\TrilanAgentService.exe"; Parameters: "install --startup=auto"; Flags: runhidden
+Filename: "sc.exe"; Parameters: "config TrilanAgentNVR start= auto"; Flags: runhidden
+Filename: "sc.exe"; Parameters: "failure TrilanAgentNVR reset= 86400 actions= restart/5000/restart/10000/restart/30000"; Flags: runhidden
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "start"; Flags: runhidden
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""Trilan Agent Tray FTP"" dir=in action=allow program=""{app}\TrilanAgentTray.exe"" enable=yes protocol=TCP localport=21"; Flags: runhidden
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""Trilan Agent Service FTP"" dir=in action=allow program=""{app}\TrilanAgentService.exe"" enable=yes protocol=TCP localport=21"; Flags: runhidden

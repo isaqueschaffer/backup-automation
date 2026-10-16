@@ -76,7 +76,22 @@ export default function MachineInfoCards({ machine, customerEmails, isAgentOnlin
             <>
               <TelemetryBar label="CPU" percent={machine.telemetry.cpu_percent || 0} info={`${machine.telemetry.cpu_percent || 0}%`} />
               <TelemetryBar label="RAM" percent={machine.telemetry.ram_percent || 0} info={`${machine.telemetry.ram_used_gb || 0} GB / ${machine.telemetry.ram_total_gb || 0} GB`} />
-              <TelemetryBar label="Disco (C:)" percent={machine.telemetry.disk_percent || 0} info={`${machine.telemetry.disk_free_gb || 0} GB Livre`} />
+              {Array.isArray(machine.telemetry.disks) && machine.telemetry.disks.length > 0 ? (
+                machine.telemetry.disks.map((d: { device?: string; mountpoint?: string; percent?: number; free_gb?: number; total_gb?: number }, i: number) => {
+                  const label = d.device ? `Disco (${d.device})` : `Disco (${d.mountpoint || i})`;
+                  const info = d.total_gb !== undefined ? `${d.free_gb ?? 0} GB Livre / ${d.total_gb ?? 0} GB` : `${d.free_gb ?? 0} GB Livre`;
+                  return (
+                    <TelemetryBar
+                      key={d.mountpoint || d.device || i}
+                      label={label}
+                      percent={d.percent || 0}
+                      info={info}
+                    />
+                  );
+                })
+              ) : (
+                <TelemetryBar label="Disco (C:)" percent={machine.telemetry.disk_percent || 0} info={`${machine.telemetry.disk_free_gb || 0} GB Livre`} />
+              )}
               {machine.telemetry.networks && machine.telemetry.networks.map((net: { name: string; mbps_sent?: number; mbps_recv?: number }, i: number) => (
                 <TelemetryBar
                   key={i}
