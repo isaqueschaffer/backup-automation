@@ -1,12 +1,13 @@
 # =============================================================
 # Trilan Agent — Helper para publicar nova versão OTA
+# Autenticacao: variavel de ambiente TRILAN_PUBLISH_TOKEN (token so de publicacao) ou -AdminPassword.
 # Uso: .\publish_version.ps1 -Version "2.0.0" -ServerUrl "https://seudominio.com" -AdminToken "seu-token" -Notes "Correção de bug X"
 # =============================================================
 
 param(
     [Parameter(Mandatory=$true)]  [string]$Version,
     [Parameter(Mandatory=$true)]  [string]$ServerUrl,
-    [Parameter(Mandatory=$true)]  [string]$AdminPassword,
+    [Parameter(Mandatory=$false)] [string]$AdminPassword = "",
     [Parameter(Mandatory=$false)] [string]$Notes = "",
     [Parameter(Mandatory=$false)] [string]$UrlService = "",
     [Parameter(Mandatory=$false)] [string]$UrlTray = ""
@@ -57,13 +58,21 @@ if (-not $UrlService) {
     exit 0
 }
 
-Write-Host "Fazendo login na API..."
-$LoginBody = @{ password = $AdminPassword } | ConvertTo-Json
-try {
-    $LoginResp = Invoke-RestMethod -Uri "$ServerUrl/api/v1/auth/login" -Method POST -Body $LoginBody -Headers @{"Content-Type"="application/json"}
-    $Token = $LoginResp.access_token
-} catch {
-    Write-Error "Falha no login. Verifique a senha do painel e a URL."
+if ($env:TRILAN_PUBLISH_TOKEN) {
+    # Token só de publicação: registra versões, não dá acesso ao painel
+    $AuthHeaders = @{ "X-Publish-Token" = $env:TRILAN_PUBLISH_TOKEN; "Content-Type" = "application/json" }
+} elseif ($AdminPassword) {
+    Write-Host "Fazendo login na API..."
+    $LoginBody = @{ password = $AdminPassword } | ConvertTo-Json
+    try {
+        $LoginResp = Invoke-RestMethod -Uri "$ServerUrl/api/v1/auth/login" -Method POST -Body $LoginBody -Headers @{"Content-Type"="application/json"}
+        $AuthHeaders = @{ "Authorization" = "Bearer $($LoginResp.access_token)"; "Content-Type" = "application/json" }
+    } catch {
+        Write-Error "Falha no login. Verifique a senha do painel e a URL."
+        exit 1
+    }
+} else {
+    Write-Error "Defina a variavel TRILAN_PUBLISH_TOKEN ou informe -AdminPassword."
     exit 1
 }
 
@@ -78,10 +87,7 @@ $Body = @{
 if ($UrlTray)  { $Body.url_tray    = $UrlTray }
 if ($HashTray) { $Body.sha256_tray = $HashTray }
 
-$Headers = @{
-    "Authorization" = "Bearer $Token"
-    "Content-Type"  = "application/json"
-}
+$Headers = $AuthHeaders
 
 try {
     $Response = Invoke-RestMethod `

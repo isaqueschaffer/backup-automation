@@ -11,7 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from auth import get_current_machine, verify_admin_token
+from auth import get_current_machine, verify_admin_token, verify_publish_or_admin
 from database import get_db
 from models import AgentVersion, Machine
 from schemas import AgentVersionCreate, AgentVersionResponse, UpdateCheckResponse, AgentVersionUpdate
@@ -67,7 +67,7 @@ def check_for_update(
     "/agent-version",
     response_model=AgentVersionResponse,
     status_code=201,
-    dependencies=[Depends(verify_admin_token)],
+    dependencies=[Depends(verify_publish_or_admin)],
 )
 def register_version(body: AgentVersionCreate, db: Session = Depends(get_db)):
     """Registra uma nova versão do agente (URL do GitHub Release + SHA256)."""

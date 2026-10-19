@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Admin
     ADMIN_PASSWORD: str  # Obrigatório — defina via variável de ambiente ADMIN_PASSWORD
     PUBLIC_URL: Optional[str] = None
+    # Token só para publicar versões do agente (POST /api/v1/admin/agent-version), enviado em
+    # X-Publish-Token. Não dá acesso ao painel. Vazio = desativado (só o admin publica).
+    PUBLISH_TOKEN: str = ""
 
     # CORS — lista de origens permitidas separadas por vírgula.
     # Ex: CORS_ORIGINS=https://painel.suaempresa.com,https://outro.dominio.com
