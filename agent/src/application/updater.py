@@ -157,22 +157,27 @@ def check_and_apply_update(conf: dict) -> bool:
         tray_exe = os.path.join(base_dir, "TrilanAgentTray.exe")
 
         # Script batch para substituir o exe e reiniciar o serviço
-        # Roda FORA do processo do serviço (detached) para poder substituir arquivos em uso
-        bat_content = f"@echo off\n"
-        bat_content += "timeout /t 4 /nobreak >nul\n"
+        # Usa ping em vez de timeout.exe porque timeout falha imediatamente sem console (Sessão 0 / CREATE_NO_WINDOW)
+        bat_content = "@echo off\n"
+        bat_content += "ping 127.0.0.1 -n 5 >nul\n"
         bat_content += "sc stop TrilanAgentNVR >nul 2>&1\n"
-    
+
         if has_tray_update:
             # Mata o Tray para destravar o arquivo e permitir a substituição
             bat_content += "taskkill /F /IM TrilanAgentTray.exe >nul 2>&1\n"
-        
-        bat_content += "timeout /t 3 /nobreak >nul\n"
+
+        bat_content += "ping 127.0.0.1 -n 5 >nul\n"
+        bat_content += "taskkill /F /IM TrilanAgentService.exe >nul 2>&1\n"
+        bat_content += "ping 127.0.0.1 -n 3 >nul\n"
         bat_content += f'copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1\n'
-    
+
         if has_tray_update:
             bat_content += f'copy /y "{tmp_tray_exe}" "{tray_exe}" >nul 2>&1\n'
-        
-        bat_content += "timeout /t 2 /nobreak >nul\n"
+
+        bat_content += "sc config TrilanAgentNVR start= delayed-auto >nul 2>&1\n"
+        bat_content += "sc failure TrilanAgentNVR reset= 86400 actions= restart/5000/restart/10000/restart/30000 >nul 2>&1\n"
+        bat_content += "sc failureflag TrilanAgentNVR 1 >nul 2>&1\n"
+        bat_content += "ping 127.0.0.1 -n 3 >nul\n"
         bat_content += "sc start TrilanAgentNVR >nul 2>&1\n"
         bat_content += 'del "%~f0"\n'
         bat_path = os.path.join(tmp_dir, "apply_update.bat")

@@ -9,6 +9,7 @@ Remove:   python service.py remove
 """
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -23,9 +24,12 @@ import win32serviceutil
 import servicemanager
 import win32security
 
-# Imports explicitos para o PyInstaller não perder dependências em imports dinâmicos
-import src.camera.rtsp_client
-import src.application.api_client
+
+def _pyinstaller_hidden_imports():
+    """Mantém imports explícitos visíveis ao bytecode do PyInstaller sem atrasar o StartServiceCtrlDispatcher no boot."""
+    import src.camera.rtsp_client  # noqa: F401
+    import src.application.api_client  # noqa: F401
+
 
 DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
@@ -34,18 +38,29 @@ PING_INTERVAL_S = 15
 
 # Usa ProgramData para logs — gravavel sem privilegios de admin
 PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
-PASTA_LOG.mkdir(parents=True, exist_ok=True)
 ARQUIVO_LOG = PASTA_LOG / "servico.log"
+_LOGGING_CONFIGURADO = False
 
-logging.basicConfig(
-    filename=str(ARQUIVO_LOG),
-    level=logging.INFO,
-    format="[%(asctime)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+
+def _garantir_logging():
+    global _LOGGING_CONFIGURADO
+    if _LOGGING_CONFIGURADO:
+        return
+    try:
+        PASTA_LOG.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(
+            filename=str(ARQUIVO_LOG),
+            level=logging.INFO,
+            format="[%(asctime)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        _LOGGING_CONFIGURADO = True
+    except Exception:
+        pass
 
 
 def log(msg, is_error=False):
+    _garantir_logging()
     if is_error:
         logging.error(msg)
     else:
@@ -55,6 +70,53 @@ def log(msg, is_error=False):
             servicemanager.LogErrorMsg(str(msg))
         else:
             servicemanager.LogInfoMsg(str(msg))
+    except Exception:
+        pass
+
+
+def _configurar_recuperacao_servico():
+    """
+    Garante que o serviço esteja configurado com:
+    - start= delayed-auto (evita timeout de 30s do SCM / Erro 1053 durante descompactação do PyInstaller --onefile no boot)
+    - failure actions (reiniciar automaticamente em caso de queda)
+    - failureflag= 1 (aciona recuperação mesmo se o serviço encerrar com código de erro Win32)
+    Executado tanto no install/update quanto no próprio SvcDoRun (auto-cura para agentes atualizados via OTA).
+    """
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        res = subprocess.run(
+            ["sc.exe", "config", "TrilanAgentNVR", "start=", "delayed-auto"],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
+        if res.returncode != 0:
+            subprocess.run(
+                ["sc.exe", "config", "TrilanAgentNVR", "start=", "auto"],
+                capture_output=True,
+                creationflags=no_window,
+                timeout=10,
+            )
+        subprocess.run(
+            [
+                "sc.exe",
+                "failure",
+                "TrilanAgentNVR",
+                "reset=",
+                "86400",
+                "actions=",
+                "restart/5000/restart/10000/restart/30000",
+            ],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
+        subprocess.run(
+            ["sc.exe", "failureflag", "TrilanAgentNVR", "1"],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
     except Exception:
         pass
 
@@ -90,7 +152,21 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.stop_requested = True
         win32event.SetEvent(self.hWaitStop)
 
+    def SvcShutdown(self):
+        # Chamado pelo Windows quando o servidor é desligado/reiniciado (SERVICE_CONTROL_SHUTDOWN)
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        log("Desligamento do Windows detectado (SvcShutdown). Encerrando servico de forma limpa...")
+        self.stop_requested = True
+        win32event.SetEvent(self.hWaitStop)
+
     def SvcDoRun(self):
+        # Reporta SERVICE_RUNNING imediatamente ao SCM para evitar timeout de inicialização no boot
+        self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+        _garantir_logging()
+
+        # Auto-cura em background: aplica delayed-auto e políticas de falha mesmo em máquinas atualizadas via OTA
+        threading.Thread(target=_configurar_recuperacao_servico, daemon=True).start()
+
         # Tenta carregar a versão do updater se possível
         try:
             from src.application.updater import get_current_version
@@ -101,10 +177,21 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         log("=" * 60)
         log(f"TRILAN AGENT NVR INICIADO (Versão: {v})")
         log(f"Diretorio: {DIRETORIO}")
-        try:
-            self._load_schedule_and_run()
-        except Exception:
-            log(f"ERRO FATAL:\n{traceback.format_exc()}", is_error=True)
+
+        # Loop de resiliência: se ocorrer erro inesperado no boot (ex.: rede/disco ainda subindo),
+        # não encerra o processo com código 0 (o que impediria o Windows SCM de reiniciar o serviço).
+        while not self.stop_requested:
+            try:
+                self._load_schedule_and_run()
+                if not self.stop_requested:
+                    log("Ciclo principal encerrou sem solicitacao de parada. Reiniciando em 10s...", is_error=True)
+            except Exception:
+                log(f"ERRO FATAL (tentando recuperar em 10s):\n{traceback.format_exc()}", is_error=True)
+
+            if not self.stop_requested:
+                if win32event.WaitForSingleObject(self.hWaitStop, 10000) == win32event.WAIT_OBJECT_0:
+                    break
+
         log("TRILAN AGENT NVR ENCERRADO")
         log("=" * 60)
 
@@ -167,7 +254,6 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self._run_loop(conf["server_url"], headers, conf)
 
     def _restart_service(self):
-        import subprocess
         # Script PowerShell resiliente: aguarda o servico parar completamente antes de iniciar
         ps_cmd = (
             "$svc = 'TrilanAgentNVR'; "
@@ -378,19 +464,13 @@ if __name__ == "__main__":
         servicemanager.PrepareToHostSingle(TrilanAgentService)
         servicemanager.StartServiceCtrlDispatcher()
     else:
-        # Se for instalação e não especificou --startup, define como auto por padrão (opções devem vir antes do comando)
-        if len(sys.argv) > 1 and sys.argv[1].lower() == "install" and not any(a.startswith("--startup") for a in sys.argv):
-            sys.argv.insert(1, "--startup=auto")  # pywin32 (getopt) só lê opções antes da ação
+        # Identifica o comando real ignorando flags como --startup=...
+        acoes_cli = [a.lower() for a in sys.argv[1:] if not a.startswith("-")]
+        acao_cli = acoes_cli[0] if acoes_cli else ""
+        # Se for install ou update e não especificou --startup, define como delayed por padrão (opções devem vir antes da ação)
+        if acao_cli in ("install", "update") and not any(a.startswith("--startup") for a in sys.argv):
+            sys.argv.insert(1, "--startup=delayed")
         win32serviceutil.HandleCommandLine(TrilanAgentService)
-        # Após install ou update, garante inicialização automática e recuperação de falhas no Windows
-        if len(sys.argv) > 1 and sys.argv[1].lower() in ("install", "update"):
-            import subprocess
-            try:
-                subprocess.run(["sc.exe", "config", "TrilanAgentNVR", "start=", "auto"], capture_output=True)
-                subprocess.run(
-                    ["sc.exe", "failure", "TrilanAgentNVR", "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000"],
-                    capture_output=True
-                )
-            except Exception:
-                pass
-
+        # Após install ou update, garante inicialização delayed-auto e recuperação de falhas no Windows SCM
+        if acao_cli in ("install", "update"):
+            _configurar_recuperacao_servico()
