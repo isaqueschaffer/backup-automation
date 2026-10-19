@@ -43,12 +43,12 @@ Write-Host ""
 # Se URLs não foram fornecidas, exibe instruções
 if (-not $UrlService) {
     Write-Host "INSTRUÇÃO:" -ForegroundColor Yellow
-    Write-Host "1. Crie uma Release no GitHub (tag: v$Version)" -ForegroundColor Yellow
+    Write-Host "1. Crie uma Release no GitHub (tag: $Version, título: v$Version)" -ForegroundColor Yellow
     Write-Host "2. Faça upload de TrilanAgentService.exe e TrilanAgentTray.exe como assets" -ForegroundColor Yellow
     Write-Host "3. Copie as URLs dos assets e re-execute com -UrlService e -UrlTray" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Exemplo de URL de asset GitHub:" -ForegroundColor Cyan
-    Write-Host "  https://github.com/isaqueschaffer/trilan-nvr-backup-automation/releases/download/v$Version/TrilanAgentService.exe" -ForegroundColor Cyan
+    Write-Host "  https://github.com/isaqueschaffer/backup-automation/releases/download/$Version/TrilanAgentService.exe" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Hashes para usar no próximo comando:" -ForegroundColor Green
     Write-Host "  -UrlService 'URL_DO_SERVICE_EXE' -UrlTray 'URL_DO_TRAY_EXE'" -ForegroundColor Green
