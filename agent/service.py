@@ -192,13 +192,20 @@ def _configurar_recuperacao_servico():
             creationflags=no_window,
             timeout=10,
         )
+        # Nome exibido em services.msc (máquinas instaladas com o nome antigo atualizam sozinhas)
+        subprocess.run(
+            ["sc.exe", "config", "TrilanAgentNVR", "DisplayName=", "Trilan — Agente Backup"],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
     except Exception:
         pass
 
 
 class TrilanAgentService(win32serviceutil.ServiceFramework):
     _svc_name_ = "TrilanAgentNVR"
-    _svc_display_name_ = "Trilan — Agente Backup NVR"
+    _svc_display_name_ = "Trilan — Agente Backup"
     _svc_description_ = "Executa backups automaticos de NVRs e envia os arquivos ao servidor Trilan."
     _svc_start_type_ = win32service.SERVICE_AUTO_START
 

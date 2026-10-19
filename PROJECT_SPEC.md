@@ -798,6 +798,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-19] — Agente 1.1.13: nome do serviço no Windows
+
+**Alteração:** O nome exibido do serviço em services.msc passa de "Trilan — Agente Backup NVR" para "Trilan — Agente Backup" (`_svc_display_name_` em `service.py`). Máquinas já instaladas recebem o novo nome sozinhas: `_configurar_recuperacao_servico` aplica `sc config TrilanAgentNVR DisplayName=` a cada início. O nome interno do serviço (`TrilanAgentNVR`) não mudou.
+**Arquivos:** agent/service.py, agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-16] — Agente 1.1.12: reinício pelo painel e atualização OTA confiáveis
 
 **Problema:** "Reiniciar todos" parava os agentes e eles não voltavam. Causa: o script que religa o serviço era iniciado com `DETACHED_PROCESS`; sem console o PowerShell fecha sem executar nada (1.1.9–1.1.11). Até a 1.1.8, `ping 3s && sc start` tentava uma vez só, cedo demais. No .bat da OTA, `timeout /t` não espera sem console (as pausas fixas nunca aconteceram).
