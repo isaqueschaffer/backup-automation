@@ -798,6 +798,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-19] — Publicação de versões: release no repositório público e cadastro sob demanda
+
+**Alteração:** (1) Ao gerar os executáveis, a release (tag = versão, título `v<versão>`, só `TrilanAgentService.exe` e `TrilanAgentTray.exe`) é publicada em `isaqueschaffer/backup-automation` (público; os agentes baixam daqui). (2) O cadastro da versão no painel é sob demanda: só quando o usuário pedir e informar a senha do painel, via `agent/publish_version.ps1`. (3) Servidor: `POST /api/v1/admin/agent-version` passa a aceitar também o header `X-Publish-Token` (variável `PUBLISH_TOKEN`; vazia = desativado), que só serve para registrar versões. Regras fixas registradas em `CLAUDE.md`.
+**Arquivos:** CLAUDE.md, agent/publish_version.ps1, server/api/auth.py, server/api/config.py, server/api/routers/agent_update.py, server/.env.example
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-19] — Agente 1.1.13: nome do serviço no Windows
 
 **Alteração:** O nome exibido do serviço em services.msc passa de "Trilan — Agente Backup NVR" para "Trilan — Agente Backup" (`_svc_display_name_` em `service.py`). Máquinas já instaladas recebem o novo nome sozinhas: `_configurar_recuperacao_servico` aplica `sc config TrilanAgentNVR DisplayName=` a cada início. O nome interno do serviço (`TrilanAgentNVR`) não mudou.
