@@ -383,9 +383,8 @@ def run_backup(trigger: str = "scheduled"):
     if backup_id:
         todos_arquivos = [f for f in TEMP_DIR_FINAL.rglob("*") if f.is_file()]
         if todos_arquivos:
-            # Define o nome do ZIP global
-            data_str = datetime.now().strftime("%d_%m_%Y")
-            nome_zip_global = f"backup_{data_str}.zip"
+            # Nome do ZIP da máquina: backup_<Nome_Da_Maquina>_<Data>.zip (protegido pela senha da máquina)
+            nome_zip_global = f"backup_{nome_seguro(client_name)}_{data_hoje()}.zip"
 
             zip_global_path = criar_zip(TEMP_DIR_FINAL, nome_zip_global, zip_password)
             if zip_global_path:
