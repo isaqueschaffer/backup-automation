@@ -64,7 +64,7 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
               checked={form.password_mode === "default"}
               onChange={() => setForm({ ...form, password_mode: "default", zip_password: "" })}
             />
-            <span>Usar padrão <span className="text-muted">(sem senha personalizada)</span></span>
+            <span>Sem senha</span>
           </label>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}>
             <input
