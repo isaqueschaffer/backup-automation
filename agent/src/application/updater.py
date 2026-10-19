@@ -193,6 +193,9 @@ def check_and_apply_update(conf: dict) -> bool:
         bat_content += passo("copia", f'copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1', 15, 2)
         if has_tray_update:
             bat_content += passo("copia_tray", f'copy /y "{tmp_tray_exe}" "{tray_exe}" >nul 2>&1', 15, 2)
+        bat_content += "sc config TrilanAgentNVR start= delayed-auto >nul 2>&1\n"
+        bat_content += "sc failure TrilanAgentNVR reset= 86400 actions= restart/5000/restart/10000/restart/30000 >nul 2>&1\n"
+        bat_content += "sc failureflag TrilanAgentNVR 1 >nul 2>&1\n"
         bat_content += passo("inicia", 'sc start TrilanAgentNVR >nul 2>&1\nping -n 4 127.0.0.1 >nul\n'
                                        'sc query TrilanAgentNVR | find "RUNNING" >nul', 5, 2)
         bat_content += f'echo [%date% %time%] Atualizacao concluida. >> "{log_ota}"\n'

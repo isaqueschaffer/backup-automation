@@ -268,10 +268,19 @@ def run_backup(trigger: str = "scheduled"):
     TEMP_DIR_WORK = DIR_AGENT / "tmp_backup_work"
     TEMP_DIR_FINAL = DIR_AGENT / "tmp_backup_final"
 
-    shutil.rmtree(TEMP_DIR_WORK, ignore_errors=True)
-    shutil.rmtree(TEMP_DIR_FINAL, ignore_errors=True)
-    TEMP_DIR_WORK.mkdir(parents=True)
-    TEMP_DIR_FINAL.mkdir(parents=True)
+    for d in (TEMP_DIR_WORK, TEMP_DIR_FINAL):
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            if d.exists():
+                for item in d.iterdir():
+                    try:
+                        if item.is_dir():
+                            shutil.rmtree(item, ignore_errors=True)
+                        else:
+                            item.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        d.mkdir(parents=True, exist_ok=True)
 
     started_at = datetime.utcnow()
     resultados = []
@@ -315,9 +324,8 @@ def run_backup(trigger: str = "scheduled"):
     if backup_id:
         todos_arquivos = [f for f in TEMP_DIR_FINAL.rglob("*") if f.is_file()]
         if todos_arquivos:
-            # Define o nome do ZIP global
-            data_str = datetime.now().strftime("%d_%m_%Y")
-            nome_zip_global = f"backup_{data_str}.zip"
+            # Nome do ZIP da máquina: backup_<Nome_Da_Maquina>_<Data>.zip (protegido pela senha da máquina)
+            nome_zip_global = f"backup_{nome_seguro(client_name)}_{data_hoje()}.zip"
 
             zip_global_path = criar_zip(TEMP_DIR_FINAL, nome_zip_global, zip_password)
             if zip_global_path:

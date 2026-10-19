@@ -112,7 +112,7 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
             <div className="text-xs text-muted" style={{ marginTop: 6 }}>
               {isEdit && form.has_zip_password && !form.zip_password
                 ? "O cliente já possui senha personalizada. Deixe em branco para manter a senha atual ou digite uma nova para alterar."
-                : "Esta senha protegerá o ZIP do cliente. Os arquivos internos das máquinas ficarão acessíveis sem senha após abrir este ZIP."}
+                : "Esta senha protegerá exclusivamente o ZIP consolidado do cliente. As máquinas mantêm suas senhas individuais separadas (dentro deste ZIP, as pastas internas das máquinas ficam acessíveis sem senha)."}
             </div>
           </div>
         ) : (

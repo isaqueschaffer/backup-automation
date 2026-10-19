@@ -93,17 +93,14 @@ def get_backup(backup_id: UUID, db: Session = Depends(get_db)):
 @router.get("/{backup_id}/download", dependencies=[Depends(verify_admin_token)])
 def download_backup_zip(
     backup_id: UUID,
-    direct_machine: bool = Query(False, description="Se True, download direto na máquina com senha da máquina"),
+    direct_machine: bool = Query(True, description="Download direto do backup da máquina"),
     db: Session = Depends(get_db)
 ):
-    """Download do arquivo ZIP do backup.
-
-    - Se direct_machine=True (download feito direto na máquina) ou a máquina não tiver cliente:
-      entrega o arquivo original do disco com a senha individual da máquina.
-    - Se a máquina pertencer a um cliente e direct_machine=False (download pelo cliente):
-      gera o ZIP usando a senha do cliente (desencriptando o da máquina e sem senha interna).
+    """Download do arquivo ZIP do backup individual da máquina.
+    Entrega o arquivo original gravado em disco com a senha individual da máquina e o nome da máquina.
+    As senhas de máquina e cliente nunca se misturam.
     """
-    from services.backup_runs import build_single_backup_zip_with_customer_password, iter_file
+    from services.storage_service import _sanitize_name
 
     b = db.query(Backup).options(_with_machine()).filter(Backup.id == backup_id).first()
     if not b:
@@ -127,28 +124,27 @@ def download_backup_zip(
             detail=f"Arquivo ZIP '{b.zip_filename}' nao encontrado no servidor."
         )
 
-    # Caso 1: Download direto na máquina ou máquina avulsa sem cliente
-    if direct_machine or not b.machine or not b.machine.customer_id:
-        return FileResponse(path=str(path), filename=b.zip_filename, media_type="application/zip")
+    # Garante que o nome do arquivo para download contenha o nome da máquina
+    clean_machine = _sanitize_name(b.machine.name) if b.machine else "maquina"
+    filename = b.zip_filename
+    if filename:
+        if clean_machine.lower() not in filename.lower():
+            if filename.startswith("backup_"):
+                filename = f"backup_{clean_machine}_{filename[7:]}"
+            else:
+                filename = f"backup_{clean_machine}_{filename}"
+    else:
+        filename = f"backup_{clean_machine}_{date_str}.zip"
 
-    # Caso 2: Download pelo cliente — usa a senha do cliente
-    f = build_single_backup_zip_with_customer_password(db, b)
-    if f is None:
-        return FileResponse(path=str(path), filename=b.zip_filename, media_type="application/zip")
-
-    customer_name = b.machine.customer.name.replace(" ", "_") if b.machine.customer else "cliente"
-    filename = f"cliente_{customer_name}_{b.zip_filename}"
-    return StreamingResponse(
-        iter_file(f),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return FileResponse(path=str(path), filename=filename, media_type="application/zip")
 
 
 @router.get("/public-download/{backup_id}")
 def public_download_backup_zip(backup_id: UUID, db: Session = Depends(get_db)):
     """Public endpoint for downloading a backup ZIP using the backup ID as token."""
-    b = db.query(Backup).filter(Backup.id == backup_id).first()
+    from services.storage_service import _sanitize_name
+
+    b = db.query(Backup).options(_with_machine()).filter(Backup.id == backup_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Backup not found")
     if not b.zip_filename:
@@ -159,7 +155,18 @@ def public_download_backup_zip(backup_id: UUID, db: Session = Depends(get_db)):
     if not path:
         raise HTTPException(status_code=404, detail="Arquivo ZIP nao encontrado no servidor.")
 
-    return FileResponse(path=str(path), filename=b.zip_filename, media_type="application/zip")
+    clean_machine = _sanitize_name(b.machine.name) if b.machine else "maquina"
+    filename = b.zip_filename
+    if filename:
+        if clean_machine.lower() not in filename.lower():
+            if filename.startswith("backup_"):
+                filename = f"backup_{clean_machine}_{filename[7:]}"
+            else:
+                filename = f"backup_{clean_machine}_{filename}"
+    else:
+        filename = f"backup_{clean_machine}_{date_str}.zip"
+
+    return FileResponse(path=str(path), filename=filename, media_type="application/zip")
 
 
 @router.get("/public-run-download/{run_id}")

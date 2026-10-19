@@ -28,7 +28,7 @@ from schemas import (
 )
 from routers.machines import check_machine_online
 from services.crypto_service import decrypt
-from services.storage_service import save_zip_stream, UploadTooLargeError
+from services.storage_service import save_zip_stream, UploadTooLargeError, _sanitize_name
 from services.email_service import send_backup_report
 from services.backup_runs import attach_report_to_run, finish_queue_run
 from config import settings
@@ -407,7 +407,15 @@ def upload_backup_zip(
         )
 
     date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
-    filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"
+    clean_machine = _sanitize_name(machine.name)
+    raw_filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"
+    if clean_machine.lower() not in raw_filename.lower():
+        if raw_filename.startswith("backup_"):
+            filename = f"backup_{clean_machine}_{raw_filename[7:]}"
+        else:
+            filename = f"backup_{clean_machine}_{raw_filename}"
+    else:
+        filename = raw_filename
 
     # Grava em streaming (chunks) com limite de tamanho; o nome é sanitizado e o
     # caminho final validado dentro do diretório da máquina (anti path traversal).

@@ -149,8 +149,8 @@ def update_machine(machine_id: UUID, body: MachineUpdate, db: Session = Depends(
         if field in ("backup_hour", "backup_minute") and getattr(machine, field) != value:
             time_changed = True
 
-        if field == "zip_password" and value:
-            setattr(machine, field, encrypt(value))
+        if field == "zip_password":
+            setattr(machine, field, encrypt(value.strip()) if (value and value.strip()) else None)
         else:
             setattr(machine, field, value)
 
