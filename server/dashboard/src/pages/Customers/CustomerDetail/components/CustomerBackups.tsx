@@ -16,9 +16,16 @@ export default function CustomerBackups({ backups }: { backups: Backup[] | null 
   const handleDownload = async (b: Backup) => {
     setDownloadingId(b.id);
     try {
-      // Download feito pelo cliente: usa a senha do cliente!
-      const data = await downloadBackupZip(b.id, { direct_machine: false });
-      saveBlob(data, `cliente_${b.zip_filename || "backup.zip"}`);
+      // Download da máquina individual: usa a senha da própria máquina e nome da máquina
+      const data = await downloadBackupZip(b.id, { direct_machine: true });
+      const safeMachine = (b.machine_name || "maquina").replace(/\s+/g, "_");
+      let filename = b.zip_filename || `backup_${safeMachine}.zip`;
+      if (!filename.toLowerCase().includes(safeMachine.toLowerCase())) {
+        filename = filename.startsWith("backup_")
+          ? `backup_${safeMachine}_${filename.slice(7)}`
+          : `backup_${safeMachine}_${filename}`;
+      }
+      saveBlob(data, filename);
     } catch (err) {
       toast(await extractBlobError(err), "error");
     } finally { setDownloadingId(null); }

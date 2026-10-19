@@ -195,20 +195,16 @@ export default function Backups() {
   const handleDownload = async (b: Backup) => {
     try {
       setDownloadingId(b.id);
-      if (b.customer_id) {
-        if (b.run_id) {
-          const safeName = (b.customer_name || "cliente").replace(/\s+/g, "_");
-          const dateStr = b.started_at ? fmtDate(b.started_at).split(" ")[0].replace(/\//g, "-") : "backup";
-          await downloadCustomerRunZip(b.customer_id, b.run_id, `cliente_${safeName}_${dateStr}.zip`);
-        } else {
-          const data = await downloadBackupZip(b.id, { direct_machine: false });
-          saveBlob(data, `cliente_${(b.customer_name || "cliente").replace(/\s+/g, "_")}_${b.zip_filename || "backup.zip"}`);
-        }
-      } else {
-        // Máquina sem cliente: baixa o ZIP individual da máquina (senha da máquina)
-        const data = await downloadBackupZip(b.id, { direct_machine: true });
-        saveBlob(data, b.zip_filename || "backup.zip");
+      // Baixa o backup individual da máquina (protegido exclusivamente com a senha da máquina)
+      const data = await downloadBackupZip(b.id, { direct_machine: true });
+      const safeMachine = (b.machine_name || "maquina").replace(/\s+/g, "_");
+      let filename = b.zip_filename || `backup_${safeMachine}.zip`;
+      if (!filename.toLowerCase().includes(safeMachine.toLowerCase())) {
+        filename = filename.startsWith("backup_")
+          ? `backup_${safeMachine}_${filename.slice(7)}`
+          : `backup_${safeMachine}_${filename}`;
       }
+      saveBlob(data, filename);
     } catch (err: unknown) {
       console.error("Erro ao baixar o backup:", err);
       const msg = await extractBlobError(err);
@@ -351,15 +347,11 @@ export default function Backups() {
                     </td>
                     <td className="text-secondary text-sm">{b.trigger}</td>
                     <td>
-                      {(b.zip_filename || b.customer_id) && (
+                      {b.zip_filename && (
                         <button
                           onClick={() => handleDownload(b)}
                           className="btn-icon"
-                          title={
-                            b.customer_id
-                              ? `Baixar ZIP do cliente "${b.customer_name || "Cliente"}" (prioridade de cliente com senha no ZIP externo)`
-                              : "Baixar ZIP da máquina (protegido com a senha da máquina)"
-                          }
+                          title="Baixar ZIP da máquina (protegido com a senha da máquina)"
                           disabled={downloadingId === b.id}
                         >
                           {downloadingId === b.id ? (

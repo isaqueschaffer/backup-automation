@@ -336,10 +336,19 @@ def run_backup(trigger: str = "scheduled"):
     TEMP_DIR_WORK = DIR_AGENT / "tmp_backup_work"
     TEMP_DIR_FINAL = DIR_AGENT / "tmp_backup_final"
 
-    shutil.rmtree(TEMP_DIR_WORK, ignore_errors=True)
-    shutil.rmtree(TEMP_DIR_FINAL, ignore_errors=True)
-    TEMP_DIR_WORK.mkdir(parents=True)
-    TEMP_DIR_FINAL.mkdir(parents=True)
+    for d in (TEMP_DIR_WORK, TEMP_DIR_FINAL):
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            if d.exists():
+                for item in d.iterdir():
+                    try:
+                        if item.is_dir():
+                            shutil.rmtree(item, ignore_errors=True)
+                        else:
+                            item.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        d.mkdir(parents=True, exist_ok=True)
 
     started_at = datetime.utcnow()
     resultados = []

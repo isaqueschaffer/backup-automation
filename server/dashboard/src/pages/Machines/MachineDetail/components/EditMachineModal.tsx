@@ -65,6 +65,9 @@ export default function EditMachineModal({ form, setForm, customerName, emailCus
         <label className="form-label">Nova senha do ZIP <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(vazio = manter atual)</span></label>
         <input className="form-input" type="password" value={form.zip_password}
           onChange={e => setForm({ ...form, zip_password: e.target.value })} />
+        <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+          Esta senha protege exclusivamente os arquivos de backup desta máquina, independente da senha do cliente.
+        </div>
       </div>
       <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
