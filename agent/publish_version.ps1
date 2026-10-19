@@ -88,13 +88,14 @@ if ($UrlTray)  { $Body.url_tray    = $UrlTray }
 if ($HashTray) { $Body.sha256_tray = $HashTray }
 
 $Headers = $AuthHeaders
+$Headers["Content-Type"] = "application/json; charset=utf-8"
 
 try {
     $Response = Invoke-RestMethod `
         -Uri "$ServerUrl/api/v1/admin/agent-version" `
         -Method POST `
         -Headers $Headers `
-        -Body ($Body | ConvertTo-Json -Depth 5)
+        -Body ([System.Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Depth 5)))
 
     Write-Host "" 
     Write-Host "✅ Versão $Version registrada com sucesso!" -ForegroundColor Green
