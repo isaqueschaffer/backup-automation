@@ -801,8 +801,8 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ### [2026-10-20] — Visão Geral: Saúde do Servidor em destaque e layout personalizável
 
-**Alteração:** Cada máquina da Visão Geral é um card com o nome do **cliente** como título e o nome da máquina pequeno, status do último backup, comunicação ("Atualizado agora/há N s", ou última comunicação quando offline) e a Saúde do Servidor como conteúdo principal (CPU, RAM, GPU, todos os discos e as placas de rede físicas). A página atualiza a cada 10 s. O botão "Personalizar" liga o modo de edição: arrastar e soltar para reordenar, largura por card (¼, ⅓, ½, ⅔, total, grade de 12 colunas) e escolha de quais máquinas aparecem. A escolha fica no `localStorage` do navegador (chave `trilan.overview.layout.v1`), sem mudança no servidor; máquinas novas aparecem sozinhas no fim.
-**Arquivos:** server/dashboard/src/pages/Overview/ (index.tsx, layout.ts, MachineHealthCard.tsx), pages/Machines/MachineDetail/components/ServerHealthCard.tsx (exports), src/index.css
+**Alteração:** Cada máquina da Visão Geral é um card com o nome do **cliente** como título e o nome da máquina pequeno, status do último backup, comunicação ("Atualizado agora/há N s", ou última comunicação quando offline) e a Saúde do Servidor como conteúdo principal em medidores em anel (CPU, RAM, GPU e um anel por disco) e as placas de rede físicas em linhas compactas. A página atualiza a cada 10 s. O botão "Personalizar" liga o modo de edição: arrastar e soltar para reordenar, largura por card (¼, ⅓, ½, ⅔, total, grade de 12 colunas) e escolha de quais máquinas aparecem. A escolha fica no `localStorage` do navegador (chave `trilan.overview.layout.v1`), sem mudança no servidor; máquinas novas aparecem sozinhas no fim. O card é compacto (largura padrão ¼) para ver muitas máquinas de uma vez.
+**Arquivos:** server/dashboard/src/pages/Overview/ (index.tsx, layout.ts, MachineHealthCard.tsx, RingGauge.tsx), pages/Machines/MachineDetail/components/ServerHealthCard.tsx (exports), src/index.css
 **Breaking Change:** Não.
 **Branch:** isaque
 

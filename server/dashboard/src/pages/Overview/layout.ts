@@ -11,7 +11,7 @@ export const SPANS: { span: Span; label: string }[] = [
   { span: 12, label: "Total" },
 ];
 
-export const DEFAULT_SPAN: Span = 4;
+export const DEFAULT_SPAN: Span = 3;
 
 const STORAGE_KEY = "trilan.overview.layout.v1";
 

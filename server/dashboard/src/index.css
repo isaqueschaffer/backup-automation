@@ -818,12 +818,12 @@ tbody td {
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
   align-items: stretch;
 }
-@media (max-width: 1100px) {
+@media (max-width: 1000px) {
   .overview-item { grid-column: span 6 !important; }
 }
-@media (max-width: 700px) {
+@media (max-width: 640px) {
   .overview-item { grid-column: span 12 !important; }
 }

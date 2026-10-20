@@ -1,12 +1,10 @@
 import { useMemo } from "react";
 import {
   Activity,
-  Cpu,
+  ArrowDown,
+  ArrowUp,
   EyeOff,
-  Gauge,
   GripVertical,
-  HardDrive,
-  MemoryStick,
   Network,
   Server,
 } from "lucide-react";
@@ -16,18 +14,14 @@ import { fmtDate, fmtSchedule } from "../../utils/date";
 import {
   fmtAgo,
   fmtGb,
+  fmtMbps,
   LEVEL_LABEL,
   overallLevel,
   parseTelemetry,
 } from "../Machines/MachineDetail/telemetry";
 import { serverUtcMs } from "../Machines/MachineDetail/utils";
-import {
-  DiskRow,
-  MetricTile,
-  NicRow,
-  SectionTitle,
-} from "../Machines/MachineDetail/components/ServerHealthCard";
 import { Span, SPANS } from "./layout";
+import RingGauge from "./RingGauge";
 
 interface Props {
   machine: Machine;
@@ -38,7 +32,7 @@ interface Props {
   onHide: () => void;
 }
 
-// Card da máquina na Visão Geral com Saúde do Servidor em destaque
+// Card compacto da máquina na Visão Geral com medidores em anel
 export default function MachineHealthCard({
   machine,
   nowMs,
@@ -61,6 +55,7 @@ export default function MachineHealthCard({
         height: "100%",
         display: "flex",
         flexDirection: "column",
+        padding: "12px 14px",
         outline: editing ? "1px dashed var(--border-accent)" : undefined,
         outlineOffset: editing ? 2 : undefined,
       }}
@@ -72,8 +67,8 @@ export default function MachineHealthCard({
             display: "flex",
             alignItems: "center",
             gap: 8,
-            marginBottom: 10,
-            paddingBottom: 8,
+            marginBottom: 8,
+            paddingBottom: 6,
             borderBottom: "1px solid var(--border)",
           }}
         >
@@ -129,26 +124,30 @@ export default function MachineHealthCard({
         </div>
       )}
 
-      <div className="client-card-header" style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-          <div className="client-avatar">
+      {/* Cabeçalho */}
+      <div className="client-card-header" style={{ marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+          <div
+            className="client-avatar"
+            style={{ width: 28, height: 28, fontSize: 12, borderRadius: 8 }}
+          >
             {customerInitial}
           </div>
           <div style={{ minWidth: 0 }}>
             <div
               className="client-name"
-              style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              style={{ fontSize: 13, marginBottom: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
               title={machine.customer_name || "Sem cliente"}
             >
               {machine.customer_name || "Sem cliente"}
             </div>
             <div
               style={{
-                fontSize: 11,
+                fontSize: 10,
                 color: "var(--text-muted)",
                 display: "flex",
                 alignItems: "center",
-                gap: 4,
+                gap: 3,
                 minWidth: 0,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -156,19 +155,20 @@ export default function MachineHealthCard({
               }}
               title={machine.name}
             >
-              <Server size={11} style={{ flexShrink: 0 }} />
+              <Server size={10} style={{ flexShrink: 0 }} />
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {machine.name}
               </span>
             </div>
           </div>
         </div>
-        <div style={{ flexShrink: 0, marginLeft: 8 }}>
+        <div style={{ transform: "scale(0.9)", transformOrigin: "right center", flexShrink: 0, marginLeft: 6 }}>
           <StatusBadge status={machine.last_backup_status} />
         </div>
       </div>
 
-      <div style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
+      {/* Linha de comunicação */}
+      <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
         {machine.active && machine.is_online ? (
           <>
             <span className="dot ok" />
@@ -193,10 +193,25 @@ export default function MachineHealthCard({
         )}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <SectionTitle icon={<Activity size={11} />}>Saúde do Servidor</SectionTitle>
+      {/* Saúde do Servidor */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: "0.5px",
+            color: "var(--text-muted)",
+          }}
+        >
+          <Activity size={11} />
+          <span>Saúde do Servidor</span>
+        </div>
         {level && (
-          <span className={"badge " + level} style={{ marginBottom: 8, padding: "2px 8px", fontSize: 10 }}>
+          <span className={"badge " + level} style={{ padding: "1px 7px", fontSize: 9 }}>
             <span className={"dot " + level} />
             {LEVEL_LABEL[level]}
           </span>
@@ -204,81 +219,127 @@ export default function MachineHealthCard({
       </div>
 
       {!t ? (
-        <div style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic", marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic", marginBottom: 8 }}>
           Sem dados de telemetria
         </div>
       ) : (
-        <div
-          style={{
-            opacity: isOnline ? 1 : 0.6,
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
+        <div style={{ opacity: isOnline ? 1 : 0.6 }}>
+          {/* Anéis de métricas */}
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(84px, 1fr))",
-              gap: 8,
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "10px 8px",
+              justifyContent: "flex-start",
             }}
           >
-            <MetricTile
-              icon={<Cpu size={11} />}
-              label="CPU"
-              percent={t.cpuPercent}
-              caption="Processador"
-            />
-            <MetricTile
-              icon={<MemoryStick size={11} />}
-              label="RAM"
+            <RingGauge percent={t.cpuPercent} label="CPU" />
+            <RingGauge
               percent={t.ramPercent}
-              caption={`${fmtGb(t.ramUsedGb)} de ${fmtGb(t.ramTotalGb)}`}
+              label="RAM"
+              caption={`${fmtGb(t.ramUsedGb)}/${fmtGb(t.ramTotalGb)}`}
             />
             {t.gpu && (
-              <MetricTile
-                icon={<Gauge size={11} />}
-                label="GPU"
+              <RingGauge
                 percent={t.gpu.percent}
+                label="GPU"
                 caption={t.gpu.name}
               />
             )}
+            {t.disks.map((d, i) => (
+              <RingGauge
+                key={d.device + i}
+                percent={d.percent}
+                label={d.device}
+                caption={`${fmtGb(d.freeGb)} livres`}
+              />
+            ))}
           </div>
 
-          {t.disks.length > 0 && (
-            <div>
-              <SectionTitle icon={<HardDrive size={11} />}>
-                {`Discos (${t.disks.length})`}
-              </SectionTitle>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {t.disks.map((d, i) => (
-                  <DiskRow key={d.device + i} disk={d} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Rede: placas físicas; as virtuais só em contagem */}
+          {/* Rede compacta */}
           {t.networks.length > 0 && (() => {
             const physicalNics = t.networks.filter(n => !n.virtual);
             const virtualNics = t.networks.filter(n => n.virtual);
-            const showPhysical = physicalNics.length > 0;
-            const displayNics = showPhysical ? physicalNics : virtualNics;
-            const title = showPhysical
-              ? `Rede (${physicalNics.length} física${physicalNics.length > 1 ? "s" : ""})`
-              : `Rede (${virtualNics.length} virtual${virtualNics.length > 1 ? "is" : ""})`;
+            const primaryNics = physicalNics.length > 0 ? physicalNics : virtualNics;
+            const shownNics = primaryNics.slice(0, 2);
+            const hiddenCount = t.networks.length - shownNics.length;
 
             return (
-              <div>
-                <SectionTitle icon={<Network size={11} />}>{title}</SectionTitle>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {displayNics.map((net, i) => (
-                    <NicRow key={net.name + i} net={net} />
+              <div style={{ marginTop: 10 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                    color: "var(--text-muted)",
+                    marginBottom: 6,
+                  }}
+                >
+                  <Network size={11} />
+                  <span>Rede</span>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {shownNics.map((net, i) => (
+                    <div
+                      key={net.name + i}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 11,
+                        minWidth: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          color: "var(--text-primary)",
+                          fontWeight: 600,
+                          flex: 1,
+                        }}
+                        title={net.name}
+                      >
+                        {net.name}
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 2,
+                          fontWeight: 700,
+                          whiteSpace: "nowrap",
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        <ArrowUp size={11} color="var(--cyan)" style={{ flexShrink: 0 }} />
+                        {fmtMbps(net.sentMbps)}
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 2,
+                          fontWeight: 700,
+                          whiteSpace: "nowrap",
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        <ArrowDown size={11} color="var(--ok)" style={{ flexShrink: 0 }} />
+                        {fmtMbps(net.recvMbps)}
+                      </span>
+                    </div>
                   ))}
-                  {showPhysical && virtualNics.length > 0 && (
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                      {`+${virtualNics.length} placa${virtualNics.length > 1 ? "s" : ""} virtual${virtualNics.length > 1 ? "is" : ""}`}
+
+                  {hiddenCount > 0 && (
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                      {hiddenCount === 1 ? "+1 placa" : `+${hiddenCount} placas`}
                     </div>
                   )}
                 </div>
@@ -288,16 +349,21 @@ export default function MachineHealthCard({
         </div>
       )}
 
+      {/* Rodapé */}
       <div
         style={{
           marginTop: "auto",
-          paddingTop: 12,
+          paddingTop: 8,
           borderTop: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: 10,
           color: "var(--text-muted)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         }}
+        title={`${machine.nvr_count} equip. · backup ${fmtSchedule(machine.backup_hour, machine.backup_minute)} · último ${fmtDate(machine.last_backup_at, { short: true, empty: "nunca" })}`}
       >
-        {`${machine.nvr_count} equipamento${machine.nvr_count === 1 ? "" : "s"} · backup às ${fmtSchedule(machine.backup_hour, machine.backup_minute)} · último ${fmtDate(machine.last_backup_at, { short: true, empty: "nunca" })}`}
+        {`${machine.nvr_count} equip. · backup ${fmtSchedule(machine.backup_hour, machine.backup_minute)} · último ${fmtDate(machine.last_backup_at, { short: true, empty: "nunca" })}`}
       </div>
     </div>
   );
