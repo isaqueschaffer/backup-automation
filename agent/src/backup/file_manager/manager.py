@@ -13,7 +13,7 @@ class FileManager:
     def __init__(self, check_hash: bool = True):
         self.copier = SafeCopier(check_hash=check_hash)
 
-    def process_equipment(self, equipamento: dict, pasta_destino: Path, tipo_parser: str) -> Dict[str, Any]:
+    def process_equipment(self, equipamento: dict, pasta_destino: Path, tipo_parser: str, conf: dict = None) -> Dict[str, Any]:
         """
         Orquestra o backup de um equipamento lendo da pasta de origem.
         """
@@ -107,28 +107,64 @@ class FileManager:
         if equipamento.get("tipo", "").upper() == "DIGIFORT":
             logging.info("  [DIGIFORT] Buscando status de gravacoes e CSV localmente...")
             try:
-                from src.application.webhook_digifort import get_status_cameras, get_caminho_csv
-                
+                from src.application.webhook_digifort import get_detalhes_cameras, get_caminho_csv
+
                 cfg_ext = equipamento.get("config_extra", {})
                 caminho_export = cfg_ext.get("caminho_csv", "")
                 caminho_log = cfg_ext.get("caminho_log_csv", "")
-                
-                status_dict = get_status_cameras(caminho_export, caminho_log)
+
+                # Câmeras detectadas localmente (export_cameras.csv): canal 1..N, nome, ip, status.
+                # Câmeras configuradas na Galeria do servidor: ip/usuário/senha/modelo por nome.
+                detalhes_locais = get_detalhes_cameras(caminho_export, caminho_log)
+                cameras_servidor = equipamento.get("cameras_config") or []
+                por_nome_servidor = {(c.get("nome") or "").strip().lower(): c for c in cameras_servidor}
+
                 status_cameras = []
-                for nome_cam, st in status_dict.items():
-                    is_ok = (st == "OK")
+                cameras_para_captura = []
+                for det in detalhes_locais:
+                    canal = det["canal"]
+                    nome_cam = det["nome"]
+                    cam_srv = por_nome_servidor.get((nome_cam or "").strip().lower())
+                    ip_cam = det.get("ip") or (cam_srv.get("ip") if cam_srv else "") or "N/A"
+                    is_ok = det["status"] == "OK"
                     status_cameras.append({
-                        "canal": "N/A",
+                        "canal": canal,
                         "nome": nome_cam,
-                        "ip": "N/A",
+                        "ip": ip_cam,
                         "online": is_ok,
                         "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
                         "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
                         "total_dias": 1,
                         "mapa": "OK" if is_ok else "FALHA"
                     })
+                    if ip_cam and ip_cam != "N/A":
+                        cameras_para_captura.append({
+                            "canal": canal,
+                            "nome": nome_cam,
+                            "ip": ip_cam,
+                            "username": (cam_srv or {}).get("username") or "admin",
+                            "password": (cam_srv or {}).get("password") or "navarro@123",
+                            "modelo": (cam_srv or {}).get("modelo") or "Hikvision",
+                        })
+
+                # Câmeras só configuradas no servidor (não detectadas no export local) também entram na captura
+                canais_vistos = {c["canal"] for c in cameras_para_captura}
+                for cam_srv in cameras_servidor:
+                    if cam_srv.get("ip") and cam_srv.get("canal") not in canais_vistos:
+                        cameras_para_captura.append(cam_srv)
+
                 logging.info("  [DIGIFORT] Status das cameras obtido com sucesso.")
-                
+
+                if cameras_para_captura and conf is not None:
+                    from src.camera.rtsp_client import capturar_imagens_noite_vms
+                    logging.info(f"  [DIGIFORT] Capturando imagem da noite de {len(cameras_para_captura)} camera(s) via RTSP...")
+                    capturar_imagens_noite_vms(nome_original, cameras_para_captura, conf)
+                    por_canal_captura = {c["canal"]: c for c in cameras_para_captura}
+                    for st in status_cameras:
+                        cap = por_canal_captura.get(st["canal"])
+                        if cap and "imagem_noite" in cap:
+                            st["imagem_noite"] = cap["imagem_noite"]
+
                 arquivo_log = get_caminho_csv(caminho_log)
                 import os, shutil
                 if os.path.isfile(arquivo_log):

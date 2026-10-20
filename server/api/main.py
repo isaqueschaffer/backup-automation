@@ -119,6 +119,11 @@ _MIGRACOES_COLUNAS = [
     ("client_groups", "email_to", "ALTER TABLE client_groups ADD COLUMN email_to TEXT[] NOT NULL DEFAULT '{}';"),
     # Senha do ZIP do cliente (Fernet-encrypted) — prioridade de download por cliente
     ("client_groups", "zip_password", "ALTER TABLE client_groups ADD COLUMN zip_password TEXT;"),
+    # Campos RTSP por câmera na galeria (usados por DIGIFORT e DEFENSE)
+    ("nvr_cameras", "ip", "ALTER TABLE nvr_cameras ADD COLUMN ip VARCHAR(50);"),
+    ("nvr_cameras", "username", "ALTER TABLE nvr_cameras ADD COLUMN username VARCHAR(100);"),
+    ("nvr_cameras", "password", "ALTER TABLE nvr_cameras ADD COLUMN password TEXT;"),
+    ("nvr_cameras", "modelo", "ALTER TABLE nvr_cameras ADD COLUMN modelo VARCHAR(50);"),
 ]
 
 _colunas_cache: dict = {}

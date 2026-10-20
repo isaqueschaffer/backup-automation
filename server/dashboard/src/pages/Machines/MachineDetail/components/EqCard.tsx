@@ -11,13 +11,13 @@ export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, o
 }) {
   const getEqIcon = (tipo: string) => {
     const m: Record<string, React.ReactNode> = {
-      NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />, MIKROTIK: <Network size={18} />, DIGIFORT: <Video size={18} />
+      NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />, MIKROTIK: <Network size={18} />, DIGIFORT: <Video size={18} />, DEFENSE: <Video size={18} />
     };
     return m[tipo] || <Video size={18} />;
   };
   const getEqColor = (tipo: string) => {
     const m: Record<string, string> = {
-      NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6", MIKROTIK: "#3b82f6", DIGIFORT: "#f43f5e"
+      NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6", MIKROTIK: "#3b82f6", DIGIFORT: "#f43f5e", DEFENSE: "#ec4899"
     };
     return m[tipo] || "var(--text-muted)";
   };
@@ -71,13 +71,13 @@ export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, o
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        {eq.tipo === "NVR" && onViewCameras && (
+        {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT" || eq.tipo === "DEFENSE") && onViewCameras && (
           <button className="btn btn-secondary btn-sm" onClick={onViewCameras}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Image size={13} /> Galeria
           </button>
         )}
-        {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT") && (
+        {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT" || eq.tipo === "DEFENSE") && (
           <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Video size={13} /> Gravações

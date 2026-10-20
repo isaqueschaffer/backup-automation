@@ -4,7 +4,7 @@ import re
 import urllib.parse
 import subprocess
 import time
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
@@ -18,7 +18,8 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
 
     # Com canal (galeria do NVR) a referência precisa ter a mesma origem da imagem da noite (stream principal,
     # {canal}01). O stream secundário ({canal}02 / subtype=1) tem resolução e proporção diferentes.
-    nvr_canal = bool(canal)
+    # Câmera direta da galeria de DIGIFORT/DEFENSE (sem canal de NVR) também pede o stream principal.
+    nvr_canal = bool(canal) or bool(task.get("stream_principal"))
 
     marca = task.get("marca") or ""
 
@@ -33,7 +34,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     elif "ONVIF" in modelo:
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile2"
     else:
-        ch_str = f"{canal}01" if nvr_canal else "102"
+        ch_str = f"{canal or 1}01" if nvr_canal else "102"
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}"
     
     import imageio_ffmpeg
@@ -498,6 +499,14 @@ def executar_tarefa_rtsp(task: Dict[str, Any]) -> Dict[str, Any]:
     modo "ao_vivo" (padrão): frame ao vivo. "referencia": ao vivo e, se falhar (câmera offline),
     o frame mais recente da gravação. "noite": madrugada mais recente com gravação."""
     modo = task.get("modo") or "ao_vivo"
+
+    if task.get("direct_camera"):
+        # Câmera direta da galeria de DIGIFORT/DEFENSE: sem playback de NVR, captura sempre ao vivo
+        vivo = test_rtsp_camera(task)
+        if vivo.get("success"):
+            return {**vivo, "origem": "ao_vivo", "horario": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}
+        return vivo
+
     if modo == "ao_vivo":
         return test_rtsp_camera(task)
     if not task.get("canal"):
@@ -532,3 +541,53 @@ def executar_tarefa_rtsp(task: Dict[str, Any]) -> Dict[str, Any]:
     if not res["success"]:
         res["error_message"] = f"Ao vivo: câmera sem vídeo. Gravação: {ret.get('motivo') or 'falhou'}"
     return res
+
+
+# ─── Imagem da noite de equipamentos VMS (DIGIFORT/DEFENSE) no backup da madrugada ─────────
+# Câmeras diretas (IP próprio) não têm playback de NVR: a "imagem da noite" é capturada ao vivo,
+# no stream principal, durante o próprio backup — por isso tem um orçamento de tempo total.
+LIMITE_IMAGENS_NVR_S = 20 * 60
+
+
+def capturar_imagens_noite_vms(equipamento_nome: str, cameras_lista: list, conf: dict, prazo=None) -> None:
+    """Captura (ao vivo, stream principal) e envia a imagem da noite de cada câmera com IP de um
+    equipamento DIGIFORT/DEFENSE. Mutila cada item de `cameras_lista` com `imagem_noite` (status/motivo/horario),
+    do mesmo jeito que o relatório de NVR comum."""
+    from src.application.api_client import upload_night_image
+
+    if prazo is None:
+        prazo = time.monotonic() + LIMITE_IMAGENS_NVR_S
+
+    for cam in cameras_lista:
+        ip = (cam.get("ip") or "").strip()
+        if "." not in ip:
+            continue
+        if time.monotonic() > prazo:
+            cam["imagem_noite"] = {"status": "FALHA", "motivo": "Tempo limite da captura esgotado", "horario": None}
+            continue
+
+        res = test_rtsp_camera({
+            "ip": ip,
+            "username": cam.get("username") or "admin",
+            "password": cam.get("password") or "navarro@123",
+            "modelo": cam.get("modelo") or "Hikvision",
+            "stream_principal": True,
+        })
+
+        if res.get("success") and res.get("image_base64"):
+            horario_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            enviado = upload_night_image(conf, {
+                "nvr_name": equipamento_nome,
+                "canal": cam.get("canal"),
+                "nome": cam.get("nome") or f"Canal {cam.get('canal')}",
+                "image_base64": res["image_base64"],
+                "night_image_date": horario_iso,
+                "ip": ip,
+                "modelo": cam.get("modelo") or "Hikvision",
+            })
+            cam["imagem_noite"] = (
+                {"status": "OK", "motivo": None, "horario": horario_iso} if enviado
+                else {"status": "FALHA", "motivo": "Falha ao enviar a imagem para o servidor", "horario": None}
+            )
+        else:
+            cam["imagem_noite"] = {"status": "FALHA", "motivo": res.get("error_message") or "Falha ao capturar a imagem.", "horario": None}

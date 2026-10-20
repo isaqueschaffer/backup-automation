@@ -11,7 +11,7 @@ from src.backup.file_manager.manager import FileManager
 # FUNÇÃO PRINCIPAL — chamada pelo backup_job.py
 # ============================================================
 
-def realizar_backup_olt(equipamento: dict, pasta_destino: Path) -> dict:
+def realizar_backup_olt(equipamento: dict, pasta_destino: Path, conf: dict = None) -> dict:
     """
     Realiza o backup de uma OLT baseada em arquivos locais (UNM2000 ou Huawei).
     O equipamento deve ter em config_extra:
@@ -45,4 +45,4 @@ def realizar_backup_olt(equipamento: dict, pasta_destino: Path) -> dict:
         check_hash = check_hash.lower() == "true"
         
     fm = FileManager(check_hash=check_hash)
-    return fm.process_equipment(equipamento, pasta_destino, tipo_parser)
+    return fm.process_equipment(equipamento, pasta_destino, tipo_parser, conf)

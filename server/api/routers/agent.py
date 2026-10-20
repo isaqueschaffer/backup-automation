@@ -38,6 +38,48 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 
 
+def _build_cameras_config(machine: Machine, nvr: NVR):
+    """Monta a lista de câmeras RTSP (ip/usuário/senha decriptada/modelo) de um equipamento
+    DIGIFORT/DEFENSE para o agente capturar a imagem da noite no backup. None para outros tipos."""
+    if (nvr.tipo or "NVR").upper() not in ("DIGIFORT", "DEFENSE"):
+        return None
+    cams_db = sorted(nvr.cameras_status or [], key=lambda c: c.canal)
+    out = []
+    for c in cams_db:
+        if not c.ip:
+            continue
+        try:
+            pwd = decrypt(c.password) if c.password else "navarro@123"
+        except Exception:
+            pwd = c.password or "navarro@123"
+        out.append({
+            "canal": c.canal,
+            "nome": c.nome,
+            "ip": c.ip,
+            "username": c.username or "admin",
+            "password": pwd,
+            "modelo": c.modelo or "Hikvision",
+        })
+    if out:
+        return out
+    # Fallback: usa câmeras avulsas (tipo == "CAMERA") cadastradas na máquina
+    machine_cams = [e for e in machine.equipamentos if (e.tipo or "").upper() == "CAMERA" and e.active and e.ip]
+    for idx, mc in enumerate(machine_cams, start=1):
+        try:
+            pwd = decrypt(mc.password) if mc.password else "navarro@123"
+        except Exception:
+            pwd = mc.password or "navarro@123"
+        out.append({
+            "canal": idx,
+            "nome": mc.name,
+            "ip": mc.ip,
+            "username": mc.username or "admin",
+            "password": pwd,
+            "modelo": (mc.config_extra or {}).get("modelo") or "Hikvision",
+        })
+    return out
+
+
 @router.get("/config", response_model=AgentConfigResponse)
 def get_agent_config(machine: Machine = Depends(get_current_machine), db: Session = Depends(get_db)):
     """Return full config needed by the Windows agent."""
@@ -49,6 +91,7 @@ def get_agent_config(machine: Machine = Depends(get_current_machine), db: Sessio
             username=nvr.username,
             password=decrypt(nvr.password),
             config_extra=nvr.config_extra,
+            cameras_config=_build_cameras_config(machine, nvr),
         )
         for nvr in machine.equipamentos if nvr.active
     ]
@@ -271,6 +314,10 @@ def receive_night_image(
         camera.nome = body.nome
         camera.night_image_base64 = body.image_base64
         camera.night_image_date = body.night_image_date
+
+    if body.ip and not camera.ip:
+        camera.ip = body.ip
+        camera.modelo = body.modelo or camera.modelo or "Hikvision"
 
     db.commit()
     return {"status": "ok"}

@@ -51,6 +51,10 @@ class NVRCameraResponse(BaseModel):
     nvr_id: UUID
     canal: int
     nome: str
+    ip: Optional[str] = None
+    username: Optional[str] = None
+    modelo: Optional[str] = None
+    has_password: bool = False
     perfect_image_base64: Optional[str] = None
     night_image_base64: Optional[str] = None
     night_image_date: Optional[datetime] = None
@@ -62,6 +66,23 @@ class NVRCameraResponse(BaseModel):
     captura_horario: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+# ─── Câmeras RTSP individuais na Galeria (DIGIFORT / DEFENSE) ──────────────
+class NVRCameraConfigItem(BaseModel):
+    canal: Optional[int] = None
+    nome: str
+    ip: str
+    username: str = "admin"
+    password: Optional[str] = None
+    modelo: str = "Hikvision"
+
+
+class NVRCameraBulkImport(BaseModel):
+    cameras: List[NVRCameraConfigItem] = []
+    sync_from_machine: bool = False
+    replace_existing: bool = False
+
 
 class NVRCameraSetPerfect(BaseModel):
     canal: int
@@ -90,6 +111,8 @@ class NVRCameraNightImage(BaseModel):
     nome: str
     image_base64: str
     night_image_date: datetime
+    ip: Optional[str] = None
+    modelo: Optional[str] = None
 
 
 # ─────────────────────────────────────────────
@@ -214,6 +237,8 @@ class AgentEquipamento(BaseModel):
     username: str
     password: str  # decrypted — sent over HTTPS only
     config_extra: Optional[Dict[str, Any]] = None
+    # Câmeras RTSP da Galeria (DIGIFORT/DEFENSE), decriptadas — usadas na captura da imagem da noite
+    cameras_config: Optional[List[Dict[str, Any]]] = None
 
 
 # Mantido para compatibilidade com agentes mais antigos
