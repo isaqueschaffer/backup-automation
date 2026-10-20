@@ -1,23 +1,38 @@
 ---
 name: criar-endpoint-fastapi
-description: Padrão para criação de novos endpoints na API FastAPI do projeto.
+description: Padrão do projeto para criar ou alterar endpoints, campos ou tabelas na API FastAPI (server/api) — schemas, model, migração inline, router, autenticação admin/agente, cliente do dashboard e registro no PROJECT_SPEC. Use sempre que mexer em rotas ou no banco da API.
 ---
 
-# Fluxo para criação de novos Endpoints
+# Endpoints na API (`server/api`)
 
-Quando o usuário pedir para criar uma nova rota/endpoint na API, siga este processo estritamente:
+Stack fixo: FastAPI 0.111, SQLAlchemy 2.0 síncrono, Pydantic 2.7, PostgreSQL 15 e `requests`.
+Não migrar para SQLModel, HTTPX, sessão async nem Alembic. A skill `fastapi` vale só no que existe nessas versões.
 
-1. **Schemas (`server/api/schemas.py`)**: 
-   - Comece sempre criando os modelos do Pydantic para validação de entrada (Request) e saída (Response).
-   - Certifique-se de documentar o schema se houver campos complexos.
+## Nomes no banco
 
-2. **Models/DB (`server/api/models.py`)**:
-   - Caso o endpoint precise de manipulação no banco de dados, certifique-se de que o modelo SQLAlchemy exista ou crie-o.
+| Tabela | Model | Na interface |
+|---|---|---|
+| `clients` | `Machine` | Máquina (computador com o agente) |
+| `client_groups` | `Customer` | Cliente |
+| `nvrs` | `NVR` | Equipamento de qualquer tipo (REGRA-002: nunca renomear) |
 
-3. **Routers (`server/api/routers/<modulo>.py`)**:
-   - Adicione o endpoint no arquivo correspondente à feature.
-   - Utilize as dependências apropriadas (como sessão de banco de dados).
-   - Trate exceções HTTP corretamente.
+## Passo a passo
 
-4. **Main (`server/api/main.py`)**:
-   - Se for um novo arquivo de router, lembre-se de registrá-lo usando `app.include_router()`.
+1. **Schemas** (`schemas.py`): entrada `XCreate` e `XUpdate` (campos `Optional`) e saída `XResponse` com `model_config = {"from_attributes": True}`.
+2. **Model** (`models.py`): datas em `Column(DateTime)` sem `timezone=True`, com `default=datetime.utcnow` (REGRA-001). Valor gravado nunca vem de `datetime.now()` nem de `datetime.now(timezone.utc)`.
+3. **Migração inline** (`main.py`, REGRA-007). O `create_all` só cria tabelas novas; não altera as que já existem.
+   - Coluna nova: tupla em `_MIGRACOES_COLUNAS`, ex.: `("nvrs", "x", "ALTER TABLE nvrs ADD COLUMN x TEXT;")`. Datas como `TIMESTAMP WITHOUT TIME ZONE`.
+   - Tabela nova: bloco `if not _tem_tabela("x"): _run_ddl("CREATE TABLE IF NOT EXISTS x (...)", "criar tabela x")`, antes das colunas que apontam para ela (FK).
+   - Proibido: Alembic, `drop_all`, DDL destrutivo.
+4. **Router** (`routers/<modulo>.py`):
+   - `router = APIRouter(prefix="/api/v1/...", tags=[...])`. Arquivo novo: `app.include_router(...)` no `main.py`.
+   - Handlers `def` síncronos com `db: Session = Depends(get_db)`. `async def` só sem I/O bloqueante (o ping em `routers/agent.py` fecha a sessão antes do long-polling).
+   - Autenticação (REGRA-003, nunca misturar):
+     - dashboard/admin: `dependencies=[Depends(verify_admin_token)]`;
+     - agente: `machine: Machine = Depends(get_current_machine)` (headers `X-Client-ID` + `X-API-Key`).
+   - Erros: `HTTPException(status_code=..., detail="mensagem em português")`.
+   - Senhas de equipamento e de ZIP: `encrypt()`/`decrypt()` de `services/crypto_service.py` (Fernet, REGRA-004). Só o agente recebe a senha aberta (`/agent/config`); respostas do admin nunca trazem senha.
+   - Horários de backup são calculados no servidor, não pelo relógio do agente (REGRA-005).
+5. **Dashboard** (quando a tela usa o endpoint): função em `server/dashboard/src/api/client.ts` (`api.get("/caminho").then(r => r.data)`; a base já inclui `/api/v1`) e tipo em `src/api/types.ts`. As datas chegam naive em UTC: formatar com `fmtDate` (`src/utils/date.ts`).
+6. **Agente** (quando ele consome o endpoint): versões antigas continuam rodando até a OTA chegar. Campo novo deve ser opcional e o servidor deve tolerar a ausência dele.
+7. **PROJECT_SPEC.md**: tabela de endpoints (seção 8, "Contratos de API") e changelog (seção 16: data, alteração, arquivos, breaking change, branch).

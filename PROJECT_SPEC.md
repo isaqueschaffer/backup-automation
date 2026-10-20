@@ -799,6 +799,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-20] — Skills: três externas instaladas e as do projeto atualizadas
+
+**Alteração:** (1) Instaladas em `.claude/skills/`, baixadas direto do GitHub e revisadas antes: `fastapi` (fastapi/fastapi@6f28852), `vercel-react-best-practices` (vercel-labs/agent-skills@063bee9) e `docker-compose-patterns` (docker/skills@38df58b). (2) Reescritas com a estrutura atual: `criar-novo-agente` (apontava para `agente_unm.py`, que não existe mais), `criar-endpoint-fastapi` (agora com REGRA-001/002/003/004/005/007 e o fluxo dashboard/PROJECT_SPEC) e `gerenciar-containers` (usa o `docker-compose.local.yml`; o de produção é só do Dokploy; testes em container). (3) `CLAUDE.md` registra como aplicar as externas neste projeto e como instalar novas sem `npx skills`.
+**Arquivos:** .claude/skills/*, CLAUDE.md, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-20] — Skills só para o Claude Code
 
 **Alteração:** As skills do projeto saem de `.agents/skills/` (lida automaticamente pelo Antigravity/agy, usado como executor) e passam para `.claude/skills/`, que só o Claude Code lê: `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers` e `find-skills`. O `professional-frontend` foi removido. O `.gitignore` versiona só `.claude/skills/`; o resto de `.claude/` (permissões locais) continua fora do git. `.agents/` fica só com `rules/git-deploy.md`.
