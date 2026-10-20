@@ -1,5 +1,12 @@
 # Instruções do projeto
 
+## Skills (só o Claude)
+
+As skills do projeto ficam em `.claude/skills/<nome>/SKILL.md` e são de uso exclusivo do Claude Code.
+Não criar nem mover skills para `.agents/skills/`: essa pasta é lida automaticamente pelo Antigravity (`agy`),
+que só executa os planos e não deve ter acesso a skills. Quando uma skill for útil para uma tarefa do executor,
+o Claude aplica o conteúdo dela no próprio plano.
+
 ## Publicação de versões do agente (regra fixa)
 
 Sempre que gerar os executáveis do agente (`agent/build.ps1` + Inno Setup), publicar também uma release no

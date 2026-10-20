@@ -162,7 +162,8 @@ trilan-nvr-backup-automation/
 │               └── Backups.tsx / Overview.tsx / Settings.tsx
 ├── tools/                       <- Utilitários avulsos (não entram em build nem deploy)
 ├── archive/legacy_scripts/      <- Código legado, só consulta
-└── .agents/                     <- Skills do Antigravity IDE
+├── .agents/rules/               <- Regras lidas pelo Antigravity (agy)
+└── .claude/skills/              <- Skills do projeto, só para o Claude Code (o agy não lê esta pasta)
 ```
 
 ---
@@ -797,6 +798,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-20] — Skills só para o Claude Code
+
+**Alteração:** As skills do projeto saem de `.agents/skills/` (lida automaticamente pelo Antigravity/agy, usado como executor) e passam para `.claude/skills/`, que só o Claude Code lê: `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers` e `find-skills`. O `professional-frontend` foi removido. O `.gitignore` versiona só `.claude/skills/`; o resto de `.claude/` (permissões locais) continua fora do git. `.agents/` fica só com `rules/git-deploy.md`.
+**Arquivos:** .gitignore, .claude/skills/*, .agents/skills/* (removidos), CLAUDE.md, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-20] — Painel: Saúde do Servidor com resumo e detalhes
 
