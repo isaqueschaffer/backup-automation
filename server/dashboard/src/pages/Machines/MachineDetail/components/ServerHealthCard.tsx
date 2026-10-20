@@ -22,7 +22,8 @@ import {
   levelOf,
   overallLevel,
   parseTelemetry,
-  worstDisk,
+  TelemetryDisk,
+  TelemetryNet,
 } from "../telemetry";
 import { PctBar } from "./TelemetryBar";
 import ServerHealthModal from "./ServerHealthModal";
@@ -94,6 +95,169 @@ function MetricTile({ icon, label, percent, caption }: MetricTileProps) {
   );
 }
 
+function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.5px",
+        textTransform: "uppercase",
+        color: "var(--text-muted)",
+        marginBottom: 8,
+      }}
+    >
+      {icon}
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function DiskRow({ disk }: { disk: TelemetryDisk }) {
+  const level = levelOf(disk.percent);
+  const color = level ? LEVEL_COLOR[level] : "var(--text-primary)";
+
+  return (
+    <div
+      style={{
+        background: "var(--surface-2)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-sm)",
+        padding: "10px 12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div>
+          <span style={{ fontWeight: 700, fontSize: 13, color: "var(--text-primary)" }}>
+            {disk.device}
+          </span>
+          {disk.fstype && (
+            <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 6 }}>
+              {disk.fstype}
+            </span>
+          )}
+        </div>
+        <span style={{ fontWeight: 700, fontSize: 13, color }}>
+          {fmtPct(disk.percent)}
+        </span>
+      </div>
+      <PctBar percent={disk.percent} height={6} />
+      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+        {`${fmtGb(disk.usedGb)} usados de ${fmtGb(disk.totalGb)} · ${fmtGb(disk.freeGb)} livres`}
+      </div>
+    </div>
+  );
+}
+
+function NicRow({ net }: { net: TelemetryNet }) {
+  const isPhysical = !net.virtual;
+
+  return (
+    <div
+      style={{
+        background: "var(--surface-2)",
+        border: "1px solid var(--border)",
+        borderLeft: isPhysical ? "3px solid var(--cyan)" : "1px solid var(--border)",
+        borderRadius: "var(--radius-sm)",
+        padding: isPhysical ? "12px 14px" : "8px 12px",
+        opacity: isPhysical ? 1 : 0.65,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: isPhysical ? 13 : 12,
+            color: "var(--text-primary)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+          title={net.name}
+        >
+          {net.name}
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            padding: "2px 6px",
+            borderRadius: 4,
+            flexShrink: 0,
+            background: isPhysical ? "var(--cyan-glow)" : "var(--surface-2)",
+            color: isPhysical ? "var(--cyan)" : "var(--text-muted)",
+          }}
+        >
+          {isPhysical ? "Física" : "Virtual"}
+        </span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <ArrowUp size={isPhysical ? 14 : 11} color="var(--cyan)" style={{ flexShrink: 0 }} />
+            <span
+              style={{
+                fontWeight: 700,
+                fontSize: isPhysical ? 18 : 13,
+                color: "var(--text-primary)",
+                lineHeight: 1.2,
+              }}
+            >
+              {fmtMbps(net.sentMbps)}
+            </span>
+          </div>
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              marginTop: 2,
+            }}
+          >
+            Envio
+          </div>
+        </div>
+
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <ArrowDown size={isPhysical ? 14 : 11} color="var(--ok)" style={{ flexShrink: 0 }} />
+            <span
+              style={{
+                fontWeight: 700,
+                fontSize: isPhysical ? 18 : 13,
+                color: "var(--text-primary)",
+                lineHeight: 1.2,
+              }}
+            >
+              {fmtMbps(net.recvMbps)}
+            </span>
+          </div>
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              marginTop: 2,
+            }}
+          >
+            Recebimento
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Card "Saúde do Servidor": resumo da telemetria do último ping; os detalhes ficam no modal
 export default function ServerHealthCard({
   telemetry,
@@ -158,7 +322,7 @@ export default function ServerHealthCard({
               gap: 12,
             }}
           >
-            {/* CPU, RAM, disco mais cheio e GPU */}
+            {/* CPU, RAM e GPU */}
             <div
               style={{
                 display: "grid",
@@ -180,19 +344,6 @@ export default function ServerHealthCard({
                 caption={`${fmtGb(t.ramUsedGb)} de ${fmtGb(t.ramTotalGb)}`}
               />
 
-              {t.disks.length > 0 && (() => {
-                const d = worstDisk(t.disks)!;
-                const label = t.disks.length === 1 ? "Disco" : `Discos (${t.disks.length})`;
-                return (
-                  <MetricTile
-                    icon={<HardDrive size={11} />}
-                    label={label}
-                    percent={d.percent}
-                    caption={`${d.device} · ${fmtGb(d.freeGb)} livres`}
-                  />
-                );
-              })()}
-
               {t.gpu && (
                 <MetricTile
                   icon={<Gauge size={11} />}
@@ -203,40 +354,33 @@ export default function ServerHealthCard({
               )}
             </div>
 
-            {/* Placa de rede principal: física com mais tráfego */}
-            {t.networks.length > 0 && (() => {
-              const main = t.networks[0];
-              return (
-                <div style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <Network size={12} style={{ flexShrink: 0 }} />
-                  <span
-                    style={{
-                      color: "var(--text-primary)",
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                    title={main.name}
-                  >
-                    {main.name}
-                  </span>
-                  <span style={{ color: "var(--text-secondary)", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                    <ArrowUp size={11} />
-                    {fmtMbps(main.sentMbps)}
-                  </span>
-                  <span style={{ color: "var(--text-secondary)", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                    <ArrowDown size={11} />
-                    {fmtMbps(main.recvMbps)}
-                  </span>
-                  {t.networks.length > 1 && (
-                    <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-                      +{t.networks.length - 1}
-                    </span>
-                  )}
+            {/* Discos */}
+            {t.disks.length > 0 && (
+              <div>
+                <SectionTitle icon={<HardDrive size={11} />}>
+                  {`Discos (${t.disks.length})`}
+                </SectionTitle>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {t.disks.map((d, i) => (
+                    <DiskRow key={d.device + i} disk={d} />
+                  ))}
                 </div>
-              );
-            })()}
+              </div>
+            )}
+
+            {/* Rede */}
+            {t.networks.length > 0 && (
+              <div>
+                <SectionTitle icon={<Network size={11} />}>
+                  {`Rede (${t.networks.length})`}
+                </SectionTitle>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {t.networks.map((net, i) => (
+                    <NicRow key={net.name + i} net={net} />
+                  ))}
+                </div>
+              </div>
+            )}
 
             <button
               className="btn btn-secondary"

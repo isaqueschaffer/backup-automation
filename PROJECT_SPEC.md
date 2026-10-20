@@ -815,7 +815,7 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ### [2026-10-20] — Painel: Saúde do Servidor com resumo e detalhes
 
-**Alteração:** O card "Saúde do Servidor" da página da máquina mostra um status geral (Saudável/Atenção/Crítico, ou Offline), quando os dados foram atualizados, blocos de CPU, RAM, disco mais cheio e GPU, e a placa de rede principal. O botão "Ver detalhes" abre um modal com cada disco (sistema, usado, livre, total), memória usada/livre, cada placa de rede (física ou virtual) e a GPU com memória. A barra de rede comparada a 1 Gbps fixo saiu. Limites únicos em `telemetry.ts`: atenção acima de 75%, crítico acima de 90%. Sem mudança no agente nem na API: usa a telemetria que já chega no ping.
+**Alteração:** O card "Saúde do Servidor" da página da máquina mostra um status geral (Saudável/Atenção/Crítico, ou Offline), quando os dados foram atualizados, blocos de CPU, RAM e GPU, a lista de todos os discos (usado, livre, total e barra) e todas as placas de rede (físicas em destaque, virtuais atenuadas, com envio e recebimento). O botão "Ver detalhes" abre um modal com cada disco (sistema, usado, livre, total), memória usada/livre, cada placa de rede (física ou virtual) e a GPU com memória. A barra de rede comparada a 1 Gbps fixo saiu. Limites únicos em `telemetry.ts`: atenção acima de 75%, crítico acima de 90%. Sem mudança no agente nem na API: usa a telemetria que já chega no ping.
 **Arquivos:** server/dashboard/src/pages/Machines/MachineDetail/telemetry.ts, components/ServerHealthCard.tsx, components/ServerHealthModal.tsx, components/TelemetryBar.tsx, components/MachineInfoCards.tsx, utils.ts, index.tsx
 **Breaking Change:** Não.
 **Branch:** isaque
