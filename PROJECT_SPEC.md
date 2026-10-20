@@ -159,7 +159,7 @@ trilan-nvr-backup-automation/
 │           └── pages/
 │               ├── Customers/       <- CustomersPage (/clientes), CustomerDetail/ (/clientes/:id, fila arrastar-e-soltar)
 │               ├── Machines/        <- MachinesPage (/maquinas), MachineDetail/ (/maquinas/:id)
-│               └── Backups.tsx / Overview.tsx / Settings.tsx
+│               └── Backups.tsx / Overview/ (Visão Geral personalizável) / Settings.tsx
 ├── tools/                       <- Utilitários avulsos (não entram em build nem deploy)
 ├── archive/legacy_scripts/      <- Código legado, só consulta
 ├── .agents/rules/               <- Regras lidas pelo Antigravity (agy)
@@ -798,6 +798,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-20] — Visão Geral: Saúde do Servidor em destaque e layout personalizável
+
+**Alteração:** Cada máquina da Visão Geral é um card com o nome do **cliente** como título e o nome da máquina pequeno, status do último backup, comunicação ("Atualizado agora/há N s", ou última comunicação quando offline) e a Saúde do Servidor como conteúdo principal (CPU, RAM, GPU, todos os discos e as placas de rede físicas). A página atualiza a cada 10 s. O botão "Personalizar" liga o modo de edição: arrastar e soltar para reordenar, largura por card (¼, ⅓, ½, ⅔, total, grade de 12 colunas) e escolha de quais máquinas aparecem. A escolha fica no `localStorage` do navegador (chave `trilan.overview.layout.v1`), sem mudança no servidor; máquinas novas aparecem sozinhas no fim.
+**Arquivos:** server/dashboard/src/pages/Overview/ (index.tsx, layout.ts, MachineHealthCard.tsx), pages/Machines/MachineDetail/components/ServerHealthCard.tsx (exports), src/index.css
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-20] — Skills: três externas instaladas e as do projeto atualizadas
 

@@ -43,7 +43,7 @@ interface MetricTileProps {
   caption: string;
 }
 
-function MetricTile({ icon, label, percent, caption }: MetricTileProps) {
+export function MetricTile({ icon, label, percent, caption }: MetricTileProps) {
   const level = levelOf(percent);
   const color = level ? LEVEL_COLOR[level] : "var(--text-primary)";
 
@@ -95,7 +95,7 @@ function MetricTile({ icon, label, percent, caption }: MetricTileProps) {
   );
 }
 
-function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+export function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div
       style={{
@@ -116,7 +116,7 @@ function SectionTitle({ icon, children }: { icon: React.ReactNode; children: Rea
   );
 }
 
-function DiskRow({ disk }: { disk: TelemetryDisk }) {
+export function DiskRow({ disk }: { disk: TelemetryDisk }) {
   const level = levelOf(disk.percent);
   const color = level ? LEVEL_COLOR[level] : "var(--text-primary)";
 
@@ -155,7 +155,7 @@ function DiskRow({ disk }: { disk: TelemetryDisk }) {
   );
 }
 
-function NicRow({ net }: { net: TelemetryNet }) {
+export function NicRow({ net }: { net: TelemetryNet }) {
   const isPhysical = !net.virtual;
 
   return (
