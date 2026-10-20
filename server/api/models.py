@@ -110,13 +110,18 @@ class NVR(Base):
 
 
 class NVRCamera(Base):
-    """Tabela de Câmeras atreladas a um NVR. Armazena imagens Base64."""
+    """Tabela de Câmeras atreladas a um equipamento (NVR, DIGIFORT, DEFENSE). Armazena imagens Base64."""
     __tablename__ = "nvr_cameras"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     nvr_id = Column(UUID(as_uuid=True), ForeignKey("nvrs.id", ondelete="CASCADE"), nullable=False)
     canal = Column(Integer, nullable=False)
     nome = Column(String(255), nullable=False)
+    # Conexão RTSP individual da câmera — usada por DIGIFORT e DEFENSE (NULL em NVR comum)
+    ip = Column(String(50), nullable=True)
+    username = Column(String(100), nullable=True)
+    password = Column(Text, nullable=True)  # Fernet-encrypted quando preenchido
+    modelo = Column(String(50), nullable=True)  # Hikvision, Intelbras, Grandstream, ONVIF
     perfect_image_base64 = Column(Text, nullable=True)
     night_image_base64 = Column(Text, nullable=True)
     night_image_date = Column(DateTime, nullable=True)

@@ -5,7 +5,7 @@ import { NVR } from "../../../../api/types";
 import { ToastFn } from "../utils";
 
 // Parser robusto de CSV (suporta aspas e delimitadores no meio do texto)
-function parseCsv(text: string): string[][] {
+export function parseCsv(text: string): string[][] {
   text = text.replace(/^\uFEFF/, "").replace(/^ï»¿/, "");
   const rows: string[][] = [];
   const delimiter = (text.indexOf(";") !== -1 && text.indexOf(";") < (text.indexOf("\n") === -1 ? 9999 : text.indexOf("\n"))) ? ";" : ",";
@@ -39,7 +39,7 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-interface CameraRow { name: string; ip: string; password: string; modelo: string }
+export interface CameraRow { name: string; ip: string; password: string; modelo: string }
 
 function cleanCell(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -47,7 +47,7 @@ function cleanCell(val: unknown): string {
 }
 
 // Converte linhas (CSV/XLSX) em câmeras a importar
-function rowsToCameras(rows: unknown[][]): CameraRow[] {
+export function rowsToCameras(rows: unknown[][]): CameraRow[] {
   if (!rows || rows.length === 0) return [];
 
   // 1. Localiza a linha do cabeçalho real (linha 0 ou linhas subsequentes se houver metadados do NVR no topo)
@@ -122,6 +122,9 @@ function rowsToCameras(rows: unknown[][]): CameraRow[] {
 
   const idxIp = headers.findIndex(h => h.includes("ip") || h.includes("endere"));
   const idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
+  const idxModelo = headers.findIndex(h =>
+    h.includes("modelo") || h.includes("protocolo") || h.includes("protocol") || h.includes("marca") || h.includes("fabricante")
+  );
 
   for (let i = headerRowIdx + 1; i < rows.length; i++) {
     const cols = rows[i];
@@ -143,12 +146,26 @@ function rowsToCameras(rows: unknown[][]): CameraRow[] {
 
     if (!ender || !ender.includes(".")) continue;
 
-    const rowStr = cols.join(" ").toUpperCase();
-    let modelo = "Hikvision";
-    if (rowStr.includes("INTELBRAS") || rowStr.includes("CÂMERA IP") || rowStr.includes("CAMERA IP")) modelo = "Intelbras";
-    else if (rowStr.includes("HIKVISION")) modelo = "Hikvision";
-    else if (rowStr.includes("GRANDSTREAM")) modelo = "Grandstream";
-    else if (rowStr.includes("ONVIF")) modelo = "ONVIF";
+    // 1) Tenta usar a coluna modelo/protocolo/marca explícita do cabeçalho
+    let modelo = "";
+    if (idxModelo >= 0) {
+      const cellModelo = cleanCell(cols[idxModelo]).toUpperCase();
+      if (cellModelo.includes("INTELBRAS")) modelo = "Intelbras";
+      else if (cellModelo.includes("HIKVISION") || cellModelo.includes("HIKV")) modelo = "Hikvision";
+      else if (cellModelo.includes("GRANDSTREAM")) modelo = "Grandstream";
+      else if (cellModelo.includes("ONVIF")) modelo = "ONVIF";
+      else if (cellModelo) modelo = cleanCell(cols[idxModelo]); // valor literal (ex: "Dahua")
+    }
+    // 2) Fallback: heurística pela linha inteira (quando não há coluna dedicada ou célula vazia)
+    if (!modelo) {
+      const rowStr = cols.join(" ").toUpperCase();
+      if (rowStr.includes("HIKVISION") || rowStr.includes("HIKV")) modelo = "Hikvision";
+      else if (rowStr.includes("INTELBRAS")) modelo = "Intelbras";
+      else if (rowStr.includes("GRANDSTREAM")) modelo = "Grandstream";
+      else if (rowStr.includes("ONVIF")) modelo = "ONVIF";
+      else if (rowStr.includes("CÂMERA IP") || rowStr.includes("CAMERA IP")) modelo = "Intelbras";
+      else modelo = "Hikvision";
+    }
 
     if (desc && ender) {
       out.push({ name: desc, ip: ender, password: pass || "navarro@123", modelo });
@@ -162,6 +179,38 @@ function summarize(ok: number, fail: number, okMsg: string, toast: ToastFn) {
   else toast(`${ok} ok, ${fail} falharam`, ok > 0 ? "info" : "error");
 }
 
+// Lê um arquivo CSV ou XLSX (planilha exportada do NVR/Digifort/Defense) e devolve as linhas brutas
+export function readRowsFromFile(file: File): Promise<unknown[][]> {
+  return new Promise((resolve, reject) => {
+    const isCsv = file.name.toLowerCase().endsWith(".csv");
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        if (isCsv) {
+          const buf = new Uint8Array(evt.target?.result as ArrayBuffer);
+          let text = "";
+          try {
+            text = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+          } catch {
+            text = new TextDecoder("iso-8859-1").decode(buf);
+          }
+          resolve(parseCsv(text));
+        } else {
+          const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: "array" });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          resolve(XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as unknown[][]);
+        }
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error("Erro ao ler o arquivo."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 // Importação (CSV/XLSX) e exclusão em massa de câmeras, sempre item a item
 export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: {
   machineId: string | undefined;
@@ -172,66 +221,39 @@ export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: 
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const importFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const importFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !machineId) return;
-    const isCsv = file.name.toLowerCase().endsWith(".csv");
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      setBusy(true);
-      try {
-        let rows: unknown[][] = [];
-        if (isCsv) {
-          const buf = new Uint8Array(evt.target?.result as ArrayBuffer);
-          let text = "";
-          try {
-            text = new TextDecoder("utf-8", { fatal: true }).decode(buf);
-          } catch {
-            text = new TextDecoder("iso-8859-1").decode(buf);
-          }
-          rows = parseCsv(text);
-        } else {
-          const data = new Uint8Array(evt.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: "array" });
-          const sheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[sheetName];
-          rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as unknown[][];
+    setBusy(true);
+    try {
+      const rows = await readRowsFromFile(file);
+      let ok = 0;
+      let fail = 0;
+      for (const cam of rowsToCameras(rows)) {
+        try {
+          await createEquipamento(machineId, {
+            tipo: "CAMERA",
+            name: cam.name,
+            ip: cam.ip,
+            username: "admin",
+            password: cam.password || "navarro@123",
+            config_extra: { modelo: cam.modelo },
+          });
+          ok++;
+        } catch (err) {
+          console.error(err);
+          fail++;
         }
-
-        let ok = 0;
-        let fail = 0;
-        for (const cam of rowsToCameras(rows)) {
-          try {
-            await createEquipamento(machineId, {
-              tipo: "CAMERA",
-              name: cam.name,
-              ip: cam.ip,
-              username: "admin",
-              password: cam.password || "navarro@123",
-              config_extra: { modelo: cam.modelo },
-            });
-            ok++;
-          } catch (err) {
-            console.error(err);
-            fail++;
-          }
-        }
-        summarize(ok, fail, `Importadas ${ok} câmeras com sucesso!`, toast);
-        reload();
-      } catch (err) {
-        console.error(err);
-        toast("Erro ao importar câmeras.", "error");
-      } finally {
-        setBusy(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
       }
-    };
-    reader.onerror = () => {
-      toast("Erro ao ler o arquivo.", "error");
+      summarize(ok, fail, `Importadas ${ok} câmeras com sucesso!`, toast);
+      reload();
+    } catch (err) {
+      console.error(err);
+      toast("Erro ao importar câmeras.", "error");
+    } finally {
+      setBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
-    };
-
-    reader.readAsArrayBuffer(file);
+    }
   };
 
   const deleteAll = async () => {

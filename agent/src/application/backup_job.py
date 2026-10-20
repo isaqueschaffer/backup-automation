@@ -118,7 +118,8 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
 
 def processar_olt(
     equipamento: dict,
-    pasta_data: Path
+    pasta_data: Path,
+    conf: dict = None
 ) -> dict:
 
     tipo = (equipamento.get("tipo") or "").lower()
@@ -165,7 +166,8 @@ def processar_olt(
     if fabricante in ("unm", "unm2000"):
         return realizar_backup_olt(
             equipamento,
-            pasta_data
+            pasta_data,
+            conf
         )
 
     logging.error(
@@ -192,9 +194,9 @@ def processar_mikrotik(equipamento: dict, pasta_data: Path) -> dict:
     return realizar_backup_mikrotik(equipamento, pasta_data)
 
 
-def processar_defense(equipamento: dict, pasta_data: Path) -> dict:
+def processar_defense(equipamento: dict, pasta_data: Path, conf: dict = None) -> dict:
     pasta_data.mkdir(parents=True, exist_ok=True)
-    return realizar_backup_defense(equipamento, pasta_data)
+    return realizar_backup_defense(equipamento, pasta_data, conf)
 
 
 def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None) -> dict:
@@ -209,7 +211,7 @@ def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path
         return processar_nvr(equipamento, zip_password, pasta_data, conf)
 
     if tipo == "OLT" or tipo == "DIGIFORT":
-        return processar_olt(equipamento, pasta_data)
+        return processar_olt(equipamento, pasta_data, conf)
 
     if tipo == "PABX":
         return processar_pabx(equipamento, pasta_data)
@@ -218,7 +220,7 @@ def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path
         return processar_mikrotik(equipamento, pasta_data)
 
     if tipo == "DEFENSE":
-        return processar_defense(equipamento, pasta_data)
+        return processar_defense(equipamento, pasta_data, conf)
 
     # Tipos cadastrados mas ainda não implementados
     logging.warning(f"  Tipo '{tipo}' ainda não suportado pelo agente. Equipamento: {equipamento.get('name')}")

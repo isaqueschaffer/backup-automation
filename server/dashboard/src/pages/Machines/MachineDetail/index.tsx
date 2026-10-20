@@ -4,7 +4,7 @@ import {
   fetchCustomer, fetchMachine, fetchMachineLogs, fetchEquipamentos, createEquipamento, updateEquipamento,
   deleteEquipamento, updateMachine, rotateMachineKey, fetchBackups, restartMachineAgent, triggerMachineBackup
 } from "../../../api/client";
-import { AgentLog, Backup, CameraRecStatus, Machine, EqForm, NVR } from "../../../api/types";
+import { AgentLog, Backup, CameraRecStatus, Machine, EqForm, NVR, TipoEquipamento } from "../../../api/types";
 import { useToast } from "../../../components/Toast";
 import { apiErrorMessage } from "../../../utils/errors";
 import { Plus, Server } from "lucide-react";
@@ -40,7 +40,7 @@ export default function MachineDetail() {
   const [showEqModal, setShowEqModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: CameraRecStatus[] }>({ show: false, nvrName: "", cameras: [] });
-  const [showNVRCamerasModal, setShowNVRCamerasModal] = useState<{ show: boolean, nvrId: string, nvrName: string }>({ show: false, nvrId: "", nvrName: "" });
+  const [showNVRCamerasModal, setShowNVRCamerasModal] = useState<{ show: boolean, nvrId: string, nvrName: string, eqTipo: TipoEquipamento }>({ show: false, nvrId: "", nvrName: "", eqTipo: "NVR" });
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState<EqForm>(emptyEqForm());
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
@@ -300,7 +300,7 @@ export default function MachineDetail() {
               <EqCard key={eq.id} eq={eq}
                 onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
                 onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
-                onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name })}
+                onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}
                 onEdit={() => openEqModal(eqToForm(eq), eq.id)}
                 onToggleActive={() => handleToggleEquipamento(eq)}
               />
@@ -375,7 +375,8 @@ export default function MachineDetail() {
           machineId={id!}
           nvrId={showNVRCamerasModal.nvrId}
           nvrName={showNVRCamerasModal.nvrName}
-          onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "" })}
+          eqTipo={showNVRCamerasModal.eqTipo}
+          onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "", eqTipo: "NVR" })}
         />
       )}
     </>

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Moon, Upload, Video } from "lucide-react";
+import { Edit2, Image, Moon, Plus, RefreshCw, Upload, Video } from "lucide-react";
 import api from "../../../../api/client";
-import { NvrCamera } from "../../../../api/types";
+import { NvrCamera, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
 import { fmtDate } from "../../../../utils/date";
+import { readRowsFromFile, rowsToCameras } from "../hooks/useCameraImport";
 import CameraImagePanel from "./CameraImagePanel";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // arquivo original
@@ -55,8 +56,9 @@ function Chip({ ok, label, title }: { ok: boolean; label: string; title: string 
   );
 }
 
-export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onClose }: { machineId: string, nvrId: string, nvrName: string, onClose: () => void }) {
+export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTipo = "NVR", onClose }: { machineId: string, nvrId: string, nvrName: string, eqTipo?: TipoEquipamento, onClose: () => void }) {
   const { toast } = useToast();
+  const isVms = eqTipo === "DIGIFORT" || eqTipo === "DEFENSE";
   const [cameras, setCameras] = useState<NvrCamera[]>([]);
   const [loading, setLoading] = useState(true);
   const [zoomImage, setZoomImage] = useState<{ src: string, title: string } | null>(null);
@@ -69,6 +71,11 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
   // false após desmontar: interrompe o lote e evita setState em componente desmontado
   const aliveRef = useRef(true);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // ── Galeria RTSP (DIGIFORT/DEFENSE): importar CSV/XLSX, sincronizar da máquina, editar conexão ──
+  const vmsFileInput = useRef<HTMLInputElement>(null);
+  const [vmsBusy, setVmsBusy] = useState(false);
+  const [editCam, setEditCam] = useState<{ canal: number; nome: string; ip: string; username: string; password: string; modelo: string } | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -96,6 +103,84 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
 
   const atualizarCam = (canal: number, dados: Partial<NvrCamera>) =>
     setCameras(prev => prev.map(c => c.canal === canal ? { ...c, ...dados } : c));
+
+  const recarregarCameras = async (selecionarCanal?: number) => {
+    try {
+      const res = await api.get(`/machines/${machineId}/equipamentos/${nvrId}/cameras`);
+      if (!aliveRef.current) return;
+      setCameras(res.data);
+      if (selecionarCanal !== undefined) setSelectedCanal(selecionarCanal);
+      else if (res.data?.length && selectedCanal === null) setSelectedCanal(res.data[0].canal);
+    } catch (e) {
+      console.error(e);
+      toast("Erro ao recarregar câmeras.", "error");
+    }
+  };
+
+  // Importa um CSV/XLSX exportado do Digifort/Defense/NVR direto na galeria (ip/usuário/senha/modelo por canal)
+  const importarArquivoVms = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setVmsBusy(true);
+    try {
+      const rows = await readRowsFromFile(file);
+      const cams = rowsToCameras(rows).map(c => ({ nome: c.name, ip: c.ip, username: "admin", password: c.password, modelo: c.modelo }));
+      if (cams.length === 0) { toast("Nenhuma câmera encontrada no arquivo.", "error"); return; }
+      await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/import`, { cameras: cams });
+      toast(`Importadas ${cams.length} câmera(s) com sucesso!`, "success");
+      await recarregarCameras();
+    } catch (err) {
+      toast(erroDaApi(err, "Erro ao importar câmeras."), "error");
+    } finally {
+      setVmsBusy(false);
+    }
+  };
+
+  // Copia as câmeras já importadas em "Câmeras da Máquina" (tipo CAMERA) para a galeria deste equipamento
+  const sincronizarDaMaquina = async () => {
+    setVmsBusy(true);
+    try {
+      const { data } = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/import`, { sync_from_machine: true });
+      toast(`Sincronizadas ${data.length} câmera(s) da máquina.`, "success");
+      await recarregarCameras();
+    } catch (err) {
+      toast(erroDaApi(err, "Erro ao sincronizar câmeras da máquina."), "error");
+    } finally {
+      setVmsBusy(false);
+    }
+  };
+
+  const abrirEdicaoRtsp = (cam?: NvrCamera) => {
+    setEditCam({
+      canal: cam ? cam.canal : (cameras.length ? Math.max(...cameras.map(c => c.canal)) + 1 : 1),
+      nome: cam?.nome || "",
+      ip: cam?.ip || "",
+      username: cam?.username || "admin",
+      password: "",
+      modelo: cam?.modelo || "Hikvision",
+    });
+  };
+
+  const salvarEdicaoRtsp = async () => {
+    if (!editCam) return;
+    if (!editCam.nome.trim() || !editCam.ip.trim()) { toast("Informe nome e IP da câmera.", "error"); return; }
+    setVmsBusy(true);
+    try {
+      await api.put(`/machines/${machineId}/equipamentos/${nvrId}/cameras/${editCam.canal}`, {
+        nome: editCam.nome, ip: editCam.ip, username: editCam.username || "admin",
+        password: editCam.password || undefined, modelo: editCam.modelo,
+      });
+      toast("Câmera salva.", "success");
+      const canalSalvo = editCam.canal;
+      setEditCam(null);
+      await recarregarCameras(canalSalvo);
+    } catch (err) {
+      toast(erroDaApi(err, "Erro ao salvar a câmera."), "error");
+    } finally {
+      setVmsBusy(false);
+    }
+  };
 
   // Referência: ao vivo e, com a câmera offline, o quadro mais recente da gravação (agente >= 1.1.6).
   // Retorna null se deu certo, ou a mensagem de erro.
@@ -262,15 +347,45 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
     { id: "sem_noite", label: "Sem noite", n: faltaNoite },
   ];
 
+  const botoesImportacaoVms = (
+    <>
+      <input ref={vmsFileInput} type="file" accept=".csv,.xls,.xlsx" style={{ display: "none" }} onChange={importarArquivoVms} />
+      <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={() => vmsFileInput.current?.click()}
+        style={{ display: "flex", alignItems: "center", gap: 6 }} title="Lê a planilha exportada do Digifort/Defense e grava as câmeras na galeria">
+        <Upload size={13} /> Importar CSV/XLSX
+      </button>
+      <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={sincronizarDaMaquina}
+        style={{ display: "flex", alignItems: "center", gap: 6 }} title="Copia as câmeras já importadas em 'Câmeras da Máquina' para esta galeria">
+        <RefreshCw size={13} /> Sincronizar da Máquina
+      </button>
+      <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={() => abrirEdicaoRtsp()}
+        style={{ display: "flex", alignItems: "center", gap: 6 }} title="Adiciona uma câmera manualmente">
+        <Plus size={13} /> Câmera
+      </button>
+    </>
+  );
+
   return (
     <>
-      <Modal title={`Câmeras do NVR: ${nvrName}`} onClose={onClose} width="1200px">
+      <Modal title={`Câmeras do ${isVms ? "equipamento" : "NVR"}: ${nvrName}`} onClose={onClose} width="1200px">
         {loading ? (
           <div style={{ padding: 40, textAlign: "center" }}>Carregando galeria...</div>
         ) : cameras.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>Nenhuma câmera sincronizada neste NVR ainda. Aguarde o próximo backup.</div>
+          <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
+            {isVms ? (
+              <>
+                <div style={{ marginBottom: 16 }}>Nenhuma câmera configurada ainda. Importe a planilha do equipamento ou sincronize da máquina.</div>
+                <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>{botoesImportacaoVms}</div>
+              </>
+            ) : "Nenhuma câmera sincronizada neste NVR ainda. Aguarde o próximo backup."}
+          </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", height: "80vh", margin: "-24px" }}>
+            {isVms && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface-50)" }}>
+                {botoesImportacaoVms}
+              </div>
+            )}
             {/* Ações em lote */}
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: "14px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface-50)" }}>
               {grupoLote("ref", <Image size={15} color="#10b981" />, "Referência ideal", faltaRef,
@@ -313,6 +428,11 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
                           <div style={{ fontWeight: isSelected ? 600 : 500, fontSize: 13, color: isSelected ? "var(--primary-dark)" : "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {nomeCam(cam)}
                           </div>
+                          {isVms && (
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {cam.ip || "sem IP"}{cam.modelo ? ` · ${cam.modelo}` : ""}
+                            </div>
+                          )}
                           <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
                             <Chip ok={temImagem(cam, "ref")} label="REF" title={temImagem(cam, "ref") ? "Tem imagem de referência" : "Sem imagem de referência: não é anexada no e-mail se a câmera ficar offline"} />
                             <Chip ok={temImagem(cam, "noite")} label="NOITE" title={temImagem(cam, "noite") ? `Imagem da noite de ${fmtDate(cam.night_image_date)}` : (cam.captura_motivo || "Sem imagem da noite")} />
@@ -332,10 +452,21 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
               <div style={{ flex: 1, padding: 24, overflowY: "auto", background: "var(--background)" }}>
                 {selectedCam ? (
                   <>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid var(--border)", paddingBottom: 14, marginBottom: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid var(--border)", paddingBottom: 14, marginBottom: 20, flexWrap: "wrap" }}>
                       <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{nomeCam(selectedCam)}</h2>
                       <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Canal {selectedCam.canal}</span>
+                      {isVms && (
+                        <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "monospace" }}>
+                          {selectedCam.ip || "sem IP"}{selectedCam.modelo ? ` · ${selectedCam.modelo}` : ""}
+                        </span>
+                      )}
                       {selectedCam.status_comunicacao === "OFFLINE" && <span className="badge err">OFFLINE</span>}
+                      {isVms && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => abrirEdicaoRtsp(selectedCam)}
+                          style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                          <Edit2 size={13} /> Editar RTSP
+                        </button>
+                      )}
                     </div>
 
                     <input ref={fileInput} type="file" accept="image/*" style={{ display: "none" }}
@@ -382,10 +513,12 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
                         />
                         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                           <button className="btn btn-primary" disabled={travado} onClick={() => capturarUma("noite", selectedCam)}
-                            title="Busca a madrugada (00h–06h) mais recente com gravação, até 15 dias atrás. Funciona com a câmera offline."
+                            title={isVms ? "Captura um frame ao vivo da câmera (stream principal)." : "Busca a madrugada (00h–06h) mais recente com gravação, até 15 dias atrás. Funciona com a câmera offline."}
                             style={{ display: "flex", gap: 6, alignItems: "center" }}>
                             <Moon size={15} />
-                            {ocupado?.tipo === "noite" && ocupado.canal === selectedCam.canal ? "Buscando na gravação..." : "Capturar da gravação"}
+                            {ocupado?.tipo === "noite" && ocupado.canal === selectedCam.canal
+                              ? (isVms ? "Capturando..." : "Buscando na gravação...")
+                              : (isVms ? "Capturar ao vivo" : "Capturar da gravação")}
                           </button>
                         </div>
                       </div>
@@ -410,6 +543,42 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, onCl
         >
           <div style={{ color: "white", fontSize: 20, fontWeight: 600, marginBottom: 20, letterSpacing: "0.02em" }}>{zoomImage.title}</div>
           <img src={zoomImage.src} style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }} />
+        </div>
+      )}
+
+      {editCam && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.6)", zIndex: 999998, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          onClick={() => !vmsBusy && setEditCam(null)}>
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, width: 360, maxWidth: "100%" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>Conexão RTSP — Canal {editCam.canal}</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Nome
+                <input className="form-input" value={editCam.nome} onChange={e => setEditCam({ ...editCam, nome: e.target.value })} style={{ marginTop: 4 }} />
+              </label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>IP
+                <input className="form-input" value={editCam.ip} onChange={e => setEditCam({ ...editCam, ip: e.target.value })} placeholder="192.168.0.10" style={{ marginTop: 4 }} />
+              </label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Usuário
+                <input className="form-input" value={editCam.username} onChange={e => setEditCam({ ...editCam, username: e.target.value })} style={{ marginTop: 4 }} />
+              </label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Senha
+                <input className="form-input" type="password" value={editCam.password} onChange={e => setEditCam({ ...editCam, password: e.target.value })} placeholder="Deixe em branco para manter a atual" style={{ marginTop: 4 }} />
+              </label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Modelo
+                <select className="form-input" value={editCam.modelo} onChange={e => setEditCam({ ...editCam, modelo: e.target.value })} style={{ marginTop: 4 }}>
+                  <option value="Hikvision">Hikvision / Outro</option>
+                  <option value="Intelbras">Intelbras</option>
+                  <option value="Grandstream">Grandstream</option>
+                  <option value="ONVIF">ONVIF Genérico</option>
+                </select>
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 20, justifyContent: "flex-end" }}>
+              <button className="btn btn-secondary" disabled={vmsBusy} onClick={() => setEditCam(null)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={vmsBusy} onClick={salvarEdicaoRtsp}>{vmsBusy ? "Salvando..." : "Salvar"}</button>
+            </div>
+          </div>
         </div>
       )}
     </>

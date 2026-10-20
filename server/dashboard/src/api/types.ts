@@ -41,6 +41,10 @@ export interface NvrCamera {
   id?: string;
   canal: number;
   nome?: string;
+  ip?: string | null;
+  username?: string | null;
+  modelo?: string | null;
+  has_password?: boolean;
   status_comunicacao?: string;
   captura_status?: string;
   captura_motivo?: string;

@@ -196,6 +196,22 @@ def get_caminho_csv(caminho_log=""):
     return caminho_log if caminho_log else ARQUIVO_CSV
 
 
+def get_detalhes_cameras(caminho_export="", caminho_log=""):
+    """Retorna a lista ordenada de câmeras do export_cameras.csv, com canal sequencial (1..N),
+    nome, ip e status ("OK"/"FALHA"). Usada pelo backup para capturar a imagem da noite via RTSP."""
+    status_dict = get_status_cameras(caminho_export, caminho_log)  # garante LISTA_CAMERAS_UNICAS carregada
+    detalhes = []
+    for idx, cam in enumerate(LISTA_CAMERAS_UNICAS, start=1):
+        nome = cam.get("Nome")
+        detalhes.append({
+            "canal": idx,
+            "nome": nome,
+            "ip": cam.get("IP") or "",
+            "status": status_dict.get(nome, "OK"),
+        })
+    return detalhes
+
+
 # =============== SNIFFER SNMP ===============
 sniffer_socket = None
 
