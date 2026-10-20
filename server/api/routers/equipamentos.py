@@ -231,6 +231,12 @@ async def test_equipamento_rtsp(
             # Agente antigo capturou ao vivo: não é imagem da noite
             return RTSPTestResponse(success=False, error_message="Atualize o agente desta máquina para a versão 1.1.6 ou superior para capturar a imagem da noite pelo painel.")
         _salvar_imagem_noite(db, equipamento_id, canal, nome, result)
+    elif modo == "noite":
+        # Mostra o motivo na galeria (a imagem anterior, se houver, é mantida)
+        nvr = db.query(NVR).filter(NVR.id == equipamento_id).first()
+        if nvr is not None:
+            _marcar_imagem_noite(nvr, canal, {"status": "FALHA", "motivo": result.error_message, "horario": None})
+            db.commit()
 
     return result
 
@@ -253,14 +259,18 @@ def _salvar_imagem_noite(db: Session, nvr_id: UUID, canal: int, nome: Optional[s
     camera.night_image_base64 = result.image_base64
     camera.night_image_date = horario
 
-    # O status da captura mostrado na galeria vem do último relatório: marca este canal como OK
+    _marcar_imagem_noite(nvr, canal, {"status": "OK", "motivo": None, "horario": result.horario})
+    db.commit()
+
+
+def _marcar_imagem_noite(nvr: NVR, canal: int, info: dict) -> None:
+    """Grava o status da captura da noite do canal em `last_recording_status` (lido pela galeria)."""
     status_rel = []
     for st in nvr.last_recording_status or []:
         if isinstance(st, dict) and _canal_int(st.get("canal")) == canal:
-            st = {**st, "imagem_noite": {"status": "OK", "motivo": None, "horario": result.horario}}
+            st = {**st, "imagem_noite": info}
         status_rel.append(st)
     nvr.last_recording_status = status_rel
-    db.commit()
 
 
 # ─── NVR Cameras Gallery ───────────────────────────────────────────────────

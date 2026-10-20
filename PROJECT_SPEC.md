@@ -798,6 +798,42 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-19] — Publicação de versões: release no repositório público e cadastro sob demanda
+
+**Alteração:** (1) Ao gerar os executáveis, a release (tag = versão, título `v<versão>`, só `TrilanAgentService.exe` e `TrilanAgentTray.exe`) é publicada em `isaqueschaffer/backup-automation` (público; os agentes baixam daqui). (2) O cadastro da versão no painel é sob demanda: só quando o usuário pedir e informar a senha do painel, via `agent/publish_version.ps1`. (3) Servidor: `POST /api/v1/admin/agent-version` passa a aceitar também o header `X-Publish-Token` (variável `PUBLISH_TOKEN`; vazia = desativado), que só serve para registrar versões. Regras fixas registradas em `CLAUDE.md`.
+**Arquivos:** CLAUDE.md, agent/publish_version.ps1, server/api/auth.py, server/api/config.py, server/api/routers/agent_update.py, server/.env.example
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-19] — Agente 1.1.13: nome do serviço no Windows
+
+**Alteração:** O nome exibido do serviço em services.msc passa de "Trilan — Agente Backup NVR" para "Trilan — Agente Backup" (`_svc_display_name_` em `service.py`). Máquinas já instaladas recebem o novo nome sozinhas: `_configurar_recuperacao_servico` aplica `sc config TrilanAgentNVR DisplayName=` a cada início. O nome interno do serviço (`TrilanAgentNVR`) não mudou.
+**Arquivos:** agent/service.py, agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-16] — Agente 1.1.12: reinício pelo painel e atualização OTA confiáveis
+
+**Problema:** "Reiniciar todos" parava os agentes e eles não voltavam. Causa: o script que religa o serviço era iniciado com `DETACHED_PROCESS`; sem console o PowerShell fecha sem executar nada (1.1.9–1.1.11). Até a 1.1.8, `ping 3s && sc start` tentava uma vez só, cedo demais. No .bat da OTA, `timeout /t` não espera sem console (as pausas fixas nunca aconteceram).
+**Alteração:** (1) Scripts auxiliares iniciados com `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP` e stdin/stdout/stderr nulos (nunca `DETACHED_PROCESS`). (2) Reinício por dois caminhos independentes: `SCRIPT_REINICIO` espera o processo do serviço (o bootloader) sair, tenta `Start-Service` até 5x, confere e registra em `logs/reinicio.log`; e o processo termina com `os._exit(1)`, para a recuperação do Windows (`sc failure ... restart/5000/10000/30000`, reaplicada a cada início por `garantir_recuperacao_windows`) religar em 5 s. (3) .bat da OTA: espera o processo antigo sair (até 90 s), copia com novas tentativas, inicia e confere `RUNNING` (até 5x), pausas com `ping`, log em `logs/atualizacao.log`. Uma OTA para a 1.1.12 ainda é aplicada pelo .bat da versão antiga.
+**Arquivos:** agent/service.py, agent/src/application/updater.py
+**Breaking Change:** Não. Cada reinício pelo painel gera no Visualizador de Eventos um aviso de "serviço terminou inesperadamente" (é o gatilho da recuperação).
+**Branch:** isaque
+
+### [2026-10-16] — Agente 1.1.11: backup sem imagem da noite; captura sem imagem cinza; galeria reorganizada
+
+**Alteração:** (1) O backup (manual e agendado) não captura mais a imagem da noite — atrasava muito o backup. A captura é só sob demanda pela Galeria (tarefa RTSP `modo=noite`). (2) Todas as capturas ffmpeg usam `-skip_frame nokey` antes do `-i`: só quadros-chave são decodificados; antes, a conexão que começava entre dois quadros-chave gerava imagem cinza (H.265, intermitente). (3) Servidor: o relatório do agente substitui `last_recording_status`; `_manter_imagem_noite` preserva o `imagem_noite` anterior nos canais sem esse campo; falha da captura da noite pelo painel grava `FALHA`+motivo no canal (`_marcar_imagem_noite`). (4) Galeria: ações em lote no topo por tipo (Referência / Noite) com contador "x/y com imagem", "Capturar faltantes (n)" (padrão) e "Todas", progresso, cancelamento e lista de falhas; lateral com filtros Todas / Sem referência / Sem noite e chips REF/NOITE por câmera; botões de cada imagem abaixo do respectivo painel.
+**Arquivos:** agent/src/application/backup_job.py, agent/src/camera/rtsp_client.py, server/api/routers/agent.py, server/api/routers/equipamentos.py, server/dashboard/src/pages/Machines/MachineDetail/components/NVRCamerasGalleryModal.tsx
+**Breaking Change:** Não (agentes antigos continuam capturando a noite no backup; o servidor aceita os dois).
+**Branch:** isaque
+
+### [2026-10-16] — Agente 1.1.10: instalador, bandeja e reabertura da bandeja após atualização
+
+**Alteração:** (1) Instalador: `--startup=auto` antes da ação (pywin32 usa getopt e ignorava a opção após `install`); `remove` antes do `install`; `PrepareToInstall` para o serviço e fecha a bandeja antes de copiar os arquivos. (2) Bandeja: "Reiniciar serviço" em um único `Restart-Service` elevado; instância única por mutex `Local\TrilanAgentTray` (por sessão). (3) A atualização OTA fecha a bandeja para trocar o arquivo; ao iniciar, o serviço (SYSTEM, sessão 0) a reabre como o usuário de cada sessão ativa/desconectada que não a tem aberta (`WTSQueryUserToken` + `CreateProcessAsUser`), só se o `TrilanAgentTray.exe` foi trocado nos últimos 15 min — não reabre uma bandeja fechada pelo usuário num reinício comum. Na atualização 1.1.9 → 1.1.10 quem aplica é o atualizador antigo; a reabertura funciona porque é feita pelo serviço novo ao iniciar.
+**Arquivos:** agent/service.py, agent/tray.py, agent/installer.iss, agent/src/application/updater.py
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-15] — Reinício do agente espera o backup terminar
 
 **Alteração:** No `/agent/ping`, se o agente informa `telemetry.backup_em_andamento` (>= 1.1.8), o servidor não entrega `restart` e mantém `restart_requested` até o ping seguinte sem backup em andamento (evita perder o backup por "Reiniciar"/"Reiniciar todos" no meio). O dashboard mostra "Reinício agendado" no cabeçalho da máquina. Agentes antigos reiniciam como antes. Backup manual não é afetado.

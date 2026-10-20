@@ -24,8 +24,6 @@ from src.backup.downloader import baixar_arquivo
 from src.backup.archiver import criar_zip, data_hoje
 
 TEMP_DIR = DIR_AGENT / "tmp_backup"
-# Orçamento de tempo das imagens da madrugada por NVR (as câmeras restantes ficam sem imagem)
-LIMITE_IMAGENS_NVR_S = 20 * 60
 
 def setup_logging():
     log_dir = DIR_AGENT / "logs"
@@ -112,74 +110,8 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
             logging.warning("  API ISAPI falhou. Backup de arquivos pulado.", exc_info=True)
             status = "PARCIAL"
 
-    # Captura a foto da madrugada para câmeras compatíveis
-    from src.application.api_client import upload_night_image
-    if conf is None:
-        conf = load_conf()
-
-    if cameras_status:
-        from src.camera.rtsp_client import capture_night_image, capture_night_image_motorola
-        if tipo_nvr == "MOTOROLA":
-            from src.nvr.motorola.cameras import buscar_cameras as login_motorola
-            _, sessao_motorola = login_motorola(ip, user, pwd)  # um login para todas as câmeras
-            capturar = lambda ip_, u_, p_, canal_, data_, prazo=None: capture_night_image_motorola(
-                ip_, u_, p_, canal_, data_, sessao=sessao_motorola, prazo=prazo)
-        else:
-            capturar = capture_night_image
-        # Tempo máximo para todas as imagens da noite deste NVR: o resto do backup (e o relatório) não espera mais que isso
-        limite_imagens = time.monotonic() + LIMITE_IMAGENS_NVR_S
-        logging.info("  Iniciando extração de imagens noturnas (Playback RTSP) para os canais gravados...")
-        for cam_st in cameras_status:
-            dias_gravacao = cam_st.get("dias_com_gravacao", [])
-            if not dias_gravacao:
-                cam_st["imagem_noite"] = {"status": "SEM_GRAVACAO", "motivo": "Sem gravação nos últimos 15 dias", "horario": None}
-                logging.warning(f"    [FALHA] Canal {cam_st['canal']}: Sem gravação nos últimos 15 dias.")
-                continue
-
-            if time.monotonic() > limite_imagens:
-                cam_st["imagem_noite"] = {"status": "FALHA", "horario": None,
-                                          "motivo": "Tempo limite da captura de imagens deste NVR esgotado"}
-                logging.warning(f"    [FALHA] Canal {cam_st['canal']}: tempo limite do NVR esgotado.")
-                continue
-
-            dias_ordenados = sorted(dias_gravacao)
-            # Dia mais recente cuja madrugada (00h-06h) já terminou; antes das 06h "hoje" ainda não tem imagem.
-            hoje_str = datetime.now().strftime("%Y-%m-%d")
-            if datetime.now().hour < 6:
-                anteriores = [d for d in dias_ordenados if d < hoje_str]
-                data_alvo = anteriores[-1] if anteriores else dias_ordenados[-1]
-            else:
-                data_alvo = dias_ordenados[-1]
-
-            try:
-                ret = capturar(ip, user, pwd, cam_st["canal"], data_alvo, prazo=limite_imagens)
-                cam_st["imagem_noite"] = {
-                    "status": ret["status"],
-                    "motivo": ret["motivo"],
-                    "horario": ret["horario"]
-                }
-                
-                b64_img = ret["image"]
-                if b64_img and ret["status"] == "OK":
-                    payload = {
-                        "nvr_name": nome,
-                        "canal": cam_st["canal"],
-                        "nome": cam_st["nome"],
-                        "image_base64": b64_img,
-                        "night_image_date": ret["horario"]
-                    }
-                    sucesso_up = upload_night_image(conf, payload)
-                    if sucesso_up:
-                        logging.info(f"    [OK] Imagem noturna do canal {cam_st['canal']} ({ret['horario']}) enviada.")
-                    else:
-                        cam_st["imagem_noite"]["status"] = "FALHA"
-                        cam_st["imagem_noite"]["motivo"] = "Falha ao enviar a imagem ao servidor"
-                        logging.warning(f"    [ERRO] Falha ao enviar imagem noturna do canal {cam_st['canal']} para o servidor.")
-                else:
-                    logging.warning(f"    [FALHA] Canal {cam_st['canal']}: {ret['motivo']}")
-            except Exception as e:
-                cam_st["imagem_noite"] = {"status": "FALHA", "motivo": str(e), "horario": None}
-                logging.warning(f"    [ERRO] Exceção ao capturar imagem do canal {cam_st['canal']}: {e}")
+    # A imagem da noite não é mais capturada no backup (atrasava backups manuais e agendados):
+    # ela é capturada sob demanda pela Galeria do NVR no painel (tarefa RTSP modo "noite").
 
     return {"nome": nome, "status": status, "cameras": cameras_status}
 

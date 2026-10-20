@@ -21,7 +21,7 @@ import requests
 
 logger = logging.getLogger("trilan.updater")
 
-CURRENT_VERSION = "1.1.9"   # <-- Atualizar manualmente a cada build
+CURRENT_VERSION = "1.1.13"   # <-- Atualizar manualmente a cada build
 _UPDATE_CHECK_INTERVAL = 3600  # segundos entre verificações de update (1h)
 _last_update_check: float = 0.0
 
@@ -156,38 +156,61 @@ def check_and_apply_update(conf: dict) -> bool:
         base_dir = os.path.dirname(current_exe)
         tray_exe = os.path.join(base_dir, "TrilanAgentTray.exe")
 
-        # Script batch para substituir o exe e reiniciar o serviço
-        # Usa ping em vez de timeout.exe porque timeout falha imediatamente sem console (Sessão 0 / CREATE_NO_WINDOW)
-        bat_content = "@echo off\n"
-        bat_content += "ping 127.0.0.1 -n 5 >nul\n"
-        bat_content += "sc stop TrilanAgentNVR >nul 2>&1\n"
+        # Script batch para substituir o exe e reiniciar o serviço. Roda FORA do processo do serviço
+        # (detached) para poder substituir arquivos em uso. Em vez de tempos fixos, espera o processo
+        # antigo sair, copia com novas tentativas (arquivo ainda travado) e confere se o serviço subiu.
+        # Pausas com "ping": o "timeout" do Windows não espera sem console (o .bat roda destacado).
+        log_ota = os.path.join(os.environ.get("ProgramData", "C:\\ProgramData"),
+                               "Trilan NVR Backup Agent", "logs", "atualizacao.log")
 
+        def passo(rotulo, comando, tentativas, espera_s):
+            # Repete `comando` até dar certo (errorlevel 0). Sem blocos ( ): %N% não expande dentro deles.
+            return (
+                f"set N=0\n:{rotulo}\n{comando}\n"
+                f"if not errorlevel 1 goto {rotulo}_ok\n"
+                f"set /a N+=1\nif %N% GEQ {tentativas} goto {rotulo}_falha\n"
+                f"ping -n {espera_s + 1} 127.0.0.1 >nul\ngoto {rotulo}\n"
+                f':{rotulo}_falha\necho [%date% %time%] FALHA: {rotulo} >> "{log_ota}"\n'
+                f":{rotulo}_ok\n"
+            )
+
+        bat_content = "@echo off\n"
+        bat_content += f'echo [%date% %time%] Atualizando para {new_version}... >> "{log_ota}"\n'
+        bat_content += "sc stop TrilanAgentNVR >nul 2>&1\n"
         if has_tray_update:
             # Mata o Tray para destravar o arquivo e permitir a substituição
             bat_content += "taskkill /F /IM TrilanAgentTray.exe >nul 2>&1\n"
-
-        bat_content += "ping 127.0.0.1 -n 5 >nul\n"
-        bat_content += "taskkill /F /IM TrilanAgentService.exe >nul 2>&1\n"
-        bat_content += "ping 127.0.0.1 -n 3 >nul\n"
-        bat_content += f'copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1\n'
-
+        # Espera (até 90 s) não haver mais TrilanAgentService.exe rodando ("find" sem achar = errorlevel 1)
+        bat_content += (
+            "set N=0\n:espera\n"
+            'tasklist /FI "IMAGENAME eq TrilanAgentService.exe" | find /I "TrilanAgentService.exe" >nul\n'
+            "if errorlevel 1 goto espera_ok\n"
+            "set /a N+=1\nif %N% GEQ 90 goto espera_falha\n"
+            "ping -n 2 127.0.0.1 >nul\ngoto espera\n"
+            f':espera_falha\necho [%date% %time%] FALHA: processo antigo nao encerrou >> "{log_ota}"\n'
+            ":espera_ok\n"
+        )
+        bat_content += passo("copia", f'copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1', 15, 2)
         if has_tray_update:
-            bat_content += f'copy /y "{tmp_tray_exe}" "{tray_exe}" >nul 2>&1\n'
-
+            bat_content += passo("copia_tray", f'copy /y "{tmp_tray_exe}" "{tray_exe}" >nul 2>&1', 15, 2)
         bat_content += "sc config TrilanAgentNVR start= delayed-auto >nul 2>&1\n"
         bat_content += "sc failure TrilanAgentNVR reset= 86400 actions= restart/5000/restart/10000/restart/30000 >nul 2>&1\n"
         bat_content += "sc failureflag TrilanAgentNVR 1 >nul 2>&1\n"
-        bat_content += "ping 127.0.0.1 -n 3 >nul\n"
-        bat_content += "sc start TrilanAgentNVR >nul 2>&1\n"
+        bat_content += passo("inicia", 'sc start TrilanAgentNVR >nul 2>&1\nping -n 4 127.0.0.1 >nul\n'
+                                       'sc query TrilanAgentNVR | find "RUNNING" >nul', 5, 2)
+        bat_content += f'echo [%date% %time%] Atualizacao concluida. >> "{log_ota}"\n'
         bat_content += 'del "%~f0"\n'
         bat_path = os.path.join(tmp_dir, "apply_update.bat")
         with open(bat_path, "w") as f:
             f.write(bat_content)
 
         logger.info("[OTA] Aplicando atualização via script batch. Serviço reiniciará em instantes...")
+        # Console oculto + entradas/saídas nulas (sem DETACHED_PROCESS: sem console, comandos como
+        # "timeout" e o PowerShell não funcionam). O processo continua após o serviço encerrar.
         subprocess.Popen(
             ["cmd", "/c", bat_path],
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
         aplicado = True  # o .bat (destacado) ainda usa tmp_dir

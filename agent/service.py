@@ -74,6 +74,81 @@ def log(msg, is_error=False):
         pass
 
 
+# Janela após a troca do TrilanAgentTray.exe em que o serviço ainda a reabre ao iniciar.
+# Só reabre se o arquivo foi trocado agora (atualização), para não reabrir uma bandeja que o usuário fechou.
+JANELA_REABRIR_BANDEJA_S = 15 * 60
+
+
+def reabrir_bandeja_atualizada():
+    """A atualização OTA fecha a bandeja para trocar o arquivo e não a abre de novo.
+
+    O serviço roda como SYSTEM na sessão 0 e não consegue mostrar janelas; por isso a bandeja é
+    iniciada como o usuário de cada sessão logada (console ou RDP) que ainda não a tem aberta.
+    """
+    tray = DIRETORIO / "TrilanAgentTray.exe"
+    try:
+        if not tray.exists() or time.time() - tray.stat().st_mtime > JANELA_REABRIR_BANDEJA_S:
+            return
+        import win32process
+        import win32profile
+        import win32ts
+
+        servidor = win32ts.WTS_CURRENT_SERVER_HANDLE
+        com_bandeja = {
+            sessao for (sessao, _pid, nome, _sid) in win32ts.WTSEnumerateProcesses(servidor, 1, 0)
+            if (nome or "").lower() == "trilanagenttray.exe"
+        }
+        for info in win32ts.WTSEnumerateSessions(servidor, 1, 0):
+            sessao = info["SessionId"]
+            if sessao == 0 or sessao in com_bandeja:
+                continue
+            if info["State"] not in (win32ts.WTSActive, win32ts.WTSDisconnected):
+                continue
+            token = None
+            try:
+                token = win32ts.WTSQueryUserToken(sessao)  # requer SYSTEM (privilégio SE_TCB)
+                ambiente = win32profile.CreateEnvironmentBlock(token, False)
+                si = win32process.STARTUPINFO()
+                si.lpDesktop = "winsta0\\default"
+                win32process.CreateProcessAsUser(
+                    token, str(tray), None, None, None, False,
+                    win32process.CREATE_UNICODE_ENVIRONMENT | win32process.NORMAL_PRIORITY_CLASS,
+                    ambiente, str(DIRETORIO), si,
+                )
+                log(f"Bandeja reaberta apos atualizacao na sessao {sessao}.")
+            except Exception as e:
+                log(f"Nao foi possivel reabrir a bandeja na sessao {sessao}: {e}", is_error=True)
+            finally:
+                if token is not None:
+                    token.Close()
+    except Exception as e:
+        log(f"Falha ao verificar a bandeja apos atualizacao: {e}", is_error=True)
+
+
+# Script que religa o serviço depois do "Reiniciar" do painel. Roda fora do processo do serviço.
+# Espera o processo antigo sair de verdade (o executável leva alguns segundos para encerrar),
+# tenta iniciar até 5 vezes, confere se subiu e registra tudo em reinicio.log.
+SCRIPT_REINICIO = r"""
+$svc = 'TrilanAgentNVR'
+$log = '__LOG__'
+function L($m) { Add-Content -Path $log -Encoding UTF8 -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) }
+$antigo = __PID__
+L "Reinicio pedido pelo painel. Aguardando o processo $antigo encerrar..."
+$t = 0
+while ($t -lt 90 -and (Get-Process -Id $antigo -ErrorAction SilentlyContinue)) { Start-Sleep -Seconds 1; $t++ }
+L "Processo antigo encerrado apos ${t}s."
+for ($i = 1; $i -le 5; $i++) {
+    Start-Sleep -Seconds 3
+    $st = (Get-Service -Name $svc -ErrorAction SilentlyContinue).Status
+    if ($st -eq 'Running') { L "Servico em execucao (tentativa $i)."; exit 0 }
+    try { Start-Service -Name $svc -ErrorAction Stop; L "Start-Service enviado (tentativa $i)." }
+    catch { L "Falha ao iniciar (tentativa $i): $($_.Exception.Message)" }
+}
+$st = (Get-Service -Name $svc -ErrorAction SilentlyContinue).Status
+if ($st -eq 'Running') { L 'Servico em execucao.' } else { L "ERRO: servico nao voltou (status: $st). A recuperacao do Windows ainda pode reinicia-lo." }
+"""
+
+
 def _configurar_recuperacao_servico():
     """
     Garante que o serviço esteja configurado com:
@@ -117,13 +192,20 @@ def _configurar_recuperacao_servico():
             creationflags=no_window,
             timeout=10,
         )
+        # Nome exibido em services.msc (máquinas instaladas com o nome antigo atualizam sozinhas)
+        subprocess.run(
+            ["sc.exe", "config", "TrilanAgentNVR", "DisplayName=", "Trilan — Agente Backup"],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
     except Exception:
         pass
 
 
 class TrilanAgentService(win32serviceutil.ServiceFramework):
     _svc_name_ = "TrilanAgentNVR"
-    _svc_display_name_ = "Trilan — Agente Backup NVR"
+    _svc_display_name_ = "Trilan — Agente Backup"
     _svc_description_ = "Executa backups automaticos de NVRs e envia os arquivos ao servidor Trilan."
     _svc_start_type_ = win32service.SERVICE_AUTO_START
 
@@ -139,6 +221,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.schedule_minute = 0
         self.config_loaded = False
         self.schedule_updated = False
+        # Reinício pedido pelo painel: o processo termina com erro para a recuperação do Windows religar
+        self.reiniciar_pelo_windows = False
 
         sec_desc = win32security.SECURITY_DESCRIPTOR()
         sec_desc.SetSecurityDescriptorDacl(1, None, 0)
@@ -177,7 +261,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         log("=" * 60)
         log(f"TRILAN AGENT NVR INICIADO (Versão: {v})")
         log(f"Diretorio: {DIRETORIO}")
-
+        # Em thread: nunca atrasa nem derruba a inicialização do serviço
+        threading.Thread(target=reabrir_bandeja_atualizada, daemon=True).start()
         # Loop de resiliência: se ocorrer erro inesperado no boot (ex.: rede/disco ainda subindo),
         # não encerra o processo com código 0 (o que impediria o Windows SCM de reiniciar o serviço).
         while not self.stop_requested:
@@ -194,6 +279,12 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
         log("TRILAN AGENT NVR ENCERRADO")
         log("=" * 60)
+        if self.reiniciar_pelo_windows:
+            # Termina sem avisar "parado" ao Windows: ele trata como falha e a recuperação configurada
+            # (_configurar_recuperacao_servico) religa o serviço em 5 s. É a segunda garantia, caso o
+            # script de reinício (SCRIPT_REINICIO) não consiga.
+            logging.shutdown()
+            os._exit(1)
 
     def _init_webhooks(self, server_cfg: dict):
         """Inicializa integrações locais de webhook (Digifort / Defense) de forma segura."""
@@ -254,21 +345,33 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self._run_loop(conf["server_url"], headers, conf)
 
     def _restart_service(self):
-        # Script PowerShell resiliente: aguarda o servico parar completamente antes de iniciar
-        ps_cmd = (
-            "$svc = 'TrilanAgentNVR'; "
-            "Start-Sleep -Seconds 2; "
-            "$elapsed = 0; "
-            "while ((Get-Service -Name $svc -ErrorAction SilentlyContinue).Status -ne 'Stopped' -and $elapsed -lt 30) { "
-            "    Start-Sleep -Seconds 1; "
-            "    $elapsed++; "
-            "}; "
-            "Start-Service -Name $svc"
-        )
-        subprocess.Popen(
-            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-        )
+        """Reinício pedido pelo painel, por dois caminhos independentes:
+        1) SCRIPT_REINICIO (fora deste processo) espera o processo do serviço sair e o inicia de novo;
+        2) o processo termina com erro e a recuperação do Windows o religa em 5 s.
+        """
+        import subprocess
+        pid_servico = os.getpid()
+        try:
+            # No executável de arquivo único quem o Windows acompanha é o processo pai (o bootloader)
+            import psutil
+            pai = psutil.Process(pid_servico).parent()
+            if pai is not None and pai.name().lower() == "trilanagentservice.exe":
+                pid_servico = pai.pid
+        except Exception:
+            pass
+        script = (SCRIPT_REINICIO.replace("__LOG__", str(PASTA_LOG / "reinicio.log"))
+                  .replace("__PID__", str(pid_servico)))
+        try:
+            # Console oculto + entradas/saídas nulas. NÃO usar DETACHED_PROCESS: sem console o PowerShell
+            # fecha na hora sem executar o script (era por isso que o serviço não voltava no reinício).
+            subprocess.Popen(
+                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-NoProfile", "-NonInteractive", "-Command", script],
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            log(f"Falha ao iniciar o script de reinicio (a recuperacao do Windows vai religar): {e}", is_error=True)
+        self.reiniciar_pelo_windows = True
         self.stop_requested = True
         win32event.SetEvent(self.hWaitStop)
 

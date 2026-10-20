@@ -95,6 +95,30 @@ def _read_request_flags(machine_id: UUID) -> tuple[bool, bool]:
     return bool(row[0]), bool(row[1])
 
 
+def _canal_chave(valor):
+    try:
+        return int(valor)
+    except (ValueError, TypeError):
+        return str(valor)
+
+
+def _manter_imagem_noite(anterior, novo):
+    """Agentes >= 1.1.11 não capturam a imagem da noite no backup (ela vem da Galeria): mantém o
+    status `imagem_noite` do relatório anterior nos canais em que o novo relatório não o traz."""
+    antigos = {_canal_chave(st.get("canal")): st.get("imagem_noite")
+               for st in (anterior or []) if isinstance(st, dict) and st.get("imagem_noite")}
+    if not antigos:
+        return novo
+    saida = []
+    for st in novo or []:
+        if isinstance(st, dict) and "imagem_noite" not in st:
+            info = antigos.get(_canal_chave(st.get("canal")))
+            if info:
+                st = {**st, "imagem_noite": info}
+        saida.append(st)
+    return saida
+
+
 @router.post("/ping", response_model=PingResponse)
 async def ping_agent(
     body: PingRequest | None = None,
@@ -273,7 +297,7 @@ def receive_backup_report(
         if nvr:
             r_dict["tipo"] = nvr.tipo
             if r.cameras is not None:
-                nvr.last_recording_status = r.cameras
+                nvr.last_recording_status = _manter_imagem_noite(nvr.last_recording_status, r.cameras)
         else:
             r_dict["tipo"] = "NVR" # default fallback se foi excluido
         nvr_results_with_type.append(r_dict)

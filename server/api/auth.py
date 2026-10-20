@@ -47,6 +47,25 @@ def verify_admin_token(
         )
 
 
+bearer_opcional = HTTPBearer(auto_error=False)
+PUBLISH_TOKEN_HEADER = APIKeyHeader(name="X-Publish-Token", auto_error=False)
+
+
+def verify_publish_or_admin(
+    publish_token: Optional[str] = Security(PUBLISH_TOKEN_HEADER),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_opcional),
+) -> dict:
+    """Aceita o token de publicação (X-Publish-Token) ou o admin do painel. Só para registrar versões."""
+    esperado = settings.PUBLISH_TOKEN
+    if publish_token and esperado:
+        if hmac.compare_digest(publish_token.encode(), esperado.encode()):
+            return {"sub": "publisher"}
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid publish token")
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return verify_admin_token(credentials)
+
+
 # ──────────────────────────────────────────────────────────────
 # API Key (Agent authentication)
 # ──────────────────────────────────────────────────────────────
