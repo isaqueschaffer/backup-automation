@@ -1,7 +1,14 @@
+import type { CSSProperties } from "react";
 import { useToast } from "../../../components/Toast";
 import { EqForm, EquipamentoConfig, NVR, TipoEquipamento } from "../../../api/types";
 
 export type ToastFn = ReturnType<typeof useToast>["toast"];
+
+// Título dos cards do topo da página da máquina
+export const cardTitleStyle: CSSProperties = {
+  fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px",
+  color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6,
+};
 
 // Intervalo de ping do agente (PING_INTERVAL_S em agent/service.py)
 export const AGENT_PING_INTERVAL_MS = 15 * 1000;
