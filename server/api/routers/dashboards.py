@@ -20,6 +20,7 @@ from services.dashboards.esquemas import (
     LayoutSalvoResposta,
     LinkGeradoResposta,
     OpcoesResposta,
+    PreviaEntrada,
     SalvarLayoutEntrada,
     para_utc_naive,
 )
@@ -163,6 +164,21 @@ def get_customer_dashboard_data(
     customer = _cliente_ou_404(db, customer_id)
     dashboard = _obter_ou_criar(db, customer)
     dados = montar_dados(db, customer, layout_do_banco(dashboard))
+    return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
+
+
+@router.post("/api/v1/clients/{customer_id}/dashboard/preview", response_model=DadosResposta)
+def preview_customer_dashboard_layout(
+    customer_id: UUID,
+    body: PreviaEntrada,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Monta os dados dos widgets de um layout em rascunho sem salvar."""
+    response.headers["Cache-Control"] = "no-store"
+    customer = _cliente_ou_404(db, customer_id)
+    validar_referencias(db, customer_id, body.layout)
+    dados = montar_dados(db, customer, body.layout)
     return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
 
 

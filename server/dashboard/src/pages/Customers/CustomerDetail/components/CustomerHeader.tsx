@@ -1,4 +1,4 @@
-import { ArrowLeft, Clock, CloudLightning, Download, Edit2, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, Clock, CloudLightning, Download, Edit2, LayoutDashboard, RotateCcw, Trash2 } from "lucide-react";
 import { Customer } from "../../../../api/types";
 import { fmtDate, fmtSchedule } from "../../../../utils/date";
 import HealthBadge, { QueueBadge } from "../../components/HealthBadge";
@@ -6,11 +6,12 @@ import HealthBadge, { QueueBadge } from "../../components/HealthBadge";
 export type CustomerAction = "backup" | "stop" | "zip" | "edit" | "delete";
 
 // Cabeçalho do cliente: nome, resumo e ações principais
-export default function CustomerHeader({ customer, busy, onBack, onAction }: {
+export default function CustomerHeader({ customer, busy, onBack, onAction, onDashboard }: {
   customer: Customer;
   busy: CustomerAction | null;
   onBack: () => void;
   onAction: (a: CustomerAction) => void;
+  onDashboard?: () => void;
 }) {
   const c = customer;
   return (
@@ -43,6 +44,11 @@ export default function CustomerHeader({ customer, busy, onBack, onAction }: {
             title="Baixar um ZIP com o último backup de cada máquina">
             {busy === "zip" ? <span className="spinner spinner-sm" /> : <Download size={15} />} Baixar ZIP
           </button>
+          {onDashboard && (
+            <button className="btn btn-secondary" onClick={onDashboard}>
+              <LayoutDashboard size={15} /> Dashboard
+            </button>
+          )}
           <button className="btn btn-secondary" onClick={() => onAction("edit")}>
             <Edit2 size={15} /> Editar cliente
           </button>

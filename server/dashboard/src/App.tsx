@@ -11,6 +11,7 @@ import MachineDetail from "./pages/Machines/MachineDetail";
 import Backups from "./pages/Backups";
 import Settings from "./pages/Settings";
 import PublicDashboardPage from "./pages/Dashboards/PublicDashboardPage";
+import DashboardAdminPage from "./pages/Dashboards/DashboardAdminPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -38,6 +39,7 @@ function AppRoutes() {
       <Route path="/" element={<ProtectedRoute><Layout><Overview /></Layout></ProtectedRoute>} />
       <Route path="/clientes" element={<ProtectedRoute><Layout><CustomersPage /></Layout></ProtectedRoute>} />
       <Route path="/clientes/:id" element={<ProtectedRoute><Layout><CustomerDetail /></Layout></ProtectedRoute>} />
+      <Route path="/clientes/:id/dashboard" element={<ProtectedRoute><Layout><DashboardAdminPage /></Layout></ProtectedRoute>} />
       <Route path="/maquinas" element={<ProtectedRoute><Layout><MachinesPage /></Layout></ProtectedRoute>} />
       <Route path="/maquinas/:id" element={<ProtectedRoute><Layout><MachineDetail /></Layout></ProtectedRoute>} />
       <Route path="/backups" element={<ProtectedRoute><Layout><Backups /></Layout></ProtectedRoute>} />

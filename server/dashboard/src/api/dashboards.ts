@@ -35,6 +35,12 @@ export const restoreDashboardDefault = (
 export const fetchDashboardData = (customerId: string): Promise<DadosDashboard> =>
   api.get(`/clients/${customerId}/dashboard/data`).then((r) => r.data);
 
+export const fetchDashboardPreview = (
+  customerId: string,
+  layout: DashboardLayout
+): Promise<DadosDashboard> =>
+  api.post(`/clients/${customerId}/dashboard/preview`, { layout }).then((r) => r.data);
+
 export const fetchDashboardOptions = (customerId: string): Promise<OpcoesDashboard> =>
   api.get(`/clients/${customerId}/dashboard/opcoes`).then((r) => r.data);
 
@@ -72,6 +78,14 @@ export const fetchPublicDashboard = (token: string): Promise<DashboardPublico> =
 
 export const fetchPublicData = (token: string): Promise<DadosDashboard> =>
   publico.get("/data", { headers: { "X-Dashboard-Token": token } }).then((r) => r.data);
+
+export const fetchPublicPreview = (
+  token: string,
+  layout: DashboardLayout
+): Promise<DadosDashboard> =>
+  publico
+    .post("/preview", { layout }, { headers: { "X-Dashboard-Token": token } })
+    .then((r) => r.data);
 
 export const fetchPublicOptions = (token: string): Promise<OpcoesDashboard> =>
   publico.get("/opcoes", { headers: { "X-Dashboard-Token": token } }).then((r) => r.data);

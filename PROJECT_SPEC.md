@@ -799,6 +799,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-21] — Dashboards por Cliente (etapa 2B-1: editor e página de administração)
+
+**Alteração:** Editor de dashboard (`DashboardWorkspace`): adicionar/remover componentes, arrastar para reordenar, largura (¼ a total) e altura por componente, configuração por componente (máquinas, equipamentos, tipos, período, visual) gerada a partir dos `campos` de cada tipo de widget (registro modular), filtro geral de período, prévia com dados reais do rascunho (`POST .../dashboard/preview`, admin e público com permissão de edição), salvar com controle de versão (409 em edição concorrente), descartar e restaurar o padrão. Nova página `/clientes/:id/dashboard` e botão "Dashboard" no detalhe do cliente.
+**Arquivos:** server/dashboard/src/pages/Dashboards/*, server/dashboard/src/api/dashboards.ts, server/dashboard/src/App.tsx, server/dashboard/src/pages/Customers/CustomerDetail/*, server/api/routers/dashboards.py, server/api/routers/public_dashboard.py, server/api/services/dashboards/esquemas.py
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-21] — Dashboards por Cliente (etapa 2A: visão pública e widgets)
 
 **Alteração:** Registro de widgets no front (resumo, saúde do servidor, status e histórico de backups, câmeras, equipamentos, texto), grade de 12 colunas (`.dash-grid`) e página pública `/d` (sem menu e sem login) que lê o token do fragmento da URL (`/d#<token>`), envia em `X-Dashboard-Token` por um cliente HTTP separado (sem JWT do painel) e atualiza os dados a cada 30 s. Novas rotas de opções para o editor: `GET /api/v1/clients/{id}/dashboard/opcoes` (admin) e `GET /api/v1/public/dashboard/opcoes` (só com permissão de edição). A rota `/d` do nginx do dashboard envia `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex` e `Cache-Control: no-store`.

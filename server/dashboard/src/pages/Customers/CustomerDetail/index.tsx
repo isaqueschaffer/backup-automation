@@ -219,7 +219,7 @@ export default function CustomerDetail() {
 
   return (
     <>
-      <CustomerHeader customer={c} busy={busy} onBack={() => navigate("/clientes")} onAction={handleAction} />
+      <CustomerHeader customer={c} busy={busy} onBack={() => navigate("/clientes")} onAction={handleAction} onDashboard={() => navigate(`/clientes/${c.id}/dashboard`)} />
 
       <QueueSection
         customer={c}

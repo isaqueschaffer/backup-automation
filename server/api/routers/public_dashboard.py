@@ -8,6 +8,7 @@ from services.dashboards.esquemas import (
     DadosResposta,
     LayoutSalvoResposta,
     OpcoesResposta,
+    PreviaEntrada,
     PublicoResposta,
     SalvarLayoutEntrada,
 )
@@ -70,6 +71,23 @@ def get_public_dashboard_opcoes(
         raise HTTPException(status_code=403, detail="Edição não permitida para este link.")
 
     return listar_opcoes(db, acesso.dashboard.customer)
+
+
+@router.post("/preview", response_model=DadosResposta)
+def preview_public_dashboard_layout(
+    body: PreviaEntrada,
+    response: Response,
+    acesso: AcessoDashboard = Depends(acesso_publico),
+    db: Session = Depends(get_db),
+):
+    """Gera prévia dos dados para layout em edição se o link tiver permissão."""
+    _cabecalhos(response)
+    if not acesso.pode_editar:
+        raise HTTPException(status_code=403, detail="Edição não permitida para este link.")
+
+    validar_referencias(db, acesso.dashboard.customer_id, body.layout)
+    dados = montar_dados(db, acesso.dashboard.customer, body.layout)
+    return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
 
 
 @router.put("/layout", response_model=LayoutSalvoResposta)

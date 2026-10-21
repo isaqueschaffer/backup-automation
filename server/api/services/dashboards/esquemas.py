@@ -40,6 +40,10 @@ class SalvarLayoutEntrada(BaseModel):
     version: int = Field(ge=1)
 
 
+class PreviaEntrada(BaseModel):
+    layout: DashboardLayout
+
+
 class LayoutSalvoResposta(BaseModel):
     layout: DashboardLayout
     version: int
