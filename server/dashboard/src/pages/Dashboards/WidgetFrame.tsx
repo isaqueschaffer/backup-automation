@@ -24,6 +24,7 @@ export default function WidgetFrame({ widget, dados, acoes, children }: Props) {
         height: "100%",
         padding: "12px 14px",
         minHeight: 0,
+        minWidth: 0,
         boxSizing: "border-box",
       }}
     >
@@ -70,7 +71,16 @@ export default function WidgetFrame({ widget, dados, acoes, children }: Props) {
       </div>
 
       {/* Corpo do widget */}
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+      <div
+        data-widget-corpo
+        style={{
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          overflow: "auto",
+          overscrollBehavior: "contain",
+        }}
+      >
         {!def ? (
           <div
             style={{

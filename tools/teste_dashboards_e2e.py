@@ -93,17 +93,21 @@ lay_ruim = json.loads(json.dumps(lay))
 lay_ruim["widgets"][1]["config"] = {"maquinas": [mB["id"]]}
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_ruim, "version": 1}, ADM)
 ok(s == 422, f"salvar com maquina de OUTRO cliente -> 422 ({s})")
-lay_tipo = json.loads(json.dumps(lay)); lay_tipo["widgets"].append({"id": "x", "tipo": "inexistente", "largura": 6, "altura": 2, "config": {}})
+lay_tipo = json.loads(json.dumps(lay)); lay_tipo["widgets"].append({"id": "x", "tipo": "inexistente", "largura": 6, "altura": 6, "config": {}})
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_tipo, "version": 1}, ADM)
 ok(s == 422, f"tipo de widget desconhecido -> 422 ({s})")
-lay_larg = json.loads(json.dumps(lay)); lay_larg["widgets"][0]["largura"] = 5
+lay_larg = json.loads(json.dumps(lay)); lay_larg["widgets"][0]["largura"] = 13
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_larg, "version": 1}, ADM)
-ok(s == 422, f"largura invalida -> 422 ({s})")
+ok(s == 422, f"largura invalida (13 colunas) -> 422 ({s})")
+for l_, a_, esperado in [(5, 37, 200), (2, 1, 200), (1, 6, 422), (6, 41, 422), (6, 0, 422)]:
+    lay_t = json.loads(json.dumps(lay)); lay_t["widgets"][0]["largura"] = l_; lay_t["widgets"][0]["altura"] = a_
+    s, r, _ = call("POST", f"/clients/{A}/dashboard/preview", {"layout": lay_t}, ADM)
+    ok(s == esperado, f"tamanho livre {l_} colunas x {a_} linhas -> {esperado} ({s})")
 lay_ok = json.loads(json.dumps(lay))
 lay_ok["widgets"][1]["config"] = {"maquinas": [mA["id"]]}
-lay_ok["widgets"].append({"id": "aviso", "tipo": "texto", "titulo": "Aviso", "largura": 4, "altura": 1, "config": {"texto": "Olá cliente"}})
-lay_ok["widgets"].append({"id": "hist", "tipo": "historico_backups", "largura": 6, "altura": 2, "config": {"periodo": "30d", "visual": "tabela"}})
-lay_ok["widgets"].append({"id": "eqp", "tipo": "equipamentos", "largura": 6, "altura": 2, "config": {"tipos": ["nvr"]}})
+lay_ok["widgets"].append({"id": "aviso", "tipo": "texto", "titulo": "Aviso", "largura": 4, "altura": 3, "config": {"texto": "Olá cliente"}})
+lay_ok["widgets"].append({"id": "hist", "tipo": "historico_backups", "largura": 6, "altura": 6, "config": {"periodo": "30d", "visual": "tabela"}})
+lay_ok["widgets"].append({"id": "eqp", "tipo": "equipamentos", "largura": 6, "altura": 6, "config": {"tipos": ["nvr"]}})
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_ok, "version": 1}, ADM)
 ok(s == 200 and r["version"] == 2, f"salvar layout valido ({s})")
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_ok, "version": 1}, ADM)
@@ -114,7 +118,7 @@ eqA = call("GET", f"/machines/{mA['id']}/equipamentos", headers=ADM)[1][0]["id"]
 eqB = call("GET", f"/machines/{mB['id']}/equipamentos", headers=ADM)[1][0]["id"]
 s, dtmp, _ = call("GET", f"/clients/{A}/dashboard", headers=ADM)
 lay_g = json.loads(json.dumps(dtmp["layout"]))
-lay_g["widgets"].append({"id": "grav", "tipo": "telemetria_equipamentos", "titulo": None, "largura": 6, "altura": 2, "config": {"equipamentos": [eqB], "apenas_problemas": False}})
+lay_g["widgets"].append({"id": "grav", "tipo": "telemetria_equipamentos", "titulo": None, "largura": 6, "altura": 6, "config": {"equipamentos": [eqB], "apenas_problemas": False}})
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_g, "version": dtmp["version"]}, ADM)
 ok(s == 422, f"Gravadores com equipamento de OUTRO cliente -> 422 ({s})")
 lay_g["widgets"][-1]["config"] = {"equipamentos": [eqA], "apenas_problemas": False}

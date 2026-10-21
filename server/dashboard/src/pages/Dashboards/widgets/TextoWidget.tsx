@@ -10,7 +10,6 @@ export default function TextoWidget({ dados }: Props) {
     <div
       style={{
         height: "100%",
-        overflow: "auto",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
         fontSize: 13,

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { DadosSaudeServidor, WidgetInstancia } from "../types";
 import RingGauge from "../../Overview/RingGauge";
@@ -16,6 +17,17 @@ interface Props {
 }
 
 export default function SaudeServidorWidget({ dados }: Props) {
+  const chegada = useMemo(() => Date.now(), [dados]);
+  const [, setTick] = useState(0);
+
+  // Força re-renderização a cada 10 s para atualizar o tempo relativo exibido
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
   if (!dados.maquinas || dados.maquinas.length === 0) {
     return (
       <div
@@ -37,7 +49,6 @@ export default function SaudeServidorWidget({ dados }: Props) {
     <div
       style={{
         height: "100%",
-        overflow: "auto",
         display: "flex",
         flexDirection: "column",
         gap: 10,
@@ -46,15 +57,10 @@ export default function SaudeServidorWidget({ dados }: Props) {
       {dados.maquinas.map((m) => {
         const t = parseTelemetry(m.telemetria);
         const lvl = t ? overallLevel(t) : null;
-        const contatoMs = m.ultimo_contato
-          ? new Date(
-              m.ultimo_contato.endsWith("Z") ? m.ultimo_contato : m.ultimo_contato + "Z"
-            ).getTime()
-          : null;
-        const tempoAgo =
-          contatoMs && !Number.isNaN(contatoMs)
-            ? `Atualizado ${fmtAgo(Date.now() - contatoMs)}`
-            : "Sem comunicação";
+        const tempoTexto =
+          m.segundos_desde_contato !== null && m.segundos_desde_contato !== undefined
+            ? `Atualizado ${fmtAgo(m.segundos_desde_contato * 1000 + (Date.now() - chegada))}`
+            : "Aguardando a primeira comunicação";
 
         return (
           <div
@@ -112,7 +118,7 @@ export default function SaudeServidorWidget({ dados }: Props) {
                     whiteSpace: "nowrap",
                   }}
                 >
-                  · {tempoAgo}
+                  · {tempoTexto}
                 </span>
               </div>
 

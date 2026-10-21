@@ -38,7 +38,6 @@ export default function StatusBackupsWidget({ dados }: Props) {
     <div
       style={{
         height: "100%",
-        overflow: "auto",
         display: "flex",
         flexDirection: "column",
         gap: 8,
@@ -94,7 +93,9 @@ export default function StatusBackupsWidget({ dados }: Props) {
                 · Último: {fmtDate(m.ultimo_backup, { short: true, empty: "nunca" })}
               </span>
             </div>
-            <StatusBadge status={m.status} />
+            <div style={{ flexShrink: 0 }}>
+              <StatusBadge status={m.status} />
+            </div>
           </div>
 
           {m.equipamentos && m.equipamentos.length > 0 && (

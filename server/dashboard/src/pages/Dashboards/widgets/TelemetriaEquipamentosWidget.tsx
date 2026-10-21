@@ -38,7 +38,6 @@ export default function TelemetriaEquipamentosWidget({
     <div
       style={{
         height: "100%",
-        overflow: "auto",
         display: "flex",
         flexDirection: "column",
         gap: 10,
@@ -161,63 +160,85 @@ export default function TelemetriaEquipamentosWidget({
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 8,
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "6px 10px",
                         fontSize: 12,
                         minWidth: 0,
                       }}
                     >
-                      <span
+                      <div
                         style={{
-                          fontWeight: 600,
-                          color: "var(--text-primary)",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          maxWidth: 100,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
                           flexShrink: 0,
+                          minWidth: 0,
                         }}
-                        title={d.device}
                       >
-                        {d.device || "Disco"}
-                      </span>
+                        <span
+                          style={{
+                            fontWeight: 600,
+                            color: "var(--text-primary)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            maxWidth: 100,
+                            flexShrink: 0,
+                          }}
+                          title={d.device}
+                        >
+                          {d.device || "Disco"}
+                        </span>
 
-                      <div style={{ flexShrink: 0, width: 96 }}>
-                        {d.status && <StatusBadge status={d.status} />}
+                        <div style={{ flexShrink: 0 }}>
+                          {d.status && <StatusBadge status={d.status} />}
+                        </div>
                       </div>
 
                       <div
                         style={{
-                          flex: 1,
-                          minWidth: 40,
-                          height: 6,
-                          borderRadius: 3,
-                          backgroundColor: "var(--surface)",
-                          overflow: "hidden",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          flex: "1 1 120px",
+                          minWidth: 0,
                         }}
                       >
                         <div
                           style={{
-                            width: `${clampedPct}%`,
-                            height: "100%",
-                            backgroundColor: corBarra,
+                            flex: 1,
+                            minWidth: 40,
+                            height: 6,
                             borderRadius: 3,
-                            transition: "width 0.3s ease",
+                            backgroundColor: "var(--surface)",
+                            overflow: "hidden",
                           }}
-                        />
-                      </div>
+                        >
+                          <div
+                            style={{
+                              width: `${clampedPct}%`,
+                              height: "100%",
+                              backgroundColor: corBarra,
+                              borderRadius: 3,
+                              transition: "width 0.3s ease",
+                            }}
+                          />
+                        </div>
 
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          whiteSpace: "nowrap",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {percentVal === null && d.free_gb == null && d.total_gb == null
-                          ? "sem dados do disco"
-                          : `${fmtPct(percentVal)} · ${fmtGb(d.free_gb ?? null)} livres de ${fmtGb(d.total_gb ?? null)}`}
-                      </span>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "var(--text-muted)",
+                            whiteSpace: "nowrap",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {percentVal === null && d.free_gb == null && d.total_gb == null
+                            ? "sem dados do disco"
+                            : `${fmtPct(percentVal)} · ${fmtGb(d.free_gb ?? null)} livres de ${fmtGb(d.total_gb ?? null)}`}
+                        </span>
+                      </div>
                     </div>
                   );
                 })}

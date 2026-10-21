@@ -1,6 +1,8 @@
 export type Periodo = "24h" | "7d" | "30d";
-export type Largura = 3 | 4 | 6 | 8 | 12;
-export type Altura = 1 | 2 | 3 | 4;
+export type Largura = number;
+export type Altura = number;
+export const ALTURA_LINHA_PX = 50;
+export const GAP_GRADE_PX = 12;
 export type TipoWidget =
   | "resumo"
   | "saude_servidor"
@@ -9,7 +11,8 @@ export type TipoWidget =
   | "cameras"
   | "telemetria_equipamentos"
   | "equipamentos"
-  | "texto";
+  | "texto"
+  | "status_nvr";
 
 export interface WidgetInstancia {
   id: string;
@@ -136,6 +139,7 @@ export interface DadosSaudeServidor {
     nome: string;
     online: boolean;
     ultimo_contato: string | null;
+    segundos_desde_contato: number | null;
     telemetria: Record<string, unknown> | null;
   }[];
 }
@@ -201,4 +205,18 @@ export interface DadosEquipamentos {
 
 export interface DadosTexto {
   texto: string;
+}
+
+export interface ContagemStatusCameras {
+  total: number;
+  gravando: number;
+  sem_gravacao: number;
+  nao_verificado: number;
+  offline: number;
+}
+
+export interface DadosStatusNvr {
+  visual: "por_equipamento" | "agregado";
+  total: ContagemStatusCameras;
+  equipamentos: ({ id: string; nome: string; tipo: string; maquina: string } & ContagemStatusCameras)[];
 }

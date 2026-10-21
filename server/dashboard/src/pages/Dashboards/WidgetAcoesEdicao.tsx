@@ -1,11 +1,10 @@
-import { GripVertical, Settings, Trash2 } from "lucide-react";
-import { Altura, Largura, WidgetInstancia } from "./types";
-import { LARGURAS } from "./widgets/registry";
+import { ChevronsUpDown, GripVertical, Maximize2, Settings, Trash2 } from "lucide-react";
+import { WidgetInstancia } from "./types";
 
 interface Props {
   widget: WidgetInstancia;
-  onLargura: (l: Largura) => void;
-  onAltura: (a: Altura) => void;
+  onLarguraTotal: () => void;
+  onAjustar: () => void;
   onConfigurar: () => void;
   onRemover: () => void;
 }
@@ -13,8 +12,8 @@ interface Props {
 // Barra de controle de um componente no modo de edição do dashboard
 export default function WidgetAcoesEdicao({
   widget,
-  onLargura,
-  onAltura,
+  onLarguraTotal,
+  onAjustar,
   onConfigurar,
   onRemover,
 }: Props) {
@@ -23,6 +22,19 @@ export default function WidgetAcoesEdicao({
       style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}
       onClick={(e) => e.stopPropagation()}
     >
+      <span
+        style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          userSelect: "none",
+          flexShrink: 0,
+          marginRight: 2,
+        }}
+        title={`Tamanho: ${widget.largura} colunas × ${widget.altura} linhas`}
+      >
+        {widget.largura}×{widget.altura}
+      </span>
+
       <span
         data-drag-handle
         title="Arraste para reordenar"
@@ -39,56 +51,31 @@ export default function WidgetAcoesEdicao({
         <GripVertical size={15} style={{ flexShrink: 0 }} />
       </span>
 
-      <select
-        value={widget.largura}
-        title="Largura"
-        onChange={(e) => {
+      <button
+        type="button"
+        className="btn-icon"
+        title="Ocupar a largura toda"
+        style={{ width: 26, height: 26, flexShrink: 0 }}
+        onClick={(e) => {
           e.stopPropagation();
-          onLargura(Number(e.target.value) as Largura);
-        }}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          fontSize: 11,
-          padding: "2px 4px",
-          background: "var(--surface-2)",
-          border: "1px solid var(--border)",
-          color: "var(--text-primary)",
-          borderRadius: 6,
-          cursor: "pointer",
-          flexShrink: 0,
+          onLarguraTotal();
         }}
       >
-        {LARGURAS.map((item) => (
-          <option key={item.valor} value={item.valor}>
-            {item.rotulo}
-          </option>
-        ))}
-      </select>
+        <Maximize2 size={13} style={{ flexShrink: 0 }} />
+      </button>
 
-      <select
-        value={widget.altura}
-        title="Altura"
-        onChange={(e) => {
+      <button
+        type="button"
+        className="btn-icon"
+        title="Ajustar a altura ao conteúdo (ou dê dois cliques no canto do componente)"
+        style={{ width: 26, height: 26, flexShrink: 0 }}
+        onClick={(e) => {
           e.stopPropagation();
-          onAltura(Number(e.target.value) as Altura);
-        }}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          fontSize: 11,
-          padding: "2px 4px",
-          background: "var(--surface-2)",
-          border: "1px solid var(--border)",
-          color: "var(--text-primary)",
-          borderRadius: 6,
-          cursor: "pointer",
-          flexShrink: 0,
+          onAjustar();
         }}
       >
-        <option value={1}>1 linha</option>
-        <option value={2}>2 linhas</option>
-        <option value={3}>3 linhas</option>
-        <option value={4}>4 linhas</option>
-      </select>
+        <ChevronsUpDown size={14} style={{ flexShrink: 0 }} />
+      </button>
 
       <button
         type="button"

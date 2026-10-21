@@ -25,10 +25,11 @@ export default function EquipamentosWidget({ dados }: Props) {
   }
 
   return (
-    <div style={{ height: "100%", overflow: "auto" }}>
+    <div style={{ overflowX: "auto", minWidth: 0 }}>
       <table
         style={{
           width: "100%",
+          minWidth: 320,
           borderCollapse: "collapse",
           fontSize: 12,
           textAlign: "left",
@@ -42,10 +43,10 @@ export default function EquipamentosWidget({ dados }: Props) {
               fontSize: 11,
             }}
           >
-            <th style={{ padding: "4px 6px" }}>Equipamento</th>
-            <th style={{ padding: "4px 6px" }}>Tipo</th>
-            <th style={{ padding: "4px 6px" }}>Máquina</th>
-            <th style={{ padding: "4px 6px", textAlign: "right" }}>Último backup</th>
+            <th style={{ padding: "4px 6px", whiteSpace: "nowrap" }}>Equipamento</th>
+            <th style={{ padding: "4px 6px", whiteSpace: "nowrap" }}>Tipo</th>
+            <th style={{ padding: "4px 6px", whiteSpace: "nowrap" }}>Máquina</th>
+            <th style={{ padding: "4px 6px", textAlign: "right", whiteSpace: "nowrap" }}>Último backup</th>
           </tr>
         </thead>
         <tbody>
@@ -61,7 +62,9 @@ export default function EquipamentosWidget({ dados }: Props) {
                   padding: "6px",
                   fontWeight: 500,
                   color: "var(--text-primary)",
+                  whiteSpace: "nowrap",
                 }}
+                title={eq.nome}
               >
                 {eq.nome}
               </td>
@@ -69,6 +72,7 @@ export default function EquipamentosWidget({ dados }: Props) {
                 style={{
                   padding: "6px",
                   color: "var(--text-secondary)",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {eq.tipo}
@@ -77,11 +81,13 @@ export default function EquipamentosWidget({ dados }: Props) {
                 style={{
                   padding: "6px",
                   color: "var(--text-secondary)",
+                  whiteSpace: "nowrap",
                 }}
+                title={eq.maquina}
               >
                 {eq.maquina}
               </td>
-              <td style={{ padding: "6px", textAlign: "right" }}>
+              <td style={{ padding: "6px", textAlign: "right", whiteSpace: "nowrap" }}>
                 <StatusBadge status={eq.status} />
               </td>
             </tr>

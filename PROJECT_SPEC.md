@@ -838,6 +838,20 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-21] — Dashboards por Cliente: redimensionar com o mouse e conteúdo adaptável (rodada B)
+
+**Alteração:** Em modo de edição cada componente ganha alças (borda direita, borda inferior e canto) para redimensionar com o mouse como uma janela, com encaixe na grade (colunas de 1/12 da largura e linhas de 50px), tamanho mínimo por tipo de widget, etiqueta "N col × M lin" durante o arrasto e atualização ao vivo do layout; "Largura total" e "Ajustar ao conteúdo" (também por duplo clique no canto) substituem os seletores de ¼/½. O conteúdo dos componentes se reorganiza conforme a área (quebra de linha, grades `auto-fit`, gráfico do histórico desenhado no tamanho real) e, no limite, rola dentro do quadro: nenhuma informação é cortada. O componente "Saúde do servidor" passou a mostrar sempre "Atualizado há …" (o servidor envia `segundos_desde_contato` e o tempo continua envelhecendo no navegador) e "Aguardando a primeira comunicação" quando a máquina nunca se comunicou; `iso()` deixou de gerar datas com fuso duplicado.
+**Arquivos:** server/dashboard/src/pages/Dashboards/DashboardCanvas.tsx, WidgetAcoesEdicao.tsx, DashboardWorkspace.tsx, WidgetFrame.tsx, types.ts, widgets/*, server/dashboard/src/index.css, server/api/services/dashboards/widgets.py
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-21] — Dashboards por Cliente: tamanho livre dos componentes e pizza de status dos NVRs (rodada A)
+
+**Alteração:** O tamanho dos componentes deixa de ser fixo: `largura` vale 2 a 12 colunas e `altura` 1 a 40 linhas de 50px (antes 1–4 linhas de 150px). Layouts antigos (`schema_version` 1) são convertidos na leitura (altura × 3) para `schema_version` 2, sem tocar no banco até o próximo salvamento. Cada tipo de widget ganha tamanho mínimo no front (`larguraMin`/`alturaMin`) para o conteúdo não quebrar. Novo widget `status_nvr` ("Status dos NVRs (pizza)"): gráfico de pizza SVG da situação das câmeras de cada NVR (gravando, sem gravação, offline, não verificado) com cores fixas por status, uma pizza por NVR ou uma agregada; reaproveita `last_recording_status` e a lista branca de campos/isolamento por cliente (`ids_referenciados` cobre a chave `equipamentos` do novo tipo).
+**Arquivos:** server/api/services/dashboards/layout.py, widgets.py, server/dashboard/src/pages/Dashboards/types.ts, useElementSize.ts, PieChart.tsx, widgets/StatusNvrWidget.tsx, widgets/registry.tsx, server/dashboard/src/index.css
+**Breaking Change:** Não (layouts antigos são convertidos na leitura).
+**Branch:** isaque
+
 ### [2026-10-21] — Dashboards por Cliente: componente "Gravadores" e indicadores de disco no Resumo
 
 **Alteração:** A telemetria dos NVR/DVR Hikvision (`nvrs.last_telemetry_status`: CPU, RAM e discos) passa a alimentar o dashboard do Cliente. Novo tipo de widget `telemetria_equipamentos` ("Gravadores (CPU, RAM e discos)": anéis de CPU/RAM, status e ocupação de cada disco, alerta quando o disco tem status diferente de OK/REPOUSO ou ocupação >= 90%, filtro de gravadores e opção "apenas com problema") e três indicadores novos no Resumo (`gravadores_com_telemetria`, `discos_total`, `discos_com_problema`; os tiles de disco só aparecem se houver telemetria). A resposta usa lista branca de campos (sem IP, usuário, senha ou `config_extra`) e o isolamento por cliente cobre a chave `equipamentos` do novo widget (`ids_referenciados`). Nenhuma mudança no agente nem no banco.

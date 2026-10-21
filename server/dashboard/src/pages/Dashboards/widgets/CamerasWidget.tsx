@@ -28,7 +28,6 @@ export default function CamerasWidget({ dados }: Props) {
     <div
       style={{
         height: "100%",
-        overflow: "auto",
         display: "flex",
         flexDirection: "column",
         gap: 10,
@@ -66,13 +65,14 @@ export default function CamerasWidget({ dados }: Props) {
                 flexWrap: "wrap",
               }}
             >
-              <div style={{ minWidth: 0 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <span
                   style={{
                     fontSize: 13,
                     fontWeight: 600,
                     color: "var(--text-primary)",
                   }}
+                  title={eq.nome}
                 >
                   {eq.nome}
                 </span>
@@ -82,6 +82,7 @@ export default function CamerasWidget({ dados }: Props) {
                     color: "var(--text-muted)",
                     marginLeft: 6,
                   }}
+                  title={eq.maquina}
                 >
                   · {eq.maquina}
                 </span>
@@ -94,6 +95,7 @@ export default function CamerasWidget({ dados }: Props) {
                   alignItems: "center",
                   gap: 10,
                   fontSize: 11,
+                  flexWrap: "wrap",
                 }}
               >
                 <span style={{ color: "var(--ok)", fontWeight: 600 }}>
@@ -181,18 +183,22 @@ export default function CamerasWidget({ dados }: Props) {
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
+                        minWidth: 0,
+                        flex: 1,
                       }}
                       title={cam.nome}
                     >
                       {cam.nome}
                     </span>
-                    <StatusBadge
-                      status={
-                        cam.comunicacao !== "ONLINE"
-                          ? "OFFLINE"
-                          : "SEM_GRAVACAO"
-                      }
-                    />
+                    <div style={{ flexShrink: 0 }}>
+                      <StatusBadge
+                        status={
+                          cam.comunicacao !== "ONLINE"
+                            ? "OFFLINE"
+                            : "SEM_GRAVACAO"
+                        }
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

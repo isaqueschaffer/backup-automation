@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Eye,
@@ -11,12 +11,14 @@ import {
 import { useToast } from "../../components/Toast";
 import { apiErrorMessage } from "../../utils/errors";
 import {
+  ALTURA_LINHA_PX,
   DadosDashboard,
   DashboardLayout,
+  GAP_GRADE_PX,
   OpcoesDashboard,
   Periodo,
 } from "./types";
-import { DefinicaoWidget } from "./widgets/registry";
+import { DefinicaoWidget, definicaoDe } from "./widgets/registry";
 import { useDashboardDraft } from "./useDashboardDraft";
 import DashboardCanvas from "./DashboardCanvas";
 import WidgetAcoesEdicao from "./WidgetAcoesEdicao";
@@ -201,6 +203,29 @@ export default function DashboardWorkspace({
   const widgetConfigurando = useMemo(
     () => draft.widgets.find((w) => w.id === widgetEmConfig) || null,
     [draft.widgets, widgetEmConfig]
+  );
+
+  const ajustarAoConteudo = useCallback(
+    (id: string) => {
+      const item = document.querySelector<HTMLElement>(`[data-widget-id="${id}"]`);
+      if (!item) return;
+      const corpo = item.querySelector<HTMLElement>("[data-widget-corpo]");
+      if (!corpo) return;
+
+      const widget = draft.widgets.find((w) => w.id === id);
+      if (!widget) return;
+      const def = definicaoDe(widget.tipo);
+      const minA = Math.max(1, def?.alturaMin ?? 1);
+
+      const precisa = corpo.scrollHeight + (item.clientHeight - corpo.clientHeight);
+      const linhasCalculadas = Math.ceil(
+        (precisa + GAP_GRADE_PX) / (ALTURA_LINHA_PX + GAP_GRADE_PX)
+      );
+      const linhas = Math.max(minA, Math.min(40, linhasCalculadas));
+
+      atualizar(id, { altura: linhas });
+    },
+    [draft.widgets, atualizar]
   );
 
   return (
@@ -395,13 +420,15 @@ export default function DashboardWorkspace({
         dados={modo === "ver" ? dadosVivos : (dadosPrevia ?? dadosVivos)}
         editando={modo === "editar"}
         onMover={mover}
+        onRedimensionar={modo === "editar" ? (id, t) => atualizar(id, t) : undefined}
+        onAjustar={modo === "editar" ? ajustarAoConteudo : undefined}
         renderAcoes={
           modo === "editar"
             ? (w) => (
                 <WidgetAcoesEdicao
                   widget={w}
-                  onLargura={(l) => atualizar(w.id, { largura: l })}
-                  onAltura={(a) => atualizar(w.id, { altura: a })}
+                  onLarguraTotal={() => atualizar(w.id, { largura: 12 })}
+                  onAjustar={() => ajustarAoConteudo(w.id)}
                   onConfigurar={() => setWidgetEmConfig(w.id)}
                   onRemover={() => remover(w.id)}
                 />

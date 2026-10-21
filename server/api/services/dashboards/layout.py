@@ -1,15 +1,19 @@
+import copy
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 from uuid import UUID
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from models import CustomerDashboard, Machine, NVR
 from . import widgets  # noqa: F401  registra os tipos de widget
 from .registro import REGISTRO
 
-LARGURAS = (3, 4, 6, 8, 12)
+LARGURA_MIN = 2
+LARGURA_MAX = 12
+ALTURA_MIN = 1
+ALTURA_MAX = 40
 MAX_WIDGETS = 40
 
 
@@ -23,16 +27,9 @@ class WidgetInstancia(BaseModel):
     id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     tipo: str
     titulo: Optional[str] = Field(None, max_length=80)
-    largura: int = 6
-    altura: int = Field(2, ge=1, le=4)
+    largura: int = Field(6, ge=LARGURA_MIN, le=LARGURA_MAX)
+    altura: int = Field(6, ge=ALTURA_MIN, le=ALTURA_MAX)
     config: Dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("largura")
-    @classmethod
-    def _largura_valida(cls, v: int) -> int:
-        if v not in LARGURAS:
-            raise ValueError("Largura inválida")
-        return v
 
     @model_validator(mode="after")
     def _validar_tipo_e_config(self):
@@ -46,7 +43,7 @@ class WidgetInstancia(BaseModel):
 
 class DashboardLayout(BaseModel):
     model_config = {"extra": "forbid"}
-    schema_version: int = 1
+    schema_version: int = 2
     filtros: FiltrosGlobais = Field(default_factory=FiltrosGlobais)
     widgets: List[WidgetInstancia] = Field(default_factory=list, max_length=MAX_WIDGETS)
 
@@ -60,13 +57,13 @@ class DashboardLayout(BaseModel):
 
 def layout_padrao() -> DashboardLayout:
     return DashboardLayout(
-        schema_version=1,
+        schema_version=2,
         filtros=FiltrosGlobais(periodo="7d"),
         widgets=[
-            WidgetInstancia(id="resumo", tipo="resumo", largura=12, altura=1, config={}),
-            WidgetInstancia(id="saude_servidor", tipo="saude_servidor", largura=12, altura=3, config={}),
-            WidgetInstancia(id="status_backups", tipo="status_backups", largura=6, altura=2, config={}),
-            WidgetInstancia(id="cameras", tipo="cameras", largura=6, altura=2, config={}),
+            WidgetInstancia(id="resumo", tipo="resumo", largura=12, altura=3, config={}),
+            WidgetInstancia(id="saude_servidor", tipo="saude_servidor", largura=12, altura=9, config={}),
+            WidgetInstancia(id="status_backups", tipo="status_backups", largura=6, altura=6, config={}),
+            WidgetInstancia(id="cameras", tipo="cameras", largura=6, altura=6, config={}),
         ],
     )
 
@@ -90,7 +87,7 @@ def ids_referenciados(layout: DashboardLayout) -> Tuple[Set[UUID], Set[UUID]]:
                 u = _parse_uuid(m)
                 if u:
                     ids_de_maquinas.add(u)
-        if w.tipo in ("cameras", "telemetria_equipamentos"):
+        if w.tipo in ("cameras", "telemetria_equipamentos", "status_nvr"):
             eqs = w.config.get("equipamentos")
             if isinstance(eqs, list):
                 for e in eqs:
@@ -119,7 +116,27 @@ def layout_do_banco(dashboard: CustomerDashboard) -> DashboardLayout:
     if not dashboard.layout or not isinstance(dashboard.layout, dict):
         return layout_padrao()
     try:
-        return DashboardLayout.model_validate(dashboard.layout)
+        dados = copy.deepcopy(dashboard.layout)
+        schema_ver = dados.get("schema_version")
+        try:
+            versao = int(schema_ver) if schema_ver is not None else 1
+        except (ValueError, TypeError):
+            versao = 1
+
+        if versao < 2:
+            widgets_list = dados.get("widgets")
+            if isinstance(widgets_list, list):
+                for w in widgets_list:
+                    if isinstance(w, dict):
+                        alt = w.get("altura", 2)
+                        try:
+                            alt_int = int(alt)
+                        except (ValueError, TypeError):
+                            alt_int = 2
+                        w["altura"] = min(alt_int * 3, ALTURA_MAX)
+            dados["schema_version"] = 2
+
+        return DashboardLayout.model_validate(dados)
     except Exception:
         return layout_padrao()
 

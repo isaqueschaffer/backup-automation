@@ -5,6 +5,7 @@ import {
   BarChart3,
   HardDrive,
   LayoutGrid,
+  PieChart as IconePizza,
   Server,
   ShieldCheck,
   Type,
@@ -18,6 +19,7 @@ import {
   DadosResumo,
   DadosSaudeServidor,
   DadosStatusBackups,
+  DadosStatusNvr,
   DadosTelemetriaEquipamentos,
   DadosTexto,
   Largura,
@@ -31,6 +33,7 @@ import CamerasWidget from "./CamerasWidget";
 import TelemetriaEquipamentosWidget from "./TelemetriaEquipamentosWidget";
 import EquipamentosWidget from "./EquipamentosWidget";
 import TextoWidget from "./TextoWidget";
+import StatusNvrWidget from "./StatusNvrWidget";
 
 export type CampoWidget =
   | { chave: string; tipo: "maquinas"; rotulo: string }
@@ -56,6 +59,8 @@ export interface DefinicaoWidget {
   icone: LucideIcon;
   larguraPadrao: Largura;
   alturaPadrao: Altura;
+  larguraMin: number;
+  alturaMin: number;
   configPadrao: Record<string, unknown>;
   campos: CampoWidget[];
   renderizar: (dados: unknown, widget: WidgetInstancia) => ReactNode;
@@ -68,7 +73,9 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     descricao: "Visão geral de máquinas, backups e câmeras do cliente",
     icone: LayoutGrid,
     larguraPadrao: 12,
-    alturaPadrao: 1,
+    alturaPadrao: 3,
+    larguraMin: 4,
+    alturaMin: 3,
     configPadrao: {},
     campos: [],
     renderizar: (dados, widget) => {
@@ -83,7 +90,9 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     descricao: "Medidores de CPU, RAM, disco, rede e GPU das máquinas",
     icone: Activity,
     larguraPadrao: 12,
-    alturaPadrao: 3,
+    alturaPadrao: 9,
+    larguraMin: 4,
+    alturaMin: 6,
     configPadrao: { maquinas: [] },
     campos: [{ chave: "maquinas", tipo: "maquinas", rotulo: "Máquinas exibidas" }],
     renderizar: (dados, widget) => {
@@ -98,7 +107,9 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     descricao: "Último status de backup por máquina e por equipamento",
     icone: ShieldCheck,
     larguraPadrao: 6,
-    alturaPadrao: 2,
+    alturaPadrao: 6,
+    larguraMin: 3,
+    alturaMin: 5,
     configPadrao: { maquinas: [] },
     campos: [{ chave: "maquinas", tipo: "maquinas", rotulo: "Máquinas exibidas" }],
     renderizar: (dados, widget) => {
@@ -113,7 +124,9 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     descricao: "Histórico de execuções com taxa de sucesso e duração",
     icone: BarChart3,
     larguraPadrao: 6,
-    alturaPadrao: 2,
+    alturaPadrao: 6,
+    larguraMin: 4,
+    alturaMin: 6,
     configPadrao: { maquinas: [], periodo: null, visual: "grafico" },
     campos: [
       { chave: "maquinas", tipo: "maquinas", rotulo: "Máquinas exibidas" },
@@ -140,7 +153,9 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     descricao: "Status de comunicação e gravação das câmeras",
     icone: Video,
     larguraPadrao: 6,
-    alturaPadrao: 2,
+    alturaPadrao: 6,
+    larguraMin: 3,
+    alturaMin: 6,
     configPadrao: { equipamentos: [], apenas_problemas: false },
     campos: [
       { chave: "equipamentos", tipo: "equipamentos", rotulo: "Equipamentos exibidos" },
@@ -158,7 +173,9 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     descricao: "CPU, memória e discos dos gravadores (NVR/DVR) com alerta de disco com problema ou cheio",
     icone: HardDrive,
     larguraPadrao: 6,
-    alturaPadrao: 2,
+    alturaPadrao: 6,
+    larguraMin: 4,
+    alturaMin: 7,
     configPadrao: { equipamentos: [], apenas_problemas: false },
     campos: [
       { chave: "equipamentos", tipo: "equipamentos", rotulo: "Gravadores exibidos", tipos: ["NVR"] },
@@ -176,7 +193,9 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     descricao: "Lista de equipamentos cadastrados por tipo",
     icone: Server,
     larguraPadrao: 6,
-    alturaPadrao: 2,
+    alturaPadrao: 6,
+    larguraMin: 3,
+    alturaMin: 5,
     configPadrao: { tipos: [], maquinas: [] },
     campos: [
       { chave: "tipos", tipo: "tipos", rotulo: "Tipos de equipamento" },
@@ -194,7 +213,9 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     descricao: "Bloco de texto livre ou aviso institucional",
     icone: Type,
     larguraPadrao: 4,
-    alturaPadrao: 1,
+    alturaPadrao: 3,
+    larguraMin: 2,
+    alturaMin: 2,
     configPadrao: { texto: "" },
     campos: [
       { chave: "texto", tipo: "texto", rotulo: "Texto", max: 1000 },
@@ -203,6 +224,43 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
       // Cast tipado para texto institucional
       const d = (dados || { texto: "" }) as DadosTexto;
       return <TextoWidget dados={d} widget={widget} />;
+    },
+  },
+  status_nvr: {
+    tipo: "status_nvr",
+    rotulo: "Status dos NVRs (pizza)",
+    descricao: "Gráfico de pizza com a situação das câmeras de cada NVR: gravando, sem gravação, offline e não verificado",
+    icone: IconePizza,
+    larguraPadrao: 6,
+    alturaPadrao: 8,
+    larguraMin: 3,
+    alturaMin: 7,
+    configPadrao: { equipamentos: [], visual: "por_equipamento" },
+    campos: [
+      {
+        chave: "equipamentos",
+        tipo: "equipamentos",
+        rotulo: "NVRs exibidos",
+        tipos: ["NVR", "DIGIFORT", "DEFENSE"],
+      },
+      {
+        chave: "visual",
+        tipo: "opcao",
+        rotulo: "Visual",
+        opcoes: [
+          { valor: "por_equipamento", rotulo: "Uma pizza por NVR" },
+          { valor: "agregado", rotulo: "Uma pizza com todos" },
+        ],
+      },
+    ],
+    renderizar: (dados, widget) => {
+      // Cast tipado para status dos NVRs
+      const d = (dados || {
+        visual: "por_equipamento",
+        total: { total: 0, gravando: 0, sem_gravacao: 0, nao_verificado: 0, offline: 0 },
+        equipamentos: [],
+      }) as DadosStatusNvr;
+      return <StatusNvrWidget dados={d} widget={widget} />;
     },
   },
 };

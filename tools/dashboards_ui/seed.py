@@ -41,7 +41,7 @@ for nome, cpu, disco in [("Servidor Principal", 23.5, 62), ("Servidor Gravação
 
 dash = call("GET", f"/clients/{cli['id']}/dashboard", headers=ADM)
 lay = dash["layout"]
-lay["widgets"].append({"id": "gravadores", "tipo": "telemetria_equipamentos", "titulo": None, "largura": 6, "altura": 2, "config": {"equipamentos": [], "apenas_problemas": False}})
+lay["widgets"].append({"id": "gravadores", "tipo": "telemetria_equipamentos", "titulo": None, "largura": 6, "altura": 8, "config": {"equipamentos": [], "apenas_problemas": False}})
 call("PUT", f"/clients/{cli['id']}/dashboard", {"layout": lay, "version": dash["version"]}, ADM)
 
 lk = call("POST", f"/clients/{cli['id']}/dashboard/share", {"permite_edicao": True}, ADM)

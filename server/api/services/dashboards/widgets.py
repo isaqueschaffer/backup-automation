@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
@@ -78,8 +78,58 @@ def contar_cameras(equipamento: NVR) -> Dict[str, int]:
     return {"total": total, "online": online, "offline": offline, "sem_gravacao": sem_gravacao}
 
 
+def contar_status_cameras(equipamento: NVR) -> Dict[str, int]:
+    raw = equipamento.last_recording_status
+    if not isinstance(raw, list):
+        return {"total": 0, "gravando": 0, "sem_gravacao": 0, "nao_verificado": 0, "offline": 0}
+
+    total = 0
+    gravando = 0
+    sem_gravacao = 0
+    nao_verificado = 0
+    offline = 0
+
+    for cam in raw:
+        if not isinstance(cam, dict):
+            continue
+        total += 1
+        comunicacao = cam.get("status_comunicacao") or ("ONLINE" if cam.get("online") else "OFFLINE")
+        gravacao = cam.get("status_gravacao")
+        if comunicacao != "ONLINE":
+            offline += 1
+        elif gravacao == "COM_GRAVACAO":
+            gravando += 1
+        elif gravacao == "SEM_GRAVACAO":
+            sem_gravacao += 1
+        else:
+            nao_verificado += 1
+
+    return {
+        "total": total,
+        "gravando": gravando,
+        "sem_gravacao": sem_gravacao,
+        "nao_verificado": nao_verificado,
+        "offline": offline,
+    }
+
+
 def iso(dt: Optional[datetime]) -> Optional[str]:
-    return dt.isoformat() + "Z" if dt else None
+    if not dt:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.isoformat() + "Z"
+
+
+def segundos_desde(agora: datetime, dt: Optional[datetime]) -> Optional[int]:
+    if dt is None:
+        return None
+    if agora.tzinfo is not None:
+        agora = agora.astimezone(timezone.utc).replace(tzinfo=None)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    diff = int((agora - dt).total_seconds())
+    return max(0, diff)
 
 
 def telemetria_publica(raw: Any) -> Optional[Dict[str, Any]]:
@@ -297,6 +347,7 @@ def construir_saude_servidor(ctx: ContextoDados, config: ConfigSaudeServidor) ->
             "nome": m.name,
             "online": check_machine_online(m),
             "ultimo_contato": iso(m.last_seen),
+            "segundos_desde_contato": segundos_desde(ctx.agora, m.last_seen),
             "telemetria": telemetria_publica(m.telemetry),
         }
         for m in maqs
@@ -547,6 +598,47 @@ def construir_texto(ctx: ContextoDados, config: ConfigTexto) -> Dict[str, Any]:
     return {"texto": config.texto}
 
 
+# ─── Status dos NVRs (pizza) ───────────────────────────────────────────
+class ConfigStatusNvr(BaseModel):
+    model_config = {"extra": "forbid"}
+    equipamentos: List[UUID] = Field(default_factory=list, max_length=500)
+    visual: Literal["por_equipamento", "agregado"] = "por_equipamento"
+
+
+def construir_status_nvr(ctx: ContextoDados, config: ConfigStatusNvr) -> Dict[str, Any]:
+    filtro_ids = set(config.equipamentos) if config.equipamentos else None
+    itens = []
+
+    for m in ctx.maquinas:
+        for e in equipamentos_ativos(m):
+            if filtro_ids is not None and e.id not in filtro_ids:
+                continue
+            c = contar_status_cameras(e)
+            if c["total"] == 0:
+                continue
+            itens.append({
+                "id": str(e.id),
+                "nome": e.name,
+                "tipo": e.tipo or "NVR",
+                "maquina": m.name,
+                **c,
+            })
+
+    total_geral = {
+        "total": sum(i["total"] for i in itens),
+        "gravando": sum(i["gravando"] for i in itens),
+        "sem_gravacao": sum(i["sem_gravacao"] for i in itens),
+        "nao_verificado": sum(i["nao_verificado"] for i in itens),
+        "offline": sum(i["offline"] for i in itens),
+    }
+
+    return {
+        "visual": config.visual,
+        "total": total_geral,
+        "equipamentos": itens,
+    }
+
+
 # ─── Registro dos tipos de widget ──────────────────────────────────────────
 registrar(TipoWidget(
     tipo="resumo",
@@ -554,7 +646,7 @@ registrar(TipoWidget(
     descricao="Visão geral de máquinas, backups e câmeras do cliente",
     config_model=ConfigResumo,
     largura_padrao=12,
-    altura_padrao=1,
+    altura_padrao=3,
     construir=construir_resumo,
 ))
 
@@ -564,7 +656,7 @@ registrar(TipoWidget(
     descricao="Medidores de CPU, RAM, disco, rede e GPU das máquinas",
     config_model=ConfigSaudeServidor,
     largura_padrao=12,
-    altura_padrao=3,
+    altura_padrao=9,
     construir=construir_saude_servidor,
 ))
 
@@ -574,7 +666,7 @@ registrar(TipoWidget(
     descricao="Último status de backup por máquina e por equipamento",
     config_model=ConfigStatusBackups,
     largura_padrao=6,
-    altura_padrao=2,
+    altura_padrao=6,
     construir=construir_status_backups,
 ))
 
@@ -584,7 +676,7 @@ registrar(TipoWidget(
     descricao="Histórico de execuções com taxa de sucesso e duração",
     config_model=ConfigHistoricoBackups,
     largura_padrao=6,
-    altura_padrao=2,
+    altura_padrao=6,
     construir=construir_historico_backups,
 ))
 
@@ -594,7 +686,7 @@ registrar(TipoWidget(
     descricao="Status de comunicação e gravação das câmeras",
     config_model=ConfigCameras,
     largura_padrao=6,
-    altura_padrao=2,
+    altura_padrao=6,
     construir=construir_cameras,
 ))
 
@@ -604,7 +696,7 @@ registrar(TipoWidget(
     descricao="CPU, memória e discos dos gravadores (NVR/DVR) com alerta de disco com problema ou cheio",
     config_model=ConfigTelemetriaEquipamentos,
     largura_padrao=6,
-    altura_padrao=2,
+    altura_padrao=6,
     construir=construir_telemetria_equipamentos,
 ))
 
@@ -614,7 +706,7 @@ registrar(TipoWidget(
     descricao="Lista de equipamentos cadastrados por tipo",
     config_model=ConfigEquipamentos,
     largura_padrao=6,
-    altura_padrao=2,
+    altura_padrao=6,
     construir=construir_equipamentos,
 ))
 
@@ -624,6 +716,16 @@ registrar(TipoWidget(
     descricao="Bloco de texto livre ou aviso institucional",
     config_model=ConfigTexto,
     largura_padrao=4,
-    altura_padrao=1,
+    altura_padrao=3,
     construir=construir_texto,
+))
+
+registrar(TipoWidget(
+    tipo="status_nvr",
+    rotulo="Status dos NVRs (pizza)",
+    descricao="Gráfico de pizza com a situação das câmeras de cada NVR: gravando, sem gravação, offline e não verificado",
+    config_model=ConfigStatusNvr,
+    largura_padrao=6,
+    altura_padrao=8,
+    construir=construir_status_nvr,
 ))

@@ -86,7 +86,6 @@ export default function ResumoWidget({ dados }: Props) {
     <div
       style={{
         height: "100%",
-        overflow: "auto",
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
         gap: 8,
