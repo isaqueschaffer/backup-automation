@@ -103,7 +103,7 @@ export function rowsToCameras(rows: unknown[][]): CameraRow[] {
 
       let modelo = "Hikvision";
       if (proto.includes("INTELBRAS")) modelo = "Intelbras";
-      else if (proto.includes("ONVIF")) modelo = "ONVIF";
+      else if (proto.includes("ONVIF") || proto.includes("MOTOROLA") || proto.includes("MTI")) modelo = "ONVIF";
       else if (proto.includes("GRANDSTREAM")) modelo = "Grandstream";
 
       out.push({
@@ -159,7 +159,7 @@ export function rowsToCameras(rows: unknown[][]): CameraRow[] {
       if (cellModelo.includes("INTELBRAS")) modelo = "Intelbras";
       else if (cellModelo.includes("HIKVISION") || cellModelo.includes("HIKV")) modelo = "Hikvision";
       else if (cellModelo.includes("GRANDSTREAM")) modelo = "Grandstream";
-      else if (cellModelo.includes("ONVIF")) modelo = "ONVIF";
+      else if (cellModelo.includes("ONVIF") || cellModelo.includes("MOTOROLA") || cellModelo.includes("MTI")) modelo = "ONVIF";
       else if (cellModelo) modelo = cleanCell(cols[idxModelo]); // valor literal (ex: "Dahua")
     }
     // 2) Fallback: heurística pela linha inteira (quando não há coluna dedicada ou célula vazia)
@@ -168,7 +168,7 @@ export function rowsToCameras(rows: unknown[][]): CameraRow[] {
       if (rowStr.includes("HIKVISION") || rowStr.includes("HIKV")) modelo = "Hikvision";
       else if (rowStr.includes("INTELBRAS")) modelo = "Intelbras";
       else if (rowStr.includes("GRANDSTREAM")) modelo = "Grandstream";
-      else if (rowStr.includes("ONVIF")) modelo = "ONVIF";
+      else if (rowStr.includes("ONVIF") || rowStr.includes("MOTOROLA") || rowStr.includes("MTI")) modelo = "ONVIF";
       else if (rowStr.includes("CÂMERA IP") || rowStr.includes("CAMERA IP")) modelo = "Intelbras";
       else modelo = "Hikvision";
     }

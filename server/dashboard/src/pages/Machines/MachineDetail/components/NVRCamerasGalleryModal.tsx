@@ -571,6 +571,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
                   <option value="Intelbras">Intelbras</option>
                   <option value="Grandstream">Grandstream</option>
                   <option value="ONVIF">ONVIF Genérico</option>
+                  <option value="Motorola">Motorola (ONVIF)</option>
                 </select>
               </label>
             </div>
