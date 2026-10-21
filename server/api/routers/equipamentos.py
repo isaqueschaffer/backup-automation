@@ -20,25 +20,11 @@ from schemas import (
     NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
 )
 from services.crypto_service import encrypt, decrypt
+from services.galeria_vms import canal_int as _canal_int, ip_valido, parear_cameras
 
 TIPOS_VMS = ("DIGIFORT", "DEFENSE")
 
 router = APIRouter(prefix="/api/v1/machines/{machine_id}/equipamentos", tags=["Equipamentos"])
-
-
-def _nome_chave(nome) -> str:
-    return (nome or "").strip().lower()
-
-
-def _canal_int(valor):
-    # Motorola (agentes < 1.1.4) reportava o canal como GUID "{0000000N-0000-...}"
-    try:
-        return int(valor)
-    except (ValueError, TypeError):
-        try:
-            return int(str(valor).strip("{}").split("-")[0], 16)
-        except ValueError:
-            return None
 
 
 def _get_machine_or_404(machine_id: UUID, db: Session) -> Machine:
@@ -190,7 +176,30 @@ async def test_equipamento_rtsp(
     if is_vms:
         cam_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == equipamento_id, NVRCamera.canal == canal).first()
         if not cam_db or not cam_db.ip:
-            return RTSPTestResponse(success=False, error_message="Câmera sem endereço IP configurado na galeria. Importe o CSV ou configure o IP da câmera.")
+            # Câmera detectada pelo agente e ainda sem IP na Galeria: usa o IP do relatório
+            todas = db.query(NVRCamera).filter(NVRCamera.nvr_id == equipamento_id).all()
+            st_cam = next((st for _, st, c, ch in parear_cameras(todas, eq.last_recording_status or [])
+                           if ch == canal and st is not None), None)
+            ip_recup = ip_valido(st_cam.get("ip")) if st_cam else ""
+            if ip_recup:
+                mod_recup = (st_cam.get("modelo") or "").strip() or "Hikvision"
+                if not cam_db:
+                    cam_db = NVRCamera(
+                        nvr_id=equipamento_id,
+                        canal=canal,
+                        nome=st_cam.get("nome") or f"Canal {canal}",
+                        ip=ip_recup,
+                        username="admin",
+                        password=encrypt("navarro@123"),
+                        modelo=mod_recup
+                    )
+                    db.add(cam_db)
+                else:
+                    cam_db.ip = ip_recup
+                db.commit()
+                db.refresh(cam_db)
+            else:
+                return RTSPTestResponse(success=False, error_message="Câmera sem endereço IP configurado na galeria. Importe o CSV ou configure o IP da câmera.")
         try:
             cam_password = decrypt(cam_db.password) if cam_db.password else "navarro@123"
         except Exception:
@@ -270,7 +279,8 @@ async def test_equipamento_rtsp(
         # Mostra o motivo na galeria (a imagem anterior, se houver, é mantida)
         nvr = db.query(NVR).filter(NVR.id == equipamento_id).first()
         if nvr is not None:
-            _marcar_imagem_noite(nvr, canal, {"status": "FALHA", "motivo": result.error_message, "horario": None}, (cam_db.nome if cam_db else None) or nome)
+            _marcar_imagem_noite(db, nvr, canal, {"status": "FALHA", "motivo": mascarar_credenciais(result.error_message), "horario": None},
+                                 (cam_db.nome if cam_db else None) or nome)
             db.commit()
 
     return result
@@ -294,29 +304,25 @@ def _salvar_imagem_noite(db: Session, nvr_id: UUID, canal: int, nome: Optional[s
     camera.night_image_base64 = result.image_base64
     camera.night_image_date = horario
 
-    _marcar_imagem_noite(nvr, canal, {"status": "OK", "motivo": None, "horario": result.horario}, camera.nome)
+    _marcar_imagem_noite(db, nvr, canal, {"status": "OK", "motivo": None, "horario": result.horario}, camera.nome)
     db.commit()
 
 
-def _marcar_imagem_noite(nvr: NVR, canal: int, info: dict, nome: Optional[str] = None) -> None:
-    """Grava o status da captura da noite em `last_recording_status` (em DIGIFORT/DEFENSE casa pelo nome)."""
-    is_vms = (nvr.tipo or "NVR").upper() in TIPOS_VMS
-    status_rel = []
-    casou = False
-    nome_k = _nome_chave(nome)
-    for st in nvr.last_recording_status or []:
-        if isinstance(st, dict):
-            if is_vms:
-                if nome_k and _nome_chave(st.get("nome")) == nome_k:
-                    st = {**st, "imagem_noite": info}
-                    casou = True
-            elif _canal_int(st.get("canal")) == canal:
-                st = {**st, "imagem_noite": info}
-                casou = True
-        status_rel.append(st)
-    if is_vms and not casou and nome:
-        status_rel.append({"canal": canal, "nome": nome, "imagem_noite": info})
-    nvr.last_recording_status = status_rel
+def _marcar_imagem_noite(db: Session, nvr: NVR, canal: int, info: dict, nome: Optional[str] = None) -> None:
+    """Grava o status da captura da noite do canal em `last_recording_status` (lido pela galeria).
+    Em DIGIFORT/DEFENSE o canal é o da Galeria: a entrada do relatório vem do pareamento por nome/IP."""
+    relatorio = list(nvr.last_recording_status or [])
+    if (nvr.tipo or "NVR").upper() in TIPOS_VMS:
+        cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id).all()
+        alvo = next((i for i, st, c, ch in parear_cameras(cameras_db, relatorio) if i is not None and ch == canal), None)
+        if alvo is not None:
+            relatorio[alvo] = {**relatorio[alvo], "imagem_noite": info}
+        elif nome:
+            relatorio.append({"canal": canal, "nome": nome, "imagem_noite": info})
+    else:
+        relatorio = [{**st, "imagem_noite": info} if isinstance(st, dict) and _canal_int(st.get("canal")) == canal else st
+                     for st in relatorio]
+    nvr.last_recording_status = relatorio
 
 
 # ─── NVR Cameras Gallery ───────────────────────────────────────────────────
@@ -334,31 +340,49 @@ def get_nvr_cameras(
         raise HTTPException(status_code=404, detail="NVR não encontrado")
 
     cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).order_by(NVRCamera.canal).all()
-    db_dict = {c.canal: c for c in cameras_db}
-
     report_status = nvr.last_recording_status or []
-
     is_vms = (nvr.tipo or "NVR").upper() in TIPOS_VMS
-    report_by_ch = {}
+
     if is_vms:
-        # O canal do relatório (ordem do export do agente) difere do da Galeria: casa pelo nome.
-        # Câmera só do relatório (sem linha na Galeria) ganha um canal livre depois dos existentes.
-        por_nome_db = {_nome_chave(c.nome): c for c in cameras_db}
-        proximo = max(db_dict, default=0) + 1
-        for st in report_status:
-            if not isinstance(st, dict):
-                continue
-            c_db = por_nome_db.get(_nome_chave(st.get("nome")))
-            if c_db is not None:
-                report_by_ch[c_db.canal] = st
-            else:
-                report_by_ch[proximo] = st
-                proximo += 1
-    else:
-        for st in report_status:
-            ch_int = _canal_int(st.get("canal"))
-            if ch_int is not None:
-                report_by_ch[ch_int] = st
+        # Pareia relatório do agente e Galeria por nome/IP (o canal do agente não é o da Galeria)
+        merged_cameras = []
+        for _, st, c_db, ch in parear_cameras(cameras_db, report_status):
+            st = st or {}
+            obj = {
+                "id": c_db.id if c_db else None,
+                "nvr_id": id,
+                "canal": ch,
+                "nome": (c_db.nome if c_db and c_db.nome else None) or (st.get("nome") or "").strip() or f"Canal {ch}",
+                "ip": (c_db.ip if c_db and c_db.ip else None) or ip_valido(st.get("ip")) or None,
+                "username": c_db.username if c_db else None,
+                "modelo": c_db.modelo if c_db else st.get("modelo"),
+                "has_password": bool(c_db and c_db.password),
+                "perfect_image_base64": c_db.perfect_image_base64 if c_db else None,
+                "night_image_base64": c_db.night_image_base64 if c_db else None,
+                "night_image_date": c_db.night_image_date if c_db else None,
+                "updated_at": c_db.updated_at if c_db else None,
+                "status_comunicacao": st.get("status_comunicacao"),
+                "status_gravacao": st.get("status_gravacao"),
+                "captura_status": None,
+                "captura_motivo": None,
+                "captura_horario": None,
+            }
+            if "imagem_noite" in st:
+                obj["captura_status"] = st["imagem_noite"].get("status")
+                obj["captura_motivo"] = mascarar_credenciais(st["imagem_noite"].get("motivo"))
+                obj["captura_horario"] = st["imagem_noite"].get("horario")
+            elif obj["night_image_base64"]:
+                obj["captura_status"] = "OK"
+            merged_cameras.append(obj)
+        return sorted(merged_cameras, key=lambda x: x["canal"])
+
+    # NVR tradicional (Intelbras/Hikvision/Motorola): canais físicos de hardware
+    db_dict = {c.canal: c for c in cameras_db}
+    report_by_ch = {}
+    for st in report_status:
+        ch_int = _canal_int(st.get("canal"))
+        if ch_int is not None:
+            report_by_ch[ch_int] = st
 
     canais_set = set(db_dict.keys()) | set(report_by_ch.keys())
 
@@ -371,7 +395,7 @@ def get_nvr_cameras(
             "id": c_db.id if c_db else None,
             "nvr_id": id,
             "canal": ch,
-            "nome": (c_db.nome if (is_vms and c_db) else None) or (c_report.get("nome") if c_report else None) or (c_db.nome if c_db else f"Canal {ch}"),
+            "nome": (c_report.get("nome") if c_report else None) or (c_db.nome if c_db else f"Canal {ch}"),
             "ip": c_db.ip if c_db else None,
             "username": c_db.username if c_db else None,
             "modelo": c_db.modelo if c_db else None,
@@ -445,6 +469,7 @@ def import_cameras(
                 nome=mc.name,
                 ip=mc.ip,
                 username=mc.username or "admin",
+                password=decrypt(mc.password) if mc.password else "navarro@123",
                 modelo=(mc.config_extra or {}).get("modelo") or "Hikvision",
             )
             for mc in machine_cams
@@ -462,12 +487,23 @@ def import_cameras(
     usados = set()
     atualizadas = []
     for idx, item in enumerate(itens, start=1):
-        canal = item.canal or idx
+        nome_key = (item.nome or "").strip().lower()
+        ip_key = (item.ip or "").strip()
+
+        # Prioriza encontrar a câmera existente pelo nome ou pelo IP!
+        camera = None
+        if nome_key and nome_key in by_nome:
+            camera = by_nome[nome_key]
+        elif ip_key and ip_key in by_ip:
+            camera = by_ip[ip_key]
+        elif item.canal and item.canal in by_canal:
+            camera = by_canal[item.canal]
+
+        canal = camera.canal if camera else (item.canal or idx)
         while canal in usados:
             canal += 1
         usados.add(canal)
 
-        camera = by_canal.get(canal) or by_nome.get((item.nome or "").strip().lower()) or by_ip.get((item.ip or "").strip())
         if camera is None:
             camera = NVRCamera(nvr_id=id, canal=canal, nome=item.nome)
             db.add(camera)

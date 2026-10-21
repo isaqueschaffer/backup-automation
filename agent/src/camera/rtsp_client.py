@@ -8,8 +8,46 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any
 
+def _mascarar(txt: str) -> str:
+    """Oculta credenciais de URLs (rtsp://user:senha@host) antes de logar/enviar stderr do ffmpeg."""
+    return re.sub(r'//[^@/\s]*@', '//***@', txt or "")
+
+
+def _capturar_frame_ffmpeg(ffmpeg_exe: str, rtsp_url: str, transport: str = "tcp",
+                           skip_nokey: bool = True, timeout: int = 6) -> tuple:
+    """Executa o ffmpeg para capturar 1 frame via RTSP. Retorna (bytes_jpeg | None, stderr_str)."""
+    cmd = [
+        ffmpeg_exe, "-y",
+        "-rtsp_transport", transport,
+        "-timeout", "5000000",
+        "-analyzeduration", "1000000",
+        "-probesize", "1000000",
+    ]
+    if skip_nokey:
+        cmd.extend(["-skip_frame", "nokey"])
+    cmd.extend([
+        "-i", rtsp_url,
+        "-vframes", "1",
+        "-f", "image2pipe",
+        "-vcodec", "mjpeg",
+        "-"
+    ])
+    try:
+        res = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        if res.returncode == 0 and len(res.stdout) > 1000:
+            return res.stdout, ""
+        stderr_txt = _mascarar(res.stderr.decode('utf-8', errors='ignore')) if res.stderr else "ffmpeg retornou vazio"
+        return None, stderr_txt
+    except subprocess.TimeoutExpired:
+        return None, f"Tempo esgotado ({timeout}s) via {transport.upper()}"
+    except Exception as e:
+        return None, _mascarar(str(e))
+
+
 def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
-    """Testa a conexao RTSP da camera localmente pelo agente e retorna a imagem em base64."""
+    """Testa a conexao RTSP da camera localmente pelo agente e retorna a imagem em base64.
+    Possui fallback automático entre TCP e UDP e entre stream principal e secundário, garantindo
+    que câmeras antigas (como Hikvision DS-2CD2012-I e DS-2CD2020-I) funcionem sem timeout."""
     senha_pura = task.get("password", "navarro@123")
     senha_enc = urllib.parse.quote(senha_pura, safe='')
     usuario = task.get("username", "admin")
@@ -17,59 +55,71 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     ip = task.get("ip", "").strip()
     canal = task.get("canal")
 
-    # Com canal (galeria do NVR) a referência precisa ter a mesma origem da imagem da noite (stream principal,
-    # {canal}01). O stream secundário ({canal}02 / subtype=1) tem resolução e proporção diferentes.
-    # Câmera direta da galeria de DIGIFORT/DEFENSE (sem canal de NVR) também pede o stream principal.
-    nvr_canal = bool(canal) or bool(task.get("stream_principal"))
+    if not ip or ip == "N/A":
+        return {"success": False, "error_message": "Câmera sem endereço IP configurado."}
 
+    nvr_canal = bool(canal) or bool(task.get("stream_principal"))
     marca = task.get("marca") or ""
 
+    urls_candidatas = []
     if "motorola" in marca.lower() or "motorola" in modelo.lower():
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal or 1}&streamType=main"
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal or 1}&streamType=main")
     elif "Grandstream" in modelo:
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/4"
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/4")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/0")
     elif "Intelbras" in modelo:
         ch = canal if canal else 1
         subtype = 0 if nvr_canal else 1
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype={subtype}"
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype={subtype}")
+        if subtype == 0:
+            urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype=1")
     elif "ONVIF" in modelo:
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile2"
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile1")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile2")
     else:
-        ch_str = f"{canal or 1}01" if nvr_canal else "102"
-        rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}"
+        # Hikvision e genéricos
+        ch_num = canal if canal else 1
+        ch_str = f"{ch_num}01" if nvr_canal else f"{ch_num}02"
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}")
+        if nvr_canal:
+            urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_num}02")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_num}")
 
     import imageio_ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
-    # Sem esta checagem, IP errado ou câmera desligada só falha depois de esperar o ffmpeg inteiro
+    # Sem esta checagem, IP errado ou câmera desligada só falha depois de esgotar todas as tentativas
     try:
         socket.create_connection((ip, 554), timeout=5).close()
     except OSError:
         return {"success": False, "error_message": f"Porta RTSP 554 inacessível em {ip} (IP incorreto, câmera desligada ou bloqueio de rede)"}
 
-    try:
-        cmd = [
-            ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
-            "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
-        ]
-        result = subprocess.run(cmd, capture_output=True, timeout=20)
+    tentativas = []
+    url_principal = urls_candidatas[0]
+    tentativas.append((url_principal, "tcp", True, 6))
+    tentativas.append((url_principal, "udp", True, 6))
+    tentativas.append((url_principal, "udp", False, 5))
 
-        if result.returncode == 0 and len(result.stdout) > 1000:
-            b64_str = base64.b64encode(result.stdout).decode('utf-8')
+    for alt_url in urls_candidatas[1:]:
+        tentativas.append((alt_url, "tcp", True, 5))
+        tentativas.append((alt_url, "udp", True, 5))
+
+    ultimo_erro = "Falha ao conectar via RTSP."
+    prazo_max = time.monotonic() + 20.0
+
+    for url, transport, skip_nokey, timeout_s in tentativas:
+        if time.monotonic() >= prazo_max:
+            break
+        jpeg_bytes, stderr_txt = _capturar_frame_ffmpeg(
+            ffmpeg_exe, url, transport=transport, skip_nokey=skip_nokey, timeout=timeout_s
+        )
+        if jpeg_bytes:
+            b64_str = base64.b64encode(jpeg_bytes).decode('utf-8')
             return {"success": True, "error_message": None, "image_base64": b64_str}
-        stderr_text = result.stderr.decode('utf-8', errors='ignore')
-        return {"success": False, "error_message": _motivo_ao_vivo(stderr_text)}
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error_message": "A câmera aceitou a conexão mas não entregou vídeo em 20s (stream principal pesado ou câmera travada)"}
-    except Exception as e:
-        return {"success": False, "error_message": f"ERRO INTERNO NO AGENTE (FFmpeg): {_mascarar(str(e))}"}
+        if stderr_txt:
+            ultimo_erro = _motivo_ao_vivo(stderr_txt) if "Tempo esgotado" not in stderr_txt else stderr_txt
 
-# Todas as capturas usam "-skip_frame nokey": o ffmpeg só decodifica quadros-chave (completos).
-# Sem isso, a conexão que começa entre dois quadros-chave decodifica um quadro de diferenças sem
-# base e a imagem sai cinza (intermitente, mais comum em H.265). Custa até um intervalo de quadro-chave.
-def _mascarar(txt: str) -> str:
-    """Oculta credenciais de URLs (rtsp://user:senha@host) antes de logar/enviar stderr do ffmpeg."""
-    return re.sub(r'//[^@/\s]*@', '//***@', txt or "")
+    return {"success": False, "error_message": f"FALHA RTSP ({ip}): {ultimo_erro}"}
 
 
 def _motivo_ffmpeg(stderr: str) -> str:

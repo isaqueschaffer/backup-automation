@@ -29,6 +29,7 @@ from schemas import (
 )
 from routers.machines import check_machine_online
 from services.crypto_service import decrypt
+from services.galeria_vms import parear_cameras
 from services.storage_service import save_zip_stream, UploadTooLargeError, _sanitize_name
 from services.email_service import send_backup_report
 from services.backup_runs import attach_report_to_run, finish_queue_run
@@ -339,13 +340,11 @@ def receive_night_image(
     canal = body.canal
     camera = None
     if vms:
-        # O canal do agente (ordem do export local) não é o da Galeria: casa pelo nome
-        nome_norm = (body.nome or "").strip().lower()
-        camera = next((c for c in nvr.cameras_status if (c.nome or "").strip().lower() == nome_norm), None)
-        if camera is None:
-            usados = {c.canal for c in nvr.cameras_status}
-            while canal in usados:
-                canal += 1
+        # O canal do agente (ordem do export local) não é o da Galeria: pareia por nome/IP.
+        # Sem par, a câmera nova ganha um canal livre.
+        cameras_db = list(nvr.cameras_status)
+        entrada = [{"canal": canal, "nome": body.nome, "ip": body.ip}]
+        _, _, camera, canal = parear_cameras(cameras_db, entrada)[0]
     else:
         camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id, NVRCamera.canal == canal).first()
 
