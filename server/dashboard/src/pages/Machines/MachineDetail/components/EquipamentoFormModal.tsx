@@ -67,9 +67,15 @@ export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, s
             <div className="form-group" style={{ marginTop: 12 }}>
               <label className="form-label">Marca do NVR</label>
               <select className="form-input" value={eqForm.marca || "Hikvision"} onChange={e => setEqForm({ ...eqForm, marca: e.target.value })}>
-                <option value="Hikvision">Hikvision / Intelbras / Outros</option>
+                <option value="Hikvision">Hikvision / Outros</option>
+                <option value="Intelbras">Intelbras</option>
                 <option value="Motorola">Motorola</option>
               </select>
+              {eqForm.marca === "Intelbras" && (
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Telemetria (RAM e discos) via SNMP (porta 161, community "Public" por padrão).
+                </span>
+              )}
             </div>
           )}
         </>
