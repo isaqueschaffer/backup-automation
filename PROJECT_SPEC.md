@@ -799,11 +799,11 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
-### [2026-10-21] — Galeria DIGIFORT/DEFENSE: câmeras casadas pelo nome e erro de captura sem senha
+### [2026-10-21] — Agente 1.1.15: Galeria DIGIFORT/DEFENSE com câmeras casadas pelo nome e erro de captura sem senha
 
 **Alteração:** Em equipamentos DIGIFORT/DEFENSE, o servidor passou a casar relatório, imagem da noite e status de captura pelo **nome** da câmera (antes era pelo canal, e a numeração do agente — ordem do export local — difere da da Galeria, o que trocava nome/IP/imagem entre câmeras). O agente envia o canal da Galeria e deduplica por nome. A captura ao vivo do agente verifica a porta 554 antes do ffmpeg, usa timeout de 20 s e devolve o motivo traduzido (porta inacessível, senha recusada, caminho RTSP não encontrado, tempo esgotado); a URL RTSP com usuário/senha nunca vai na mensagem, e o servidor também mascara credenciais recebidas de agentes antigos (rtsp-result, relatório e leitura da Galeria).
 **Arquivos:** server/api/routers/agent.py, server/api/routers/equipamentos.py, agent/src/backup/file_manager/manager.py, agent/src/camera/rtsp_client.py
-**Breaking Change:** Não (a correção do agente só chega às máquinas numa próxima versão; o servidor já corrige a leitura com agentes atuais).
+**Breaking Change:** Não (o servidor já corrige a leitura com agentes atuais; a correção do agente chega às máquinas na 1.1.15).
 **Branch:** isaque
 
 ### [2026-10-20] — Visão Geral: Saúde do Servidor em destaque e layout personalizável
