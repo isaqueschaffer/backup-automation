@@ -837,6 +837,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-21] — Agente 1.1.17: Suporte Completo a Câmeras IP Motorola / ONVIF (MTIDM022603)
+
+**Alteração:** (1) Agente (`rtsp_client.py`): Diferenciação entre NVRs Motorola multiplexados (NVMS-9000, que usam `/chID=N&streamType=main`) e câmeras IP standalone Motorola / ONVIF Profile S (como a Dome 2MP `MTIDM022603`), que passam a tentar as URLs padrão `/profile1` (stream principal), `/profile2` (sub-stream), `/live/ch0`, `/live/ch1`, `/?chID=1&streamType=main`, `/onvif1` e fallback ONVIF genérico. Evita que câmeras avulsas tentem endpoints exclusivos de NVR ou caiam no padrão Hikvision (`/Streaming/Channels/101`). (2) `_eh_motorola` e `_sem_playback`: câmeras diretas (`direct_camera=True`) ou modelos MTI/ONVIF são identificadas como câmeras avulsas sem playback em NVR, prevenindo tentativas de login NVR via SOAP/NVMS. (3) Frontend: Adicionada detecção de prefixo `MTI`/`MTIDM` e marca `MOTOROLA` como protocolo ONVIF no importador CSV (`useCameraImport.ts`) e opção explícita "Motorola (ONVIF)" nos modais de edição (`NVRCamerasGalleryModal.tsx` e `EquipamentoFormModal.tsx`).
+(4) Proteção anti-lockout: no máximo 4 tentativas por captura e parada imediata em `401 Unauthorized`. Na integração (merge em isaque) ficou junto da checagem prévia da porta 554 e das mensagens de erro traduzidas sem usuário/senha, e a parada considera só `401 Unauthorized`.
+**Arquivos:** agent/src/camera/rtsp_client.py, server/dashboard/src/pages/Machines/MachineDetail/hooks/useCameraImport.ts, server/dashboard/src/pages/Machines/MachineDetail/components/NVRCamerasGalleryModal.tsx, server/dashboard/src/pages/Machines/MachineDetail/components/EquipamentoFormModal.tsx, agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** helena, isaque
+
 ### [2026-10-21] — Dashboards por Cliente (etapa 3: documentação e testes)
 
 **Alteração:** Dashboard por Cliente documentado nas seções 3 (estrutura), 5 (tabela `customer_dashboards`), 7 (fluxo do link público: token com hash, fragmento da URL, 404 genérico, limites por IP, isolamento e listas brancas) e 8 (rotas). Nova skill do Claude `criar-widget-dashboard` (como registrar um tipo de widget no backend e no front). Testes de ponta a ponta no repositório: `tools/teste_dashboards_e2e.py` (API: isolamento entre clientes, token inválido/expirado/revogado/regenerado, limite de tentativas, permissão de edição, token sem acesso a rotas admin, resposta pública sem IP/credenciais) e `tools/dashboards_ui/` (Chromium headless em Docker: página pública e de administração, personalizar, salvar, compartilhar e revogar).

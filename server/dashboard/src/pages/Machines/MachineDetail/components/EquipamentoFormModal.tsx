@@ -20,10 +20,10 @@ export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, s
         {eqForm.tipo === "CAMERA" ? (
           <div style={{ padding: "10px", background: "rgba(255,255,255,0.05)", borderRadius: 6, marginBottom: 16 }}>📷 Câmera (RTSP)</div>
         ) : (
-        <select className="form-input" value={eqForm.tipo}
-          onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: e.target.value === "DEFENSE" ? "C:\\Intelbras Defense IA\\Intelbras Defense IA Server\\bak\\db_backup" : "", fabricante_olt: "UNM2000" })}>
-          {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE_EMOJI[t]} {t}</option>)}
-        </select>
+          <select className="form-input" value={eqForm.tipo}
+            onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: e.target.value === "DEFENSE" ? "C:\\Intelbras Defense IA\\Intelbras Defense IA Server\\bak\\db_backup" : "", fabricante_olt: "UNM2000" })}>
+            {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE_EMOJI[t]} {t}</option>)}
+          </select>
         )}
       </div>
       <div className="form-group">
@@ -46,7 +46,7 @@ export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, s
                 value={eqForm.username} onChange={e => setEqForm({ ...eqForm, username: e.target.value })} />
             </div>
             <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Senha {editingEqId ? <span style={{fontWeight:400, color:'var(--text-muted)'}}>(vazio = manter atual)</span> : '*'}</label>
+              <label className="form-label">Senha {editingEqId ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(vazio = manter atual)</span> : '*'}</label>
               <input className="form-input" type="password"
                 value={eqForm.password} onChange={e => setEqForm({ ...eqForm, password: e.target.value })} />
             </div>
@@ -59,6 +59,7 @@ export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, s
                 <option value="Intelbras">Intelbras</option>
                 <option value="Grandstream">Grandstream</option>
                 <option value="ONVIF">ONVIF Genérico</option>
+                <option value="Motorola">Motorola (ONVIF)</option>
               </select>
             </div>
           )}

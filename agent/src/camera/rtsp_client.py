@@ -61,29 +61,50 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     nvr_canal = bool(canal) or bool(task.get("stream_principal"))
     marca = task.get("marca") or ""
 
+    direct_cam = task.get("direct_camera", False)
+    mod_upper = modelo.upper()
+    marca_upper = marca.upper()
+
+    eh_motorola = "MOTOROLA" in marca_upper or "MOTOROLA" in mod_upper or mod_upper.startswith("MTI")
+    eh_onvif = "ONVIF" in mod_upper or "ONVIF" in marca_upper
+    eh_grandstream = "GRANDSTREAM" in mod_upper or "GRANDSTREAM" in marca_upper or mod_upper.startswith("GXV")
+    eh_intelbras = "INTELBRAS" in mod_upper or "INTELBRAS" in marca_upper or mod_upper.startswith("VIP")
+
     urls_candidatas = []
-    if "motorola" in marca.lower() or "motorola" in modelo.lower():
-        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal or 1}&streamType=main")
-    elif "Grandstream" in modelo:
+    if eh_motorola and not direct_cam and canal and int(canal) > 1:
+        # NVR tradicional Motorola (NVMS-9000) com canais de hardware
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal}&streamType=main")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/?chID={canal}&streamType=main")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile{canal}")
+    elif eh_motorola or eh_onvif:
+        # Câmera IP Motorola (ex: MTIDM022603) ou ONVIF Profile S padrão
+        ch = canal if canal else 1
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile1")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile2")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/live/ch0")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/live/ch1")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/?chID={ch}&streamType=main")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={ch}&streamType=main")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/onvif1")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype=0")
+    elif eh_grandstream:
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/4")
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/0")
-    elif "Intelbras" in modelo:
+    elif eh_intelbras:
         ch = canal if canal else 1
         subtype = 0 if nvr_canal else 1
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype={subtype}")
         if subtype == 0:
             urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype=1")
-    elif "ONVIF" in modelo:
-        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile1")
-        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile2")
     else:
-        # Hikvision e genéricos
+        # Hikvision e genéricos com fallback ONVIF
         ch_num = canal if canal else 1
         ch_str = f"{ch_num}01" if nvr_canal else f"{ch_num}02"
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}")
         if nvr_canal:
             urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_num}02")
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_num}")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile1")
 
     import imageio_ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -94,20 +115,26 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     except OSError:
         return {"success": False, "error_message": f"Porta RTSP 554 inacessível em {ip} (IP incorreto, câmera desligada ou bloqueio de rede)"}
 
+    # Limite rigoroso de segurança contra bloqueio por força bruta (account lockout):
+    # Câmeras de segurança costumam travar com 5 a 7 tentativas falhas.
+    MAX_TENTATIVAS_SEGURANCA = 4
+
     tentativas = []
     url_principal = urls_candidatas[0]
     tentativas.append((url_principal, "tcp", True, 6))
     tentativas.append((url_principal, "udp", True, 6))
-    tentativas.append((url_principal, "udp", False, 5))
 
     for alt_url in urls_candidatas[1:]:
         tentativas.append((alt_url, "tcp", True, 5))
         tentativas.append((alt_url, "udp", True, 5))
 
+    # Garante que a lista nunca ultrapasse o limite de segurança
+    tentativas = tentativas[:MAX_TENTATIVAS_SEGURANCA]
+
     ultimo_erro = "Falha ao conectar via RTSP."
     prazo_max = time.monotonic() + 20.0
 
-    for url, transport, skip_nokey, timeout_s in tentativas:
+    for idx, (url, transport, skip_nokey, timeout_s) in enumerate(tentativas, start=1):
         if time.monotonic() >= prazo_max:
             break
         jpeg_bytes, stderr_txt = _capturar_frame_ffmpeg(
@@ -118,6 +145,12 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
             return {"success": True, "error_message": None, "image_base64": b64_str}
         if stderr_txt:
             ultimo_erro = _motivo_ao_vivo(stderr_txt) if "Tempo esgotado" not in stderr_txt else stderr_txt
+            # Credenciais recusadas (401): para na 1ª tentativa. Insistir em outras URLs com a mesma
+            # senha errada consumiria as tentativas e bloquearia a câmera do cliente.
+            if "401 Unauthorized" in stderr_txt:
+                ultimo_erro = "Usuário ou senha RTSP recusados pela câmera (interrompido na 1ª tentativa para evitar bloqueio)"
+                logging.warning(f"Câmera {ip} retornou 401 Unauthorized. Abortando imediatamente para prevenir lockout.")
+                break
 
     return {"success": False, "error_message": f"FALHA RTSP ({ip}): {ultimo_erro}"}
 
@@ -407,13 +440,17 @@ DIAS_BUSCA = 15
 
 
 def _eh_motorola(task: Dict[str, Any]) -> bool:
+    if task.get("direct_camera"):
+        return False
     return "motorola" in (task.get("marca") or "").lower() or "motorola" in (task.get("modelo") or "").lower()
 
 
 def _sem_playback(task: Dict[str, Any]) -> bool:
     """Equipamentos sem playback RTSP suportado (câmeras avulsas/outras marcas)."""
-    modelo = task.get("modelo") or ""
-    return any(m in modelo for m in ("Grandstream", "Intelbras", "ONVIF"))
+    if task.get("direct_camera"):
+        return True
+    modelo = (task.get("modelo") or "").upper()
+    return any(m in modelo for m in ("GRANDSTREAM", "INTELBRAS", "ONVIF", "MTI"))
 
 
 def _resultado(r: dict, origem: str) -> Dict[str, Any]:
