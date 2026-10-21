@@ -109,6 +109,7 @@ _MIGRACOES_COLUNAS = [
     ("clients", "group_id", "ALTER TABLE clients ADD COLUMN group_id UUID REFERENCES client_groups(id) ON DELETE SET NULL;"),
     ("clients", "queue_order", "ALTER TABLE clients ADD COLUMN queue_order INTEGER NOT NULL DEFAULT 0;"),
     ("nvrs", "last_recording_status", "ALTER TABLE nvrs ADD COLUMN last_recording_status JSON;"),
+    ("nvrs", "last_telemetry_status", "ALTER TABLE nvrs ADD COLUMN last_telemetry_status JSON;"),
     # Suporte a múltiplos tipos de equipamentos
     ("nvrs", "tipo", "ALTER TABLE nvrs ADD COLUMN tipo VARCHAR(20) NOT NULL DEFAULT 'NVR';"),
     ("nvrs", "config_extra", "ALTER TABLE nvrs ADD COLUMN config_extra JSON;"),

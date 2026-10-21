@@ -11,6 +11,22 @@ export interface CameraRecStatus {
   total_dias?: number;
 }
 
+// Disco reportado pela telemetria do NVR (NVR.last_telemetry_status)
+export interface NVRTelemetryDisk {
+  device?: string;
+  status?: string;
+  percent?: number | null;
+  total_gb?: number | null;
+  free_gb?: number | null;
+}
+
+// Telemetria de CPU/RAM/discos do NVR (Hikvision via ISAPI)
+export interface NVRTelemetry {
+  cpu_percent?: number | null;
+  ram_percent?: number | null;
+  disks?: NVRTelemetryDisk[];
+}
+
 export interface EquipamentoConfig {
   pasta_origem?: string;
   fabricante_olt?: string;
@@ -80,6 +96,7 @@ export interface NVR {
   username: string;
   config_extra?: EquipamentoConfig | null;
   last_recording_status?: CameraRecStatus[] | null;
+  last_telemetry_status?: NVRTelemetry | null;
   active: boolean;
 }
 
@@ -122,6 +139,7 @@ export interface NVRResult {
   status: string;
   tipo?: TipoEquipamento;
   cameras?: CameraRecStatus[];
+  telemetria?: NVRTelemetry | null;
 }
 
 export interface Backup {

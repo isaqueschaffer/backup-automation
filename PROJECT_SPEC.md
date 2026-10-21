@@ -239,6 +239,7 @@ trilan-nvr-backup-automation/
 | password | TEXT | str | NOT NULL | — |
 | config_extra | JSON | dict | NULL | — |
 | last_recording_status | JSON | list | NULL | — |
+| last_telemetry_status | JSON | dict | NULL | — |
 | active | BOOLEAN | bool | NOT NULL | TRUE |
 | updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | NOW() |
 
@@ -798,6 +799,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-21] — Telemetria de NVR Hikvision (CPU/RAM/Discos) e status no painel
+
+**Alteração:** (1) Agente: novo `src/nvr/hikvision/telemetry.py` (`coletar_telemetria_hikvision`) lê `ISAPI/System/status` (CPU/RAM) e `ISAPI/ContentMgmt/Storage/hdd` (discos: capacidade, livre, status) de NVR/DVR Hikvision, convertendo MB→GB e calculando o percentual de uso de cada disco; `factory.py` expõe `coletar_telemetria_nvr()`, que só roda para `tipo_nvr` `NVR`/`DVR` (Motorola retorna `None`). `backup_job.processar_nvr` inclui o resultado em `"telemetria"` no retorno do backup. (2) API: `NVRResult.telemetria` (relatório do agente) grava em `NVR.last_telemetry_status` (coluna JSON nova, migração inline em `main.py`); exposta em `NVRResponse.last_telemetry_status`. (3) Painel: botão "Telemetria" no card de equipamento NVR (`EqCard.tsx`) abre `NVRTelemetryModal.tsx`, reaproveitando `MetricTile`/`PctBar` (CPU, RAM) e `StatusBadge` (status de cada disco: OK, Erro, Não Inicializado, Não Formatado, Repouso, Desconhecido — novas entradas no mapa de `StatusBadge.tsx`) e `fmtGb`/`fmtPct` de `telemetry.ts`. Sem dado (equipamento não-Hikvision ou offline na última coleta): modal mostra "Sem dados de telemetria disponíveis.".
+**Arquivos:** agent/src/nvr/hikvision/telemetry.py, agent/src/nvr/factory.py, agent/src/application/backup_job.py, server/api/schemas.py, server/api/models.py, server/api/main.py, server/api/routers/agent.py, server/dashboard/src/api/types.ts, server/dashboard/src/components/StatusBadge.tsx, server/dashboard/src/pages/Machines/MachineDetail/components/NVRTelemetryModal.tsx, server/dashboard/src/pages/Machines/MachineDetail/components/EqCard.tsx, server/dashboard/src/pages/Machines/MachineDetail/index.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** helena
 
 ### [2026-10-21] — Agente 1.1.16: Suporte Completo a Câmeras IP Motorola / ONVIF (MTIDM022603)
 

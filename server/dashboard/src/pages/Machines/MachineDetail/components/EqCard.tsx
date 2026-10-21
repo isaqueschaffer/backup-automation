@@ -1,11 +1,12 @@
-import { Edit2, FolderOpen, Image, Network, Phone, RefreshCw, Trash2, Video, Wifi, WifiOff } from "lucide-react";
+import { Activity, Edit2, FolderOpen, Image, Network, Phone, RefreshCw, Trash2, Video, Wifi, WifiOff } from "lucide-react";
 import { NVR } from "../../../../api/types";
 
-export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, onEdit, onToggleActive }: {
+export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onEdit, onToggleActive }: {
   eq: NVR;
   onDelete: () => void;
   onViewRecording: () => void;
   onViewCameras?: () => void;
+  onViewTelemetry?: () => void;
   onEdit: () => void;
   onToggleActive: () => void;
 }) {
@@ -81,6 +82,12 @@ export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, o
           <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Video size={13} /> Gravações
+          </button>
+        )}
+        {eq.tipo === "NVR" && onViewTelemetry && (
+          <button className="btn btn-secondary btn-sm" onClick={onViewTelemetry}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Activity size={13} /> Telemetria
           </button>
         )}
         <button className="btn-icon" title={eq.active === false ? "Retomar Backup" : "Pausar Backup"} onClick={onToggleActive}>

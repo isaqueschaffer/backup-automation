@@ -38,6 +38,7 @@ class NVRResponse(NVRBase):
     id: UUID
     machine_id: UUID
     last_recording_status: Optional[Any] = None
+    last_telemetry_status: Optional[Any] = None
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
@@ -183,6 +184,7 @@ class NVRResult(BaseModel):
     tipo: str = "NVR"  # NVR, OLT, ONU, PABX
     status: str  # OK, PARCIAL, ERRO
     cameras: Optional[List[Dict[str, Any]]] = None
+    telemetria: Optional[Dict[str, Any]] = None  # CPU/RAM/discos (NVR Hikvision)
 
 
 class BackupReportCreate(BaseModel):

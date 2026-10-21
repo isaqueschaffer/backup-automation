@@ -6,6 +6,7 @@ from src.nvr.hikvision.cameras import buscar_cameras_nvr, buscar_cameras_dvr
 from src.nvr.motorola.cameras import buscar_cameras as buscar_cameras_motorola
 from src.nvr.motorola.recordings import buscar_datas_gravacao_motorola
 from src.nvr.hikvision.recordings import tem_gravacao_no_dia
+from src.nvr.hikvision.telemetry import coletar_telemetria_hikvision
 
 DIAS_VERIFICAR = 15
 
@@ -45,6 +46,17 @@ def buscar_cameras(nvr_ip, usuario, senha, marca=None):
         return cameras, "MOTOROLA", sessao
 
     return {}, "DESCONHECIDO", None
+
+def coletar_telemetria_nvr(nvr_ip, usuario, senha, tipo_nvr):
+    """Coleta CPU/RAM/discos do NVR. So suportado em NVR/DVR Hikvision (ISAPI);
+    Motorola e marcas desconhecidas retornam None."""
+    if tipo_nvr not in ("NVR", "DVR"):
+        return None
+    try:
+        return coletar_telemetria_hikvision(nvr_ip, usuario, senha)
+    except Exception:
+        logging.warning(f"  Falha ao coletar telemetria do NVR {nvr_ip}.", exc_info=True)
+        return None
 
 def _canal_numerico_motorola(canal_id):
     try:
