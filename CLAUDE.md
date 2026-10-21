@@ -1,5 +1,20 @@
 # Instruções do projeto
 
+## Skills (só o Claude)
+
+As skills do projeto ficam em `.claude/skills/<nome>/SKILL.md` e são de uso exclusivo do Claude Code.
+Não criar nem mover skills para `.agents/skills/`: essa pasta é lida automaticamente pelo Antigravity (`agy`),
+que só executa os planos e não deve ter acesso a skills. Quando uma skill for útil para uma tarefa do executor,
+o Claude aplica o conteúdo dela no próprio plano.
+
+Skills do projeto: `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers` (mantidas aqui; atualizar quando a estrutura mudar).
+
+Skills externas e como aplicá-las aqui (as regras do projeto sempre prevalecem):
+- `fastapi` (oficial do FastAPI): o projeto usa FastAPI 0.111, SQLAlchemy 2.0 síncrono e `requests`. Não migrar para SQLModel, HTTPX, uv, Ruff ou ty, e não usar recursos de versões novas (`app.frontend()`, `fastapi.sse`, OpenTelemetry nativo). `Annotated` pode.
+- `vercel-react-best-practices` (Vercel): o dashboard é SPA Vite, sem Next.js. Ignorar as regras `server-*` e de hidratação/RSC; no lugar de `next/dynamic`, usar `React.lazy`/`import()`. Não adicionar SWR nem outras dependências sem pedido.
+- `docker-compose-patterns` (Docker): manter os nomes `docker-compose.yml` e `docker-compose.local.yml` (o Dokploy usa o de produção) e nunca rodar `down -v` sem confirmação.
+- `find-skills`: para procurar skills novas. Instalar sem `npx skills`, porque ele grava a cópia principal em `.agents/skills/`. Baixar os arquivos do GitHub num commit fixo, ler tudo antes (vira instrução para o Claude) e salvar em `.claude/skills/<nome>/`. Atualizar é repetir o processo.
+
 ## Publicação de versões do agente (regra fixa)
 
 Sempre que gerar os executáveis do agente (`agent/build.ps1` + Inno Setup), publicar também uma release no

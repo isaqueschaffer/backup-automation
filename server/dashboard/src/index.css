@@ -1,4 +1,4 @@
-﻿/* ======================================================
+/* ======================================================
    TRILAN NVR BACKUP — Design System
    Dark glassmorphism theme with purple/cyan accents
    ====================================================== */
@@ -811,4 +811,19 @@ tbody td {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px;
+}
+
+
+/* ── Visão Geral: grade de 12 colunas personalizável ── */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+@media (max-width: 1000px) {
+  .overview-item { grid-column: span 6 !important; }
+}
+@media (max-width: 640px) {
+  .overview-item { grid-column: span 12 !important; }
 }

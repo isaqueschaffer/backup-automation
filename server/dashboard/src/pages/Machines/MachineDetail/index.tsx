@@ -273,7 +273,7 @@ export default function MachineDetail() {
       />
 
       {/* ── Layout de três colunas ── */}
-      <MachineInfoCards machine={machine} customerEmails={customerEmails} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} />
+      <MachineInfoCards machine={machine} customerEmails={customerEmails} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} nowMs={now + serverSkewMs} />
 
       {/* ── Equipamentos ── */}
       <div style={{ marginBottom: 24 }}>

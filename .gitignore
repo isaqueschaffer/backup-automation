@@ -54,5 +54,6 @@ scratch_test/
 agent/index.xml
 test*.jpg
 
-# Configuração local do Claude Code (permissões pessoais)
-.claude/
+# Configuração local do Claude Code (permissões pessoais); só as skills entram no git
+.claude/*
+!.claude/skills/

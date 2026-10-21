@@ -159,10 +159,11 @@ trilan-nvr-backup-automation/
 │           └── pages/
 │               ├── Customers/       <- CustomersPage (/clientes), CustomerDetail/ (/clientes/:id, fila arrastar-e-soltar)
 │               ├── Machines/        <- MachinesPage (/maquinas), MachineDetail/ (/maquinas/:id)
-│               └── Backups.tsx / Overview.tsx / Settings.tsx
+│               └── Backups.tsx / Overview/ (Visão Geral personalizável) / Settings.tsx
 ├── tools/                       <- Utilitários avulsos (não entram em build nem deploy)
 ├── archive/legacy_scripts/      <- Código legado, só consulta
-└── .agents/                     <- Skills do Antigravity IDE
+├── .agents/rules/               <- Regras lidas pelo Antigravity (agy)
+└── .claude/skills/              <- Skills do projeto, só para o Claude Code (o agy não lê esta pasta)
 ```
 
 ---
@@ -804,6 +805,34 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 **Arquivos:** agent/src/camera/rtsp_client.py, agent/src/backup/file_manager/manager.py, server/api/routers/equipamentos.py, server/dashboard/src/pages/Machines/MachineDetail/hooks/useCameraImport.ts, agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json
 **Breaking Change:** Não.
 **Branch:** helena
+
+### [2026-10-20] — Visão Geral: Saúde do Servidor em destaque e layout personalizável
+
+**Alteração:** Cada máquina da Visão Geral é um card com o nome do **cliente** como título e o nome da máquina pequeno, status do último backup, comunicação ("Atualizado agora/há N s", ou última comunicação quando offline) e a Saúde do Servidor como conteúdo principal em medidores em anel (CPU, RAM, GPU e um anel por disco) e as placas de rede físicas em linhas compactas. A página atualiza a cada 10 s. O botão "Personalizar" liga o modo de edição: arrastar e soltar para reordenar, largura por card (¼, ⅓, ½, ⅔, total, grade de 12 colunas) e escolha de quais máquinas aparecem. A escolha fica no `localStorage` do navegador (chave `trilan.overview.layout.v1`), sem mudança no servidor; máquinas novas aparecem sozinhas no fim. O card é compacto (largura padrão ¼) para ver muitas máquinas de uma vez.
+**Arquivos:** server/dashboard/src/pages/Overview/ (index.tsx, layout.ts, MachineHealthCard.tsx, RingGauge.tsx), pages/Machines/MachineDetail/components/ServerHealthCard.tsx (exports), src/index.css
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-20] — Skills: três externas instaladas e as do projeto atualizadas
+
+**Alteração:** (1) Instaladas em `.claude/skills/`, baixadas direto do GitHub e revisadas antes: `fastapi` (fastapi/fastapi@6f28852), `vercel-react-best-practices` (vercel-labs/agent-skills@063bee9) e `docker-compose-patterns` (docker/skills@38df58b). (2) Reescritas com a estrutura atual: `criar-novo-agente` (apontava para `agente_unm.py`, que não existe mais), `criar-endpoint-fastapi` (agora com REGRA-001/002/003/004/005/007 e o fluxo dashboard/PROJECT_SPEC) e `gerenciar-containers` (usa o `docker-compose.local.yml`; o de produção é só do Dokploy; testes em container). (3) `CLAUDE.md` registra como aplicar as externas neste projeto e como instalar novas sem `npx skills`.
+**Arquivos:** .claude/skills/*, CLAUDE.md, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-20] — Skills só para o Claude Code
+
+**Alteração:** As skills do projeto saem de `.agents/skills/` (lida automaticamente pelo Antigravity/agy, usado como executor) e passam para `.claude/skills/`, que só o Claude Code lê: `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers` e `find-skills`. O `professional-frontend` foi removido. O `.gitignore` versiona só `.claude/skills/`; o resto de `.claude/` (permissões locais) continua fora do git. `.agents/` fica só com `rules/git-deploy.md`.
+**Arquivos:** .gitignore, .claude/skills/*, .agents/skills/* (removidos), CLAUDE.md, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-20] — Painel: Saúde do Servidor com resumo e detalhes
+
+**Alteração:** O card "Saúde do Servidor" da página da máquina mostra um status geral (Saudável/Atenção/Crítico, ou Offline), quando os dados foram atualizados, blocos de CPU, RAM e GPU, a lista de todos os discos (usado, livre, total e barra) e todas as placas de rede (físicas em destaque, virtuais atenuadas, com envio e recebimento). O botão "Ver detalhes" abre um modal com cada disco (sistema, usado, livre, total), memória usada/livre, cada placa de rede (física ou virtual) e a GPU com memória. A barra de rede comparada a 1 Gbps fixo saiu. Limites únicos em `telemetry.ts`: atenção acima de 75%, crítico acima de 90%. Sem mudança no agente nem na API: usa a telemetria que já chega no ping.
+**Arquivos:** server/dashboard/src/pages/Machines/MachineDetail/telemetry.ts, components/ServerHealthCard.tsx, components/ServerHealthModal.tsx, components/TelemetryBar.tsx, components/MachineInfoCards.tsx, utils.ts, index.tsx
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-20] — Agente 1.1.14: Galeria RTSP para DIGIFORT e DEFENSE
 
