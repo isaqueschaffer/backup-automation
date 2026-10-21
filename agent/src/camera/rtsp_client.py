@@ -108,20 +108,26 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     import imageio_ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
+    # Limite rigoroso de segurança contra bloqueio por força bruta (account lockout):
+    # Câmeras de segurança costumam travar com 5 a 7 tentativas falhas.
+    MAX_TENTATIVAS_SEGURANCA = 4
+
     tentativas = []
     url_principal = urls_candidatas[0]
     tentativas.append((url_principal, "tcp", True, 6))
     tentativas.append((url_principal, "udp", True, 6))
-    tentativas.append((url_principal, "udp", False, 5))
 
     for alt_url in urls_candidatas[1:]:
         tentativas.append((alt_url, "tcp", True, 5))
         tentativas.append((alt_url, "udp", True, 5))
 
+    # Garante que a lista nunca ultrapasse o limite de segurança
+    tentativas = tentativas[:MAX_TENTATIVAS_SEGURANCA]
+
     ultimo_erro = "Falha ao conectar via RTSP."
     prazo_max = time.monotonic() + 25.0
 
-    for url, transport, skip_nokey, timeout_s in tentativas:
+    for idx, (url, transport, skip_nokey, timeout_s) in enumerate(tentativas, start=1):
         if time.monotonic() >= prazo_max:
             break
         jpeg_bytes, stderr_txt = _capturar_frame_ffmpeg(
@@ -132,6 +138,13 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
             return {"success": True, "error_message": None, "image_base64": b64_str}
         if stderr_txt:
             ultimo_erro = _motivo_ffmpeg(stderr_txt) if "Tempo esgotado" not in stderr_txt else stderr_txt
+            # PROTEÇÃO ANTI-LOCKOUT CRÍTICA:
+            # Se as credenciais forem recusadas (401), aborta na 1ª tentativa!
+            # Tentar outras URLs com a mesma senha errada só consumiria as tentativas e travaria a câmera do cliente.
+            if "401 " in stderr_txt or "401 Unauthorized" in stderr_txt:
+                ultimo_erro = "Usuário ou senha RTSP recusados pela câmera (interrompido na 1ª tentativa para evitar bloqueio)"
+                logging.warning(f"Câmera {ip} retornou 401 Unauthorized. Abortando imediatamente para prevenir lockout.")
+                break
 
     return {"success": False, "error_message": f"FALHA RTSP ({ip}): {ultimo_erro}"}
 
