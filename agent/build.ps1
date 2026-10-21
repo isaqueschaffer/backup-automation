@@ -20,6 +20,8 @@ Write-Host "Compilando serviço em background (service.exe)..."
     --hidden-import psutil `
     --hidden-import GPUtil `
     --collect-all imageio_ffmpeg `
+    --collect-all pysnmp `
+    --collect-all pyasn1 `
     --name TrilanAgentService `
     service.py
 

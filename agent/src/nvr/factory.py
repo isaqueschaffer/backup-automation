@@ -7,6 +7,7 @@ from src.nvr.motorola.cameras import buscar_cameras as buscar_cameras_motorola
 from src.nvr.motorola.recordings import buscar_datas_gravacao_motorola
 from src.nvr.hikvision.recordings import tem_gravacao_no_dia
 from src.nvr.hikvision.telemetry import coletar_telemetria_hikvision
+from src.nvr.intelbras.telemetry import coletar_telemetria_intelbras
 
 DIAS_VERIFICAR = 15
 
@@ -32,7 +33,8 @@ def buscar_cameras(nvr_ip, usuario, senha, marca=None):
         if marca == "MOTOROLA":
             cameras, sessao = buscar_cameras_motorola(nvr_ip, usuario, senha)
             return cameras, "MOTOROLA", sessao
-        elif marca == "HIKVISION":
+        elif marca in ("HIKVISION", "INTELBRAS"):
+            # NVR Intelbras usa o mesmo protocolo ISAPI do Hikvision para cameras/gravacoes.
             cameras, tipo = _probe_hikvision(nvr_ip, usuario, senha)
             return (cameras, tipo, None) if cameras else ({}, "DESCONHECIDO", None)
 
@@ -47,11 +49,15 @@ def buscar_cameras(nvr_ip, usuario, senha, marca=None):
 
     return {}, "DESCONHECIDO", None
 
-def coletar_telemetria_nvr(nvr_ip, usuario, senha, tipo_nvr):
-    """Coleta CPU/RAM/discos do NVR. So suportado em NVR/DVR Hikvision (ISAPI);
-    Motorola e marcas desconhecidas retornam None."""
+def coletar_telemetria_nvr(nvr_ip, usuario, senha, tipo_nvr, marca=None, snmp_community=None):
+    """Coleta CPU/RAM/discos do NVR. So suportado em NVR/DVR (nao Motorola).
+    Intelbras usa SNMP (porta 161); demais (Hikvision e compativeis) usam ISAPI."""
     if tipo_nvr not in ("NVR", "DVR"):
         return None
+    if (marca or "").upper() == "INTELBRAS":
+        if snmp_community:
+            return coletar_telemetria_intelbras(nvr_ip, snmp_community)
+        return coletar_telemetria_intelbras(nvr_ip)
     try:
         return coletar_telemetria_hikvision(nvr_ip, usuario, senha)
     except Exception:

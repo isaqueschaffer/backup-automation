@@ -9,3 +9,4 @@ pyftpdlib>=1.5.8
 imageio-ffmpeg
 psutil>=5.9.0
 GPUtil>=1.4.0
+pysnmp>=6.1.2,<7.0.0

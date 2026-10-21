@@ -76,7 +76,7 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
 
     logging.info(f"  NVR acessivel (Detectado: {tipo_nvr}).")
 
-    telemetria = coletar_telemetria_nvr(ip, user, pwd, tipo_nvr)
+    telemetria = coletar_telemetria_nvr(ip, user, pwd, tipo_nvr, marca, config_extra.get("snmp_community"))
 
     sessao = requests.Session()
     sessao.auth = HTTPDigestAuth(user, pwd)
