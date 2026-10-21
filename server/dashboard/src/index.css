@@ -840,5 +840,6 @@ tbody td {
   .dash-item { grid-column: span 6 !important; }
 }
 @media (max-width: 640px) {
-  .dash-item { grid-column: span 12 !important; }
+  .dash-grid { grid-auto-rows: auto; }
+  .dash-item { grid-column: span 12 !important; grid-row: auto !important; min-height: 150px; }
 }

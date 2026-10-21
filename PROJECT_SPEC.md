@@ -799,6 +799,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-21] — Dashboards por Cliente (etapa 2B-2: compartilhamento e personalização pelo cliente)
+
+**Alteração:** Painel "Compartilhar" na página do dashboard (admin): gerar o link (validade: sem validade, 7/30/90 dias ou data; permitir ou não a personalização pelo cliente), copiar o link (mostrado uma única vez — o servidor guarda só o hash), ativar/desativar, alterar a validade e a permissão de edição, gerar novo link (invalida o anterior) e revogar. A página pública `/d` passou a usar o mesmo editor (`DashboardWorkspace`): quando o link tem permissão de edição o cliente vê "Personalizar" (sem "Restaurar padrão" nem "Compartilhar") e o layout é salvo no servidor com controle de versão; sem permissão a página é somente leitura.
+**Arquivos:** server/dashboard/src/pages/Dashboards/SharePanel.tsx, DashboardAdminPage.tsx, PublicDashboardPage.tsx
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-21] — Dashboards por Cliente (etapa 2B-1: editor e página de administração)
 
 **Alteração:** Editor de dashboard (`DashboardWorkspace`): adicionar/remover componentes, arrastar para reordenar, largura (¼ a total) e altura por componente, configuração por componente (máquinas, equipamentos, tipos, período, visual) gerada a partir dos `campos` de cada tipo de widget (registro modular), filtro geral de período, prévia com dados reais do rascunho (`POST .../dashboard/preview`, admin e público com permissão de edição), salvar com controle de versão (409 em edição concorrente), descartar e restaurar o padrão. Nova página `/clientes/:id/dashboard` e botão "Dashboard" no detalhe do cliente.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Share2 } from "lucide-react";
 import {
   fetchDashboard,
   fetchDashboardData,
@@ -13,6 +13,7 @@ import { useToast } from "../../components/Toast";
 import { apiErrorMessage } from "../../utils/errors";
 import { Compartilhamento, DadosDashboard, DashboardAdmin } from "./types";
 import DashboardWorkspace from "./DashboardWorkspace";
+import SharePanel from "./SharePanel";
 
 // Página administrativa de configuração do dashboard do cliente
 export default function DashboardAdminPage() {
@@ -25,6 +26,7 @@ export default function DashboardAdminPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [erroCarga, setErroCarga] = useState(false);
+  const [compartilhando, setCompartilhando] = useState(false);
 
   const carregarDados = useCallback(
     async () => {
@@ -180,7 +182,27 @@ export default function DashboardAdminPage() {
           setDashboard((d) => (d ? { ...d, layout: r.layout, version: r.version } : d))
         }
         onConflito={carregarTudo}
+        barraExtra={
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setCompartilhando(true)}
+          >
+            <Share2 size={14} style={{ flexShrink: 0 }} /> Compartilhar
+          </button>
+        }
       />
+
+      {compartilhando && dashboard && (
+        <SharePanel
+          customerId={dashboard.customer_id}
+          compartilhamento={dashboard.compartilhamento}
+          onChange={(c) =>
+            setDashboard((d) => (d ? { ...d, compartilhamento: c } : d))
+          }
+          onClose={() => setCompartilhando(false)}
+        />
+      )}
     </div>
   );
 }

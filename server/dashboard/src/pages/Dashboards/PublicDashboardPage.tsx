@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, Link2Off, RefreshCw, WifiOff } from "lucide-react";
-import { fetchPublicDashboard, fetchPublicData } from "../../api/dashboards";
+import {
+  fetchPublicDashboard,
+  fetchPublicData,
+  fetchPublicOptions,
+  fetchPublicPreview,
+  savePublicLayout,
+} from "../../api/dashboards";
 import { DadosDashboard, DashboardPublico } from "./types";
-import DashboardCanvas from "./DashboardCanvas";
+import DashboardWorkspace from "./DashboardWorkspace";
 
 type TipoErro = "invalido" | "limite" | "rede";
 
@@ -132,6 +138,24 @@ export default function PublicDashboardPage() {
       })
       .finally(() => {
         setAtualizando(false);
+      });
+  };
+
+  const recarregarCompleto = () => {
+    if (!token) return;
+    fetchPublicDashboard(token)
+      .then((dash) => {
+        setDashboard(dash);
+        setDados(dash.dados);
+        setSemConexao(false);
+      })
+      .catch((err) => {
+        const tipo = classificarErro(err);
+        if (tipo === "invalido") {
+          setErro("invalido");
+        } else {
+          setSemConexao(true);
+        }
       });
   };
 
@@ -313,7 +337,21 @@ export default function PublicDashboardPage() {
         </div>
 
         {/* Grade de widgets */}
-        <DashboardCanvas layout={dashboard.layout} dados={dados} />
+        <DashboardWorkspace
+          layout={dashboard.layout}
+          version={dashboard.version}
+          dadosVivos={dados}
+          podeEditar={dashboard.pode_editar}
+          carregarOpcoes={() => fetchPublicOptions(token)}
+          previa={(l) => fetchPublicPreview(token, l)}
+          salvar={(l, v) => savePublicLayout(token, l, v)}
+          onSalvo={(r) =>
+            setDashboard((d) =>
+              d ? { ...d, layout: r.layout, version: r.version } : d
+            )
+          }
+          onConflito={recarregarCompleto}
+        />
       </div>
     </div>
   );
