@@ -11,7 +11,7 @@ from models import Machine, Customer, Backup
 from schemas import StatsResponse
 from auth import verify_admin_token
 from config import settings
-from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -100,6 +100,25 @@ if not _tem_tabela('customer_backup_runs'):
         );
     """, "criar tabela customer_backup_runs")
 
+# Dashboards por Cliente (layout + link de compartilhamento)
+if not _tem_tabela('customer_dashboards'):
+    _run_ddl("""
+        CREATE TABLE IF NOT EXISTS customer_dashboards (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            customer_id UUID NOT NULL UNIQUE REFERENCES client_groups(id) ON DELETE CASCADE,
+            layout JSON NOT NULL DEFAULT '{}',
+            version INTEGER NOT NULL DEFAULT 1,
+            share_token_hash VARCHAR(64) UNIQUE,
+            share_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            share_expires_at TIMESTAMP WITHOUT TIME ZONE,
+            share_allow_edit BOOLEAN NOT NULL DEFAULT FALSE,
+            share_created_at TIMESTAMP WITHOUT TIME ZONE,
+            last_viewed_at TIMESTAMP WITHOUT TIME ZONE,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+        );
+    """, "criar tabela customer_dashboards")
+
 # (tabela, coluna, DDL) — cada ALTER roda em transação separada
 _MIGRACOES_COLUNAS = [
     ("clients", "last_seen", "ALTER TABLE clients ADD COLUMN last_seen TIMESTAMP WITHOUT TIME ZONE;"),
@@ -164,6 +183,7 @@ openapi_tags = [
     {"name": "Clientes", "description": "Gestão de Clientes (empresas atendidas: máquinas vinculadas, fila de backup e download consolidado)"},
     {"name": "Máquinas", "description": "Gestão de Máquinas (computadores com o agente: configuração, status e chaves)"},
     {"name": "Equipamentos", "description": "Equipamentos vinculados às máquinas (NVR, OLT, ONU, PABX, etc.)"},
+    {"name": "Dashboards", "description": "Dashboards personalizáveis por Cliente e link público de visualização"},
     {"name": "backups", "description": "Histórico e relatórios de backups"},
     {"name": "agent", "description": "Comunicação e heartbeat com os Agentes Windows"},
     {"name": "settings", "description": "Configurações do sistema (SMTP, retenção)"},
@@ -194,6 +214,8 @@ app.include_router(auth_router.router)
 app.include_router(customers.router)     # Clientes: /api/v1/clients
 app.include_router(machines.router)      # Máquinas: /api/v1/machines
 app.include_router(equipamentos.router)  # Equipamentos: /api/v1/machines/{machine_id}/equipamentos
+app.include_router(dashboards.router)         # Dashboards (admin): /api/v1/clients/{id}/dashboard e /api/v1/dashboards
+app.include_router(public_dashboard.router)   # Dashboard público por link: /api/v1/public/dashboard
 app.include_router(nvrs.router, include_in_schema=False)  # mantido para compatibilidade
 app.include_router(backups.router)
 app.include_router(agent.router)

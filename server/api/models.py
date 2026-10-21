@@ -54,6 +54,28 @@ class CustomerBackupRun(Base):
     backups = relationship("Backup", back_populates="run")
 
 
+class CustomerDashboard(Base):
+    """Dashboard do Cliente: layout dos widgets e compartilhamento por link com token."""
+    __tablename__ = "customer_dashboards"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id = Column(UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="CASCADE"), nullable=False, unique=True)
+    layout = Column(JSON, nullable=False, default=dict)
+    # Incrementa a cada gravação do layout: evita que duas edições simultâneas se sobrescrevam
+    version = Column(Integer, nullable=False, default=1)
+    # Só o hash SHA-256 do token é guardado; o token em texto puro é mostrado uma única vez
+    share_token_hash = Column(String(64), nullable=True, unique=True)
+    share_enabled = Column(Boolean, nullable=False, default=False)
+    share_expires_at = Column(DateTime, nullable=True)
+    share_allow_edit = Column(Boolean, nullable=False, default=False)
+    share_created_at = Column(DateTime, nullable=True)
+    last_viewed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    customer = relationship("Customer")
+
+
 class Machine(Base):
     """Máquina: o computador com o agente instalado (tabela 'clients' mantida no BD)."""
     __tablename__ = "clients"
