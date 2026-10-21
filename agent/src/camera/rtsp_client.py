@@ -1,6 +1,7 @@
 import base64
 import logging
 import re
+import socket
 import urllib.parse
 import subprocess
 import time
@@ -36,24 +37,32 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     else:
         ch_str = f"{canal or 1}01" if nvr_canal else "102"
         rtsp_url = f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}"
-    
+
     import imageio_ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    
+
+    # Sem esta checagem, IP errado ou câmera desligada só falha depois de esperar o ffmpeg inteiro
+    try:
+        socket.create_connection((ip, 554), timeout=5).close()
+    except OSError:
+        return {"success": False, "error_message": f"Porta RTSP 554 inacessível em {ip} (IP incorreto, câmera desligada ou bloqueio de rede)"}
+
     try:
         cmd = [
             ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
             "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
         ]
-        result = subprocess.run(cmd, capture_output=True, timeout=15)
-        
+        result = subprocess.run(cmd, capture_output=True, timeout=20)
+
         if result.returncode == 0 and len(result.stdout) > 1000:
             b64_str = base64.b64encode(result.stdout).decode('utf-8')
             return {"success": True, "error_message": None, "image_base64": b64_str}
-        else:
-            return {"success": False, "error_message": "FALHA: ffmpeg retornou vazio ou erro ao capturar."}
+        stderr_text = result.stderr.decode('utf-8', errors='ignore')
+        return {"success": False, "error_message": _motivo_ao_vivo(stderr_text)}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error_message": "A câmera aceitou a conexão mas não entregou vídeo em 20s (stream principal pesado ou câmera travada)"}
     except Exception as e:
-        return {"success": False, "error_message": f"ERRO INTERNO NO AGENTE (FFmpeg): {str(e)}"}
+        return {"success": False, "error_message": f"ERRO INTERNO NO AGENTE (FFmpeg): {_mascarar(str(e))}"}
 
 # Todas as capturas usam "-skip_frame nokey": o ffmpeg só decodifica quadros-chave (completos).
 # Sem isso, a conexão que começa entre dois quadros-chave decodifica um quadro de diferenças sem
@@ -81,6 +90,21 @@ def _motivo_ffmpeg(stderr: str) -> str:
         ultima_linha = linhas[-1]
         return ultima_linha[:150]
     return "Erro desconhecido"
+
+
+def _motivo_ao_vivo(stderr: str) -> str:
+    """Motivo legível da falha de captura ao vivo de uma câmera (sem credenciais)."""
+    stderr = _mascarar(stderr)
+    if "401 Unauthorized" in stderr:
+        return "Usuário/senha RTSP recusados pela câmera"
+    if any(e in stderr for e in ["404 Not Found", "400 Bad Request"]):
+        return "Caminho RTSP não encontrado: confira o modelo da câmera (Hikvision, Intelbras, Grandstream ou ONVIF)"
+    if any(e in stderr for e in ["Connection refused", "timed out", "No route to host", "Network is unreachable"]):
+        return "Porta RTSP 554 inacessível"
+    linhas = [linha.strip() for linha in stderr.split('\n') if linha.strip()]
+    if linhas:
+        return "Falha ao capturar: " + linhas[-1][:150]
+    return "Falha ao capturar: a câmera não retornou imagem"
 
 # Falhas de vídeo seguidas (por câmera) antes de desistir da imagem da noite no backup
 MAX_FALHAS_CAPTURA = 2

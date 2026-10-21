@@ -4,6 +4,7 @@ Windows agent authenticates with X-Client-ID + X-API-Key headers.
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 from uuid import UUID
@@ -138,6 +139,25 @@ def _read_request_flags(machine_id: UUID) -> tuple[bool, bool]:
     return bool(row[0]), bool(row[1])
 
 
+_URL_COM_CREDENCIAIS = re.compile(r"//[^@/\s'\"]*@")
+
+
+def mascarar_credenciais(texto):
+    """Oculta usuário/senha de URLs (rtsp://user:senha@host) em mensagens vindas do agente."""
+    return _URL_COM_CREDENCIAIS.sub("//***@", texto) if isinstance(texto, str) else texto
+
+
+def _limpar_motivos(cameras):
+    """Mascara credenciais no motivo de `imagem_noite` das câmeras do relatório."""
+    saida = []
+    for st in cameras or []:
+        info = st.get("imagem_noite") if isinstance(st, dict) else None
+        if isinstance(info, dict) and isinstance(info.get("motivo"), str):
+            st = {**st, "imagem_noite": {**info, "motivo": mascarar_credenciais(info["motivo"])}}
+        saida.append(st)
+    return saida
+
+
 def _canal_chave(valor):
     try:
         return int(valor)
@@ -145,19 +165,33 @@ def _canal_chave(valor):
         return str(valor)
 
 
-def _manter_imagem_noite(anterior, novo):
+def _manter_imagem_noite(anterior, novo, por_nome=False):
     """Agentes >= 1.1.11 não capturam a imagem da noite no backup (ela vem da Galeria): mantém o
-    status `imagem_noite` do relatório anterior nos canais em que o novo relatório não o traz."""
-    antigos = {_canal_chave(st.get("canal")): st.get("imagem_noite")
-               for st in (anterior or []) if isinstance(st, dict) and st.get("imagem_noite")}
+    status `imagem_noite` do relatório anterior nos canais em que o novo relatório não o traz
+    (em DIGIFORT/DEFENSE casa pelo nome)."""
+    def chave(st):
+        if por_nome:
+            return (st.get("nome") or "").strip().lower()
+        return _canal_chave(st.get("canal"))
+
+    antigos = {}
+    for st in (anterior or []):
+        if isinstance(st, dict) and st.get("imagem_noite"):
+            k = chave(st)
+            if por_nome and not k:
+                continue
+            antigos[k] = st.get("imagem_noite")
+
     if not antigos:
         return novo
     saida = []
     for st in novo or []:
         if isinstance(st, dict) and "imagem_noite" not in st:
-            info = antigos.get(_canal_chave(st.get("canal")))
-            if info:
-                st = {**st, "imagem_noite": info}
+            k = chave(st)
+            if not (por_nome and not k):
+                info = antigos.get(k)
+                if info:
+                    st = {**st, "imagem_noite": info}
         saida.append(st)
     return saida
 
@@ -278,6 +312,7 @@ async def receive_rtsp_result(
     machine: Machine = Depends(get_current_machine),
 ):
     """Agent posts the result of an RTSP task."""
+    result.error_message = mascarar_credenciais(result.error_message)
     machine_id_str = str(machine.id)
     task_data = pending_rtsp_tasks.get(machine_id_str)
     if task_data is not None:
@@ -300,18 +335,32 @@ def receive_night_image(
     if not nvr:
         return {"status": "error", "message": "NVR não encontrado ou inativo"}
 
-    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id, NVRCamera.canal == body.canal).first()
+    vms = (nvr.tipo or "NVR").upper() in ("DIGIFORT", "DEFENSE")
+    canal = body.canal
+    camera = None
+    if vms:
+        # O canal do agente (ordem do export local) não é o da Galeria: casa pelo nome
+        nome_norm = (body.nome or "").strip().lower()
+        camera = next((c for c in nvr.cameras_status if (c.nome or "").strip().lower() == nome_norm), None)
+        if camera is None:
+            usados = {c.canal for c in nvr.cameras_status}
+            while canal in usados:
+                canal += 1
+    else:
+        camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id, NVRCamera.canal == canal).first()
+
     if not camera:
         camera = NVRCamera(
             nvr_id=nvr.id,
-            canal=body.canal,
+            canal=canal,
             nome=body.nome,
             night_image_base64=body.image_base64,
             night_image_date=body.night_image_date
         )
         db.add(camera)
     else:
-        camera.nome = body.nome
+        if not vms:
+            camera.nome = body.nome
         camera.night_image_base64 = body.image_base64
         camera.night_image_date = body.night_image_date
 
@@ -344,7 +393,9 @@ def receive_backup_report(
         if nvr:
             r_dict["tipo"] = nvr.tipo
             if r.cameras is not None:
-                nvr.last_recording_status = _manter_imagem_noite(nvr.last_recording_status, r.cameras)
+                vms = (nvr.tipo or "NVR").upper() in ("DIGIFORT", "DEFENSE")
+                nvr.last_recording_status = _manter_imagem_noite(
+                    nvr.last_recording_status, _limpar_motivos(r.cameras), por_nome=vms)
         else:
             r_dict["tipo"] = "NVR" # default fallback se foi excluido
         nvr_results_with_type.append(r_dict)

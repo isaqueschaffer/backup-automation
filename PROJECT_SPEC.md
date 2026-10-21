@@ -799,6 +799,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-21] — Galeria DIGIFORT/DEFENSE: câmeras casadas pelo nome e erro de captura sem senha
+
+**Alteração:** Em equipamentos DIGIFORT/DEFENSE, o servidor passou a casar relatório, imagem da noite e status de captura pelo **nome** da câmera (antes era pelo canal, e a numeração do agente — ordem do export local — difere da da Galeria, o que trocava nome/IP/imagem entre câmeras). O agente envia o canal da Galeria e deduplica por nome. A captura ao vivo do agente verifica a porta 554 antes do ffmpeg, usa timeout de 20 s e devolve o motivo traduzido (porta inacessível, senha recusada, caminho RTSP não encontrado, tempo esgotado); a URL RTSP com usuário/senha nunca vai na mensagem, e o servidor também mascara credenciais recebidas de agentes antigos (rtsp-result, relatório e leitura da Galeria).
+**Arquivos:** server/api/routers/agent.py, server/api/routers/equipamentos.py, agent/src/backup/file_manager/manager.py, agent/src/camera/rtsp_client.py
+**Breaking Change:** Não (a correção do agente só chega às máquinas numa próxima versão; o servidor já corrige a leitura com agentes atuais).
+**Branch:** isaque
+
 ### [2026-10-20] — Visão Geral: Saúde do Servidor em destaque e layout personalizável
 
 **Alteração:** Cada máquina da Visão Geral é um card com o nome do **cliente** como título e o nome da máquina pequeno, status do último backup, comunicação ("Atualizado agora/há N s", ou última comunicação quando offline) e a Saúde do Servidor como conteúdo principal em medidores em anel (CPU, RAM, GPU e um anel por disco) e as placas de rede físicas em linhas compactas. A página atualiza a cada 10 s. O botão "Personalizar" liga o modo de edição: arrastar e soltar para reordenar, largura por card (¼, ⅓, ½, ⅔, total, grade de 12 colunas) e escolha de quais máquinas aparecem. A escolha fica no `localStorage` do navegador (chave `trilan.overview.layout.v1`), sem mudança no servidor; máquinas novas aparecem sozinhas no fim. O card é compacto (largura padrão ¼) para ver muitas máquinas de uma vez.

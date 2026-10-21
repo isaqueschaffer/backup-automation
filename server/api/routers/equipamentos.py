@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from auth import verify_admin_token
 from database import get_db
 from models import Machine, NVR, NVRCamera
-from routers.agent import pending_rtsp_tasks
+from routers.agent import mascarar_credenciais, pending_rtsp_tasks
 from schemas import (
     NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse,
     NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
@@ -24,6 +24,10 @@ from services.crypto_service import encrypt, decrypt
 TIPOS_VMS = ("DIGIFORT", "DEFENSE")
 
 router = APIRouter(prefix="/api/v1/machines/{machine_id}/equipamentos", tags=["Equipamentos"])
+
+
+def _nome_chave(nome) -> str:
+    return (nome or "").strip().lower()
 
 
 def _canal_int(valor):
@@ -261,12 +265,12 @@ async def test_equipamento_rtsp(
             else:
                 # Agente antigo capturou ao vivo: não é imagem da noite
                 return RTSPTestResponse(success=False, error_message="Atualize o agente desta máquina para a versão 1.1.6 ou superior para capturar a imagem da noite pelo painel.")
-        _salvar_imagem_noite(db, equipamento_id, canal, nome or (cam_db.nome if cam_db else None), result)
+        _salvar_imagem_noite(db, equipamento_id, canal, (cam_db.nome if cam_db else None) or nome, result)
     elif modo == "noite":
         # Mostra o motivo na galeria (a imagem anterior, se houver, é mantida)
         nvr = db.query(NVR).filter(NVR.id == equipamento_id).first()
         if nvr is not None:
-            _marcar_imagem_noite(nvr, canal, {"status": "FALHA", "motivo": result.error_message, "horario": None})
+            _marcar_imagem_noite(nvr, canal, {"status": "FALHA", "motivo": result.error_message, "horario": None}, (cam_db.nome if cam_db else None) or nome)
             db.commit()
 
     return result
@@ -290,17 +294,28 @@ def _salvar_imagem_noite(db: Session, nvr_id: UUID, canal: int, nome: Optional[s
     camera.night_image_base64 = result.image_base64
     camera.night_image_date = horario
 
-    _marcar_imagem_noite(nvr, canal, {"status": "OK", "motivo": None, "horario": result.horario})
+    _marcar_imagem_noite(nvr, canal, {"status": "OK", "motivo": None, "horario": result.horario}, camera.nome)
     db.commit()
 
 
-def _marcar_imagem_noite(nvr: NVR, canal: int, info: dict) -> None:
-    """Grava o status da captura da noite do canal em `last_recording_status` (lido pela galeria)."""
+def _marcar_imagem_noite(nvr: NVR, canal: int, info: dict, nome: Optional[str] = None) -> None:
+    """Grava o status da captura da noite em `last_recording_status` (em DIGIFORT/DEFENSE casa pelo nome)."""
+    is_vms = (nvr.tipo or "NVR").upper() in TIPOS_VMS
     status_rel = []
+    casou = False
+    nome_k = _nome_chave(nome)
     for st in nvr.last_recording_status or []:
-        if isinstance(st, dict) and _canal_int(st.get("canal")) == canal:
-            st = {**st, "imagem_noite": info}
+        if isinstance(st, dict):
+            if is_vms:
+                if nome_k and _nome_chave(st.get("nome")) == nome_k:
+                    st = {**st, "imagem_noite": info}
+                    casou = True
+            elif _canal_int(st.get("canal")) == canal:
+                st = {**st, "imagem_noite": info}
+                casou = True
         status_rel.append(st)
+    if is_vms and not casou and nome:
+        status_rel.append({"canal": canal, "nome": nome, "imagem_noite": info})
     nvr.last_recording_status = status_rel
 
 
@@ -317,7 +332,7 @@ def get_nvr_cameras(
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="NVR não encontrado")
-    
+
     cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).order_by(NVRCamera.canal).all()
     db_dict = {c.canal: c for c in cameras_db}
 
@@ -325,25 +340,25 @@ def get_nvr_cameras(
 
     is_vms = (nvr.tipo or "NVR").upper() in TIPOS_VMS
     report_by_ch = {}
-    sem_canal = []
-    for st in report_status:
-        ch_int = _canal_int(st.get("canal"))
-        if ch_int is not None:
-            report_by_ch[ch_int] = st
-        elif is_vms:
-            sem_canal.append(st)
-
-    if is_vms and sem_canal:
-        # DIGIFORT/DEFENSE reportam canal "N/A": casa pelo nome com a galeria (ou usa o próximo canal livre)
-        nomes_db = {(c.nome or "").strip().lower(): c.canal for c in cameras_db}
-        proximo = 1
-        for st in sem_canal:
-            ch = nomes_db.get((st.get("nome") or "").strip().lower())
-            if ch is None:
-                while proximo in report_by_ch or proximo in db_dict:
-                    proximo += 1
-                ch = proximo
-            report_by_ch[ch] = st
+    if is_vms:
+        # O canal do relatório (ordem do export do agente) difere do da Galeria: casa pelo nome.
+        # Câmera só do relatório (sem linha na Galeria) ganha um canal livre depois dos existentes.
+        por_nome_db = {_nome_chave(c.nome): c for c in cameras_db}
+        proximo = max(db_dict, default=0) + 1
+        for st in report_status:
+            if not isinstance(st, dict):
+                continue
+            c_db = por_nome_db.get(_nome_chave(st.get("nome")))
+            if c_db is not None:
+                report_by_ch[c_db.canal] = st
+            else:
+                report_by_ch[proximo] = st
+                proximo += 1
+    else:
+        for st in report_status:
+            ch_int = _canal_int(st.get("canal"))
+            if ch_int is not None:
+                report_by_ch[ch_int] = st
 
     canais_set = set(db_dict.keys()) | set(report_by_ch.keys())
 
@@ -356,7 +371,7 @@ def get_nvr_cameras(
             "id": c_db.id if c_db else None,
             "nvr_id": id,
             "canal": ch,
-            "nome": (c_report.get("nome") if c_report else None) or (c_db.nome if c_db else f"Canal {ch}"),
+            "nome": (c_db.nome if (is_vms and c_db) else None) or (c_report.get("nome") if c_report else None) or (c_db.nome if c_db else f"Canal {ch}"),
             "ip": c_db.ip if c_db else None,
             "username": c_db.username if c_db else None,
             "modelo": c_db.modelo if c_db else None,
@@ -371,17 +386,17 @@ def get_nvr_cameras(
             "captura_motivo": None,
             "captura_horario": None,
         }
-        
+
         if c_report and "imagem_noite" in c_report:
             obj["captura_status"] = c_report["imagem_noite"].get("status")
-            obj["captura_motivo"] = c_report["imagem_noite"].get("motivo")
+            obj["captura_motivo"] = mascarar_credenciais(c_report["imagem_noite"].get("motivo"))
             obj["captura_horario"] = c_report["imagem_noite"].get("horario")
         else:
             if obj["night_image_base64"]:
                 obj["captura_status"] = "OK"
-                
+
         merged_cameras.append(obj)
-        
+
     return merged_cameras
 
 
