@@ -395,6 +395,8 @@ def receive_backup_report(
                 vms = (nvr.tipo or "NVR").upper() in ("DIGIFORT", "DEFENSE")
                 nvr.last_recording_status = _manter_imagem_noite(
                     nvr.last_recording_status, _limpar_motivos(r.cameras), por_nome=vms)
+            if r.telemetria is not None:
+                nvr.last_telemetry_status = r.telemetria
         else:
             r_dict["tipo"] = "NVR" # default fallback se foi excluido
         nvr_results_with_type.append(r_dict)

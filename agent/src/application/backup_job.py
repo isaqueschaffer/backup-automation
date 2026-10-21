@@ -13,7 +13,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from src.core.config import load_conf, parse_config_extra, DIR_AGENT
 from src.application.api_client import fetch_server_config, post_report, upload_zip
-from src.nvr.factory import verificar_gravacao_nvr
+from src.nvr.factory import verificar_gravacao_nvr, coletar_telemetria_nvr
 from src.olt.unm2000 import realizar_backup_olt
 from src.olt.vsol import realizar_backup_vsol
 from src.pabx.issabel import realizar_backup_issabel
@@ -76,6 +76,8 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
 
     logging.info(f"  NVR acessivel (Detectado: {tipo_nvr}).")
 
+    telemetria = coletar_telemetria_nvr(ip, user, pwd, tipo_nvr)
+
     sessao = requests.Session()
     sessao.auth = HTTPDigestAuth(user, pwd)
     sessao.verify = False
@@ -113,7 +115,7 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
     # A imagem da noite não é mais capturada no backup (atrasava backups manuais e agendados):
     # ela é capturada sob demanda pela Galeria do NVR no painel (tarefa RTSP modo "noite").
 
-    return {"nome": nome, "status": status, "cameras": cameras_status}
+    return {"nome": nome, "status": status, "cameras": cameras_status, "telemetria": telemetria}
 
 
 def processar_olt(
