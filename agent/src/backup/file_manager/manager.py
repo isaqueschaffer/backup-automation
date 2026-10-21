@@ -118,14 +118,18 @@ class FileManager:
                 detalhes_locais = get_detalhes_cameras(caminho_export, caminho_log)
                 cameras_servidor = equipamento.get("cameras_config") or []
                 por_nome_servidor = {(c.get("nome") or "").strip().lower(): c for c in cameras_servidor}
+                por_ip_servidor = {(c.get("ip") or "").strip(): c for c in cameras_servidor if c.get("ip")}
 
                 status_cameras = []
                 cameras_para_captura = []
                 for det in detalhes_locais:
                     canal = det["canal"]
                     nome_cam = det["nome"]
+                    ip_local = (det.get("ip") or "").strip()
                     cam_srv = por_nome_servidor.get((nome_cam or "").strip().lower())
-                    ip_cam = det.get("ip") or (cam_srv.get("ip") if cam_srv else "") or "N/A"
+                    if not cam_srv and ip_local:
+                        cam_srv = por_ip_servidor.get(ip_local)
+                    ip_cam = ip_local or (cam_srv.get("ip") if cam_srv else "") or "N/A"
                     is_ok = det["status"] == "OK"
                     status_cameras.append({
                         "canal": canal,

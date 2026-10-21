@@ -118,7 +118,8 @@ export function rowsToCameras(rows: unknown[][]): CameraRow[] {
 
   // Demais formatos: Digifort, Intelbras Defense e Genéricos
   let idxDesc = headers.findIndex(h => h.includes("desc"));
-  if (idxDesc === -1) idxDesc = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+  let idxNome = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+  if (idxDesc === -1) idxDesc = idxNome;
 
   const idxIp = headers.findIndex(h => h.includes("ip") || h.includes("endere"));
   const idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
@@ -135,11 +136,16 @@ export function rowsToCameras(rows: unknown[][]): CameraRow[] {
     let pass = "";
 
     if (idxDesc >= 0 || idxIp >= 0) {
-      desc = cleanCell(idxDesc >= 0 ? cols[idxDesc] : cols[0]);
+      const colNome = cleanCell(idxNome >= 0 ? cols[idxNome] : cols[0]);
+      const colDesc = cleanCell(idxDesc >= 0 ? cols[idxDesc] : "");
+      desc = colDesc || colNome;
+      if (colNome && colDesc && colNome.length > colDesc.length && !/^\d+$/.test(colNome)) {
+        desc = colNome;
+      }
       ender = cleanCell(idxIp >= 0 ? cols[idxIp] : cols[1]);
       pass = cleanCell(idxPass >= 0 ? cols[idxPass] : "");
     } else {
-      desc = cleanCell(cols[1]);
+      desc = cleanCell(cols[1]) || cleanCell(cols[0]);
       ender = cleanCell(cols[3]);
       pass = cleanCell(cols[6]);
     }

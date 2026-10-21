@@ -4,6 +4,7 @@ Substitui o antigo router de NVRs, agora suportando múltiplos tipos:
 NVR, OLT, ONU, PABX (e futuros).
 """
 import asyncio
+import re
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
@@ -186,7 +187,31 @@ async def test_equipamento_rtsp(
     if is_vms:
         cam_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == equipamento_id, NVRCamera.canal == canal).first()
         if not cam_db or not cam_db.ip:
-            return RTSPTestResponse(success=False, error_message="Câmera sem endereço IP configurado na galeria. Importe o CSV ou configure o IP da câmera.")
+            # Tenta recuperar IP a partir do last_recording_status da máquina
+            st_cam = next(
+                (s for s in (eq.last_recording_status or []) if isinstance(s, dict) and _canal_int(s.get("canal")) == canal),
+                None
+            )
+            ip_recup = (st_cam.get("ip") or "").strip() if st_cam else ""
+            if ip_recup and ip_recup != "N/A" and "." in ip_recup:
+                mod_recup = (st_cam.get("modelo") or "").strip() or "Hikvision"
+                if not cam_db:
+                    cam_db = NVRCamera(
+                        nvr_id=equipamento_id,
+                        canal=canal,
+                        nome=st_cam.get("nome") or f"Canal {canal}",
+                        ip=ip_recup,
+                        username="admin",
+                        password=encrypt("navarro@123"),
+                        modelo=mod_recup
+                    )
+                    db.add(cam_db)
+                else:
+                    cam_db.ip = ip_recup
+                db.commit()
+                db.refresh(cam_db)
+            else:
+                return RTSPTestResponse(success=False, error_message="Câmera sem endereço IP configurado na galeria. Importe o CSV ou configure o IP da câmera.")
         try:
             cam_password = decrypt(cam_db.password) if cam_db.password else "navarro@123"
         except Exception:
@@ -319,31 +344,122 @@ def get_nvr_cameras(
         raise HTTPException(status_code=404, detail="NVR não encontrado")
     
     cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).order_by(NVRCamera.canal).all()
-    db_dict = {c.canal: c for c in cameras_db}
-
     report_status = nvr.last_recording_status or []
-
     is_vms = (nvr.tipo or "NVR").upper() in TIPOS_VMS
+
+    if is_vms:
+        def norm(s):
+            return re.sub(r'[^a-zA-Z0-9]', '', (s or "").lower())
+
+        cams_db_disponiveis = list(cameras_db)
+        usados_db_ids = set()
+        merged_cameras = []
+
+        # 1. Processa cada câmera reportada pelo agente no backup local
+        for idx_rep, st in enumerate(report_status):
+            st_canal = _canal_int(st.get("canal")) or (idx_rep + 1)
+            st_nome = (st.get("nome") or "").strip()
+            st_ip = (st.get("ip") or "").strip()
+            st_norm = norm(st_nome)
+
+            match_db = None
+            # 1a. Tenta casar por nome exato normalizado
+            if st_norm:
+                for c in cams_db_disponiveis:
+                    if c.id not in usados_db_ids and norm(c.nome) == st_norm:
+                        match_db = c
+                        break
+            # 1b. Tenta casar por IP válido
+            if not match_db and st_ip and st_ip != "N/A" and "." in st_ip:
+                for c in cams_db_disponiveis:
+                    if c.id not in usados_db_ids and (c.ip or "").strip() == st_ip:
+                        match_db = c
+                        break
+            # 1c. Tenta casar por substring do nome (ex: "1 ANDAR" dentro de "1 ANDAR- ACESSO...")
+            if not match_db and st_norm:
+                for c in cams_db_disponiveis:
+                    if c.id not in usados_db_ids:
+                        c_norm = norm(c.nome)
+                        if c_norm and (c_norm in st_norm or st_norm in c_norm):
+                            match_db = c
+                            break
+            # 1d. Tenta casar por canal
+            if not match_db:
+                for c in cams_db_disponiveis:
+                    if c.id not in usados_db_ids and c.canal == st_canal:
+                        match_db = c
+                        break
+
+            if match_db:
+                usados_db_ids.add(match_db.id)
+                ch_final = match_db.canal
+            else:
+                ch_final = st_canal
+
+            ip_final = (match_db.ip if match_db and match_db.ip else None) or (st_ip if st_ip and st_ip != "N/A" and "." in st_ip else None)
+            nome_final = (match_db.nome if match_db and match_db.nome else None) or st_nome or f"Canal {ch_final}"
+
+            obj = {
+                "id": match_db.id if match_db else None,
+                "nvr_id": id,
+                "canal": ch_final,
+                "nome": nome_final,
+                "ip": ip_final,
+                "username": match_db.username if match_db else None,
+                "modelo": match_db.modelo if match_db else st.get("modelo"),
+                "has_password": bool(match_db and match_db.password),
+                "perfect_image_base64": match_db.perfect_image_base64 if match_db else None,
+                "night_image_base64": match_db.night_image_base64 if match_db else None,
+                "night_image_date": match_db.night_image_date if match_db else None,
+                "updated_at": match_db.updated_at if match_db else None,
+                "status_comunicacao": st.get("status_comunicacao"),
+                "status_gravacao": st.get("status_gravacao"),
+                "captura_status": None,
+                "captura_motivo": None,
+                "captura_horario": None,
+            }
+            if "imagem_noite" in st:
+                obj["captura_status"] = st["imagem_noite"].get("status")
+                obj["captura_motivo"] = st["imagem_noite"].get("motivo")
+                obj["captura_horario"] = st["imagem_noite"].get("horario")
+            elif obj["night_image_base64"]:
+                obj["captura_status"] = "OK"
+
+            merged_cameras.append(obj)
+
+        # 2. Câmeras que estão no banco mas não vieram no relatório do agente
+        for c in cams_db_disponiveis:
+            if c.id not in usados_db_ids:
+                obj = {
+                    "id": c.id,
+                    "nvr_id": id,
+                    "canal": c.canal,
+                    "nome": c.nome or f"Canal {c.canal}",
+                    "ip": c.ip,
+                    "username": c.username,
+                    "modelo": c.modelo,
+                    "has_password": bool(c.password),
+                    "perfect_image_base64": c.perfect_image_base64,
+                    "night_image_base64": c.night_image_base64,
+                    "night_image_date": c.night_image_date,
+                    "updated_at": c.updated_at,
+                    "status_comunicacao": None,
+                    "status_gravacao": None,
+                    "captura_status": "OK" if c.night_image_base64 else None,
+                    "captura_motivo": None,
+                    "captura_horario": None,
+                }
+                merged_cameras.append(obj)
+
+        return sorted(merged_cameras, key=lambda x: x["canal"])
+
+    # NVR tradicional (Intelbras/Hikvision/Motorola): canais físicos de hardware
+    db_dict = {c.canal: c for c in cameras_db}
     report_by_ch = {}
-    sem_canal = []
     for st in report_status:
         ch_int = _canal_int(st.get("canal"))
         if ch_int is not None:
             report_by_ch[ch_int] = st
-        elif is_vms:
-            sem_canal.append(st)
-
-    if is_vms and sem_canal:
-        # DIGIFORT/DEFENSE reportam canal "N/A": casa pelo nome com a galeria (ou usa o próximo canal livre)
-        nomes_db = {(c.nome or "").strip().lower(): c.canal for c in cameras_db}
-        proximo = 1
-        for st in sem_canal:
-            ch = nomes_db.get((st.get("nome") or "").strip().lower())
-            if ch is None:
-                while proximo in report_by_ch or proximo in db_dict:
-                    proximo += 1
-                ch = proximo
-            report_by_ch[ch] = st
 
     canais_set = set(db_dict.keys()) | set(report_by_ch.keys())
 
@@ -430,6 +546,7 @@ def import_cameras(
                 nome=mc.name,
                 ip=mc.ip,
                 username=mc.username or "admin",
+                password=decrypt(mc.password) if mc.password else "navarro@123",
                 modelo=(mc.config_extra or {}).get("modelo") or "Hikvision",
             )
             for mc in machine_cams
@@ -447,12 +564,23 @@ def import_cameras(
     usados = set()
     atualizadas = []
     for idx, item in enumerate(itens, start=1):
-        canal = item.canal or idx
+        nome_key = (item.nome or "").strip().lower()
+        ip_key = (item.ip or "").strip()
+
+        # Prioriza encontrar a câmera existente pelo nome ou pelo IP!
+        camera = None
+        if nome_key and nome_key in by_nome:
+            camera = by_nome[nome_key]
+        elif ip_key and ip_key in by_ip:
+            camera = by_ip[ip_key]
+        elif item.canal and item.canal in by_canal:
+            camera = by_canal[item.canal]
+
+        canal = camera.canal if camera else (item.canal or idx)
         while canal in usados:
             canal += 1
         usados.add(canal)
 
-        camera = by_canal.get(canal) or by_nome.get((item.nome or "").strip().lower()) or by_ip.get((item.ip or "").strip())
         if camera is None:
             camera = NVRCamera(nvr_id=id, canal=canal, nome=item.nome)
             db.add(camera)
