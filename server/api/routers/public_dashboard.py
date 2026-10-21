@@ -3,10 +3,11 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from services.dashboards.compartilhamento import AcessoDashboard, acesso_publico
-from services.dashboards.dados import montar_dados
+from services.dashboards.dados import listar_opcoes, montar_dados
 from services.dashboards.esquemas import (
     DadosResposta,
     LayoutSalvoResposta,
+    OpcoesResposta,
     PublicoResposta,
     SalvarLayoutEntrada,
 )
@@ -55,6 +56,20 @@ def get_public_dashboard_data(
     dados = montar_dados(db, dashboard.customer, layout)
 
     return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
+
+
+@router.get("/opcoes", response_model=OpcoesResposta)
+def get_public_dashboard_opcoes(
+    response: Response,
+    acesso: AcessoDashboard = Depends(acesso_publico),
+    db: Session = Depends(get_db),
+):
+    """Lista opções disponíveis para configuração caso o link tenha permissão de edição."""
+    _cabecalhos(response)
+    if not acesso.pode_editar:
+        raise HTTPException(status_code=403, detail="Edição não permitida para este link.")
+
+    return listar_opcoes(db, acesso.dashboard.customer)
 
 
 @router.put("/layout", response_model=LayoutSalvoResposta)

@@ -799,6 +799,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-21] — Dashboards por Cliente (etapa 2A: visão pública e widgets)
+
+**Alteração:** Registro de widgets no front (resumo, saúde do servidor, status e histórico de backups, câmeras, equipamentos, texto), grade de 12 colunas (`.dash-grid`) e página pública `/d` (sem menu e sem login) que lê o token do fragmento da URL (`/d#<token>`), envia em `X-Dashboard-Token` por um cliente HTTP separado (sem JWT do painel) e atualiza os dados a cada 30 s. Novas rotas de opções para o editor: `GET /api/v1/clients/{id}/dashboard/opcoes` (admin) e `GET /api/v1/public/dashboard/opcoes` (só com permissão de edição). A rota `/d` do nginx do dashboard envia `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex` e `Cache-Control: no-store`.
+**Arquivos:** server/dashboard/src/pages/Dashboards/*, server/dashboard/src/api/dashboards.ts, server/dashboard/src/App.tsx, server/dashboard/src/index.css, server/dashboard/nginx-spa.conf, server/api/routers/dashboards.py, server/api/routers/public_dashboard.py, server/api/services/dashboards/{dados,esquemas}.py
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-21] — Dashboards por Cliente (etapa 1: API)
 
 **Alteração:** Nova tabela `customer_dashboards` (um dashboard por Cliente: layout JSON versionado + compartilhamento por link). Registro de tipos de widget plugáveis (`services/dashboards/`: resumo, saúde do servidor, status e histórico de backups, câmeras/gravação, equipamentos, texto) que montam os dados a partir de telemetria, backups e `last_recording_status` já existentes. Rotas de admin (JWT) em `/api/v1/clients/{id}/dashboard` (layout com controle de versão, link de compartilhamento: gerar/regenerar, ativar, validade, permitir edição, revogar) e catálogo em `/api/v1/dashboards/widgets`. Rotas públicas em `/api/v1/public/dashboard` autenticadas só por `X-Dashboard-Token` (token aleatório de 256 bits, guardado como hash SHA-256, mostrado uma única vez; 404 genérico para inválido/expirado/revogado; limite de requisições e de tentativas inválidas por IP em memória, válido para 1 worker). O servidor filtra tudo pelo cliente do token e a resposta pública omite IPs, credenciais e configurações dos equipamentos.

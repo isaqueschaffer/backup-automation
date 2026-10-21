@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -75,3 +75,21 @@ class PublicoResposta(BaseModel):
     version: int
     pode_editar: bool
     dados: DadosResposta
+
+
+class OpcaoMaquina(BaseModel):
+    id: UUID
+    nome: str
+
+
+class OpcaoEquipamento(BaseModel):
+    id: UUID
+    nome: str
+    tipo: str
+    maquina_id: UUID
+    maquina: str
+
+
+class OpcoesResposta(BaseModel):
+    maquinas: List[OpcaoMaquina]
+    equipamentos: List[OpcaoEquipamento]

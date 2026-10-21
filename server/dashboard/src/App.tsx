@@ -10,6 +10,7 @@ import MachinesPage from "./pages/Machines/MachinesPage";
 import MachineDetail from "./pages/Machines/MachineDetail";
 import Backups from "./pages/Backups";
 import Settings from "./pages/Settings";
+import PublicDashboardPage from "./pages/Dashboards/PublicDashboardPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route key={from} path={`/${from}`} element={<Navigate to={to} replace />} />
       ))}
       <Route path="/clients/:id" element={<LegacyMachineRedirect />} />
+      <Route path="/d" element={<PublicDashboardPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

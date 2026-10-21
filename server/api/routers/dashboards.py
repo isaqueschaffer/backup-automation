@@ -10,7 +10,7 @@ from config import settings
 from database import get_db
 from models import Customer, CustomerDashboard
 from services.dashboards.compartilhamento import gerar_token
-from services.dashboards.dados import montar_dados
+from services.dashboards.dados import listar_opcoes, montar_dados
 from services.dashboards.esquemas import (
     AtualizarLinkEntrada,
     CompartilhamentoResposta,
@@ -19,6 +19,7 @@ from services.dashboards.esquemas import (
     GerarLinkEntrada,
     LayoutSalvoResposta,
     LinkGeradoResposta,
+    OpcoesResposta,
     SalvarLayoutEntrada,
     para_utc_naive,
 )
@@ -163,6 +164,18 @@ def get_customer_dashboard_data(
     dashboard = _obter_ou_criar(db, customer)
     dados = montar_dados(db, customer, layout_do_banco(dashboard))
     return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
+
+
+@router.get("/api/v1/clients/{customer_id}/dashboard/opcoes", response_model=OpcoesResposta)
+def get_customer_dashboard_opcoes(
+    customer_id: UUID,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Lista opções de máquinas e equipamentos disponíveis para configurar widgets."""
+    response.headers["Cache-Control"] = "no-store"
+    customer = _cliente_ou_404(db, customer_id)
+    return listar_opcoes(db, customer)
 
 
 @router.post("/api/v1/clients/{customer_id}/dashboard/share", response_model=LinkGeradoResposta)
