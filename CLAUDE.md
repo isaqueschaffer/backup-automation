@@ -7,7 +7,7 @@ Não criar nem mover skills para `.agents/skills/`: essa pasta é lida automatic
 que só executa os planos e não deve ter acesso a skills. Quando uma skill for útil para uma tarefa do executor,
 o Claude aplica o conteúdo dela no próprio plano.
 
-Skills do projeto: `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers` (mantidas aqui; atualizar quando a estrutura mudar).
+Skills do projeto: `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers`, `criar-widget-dashboard` (mantidas aqui; atualizar quando a estrutura mudar).
 
 Skills externas e como aplicá-las aqui (as regras do projeto sempre prevalecem):
 - `fastapi` (oficial do FastAPI): o projeto usa FastAPI 0.111, SQLAlchemy 2.0 síncrono e `requests`. Não migrar para SQLModel, HTTPX, uv, Ruff ou ty, e não usar recursos de versões novas (`app.frontend()`, `fastapi.sse`, OpenTelemetry nativo). `Annotated` pode.

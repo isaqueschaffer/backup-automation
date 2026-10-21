@@ -148,8 +148,11 @@ trilan-nvr-backup-automation/
 │   │   │   ├── equipamentos.py  <- /api/v1/machines/{id}/equipamentos/*
 │   │   │   ├── nvrs.py          <- legado, fora do schema (candidato a remoção)
 │   │   │   ├── backups.py       <- /api/v1/backups/*
+│   │   │   ├── dashboards.py    <- /api/v1/clients/{id}/dashboard/* e /api/v1/dashboards/widgets (admin, JWT)
+│   │   │   ├── public_dashboard.py <- /api/v1/public/dashboard/* (só X-Dashboard-Token)
 │   │   │   ├── settings_router.py / auth_router.py
-│   │   ├── services/            <- crypto_service, email_service, storage_service
+│   │   ├── services/            <- crypto_service, email_service, storage_service, galeria_vms
+│   │   │   └── dashboards/      <- registro, widgets, layout, dados, compartilhamento (token/limitador), esquemas
 │   │   └── tests/
 │   └── dashboard/               <- React + Vite + TypeScript
 │       ├── Dockerfile / nginx-spa.conf
@@ -159,6 +162,7 @@ trilan-nvr-backup-automation/
 │           └── pages/
 │               ├── Customers/       <- CustomersPage (/clientes), CustomerDetail/ (/clientes/:id, fila arrastar-e-soltar)
 │               ├── Machines/        <- MachinesPage (/maquinas), MachineDetail/ (/maquinas/:id)
+│               ├── Dashboards/      <- editor e visão do cliente: DashboardWorkspace, widgets/ (registro), SharePanel, DashboardAdminPage (/clientes/:id/dashboard), PublicDashboardPage (/d)
 │               └── Backups.tsx / Overview/ (Visão Geral personalizável) / Settings.tsx
 ├── tools/                       <- Utilitários avulsos (não entram em build nem deploy)
 ├── archive/legacy_scripts/      <- Código legado, só consulta
@@ -290,6 +294,21 @@ trilan-nvr-backup-automation/
 | sha256_tray | VARCHAR(64) | str | NULL | Hash lowercase |
 | active | BOOLEAN | bool | NOT NULL | FALSE = rollback emergência |
 | created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
+#### `customer_dashboards` (um dashboard por Cliente, `client_groups`)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Notas |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | PK |
+| customer_id | UUID | uuid.UUID | NOT NULL UNIQUE | FK `client_groups.id` ON DELETE CASCADE |
+| layout | JSON | dict | NOT NULL | `{schema_version, filtros:{periodo}, widgets:[{id, tipo, titulo, largura, altura, config}]}` validado por `services/dashboards/layout.py` |
+| version | INTEGER | int | NOT NULL | +1 a cada gravação do layout (409 em edição concorrente) |
+| share_token_hash | VARCHAR(64) | str | NULL UNIQUE | SHA-256 do token do link; o token em texto puro nunca é gravado |
+| share_enabled | BOOLEAN | bool | NOT NULL | Link ativo |
+| share_expires_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | Validade (UTC) |
+| share_allow_edit | BOOLEAN | bool | NOT NULL | O visitante do link pode salvar o layout |
+| share_created_at / last_viewed_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
+| created_at / updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
 
 ### Estratégia de Migração
 
@@ -444,6 +463,18 @@ X-API-Key: sk_trilan_<token>
 
 API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 
+### Fluxo do link público do Dashboard (token de compartilhamento)
+
+```
+X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/*)
+```
+
+- Token com `secrets.token_urlsafe(32)` (256 bits) e prefixo `dsh_`; só o hash SHA-256 fica no banco e o token aparece **uma única vez**, ao gerar. Gerar de novo invalida o anterior; revogar apaga.
+- O link é `/d#<token>`: o token vai no **fragmento da URL**, que o navegador não envia ao servidor (fora de logs do nginx/proxy). A página `/d` usa um cliente HTTP próprio, sem o JWT do painel, e o nginx do dashboard responde `/d` com `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex` e `Cache-Control: no-store`.
+- Token inexistente, desativado, expirado ou de cliente inativo → o mesmo `404` genérico. Limites em memória por IP (válidos para 1 worker uvicorn): 240 requisições/min e 10 tentativas inválidas/5 min (depois `429`).
+- Isolamento: o token resolve para um único `customer_id` e todas as consultas são filtradas por ele; ids de máquina/equipamento guardados no layout são validados contra o cliente ao salvar (422) e ignorados na leitura. A resposta pública usa listas brancas de campos: sem IPs, usuários, senhas, `config_extra` ou chaves de API.
+- O token **não** abre nenhuma rota administrativa (`verify_admin_token` continua exigindo o JWT). Editar o layout pelo link exige `share_allow_edit` e só altera `layout`/`version`, nunca o compartilhamento.
+
 ---
 
 ## 8. Contratos de API
@@ -489,6 +520,13 @@ API Key gerada com `secrets.token_urlsafe(32)` prefixada com `sk_trilan_`.
 | GET | `/api/v1/clients/{id}/runs/{run_id}/download` | ZIP unificado da rodada (uma pasta por máquina) |
 | POST | `/api/v1/clients/{id}/runs/{run_id}/resend-email` | Reenviar e-mail da rodada (409 se aberta) |
 | GET | `/api/v1/clients/{id}/download-latest` | ZIP unificado do último backup do Cliente |
+| GET | `/api/v1/dashboards/widgets` | Catálogo dos tipos de widget (rótulo, tamanho padrão, schema da config) |
+| GET/PUT | `/api/v1/clients/{id}/dashboard` | Ler (cria o padrão) / salvar o layout `{layout, version}` (409 = versão antiga; 422 = layout ou referência inválida) |
+| POST | `/api/v1/clients/{id}/dashboard/restore-default` · `/preview` | Restaurar o layout padrão / dados de um rascunho sem gravar |
+| GET | `/api/v1/clients/{id}/dashboard/data` · `/opcoes` | Dados dos widgets do layout salvo / máquinas e equipamentos do cliente para configurar |
+| POST/PUT/DELETE | `/api/v1/clients/{id}/dashboard/share` | Gerar/regenerar o link (token devolvido uma vez) / ativar, validade, permissão de edição / revogar |
+| GET | `/api/v1/public/dashboard` · `/data` | Dashboard e dados pelo link (`X-Dashboard-Token`; 404 genérico, 429 por limite) |
+| GET/POST/PUT | `/api/v1/public/dashboard/opcoes` · `/preview` · `/layout` | Só com permissão de edição do link (403 sem ela) |
 | GET | `/api/v1/backups` | Listar backups (paginado; filtros `machine_id`, `customer_id`) |
 | GET | `/api/v1/backups/{id}/download` | Download de ZIP (admin) |
 | GET | `/api/v1/backups/public-download/{id}` | Download público por link de e-mail (sem auth; ver riscos abertos) |
@@ -798,6 +836,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-21] — Dashboards por Cliente (etapa 3: documentação e testes)
+
+**Alteração:** Dashboard por Cliente documentado nas seções 3 (estrutura), 5 (tabela `customer_dashboards`), 7 (fluxo do link público: token com hash, fragmento da URL, 404 genérico, limites por IP, isolamento e listas brancas) e 8 (rotas). Nova skill do Claude `criar-widget-dashboard` (como registrar um tipo de widget no backend e no front). Testes de ponta a ponta no repositório: `tools/teste_dashboards_e2e.py` (API: isolamento entre clientes, token inválido/expirado/revogado/regenerado, limite de tentativas, permissão de edição, token sem acesso a rotas admin, resposta pública sem IP/credenciais) e `tools/dashboards_ui/` (Chromium headless em Docker: página pública e de administração, personalizar, salvar, compartilhar e revogar).
+**Arquivos:** PROJECT_SPEC.md, CLAUDE.md, .claude/skills/criar-widget-dashboard/SKILL.md, tools/teste_dashboards_e2e.py, tools/dashboards_ui/*, tools/README.md
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-21] — Dashboards por Cliente (etapa 2B-2: compartilhamento e personalização pelo cliente)
 

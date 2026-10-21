@@ -40,3 +40,10 @@ Script de análise de logs do software **Digifort** (NVR). Lê os logs do Digifo
 - Este script é **independente** do serviço Windows de backup (`TrilanAgentNVR`).
 - Requer Python 3.x instalado na máquina onde for executado.
 - Os caminhos padrão no script são exemplos e devem ser ajustados para cada cliente.
+
+## Testes do Dashboard por Cliente (rodar só no ambiente local)
+
+| Arquivo | O que testa |
+|---|---|
+| `teste_dashboards_e2e.py` | API: isolamento entre clientes, token do link (inválido, expirado, revogado, regenerado), limite de tentativas, edição permitida/negada, token não abre rotas admin, resposta pública sem IP/credenciais. Uso: `python tools/teste_dashboards_e2e.py <senha-admin-local>` |
+| `dashboards_ui/` | Navegador de verdade (Chromium headless em Docker): `seed.py <senha> seed.json` cria um cliente de demonstração e `ui_test.js` abre a página pública e a de administração, personaliza, salva, compartilha e revoga, gerando capturas de tela. Execução: `docker run --rm --add-host=host.docker.internal:host-gateway -v <pasta com seed.json e ui_test.js>:/work -e NODE_PATH=/usr/src/app/node_modules --entrypoint node zenika/alpine-chrome:with-puppeteer /work/ui_test.js` |
