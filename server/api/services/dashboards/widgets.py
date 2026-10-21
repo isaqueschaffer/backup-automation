@@ -137,6 +137,66 @@ def telemetria_publica(raw: Any) -> Optional[Dict[str, Any]]:
     return out
 
 
+STATUS_DISCO_OK = ("OK", "REPOUSO")
+LIMITE_DISCO_CHEIO = 90
+
+
+def disco_com_problema(d: Dict[str, Any]) -> bool:
+    status = str(d.get("status") or "").upper()
+    status_ruim = bool(status and status not in STATUS_DISCO_OK)
+    pct = d.get("percent")
+    pct_cheio = isinstance(pct, (int, float)) and not isinstance(pct, bool) and pct >= LIMITE_DISCO_CHEIO
+    return status_ruim or pct_cheio
+
+
+def telemetria_equipamento_publica(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+
+    cpu_val = raw.get("cpu_percent")
+    cpu_percent = cpu_val if isinstance(cpu_val, (int, float)) and not isinstance(cpu_val, bool) else None
+
+    ram_val = raw.get("ram_percent")
+    ram_percent = ram_val if isinstance(ram_val, (int, float)) and not isinstance(ram_val, bool) else None
+
+    disks_raw = raw.get("disks")
+    disks_out: List[Dict[str, Any]] = []
+    if isinstance(disks_raw, list):
+        for d in disks_raw[:32]:
+            if not isinstance(d, dict):
+                continue
+            item_d: Dict[str, Any] = {}
+            dev = d.get("device")
+            if dev is not None:
+                item_d["device"] = str(dev)[:40]
+            st = d.get("status")
+            item_d["status"] = str(st).upper()[:30] if st is not None else None
+            for nk in ("percent", "total_gb", "free_gb"):
+                nv = d.get(nk)
+                item_d[nk] = nv if isinstance(nv, (int, float)) and not isinstance(nv, bool) else None
+            disks_out.append(item_d)
+
+    if cpu_percent is None and ram_percent is None and not disks_out:
+        return None
+
+    return {
+        "cpu_percent": cpu_percent,
+        "ram_percent": ram_percent,
+        "disks": disks_out,
+    }
+
+
+def equipamento_tem_problema(t: Dict[str, Any]) -> bool:
+    for d in t.get("disks") or []:
+        if isinstance(d, dict) and disco_com_problema(d):
+            return True
+    for k in ("cpu_percent", "ram_percent"):
+        v = t.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 90:
+            return True
+    return False
+
+
 def ultimo_backup_por_maquina(ctx: ContextoDados) -> Dict[UUID, Backup]:
     if not ctx.maquinas:
         return {}
@@ -183,6 +243,10 @@ def construir_resumo(ctx: ContextoDados, config: ConfigResumo) -> Dict[str, Any]
     cameras_offline = 0
     cameras_sem_gravacao = 0
 
+    gravadores_com_telemetria = 0
+    discos_total = 0
+    discos_com_problema = 0
+
     for m in ctx.maquinas:
         for e in equipamentos_ativos(m):
             equipamentos_total += 1
@@ -191,6 +255,15 @@ def construir_resumo(ctx: ContextoDados, config: ConfigResumo) -> Dict[str, Any]
             cameras_online += cnt["online"]
             cameras_offline += cnt["offline"]
             cameras_sem_gravacao += cnt["sem_gravacao"]
+
+            t = telemetria_equipamento_publica(e.last_telemetry_status)
+            if t is not None:
+                gravadores_com_telemetria += 1
+                disks = t.get("disks") or []
+                discos_total += len(disks)
+                for d in disks:
+                    if disco_com_problema(d):
+                        discos_com_problema += 1
 
     return {
         "maquinas_total": maquinas_total,
@@ -204,6 +277,9 @@ def construir_resumo(ctx: ContextoDados, config: ConfigResumo) -> Dict[str, Any]
         "cameras_online": cameras_online,
         "cameras_offline": cameras_offline,
         "cameras_sem_gravacao": cameras_sem_gravacao,
+        "gravadores_com_telemetria": gravadores_com_telemetria,
+        "discos_total": discos_total,
+        "discos_com_problema": discos_com_problema,
     }
 
 
@@ -383,6 +459,43 @@ def construir_cameras(ctx: ContextoDados, config: ConfigCameras) -> Dict[str, An
     return {"equipamentos": itens}
 
 
+# ─── Gravadores (CPU, RAM e discos) ────────────────────────────────────
+class ConfigTelemetriaEquipamentos(BaseModel):
+    model_config = {"extra": "forbid"}
+    equipamentos: List[UUID] = Field(default_factory=list, max_length=500)
+    apenas_problemas: bool = False
+
+
+def construir_telemetria_equipamentos(ctx: ContextoDados, config: ConfigTelemetriaEquipamentos) -> Dict[str, Any]:
+    filtro_ids = set(config.equipamentos) if config.equipamentos else None
+    itens = []
+
+    for m in ctx.maquinas:
+        for e in equipamentos_ativos(m):
+            if filtro_ids is not None and e.id not in filtro_ids:
+                continue
+            t = telemetria_equipamento_publica(e.last_telemetry_status)
+            if t is None:
+                continue
+            problema = equipamento_tem_problema(t)
+            if config.apenas_problemas and not problema:
+                continue
+            itens.append({
+                "id": str(e.id),
+                "nome": e.name,
+                "tipo": e.tipo or "NVR",
+                "maquina": m.name,
+                "atualizado_em": iso(e.updated_at),
+                "cpu_percent": t["cpu_percent"],
+                "ram_percent": t["ram_percent"],
+                "disks": t["disks"],
+                "tem_problema": problema,
+            })
+
+    itens.sort(key=lambda item: 0 if item["tem_problema"] else 1)
+    return {"equipamentos": itens}
+
+
 # ─── Equipamentos ───────────────────────────────────────────────────────
 class ConfigEquipamentos(BaseModel):
     model_config = {"extra": "forbid"}
@@ -483,6 +596,16 @@ registrar(TipoWidget(
     largura_padrao=6,
     altura_padrao=2,
     construir=construir_cameras,
+))
+
+registrar(TipoWidget(
+    tipo="telemetria_equipamentos",
+    rotulo="Gravadores (CPU, RAM e discos)",
+    descricao="CPU, memória e discos dos gravadores (NVR/DVR) com alerta de disco com problema ou cheio",
+    config_model=ConfigTelemetriaEquipamentos,
+    largura_padrao=6,
+    altura_padrao=2,
+    construir=construir_telemetria_equipamentos,
 ))
 
 registrar(TipoWidget(

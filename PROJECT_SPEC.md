@@ -838,6 +838,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-21] — Dashboards por Cliente: componente "Gravadores" e indicadores de disco no Resumo
+
+**Alteração:** A telemetria dos NVR/DVR Hikvision (`nvrs.last_telemetry_status`: CPU, RAM e discos) passa a alimentar o dashboard do Cliente. Novo tipo de widget `telemetria_equipamentos` ("Gravadores (CPU, RAM e discos)": anéis de CPU/RAM, status e ocupação de cada disco, alerta quando o disco tem status diferente de OK/REPOUSO ou ocupação >= 90%, filtro de gravadores e opção "apenas com problema") e três indicadores novos no Resumo (`gravadores_com_telemetria`, `discos_total`, `discos_com_problema`; os tiles de disco só aparecem se houver telemetria). A resposta usa lista branca de campos (sem IP, usuário, senha ou `config_extra`) e o isolamento por cliente cobre a chave `equipamentos` do novo widget (`ids_referenciados`). Nenhuma mudança no agente nem no banco.
+**Arquivos:** server/api/services/dashboards/widgets.py, server/api/services/dashboards/layout.py, server/dashboard/src/pages/Dashboards/types.ts, widgets/TelemetriaEquipamentosWidget.tsx, widgets/registry.tsx, widgets/ResumoWidget.tsx, WidgetConfigModal.tsx
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-21] — Telemetria de NVR Hikvision (CPU/RAM/Discos) e status no painel
 
 **Alteração:** (1) Agente: novo `src/nvr/hikvision/telemetry.py` (`coletar_telemetria_hikvision`) lê `ISAPI/System/status` (CPU/RAM) e `ISAPI/ContentMgmt/Storage/hdd` (discos: capacidade, livre, status) de NVR/DVR Hikvision, convertendo MB→GB e calculando o percentual de uso de cada disco; `factory.py` expõe `coletar_telemetria_nvr()`, que só roda para `tipo_nvr` `NVR`/`DVR` (Motorola retorna `None`). `backup_job.processar_nvr` inclui o resultado em `"telemetria"` no retorno do backup. (2) API: `NVRResult.telemetria` (relatório do agente) grava em `NVR.last_telemetry_status` (coluna JSON nova, migração inline em `main.py`); exposta em `NVRResponse.last_telemetry_status`. (3) Painel: botão "Telemetria" no card de equipamento NVR (`EqCard.tsx`) abre `NVRTelemetryModal.tsx`, reaproveitando `MetricTile`/`PctBar` (CPU, RAM) e `StatusBadge` (status de cada disco: OK, Erro, Não Inicializado, Não Formatado, Repouso, Desconhecido — novas entradas no mapa de `StatusBadge.tsx`) e `fmtGb`/`fmtPct` de `telemetry.ts`. Sem dado (equipamento não-Hikvision ou offline na última coleta): modal mostra "Sem dados de telemetria disponíveis.".

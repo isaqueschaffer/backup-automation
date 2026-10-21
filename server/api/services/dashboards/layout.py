@@ -90,7 +90,7 @@ def ids_referenciados(layout: DashboardLayout) -> Tuple[Set[UUID], Set[UUID]]:
                 u = _parse_uuid(m)
                 if u:
                     ids_de_maquinas.add(u)
-        if w.tipo == "cameras":
+        if w.tipo in ("cameras", "telemetria_equipamentos"):
             eqs = w.config.get("equipamentos")
             if isinstance(eqs, list):
                 for e in eqs:

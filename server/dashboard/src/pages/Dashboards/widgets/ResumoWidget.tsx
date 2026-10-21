@@ -67,6 +67,21 @@ export default function ResumoWidget({ dados }: Props) {
     },
   ];
 
+  if ((dados.discos_total || 0) > 0) {
+    tiles.push(
+      {
+        rotulo: "Discos dos gravadores",
+        valor: dados.discos_total,
+        cor: "var(--text-primary)",
+      },
+      {
+        rotulo: "Discos com problema",
+        valor: dados.discos_com_problema,
+        cor: dados.discos_com_problema > 0 ? "var(--err)" : "var(--ok)",
+      }
+    );
+  }
+
   return (
     <div
       style={{

@@ -67,7 +67,10 @@ for m, ag, nome, ip in [(mA, agA, "NVR-A", "10.10.10.10"), (mB, agB, "NVR-B-SEGR
     call("POST", "/agent/backup/report", {"started_at": (agora - timedelta(minutes=3)).isoformat(), "finished_at": agora.isoformat(), "status": "OK",
          "nvr_results": [{"nome": nome, "tipo": "NVR", "status": "OK", "cameras": [
              {"canal": 1, "nome": "Cam1", "status_comunicacao": "ONLINE", "status_gravacao": "COM_GRAVACAO"},
-             {"canal": 2, "nome": "Cam2", "status_comunicacao": "OFFLINE", "status_gravacao": "SEM_GRAVACAO"}]}]}, ag)
+             {"canal": 2, "nome": "Cam2", "status_comunicacao": "OFFLINE", "status_gravacao": "SEM_GRAVACAO"}],
+         "telemetria": {"cpu_percent": 91, "ram_percent": 40, "ip_interno": "172.16.9.9", "disks": [
+             {"device": "HDD1", "status": "OK", "percent": 50.0, "total_gb": 1000.0, "free_gb": 500.0, "serial": "SN-SEGREDO"},
+             {"device": "HDD2", "status": "ERRO", "percent": None, "total_gb": None, "free_gb": None}]}}]}, ag)
     call("POST", "/agent/ping", {"telemetry": {"cpu_percent": 12.5, "ram_percent": 40, "ram_used_gb": 4, "ram_total_gb": 8,
          "disks": [{"device": "C:\\", "fstype": "NTFS", "percent": 50, "total_gb": 100, "used_gb": 50, "free_gb": 50, "mountpoint": "SEGREDO_MOUNT"}],
          "networks": [{"name": "Ethernet", "mbps_sent": 1, "mbps_recv": 2, "ip": "192.168.99.99", "mac": "AA:BB:CC"}],
@@ -105,6 +108,28 @@ s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_ok, "version": 1
 ok(s == 200 and r["version"] == 2, f"salvar layout valido ({s})")
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_ok, "version": 1}, ADM)
 ok(s == 409, f"versao desatualizada -> 409 ({s})")
+
+print("\n[2b] Componente Gravadores (telemetria dos NVR): isolamento e lista branca")
+eqA = call("GET", f"/machines/{mA['id']}/equipamentos", headers=ADM)[1][0]["id"]
+eqB = call("GET", f"/machines/{mB['id']}/equipamentos", headers=ADM)[1][0]["id"]
+s, dtmp, _ = call("GET", f"/clients/{A}/dashboard", headers=ADM)
+lay_g = json.loads(json.dumps(dtmp["layout"]))
+lay_g["widgets"].append({"id": "grav", "tipo": "telemetria_equipamentos", "titulo": None, "largura": 6, "altura": 2, "config": {"equipamentos": [eqB], "apenas_problemas": False}})
+s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_g, "version": dtmp["version"]}, ADM)
+ok(s == 422, f"Gravadores com equipamento de OUTRO cliente -> 422 ({s})")
+lay_g["widgets"][-1]["config"] = {"equipamentos": [eqA], "apenas_problemas": False}
+s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_g, "version": dtmp["version"]}, ADM)
+ok(s == 200, f"Gravadores com equipamento do proprio cliente ({s})")
+s, dg, _ = call("GET", f"/clients/{A}/dashboard/data", headers=ADM)
+gw = dg["widgets"]["grav"]
+ok(gw["ok"] and [e["nome"] for e in gw["dados"]["equipamentos"]] == ["NVR-A"], "widget lista so o gravador do cliente A")
+eq0 = gw["dados"]["equipamentos"][0]
+ok(eq0["tem_problema"] is True and len(eq0["disks"]) == 2 and eq0["disks"][1]["status"] == "ERRO", "alerta: disco em ERRO e CPU 91% marcam o gravador com problema")
+gtxt = json.dumps(dg, ensure_ascii=False)
+for proibido in ["172.16.9.9", "SN-SEGREDO", "ip_interno", "serial", "NVR-B-SEGREDO", "10.10.10.10"]:
+    ok(proibido not in gtxt, f"dados do widget NAO contem '{proibido}'")
+rs = dg["widgets"]["resumo"]["dados"]
+ok(rs["gravadores_com_telemetria"] == 1 and rs["discos_total"] == 2 and rs["discos_com_problema"] == 1, f"resumo conta so o cliente A: {rs['gravadores_com_telemetria']}/{rs['discos_total']}/{rs['discos_com_problema']}")
 
 print("\n[3] Dados (previa admin)")
 s, dados, _ = call("GET", f"/clients/{A}/dashboard/data", headers=ADM)

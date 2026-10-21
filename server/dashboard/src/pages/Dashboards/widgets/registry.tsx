@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   BarChart3,
+  HardDrive,
   LayoutGrid,
   Server,
   ShieldCheck,
@@ -17,6 +18,7 @@ import {
   DadosResumo,
   DadosSaudeServidor,
   DadosStatusBackups,
+  DadosTelemetriaEquipamentos,
   DadosTexto,
   Largura,
   WidgetInstancia,
@@ -26,12 +28,13 @@ import SaudeServidorWidget from "./SaudeServidorWidget";
 import StatusBackupsWidget from "./StatusBackupsWidget";
 import HistoricoBackupsWidget from "./HistoricoBackupsWidget";
 import CamerasWidget from "./CamerasWidget";
+import TelemetriaEquipamentosWidget from "./TelemetriaEquipamentosWidget";
 import EquipamentosWidget from "./EquipamentosWidget";
 import TextoWidget from "./TextoWidget";
 
 export type CampoWidget =
   | { chave: string; tipo: "maquinas"; rotulo: string }
-  | { chave: string; tipo: "equipamentos"; rotulo: string }
+  | { chave: string; tipo: "equipamentos"; rotulo: string; tipos?: string[] }
   | { chave: string; tipo: "tipos"; rotulo: string }
   | { chave: string; tipo: "periodo"; rotulo: string }
   | { chave: string; tipo: "opcao"; rotulo: string; opcoes: { valor: string; rotulo: string }[] }
@@ -147,6 +150,24 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
       // Cast tipado para monitoramento de câmeras
       const d = (dados || { equipamentos: [] }) as DadosCameras;
       return <CamerasWidget dados={d} widget={widget} />;
+    },
+  },
+  telemetria_equipamentos: {
+    tipo: "telemetria_equipamentos",
+    rotulo: "Gravadores (CPU, RAM e discos)",
+    descricao: "CPU, memória e discos dos gravadores (NVR/DVR) com alerta de disco com problema ou cheio",
+    icone: HardDrive,
+    larguraPadrao: 6,
+    alturaPadrao: 2,
+    configPadrao: { equipamentos: [], apenas_problemas: false },
+    campos: [
+      { chave: "equipamentos", tipo: "equipamentos", rotulo: "Gravadores exibidos", tipos: ["NVR"] },
+      { chave: "apenas_problemas", tipo: "booleano", rotulo: "Mostrar apenas gravadores com problema" },
+    ],
+    renderizar: (dados, widget) => {
+      // Cast tipado para telemetria dos gravadores
+      const d = (dados || { equipamentos: [] }) as DadosTelemetriaEquipamentos;
+      return <TelemetriaEquipamentosWidget dados={d} widget={widget} />;
     },
   },
   equipamentos: {

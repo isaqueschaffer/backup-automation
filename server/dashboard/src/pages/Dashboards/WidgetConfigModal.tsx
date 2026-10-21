@@ -34,19 +34,6 @@ export default function WidgetConfigModal({
     return Array.from(set).sort();
   }, [opcoes]);
 
-  const equipamentosAgrupados = useMemo(() => {
-    if (!opcoes) return [];
-    const map = new Map<string, { maquina: string; itens: typeof opcoes.equipamentos }>();
-    for (const eq of opcoes.equipamentos) {
-      const chave = eq.maquina_id || eq.maquina;
-      if (!map.has(chave)) {
-        map.set(chave, { maquina: eq.maquina || "Sem máquina", itens: [] });
-      }
-      map.get(chave)!.itens.push(eq);
-    }
-    return Array.from(map.values());
-  }, [opcoes]);
-
   const handleAplicar = () => {
     const limpo = titulo.trim();
     onSalvar({
@@ -133,6 +120,31 @@ export default function WidgetConfigModal({
       const marcados = Array.isArray(config[campo.chave])
         ? (config[campo.chave] as string[])
         : [];
+
+      const tiposFiltro =
+        campo.tipos && campo.tipos.length > 0
+          ? new Set(campo.tipos.map((t) => t.toUpperCase()))
+          : null;
+
+      const eqsFiltrados = tiposFiltro
+        ? opcoes.equipamentos.filter(
+            (eq) => eq.tipo && tiposFiltro.has(eq.tipo.toUpperCase())
+          )
+        : opcoes.equipamentos;
+
+      const gruposMap = new Map<
+        string,
+        { maquina: string; itens: typeof opcoes.equipamentos }
+      >();
+      for (const eq of eqsFiltrados) {
+        const chave = eq.maquina_id || eq.maquina;
+        if (!gruposMap.has(chave)) {
+          gruposMap.set(chave, { maquina: eq.maquina || "Sem máquina", itens: [] });
+        }
+        gruposMap.get(chave)!.itens.push(eq);
+      }
+      const grupos = Array.from(gruposMap.values());
+
       return (
         <div>
           <div
@@ -145,12 +157,14 @@ export default function WidgetConfigModal({
               background: "var(--surface)",
             }}
           >
-            {equipamentosAgrupados.length === 0 ? (
+            {grupos.length === 0 ? (
               <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                Nenhum equipamento cadastrado.
+                {tiposFiltro
+                  ? "Nenhum equipamento deste tipo neste cliente."
+                  : "Nenhum equipamento cadastrado."}
               </span>
             ) : (
-              equipamentosAgrupados.map((g) => (
+              grupos.map((g) => (
                 <div key={g.maquina} style={{ marginBottom: 8 }}>
                   <div
                     style={{
@@ -194,7 +208,7 @@ export default function WidgetConfigModal({
             )}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-            Nenhum marcado = todos os equipamentos com câmeras.
+            Nenhum marcado = todos os equipamentos {tiposFiltro ? "deste tipo." : "com câmeras."}
           </div>
         </div>
       );

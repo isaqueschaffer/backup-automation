@@ -38,6 +38,9 @@ const ok = (cond, msg) => { resultados.push((cond ? "OK    " : "FALHA ") + msg);
   ok(txt.includes("Saúde do servidor") && txt.includes("Servidor Principal"), "publico mostra saude do servidor com a maquina");
   ok(txt.includes("Câmeras e gravação") && txt.includes("Garagem"), "publico lista a camera com problema");
   ok(!txt.includes("10.0.0.5"), "publico sem IP");
+  ok(txt.includes("Gravadores (CPU, RAM e discos)") && txt.includes("HDD1") && txt.includes("HDD2"), "publico mostra o componente Gravadores com os discos");
+  ok(/ATENÇÃO/i.test(txt) && /SAUDÁVEL/i.test(txt), "gravador com disco em erro marcado como Atencao e o outro como Saudavel");
+  ok(/discos com problema/i.test(txt), "resumo mostra 'Discos com problema'");
   ok(txt.includes("Personalizar"), "botao Personalizar (link com edicao)");
   ok(!txt.includes("Compartilhar") && !txt.includes("Restaurar padrão"), "publico sem Compartilhar / Restaurar padrao");
 

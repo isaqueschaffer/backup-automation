@@ -7,6 +7,7 @@ export type TipoWidget =
   | "status_backups"
   | "historico_backups"
   | "cameras"
+  | "telemetria_equipamentos"
   | "equipamentos"
   | "texto";
 
@@ -110,6 +111,23 @@ export interface DadosResumo {
   cameras_online: number;
   cameras_offline: number;
   cameras_sem_gravacao: number;
+  gravadores_com_telemetria: number;
+  discos_total: number;
+  discos_com_problema: number;
+}
+
+export interface DadosTelemetriaEquipamentos {
+  equipamentos: {
+    id: string;
+    nome: string;
+    tipo: string;
+    maquina: string;
+    atualizado_em: string | null;
+    cpu_percent: number | null;
+    ram_percent: number | null;
+    disks: { device?: string; status?: string | null; percent?: number | null; total_gb?: number | null; free_gb?: number | null }[];
+    tem_problema: boolean;
+  }[];
 }
 
 export interface DadosSaudeServidor {
