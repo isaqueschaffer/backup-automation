@@ -27,6 +27,27 @@ def _numero(texto_bruto):
         return None
 
 
+def _calcular_ram(mem_uso_raw, mem_disp_raw=None):
+    """Retorna (ram_percent, ram_total_gb, ram_used_gb)."""
+    if not mem_uso_raw or not mem_uso_raw.strip():
+        return None, None, None
+    try:
+        uso_mb = float(mem_uso_raw.strip())
+        if mem_disp_raw and mem_disp_raw.strip():
+            disp_mb = float(mem_disp_raw.strip())
+            total_mb = uso_mb + disp_mb
+            if total_mb > 0:
+                pct = int(round((uso_mb / total_mb) * 100))
+                total_gb = round(total_mb / 1024, 1)
+                used_gb = round(uso_mb / 1024, 1)
+                return pct, total_gb, used_gb
+        if 0 <= uso_mb <= 100:
+            return int(round(uso_mb)), None, None
+        return None, None, None
+    except ValueError:
+        return None, None, None
+
+
 def _status_hdd(status_bruto):
     chave = (status_bruto or "").strip().lower()
     return _STATUS_HDD.get(chave, (status_bruto or "DESCONHECIDO").upper())
@@ -45,9 +66,13 @@ def coletar_telemetria_hikvision(nvr_ip, usuario, senha):
             root = parse_xml_seguro(resp.content)
             ns = detectar_namespace(root)
             cpu = texto(root, ".//hik:cpuUtilization" if ns else ".//cpuUtilization", ns)
-            mem = texto(root, ".//hik:memoryUsage" if ns else ".//memoryUsage", ns)
+            mem_uso = texto(root, ".//hik:memoryUsage" if ns else ".//memoryUsage", ns)
+            mem_disp = texto(root, ".//hik:memoryAvailable" if ns else ".//memoryAvailable", ns)
+            ram_pct, ram_total, ram_used = _calcular_ram(mem_uso, mem_disp)
             telemetria["cpu_percent"] = _numero(cpu)
-            telemetria["ram_percent"] = _numero(mem)
+            telemetria["ram_percent"] = ram_pct
+            telemetria["ram_total_gb"] = ram_total
+            telemetria["ram_used_gb"] = ram_used
             teve_sucesso = True
     except Exception:
         logging.warning(f"  Falha ao ler status (CPU/RAM) do NVR {nvr_ip}.", exc_info=True)

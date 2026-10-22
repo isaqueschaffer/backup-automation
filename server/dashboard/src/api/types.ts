@@ -24,6 +24,8 @@ export interface NVRTelemetryDisk {
 export interface NVRTelemetry {
   cpu_percent?: number | null;
   ram_percent?: number | null;
+  ram_total_gb?: number | null;
+  ram_used_gb?: number | null;
   disks?: NVRTelemetryDisk[];
 }
 

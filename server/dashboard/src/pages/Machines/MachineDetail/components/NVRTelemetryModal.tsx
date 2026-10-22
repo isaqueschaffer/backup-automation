@@ -12,6 +12,10 @@ export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
   onClose: () => void;
 }) {
   const disks = telemetry?.disks || [];
+  const ramSuffix = telemetry?.ram_total_gb ? `de ${fmtGb(telemetry.ram_total_gb)}` : undefined;
+  const ramCaption = telemetry?.ram_used_gb != null
+    ? `${fmtGb(telemetry.ram_used_gb)} em uso`
+    : "Memória";
 
   return (
     <Modal title={`Telemetria — ${nvrName}`} onClose={onClose}>
@@ -21,7 +25,13 @@ export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 8 }}>
             <MetricTile icon={<Cpu size={11} />} label="CPU" percent={telemetry.cpu_percent ?? null} caption="Processador" />
-            <MetricTile icon={<MemoryStick size={11} />} label="RAM" percent={telemetry.ram_percent ?? null} caption="Memória" />
+            <MetricTile
+              icon={<MemoryStick size={11} />}
+              label="RAM"
+              percent={telemetry.ram_percent ?? null}
+              caption={ramCaption}
+              suffix={ramSuffix}
+            />
           </div>
 
           {disks.length === 0 ? (

@@ -10,6 +10,7 @@ TIMEOUT = 2.0
 COMMUNITY_PADRAO = "Public"
 
 # MIB proprietaria Intelbras: nao expoe utilizacao de CPU, so RAM e discos.
+_OID_RAM_TOTAL_MB = "1.3.6.1.4.1.1004849.2.1.9.1.0"
 _OID_RAM_USO_PCT = "1.3.6.1.4.1.1004849.2.1.9.2.0"
 _OID_TABELA_HDD = "1.3.6.1.4.1.1004849.2.4.1.1"  # .4={device} .5={status} .6={total_gb} .7={free_gb}
 
@@ -40,13 +41,25 @@ async def _coletar_async(nvr_ip, community):
 
     try:
         err_ind, err_status, _, var_binds = await get_cmd(
-            engine, auth, target, ctx, ObjectType(ObjectIdentity(_OID_RAM_USO_PCT))
+            engine, auth, target, ctx,
+            ObjectType(ObjectIdentity(_OID_RAM_USO_PCT)),
+            ObjectType(ObjectIdentity(_OID_RAM_TOTAL_MB)),
         )
         if not err_ind and not err_status and var_binds:
             try:
                 telemetria["ram_percent"] = int(var_binds[0][1].prettyPrint())
                 teve_sucesso = True
-            except ValueError:
+            except (ValueError, IndexError):
+                pass
+            try:
+                if len(var_binds) > 1:
+                    total_mb = int(var_binds[1][1].prettyPrint())
+                    if total_mb > 0:
+                        total_gb = round(total_mb / 1024, 1)
+                        telemetria["ram_total_gb"] = total_gb
+                        if "ram_percent" in telemetria:
+                            telemetria["ram_used_gb"] = round(total_gb * (telemetria["ram_percent"] / 100), 1)
+            except (ValueError, IndexError):
                 pass
     except Exception:
         logging.warning(f"  Falha ao ler memoria SNMP do NVR {nvr_ip}.", exc_info=True)

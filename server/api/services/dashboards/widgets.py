@@ -226,12 +226,20 @@ def telemetria_equipamento_publica(raw: Any) -> Optional[Dict[str, Any]]:
                 item_d[nk] = nv if isinstance(nv, (int, float)) and not isinstance(nv, bool) else None
             disks_out.append(item_d)
 
+    ram_total_val = raw.get("ram_total_gb")
+    ram_total_gb = ram_total_val if isinstance(ram_total_val, (int, float)) and not isinstance(ram_total_val, bool) else None
+
+    ram_used_val = raw.get("ram_used_gb")
+    ram_used_gb = ram_used_val if isinstance(ram_used_val, (int, float)) and not isinstance(ram_used_val, bool) else None
+
     if cpu_percent is None and ram_percent is None and not disks_out:
         return None
 
     return {
         "cpu_percent": cpu_percent,
         "ram_percent": ram_percent,
+        "ram_total_gb": ram_total_gb,
+        "ram_used_gb": ram_used_gb,
         "disks": disks_out,
     }
 
