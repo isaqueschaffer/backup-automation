@@ -838,6 +838,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-22] — Agente 1.1.20: RAM total/usada na telemetria dos NVR (Hikvision e Intelbras)
+
+**Alteração (branch helena, integrada em isaque):** a telemetria passa a incluir `ram_total_gb` e `ram_used_gb`. Hikvision: `_calcular_ram` em `telemetry.py` lê `memoryUsage` e `memoryAvailable` (MB) e calcula o percentual, o total e o usado em GB; sem `memoryAvailable`, mantém o valor bruto como percentual quando está entre 0 e 100. Intelbras: o SNMP lê também o OID de RAM total (`1.3.6.1.4.1.1004849.2.1.9.1.0`, em MB) e deriva o usado a partir do percentual. `crypto.gerar_secretkey` passa a aceitar senha `None` (tratada como vazia). Servidor: `telemetria_equipamento_publica` repassa os dois campos novos (só numéricos; o resto vira `None`). Painel: `types.ts`, `NVRTelemetryModal.tsx` e `ServerHealthCard.tsx` exibem a RAM em GB quando disponível. Sem mudança de contrato nem de banco (a telemetria é JSON). O efeito aparece a cada backup após a máquina atualizar para a 1.1.20.
+**Arquivos:** agent/src/backup/crypto.py, agent/src/nvr/hikvision/telemetry.py, agent/src/nvr/intelbras/telemetry.py, server/api/services/dashboards/widgets.py, server/dashboard/src/api/types.ts, server/dashboard/src/pages/Machines/MachineDetail/components/NVRTelemetryModal.tsx, server/dashboard/src/pages/Machines/MachineDetail/components/ServerHealthCard.tsx, agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json
+**Breaking Change:** Não.
+**Branch:** helena, isaque
+
 ### [2026-10-22] — Agente 1.1.19: correção: telemetria dos NVR nunca chegava ao servidor
 
 **Problema:** `post_report` (`agent/src/application/api_client.py`) montava cada item de `nvr_results` com `nome`, `tipo`, `status` e `cameras`, mas **não** com `telemetria`. O agente coletava CPU/RAM/discos (Hikvision por ISAPI, Intelbras por SNMP), o servidor já sabia gravar `nvrs.last_telemetry_status`, porém o campo se perdia no envio — `last_telemetry_status` ficava vazio e os widgets "Gravadores" e os indicadores de disco do "Resumo" apareciam sem dados. Afetava todas as versões do agente até a 1.1.18 (inclusive a branch `helena`).
