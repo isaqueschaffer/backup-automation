@@ -26,6 +26,7 @@
 14. [Decisões Arquiteturais (ADRs)](#14-decisões-arquiteturais-adrs)
 15. [Incompatibilidades Conhecidas](#15-incompatibilidades-conhecidas)
 16. [Architecture Changelog](#16-architecture-changelog)
+17. [Fluxo de Atualização de Versão (Release)](#17-fluxo-de-atualização-de-versão-release)
 
 ---
 
@@ -67,6 +68,8 @@
 | python-multipart | 0.0.9 | Upload de arquivos |
 | aiofiles | 23.2.1 | I/O assíncrono de arquivos |
 | requests | 2.31.0 | HTTP client |
+| python-dotenv | 1.0.1 | Leitura do `.env` |
+| pyzipper | 0.3.6 | ZIP com senha (ZIP unificado do Cliente) |
 
 ### Dashboard (Frontend)
 
@@ -92,6 +95,7 @@
 | imageio-ffmpeg | — | ffmpeg embarcado (captura RTSP / imagem noturna) |
 | psutil | >=5.9.0 | Telemetria (CPU, RAM, disco, rede) |
 | GPUtil | >=1.4.0 | Telemetria de GPU (opcional, falha silenciosa) |
+| pysnmp | >=7.1,<8.0.0 | SNMPv2c: telemetria de NVR Intelbras (a faixa `<7` não tem `get_cmd`/`walk_cmd`) |
 
 ---
 
@@ -117,13 +121,15 @@ trilan-nvr-backup-automation/
 │       │   ├── api_client.py    <- HTTP client para o servidor (ping, upload, telemetria)
 │       │   ├── backup_job.py    <- Orquestra o backup por equipamento + captura da imagem da noite
 │       │   ├── updater.py       <- Auto-atualização OTA (CURRENT_VERSION)
+│       │   ├── estado.py        <- Flag `backup_em_andamento`, compartilhada entre as threads do backup e do ping
 │       │   ├── webhook_defense.py / webhook_digifort.py
 │       ├── backup/              <- archiver, crypto, downloader, file_manager/
 │       ├── camera/rtsp_client.py<- Teste RTSP, referência ideal e imagem da noite (ffmpeg)
 │       ├── core/config.py       <- Lê agent.conf (ConfigError, parse_config_extra)
 │       ├── nvr/
 │       │   ├── factory.py       <- Detecta tipo de NVR e orquestra busca/gravação
-│       │   ├── hikvision/       <- NVR/DVR Hikvision (ISAPI)
+│       │   ├── hikvision/       <- NVR/DVR Hikvision (ISAPI; telemetria CPU/RAM/discos)
+│       │   ├── intelbras/       <- NVR Intelbras: telemetria por SNMP (câmeras e gravações usam o ISAPI de hikvision/)
 │       │   └── motorola/        <- NVR Motorola/NVMS-9000 (cameras, recordings, queryChlRecLog)
 │       ├── olt/                 <- huawei_active, unm2000, vsol
 │       ├── pabx/issabel.py
@@ -146,18 +152,18 @@ trilan-nvr-backup-automation/
 │   │   │   ├── machines.py      <- /api/v1/machines/*  (Máquinas = computadores com o agente)
 │   │   │   ├── customers.py     <- /api/v1/clients/*   (Clientes = empresas; fila de backup)
 │   │   │   ├── equipamentos.py  <- /api/v1/machines/{id}/equipamentos/*
-│   │   │   ├── nvrs.py          <- legado, fora do schema (candidato a remoção)
+│   │   │   ├── nvrs.py          <- legado: ativo (JWT) mas oculto do OpenAPI (`include_in_schema=False`), sem chamador no painel nem no agente (candidato a remoção)
 │   │   │   ├── backups.py       <- /api/v1/backups/*
 │   │   │   ├── dashboards.py    <- /api/v1/clients/{id}/dashboard/* e /api/v1/dashboards/widgets (admin, JWT)
 │   │   │   ├── public_dashboard.py <- /api/v1/public/dashboard/* (só X-Dashboard-Token)
 │   │   │   ├── settings_router.py / auth_router.py
-│   │   ├── services/            <- crypto_service, email_service, storage_service, galeria_vms
+│   │   ├── services/            <- crypto_service, email_service, storage_service, galeria_vms, backup_runs (rodadas de backup do Cliente: abertura, fechamento, e-mail e ZIP unificado)
 │   │   │   └── dashboards/      <- registro, widgets, layout, dados, compartilhamento (token/limitador), esquemas
 │   │   └── tests/
 │   └── dashboard/               <- React + Vite + TypeScript
 │       ├── Dockerfile / nginx-spa.conf
 │       └── src/
-│           ├── api/             <- client.ts (axios) e types.ts
+│           ├── api/             <- client.ts (axios), dashboards.ts (dashboards, inclusive o cliente HTTP do link público) e types.ts
 │           ├── components/ / utils/date.ts
 │           └── pages/
 │               ├── Customers/       <- CustomersPage (/clientes), CustomerDetail/ (/clientes/:id, fila arrastar-e-soltar)
@@ -215,7 +221,7 @@ trilan-nvr-backup-automation/
 |---|---|---|---|---|
 | id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
 | name | VARCHAR(255) | str | NOT NULL | — |
-| api_key_hash | VARCHAR(255) | str | NOT NULL | — |
+| api_key_hash | VARCHAR(255) | str | NOT NULL UNIQUE | — |
 | api_key_prefix | VARCHAR(20) | str | NOT NULL | — |
 | backup_hour | INTEGER | int | NOT NULL | 2 |
 | backup_minute | INTEGER | int | NOT NULL | 0 |
@@ -229,6 +235,23 @@ trilan-nvr-backup-automation/
 | restart_requested | BOOLEAN | bool | NOT NULL | FALSE |
 | backup_requested | BOOLEAN | bool | NOT NULL | FALSE |
 | telemetry | JSON | dict | NULL | — (CPU/RAM/disco/rede/GPU enviados no ping) |
+| group_id | UUID | uuid.UUID (ORM: `customer_id`) | NULL | — (FK `client_groups.id` ON DELETE SET NULL; Cliente da máquina) |
+| queue_order | INTEGER | int | NOT NULL | 0 (posição na fila de backup do Cliente) |
+
+#### `client_groups` (Clientes — empresas atendidas; model `Customer`, ADR-007)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | uuid4 |
+| name | VARCHAR(255) | str | NOT NULL | — |
+| description | TEXT | str | NULL | — |
+| active | BOOLEAN | bool | NOT NULL | TRUE |
+| backup_hour / backup_minute | INTEGER | int | NULL | 2 / 0 (horário herdado pelas máquinas vinculadas) |
+| queue_active | BOOLEAN | bool | NOT NULL | FALSE (fila sequencial de backup em andamento) |
+| queue_current_index | INTEGER | int | NULL | — (posição atual na fila) |
+| email_to | ARRAY(VARCHAR) | List[str] | NOT NULL | [] (destinatários do e-mail único por rodada) |
+| zip_password | TEXT | str | NULL | — (Fernet; NULL = ZIP do Cliente sem senha) |
+| created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
 
 #### `nvrs` (tabela de equipamentos — nome mantido por compatibilidade)
 
@@ -247,6 +270,23 @@ trilan-nvr-backup-automation/
 | active | BOOLEAN | bool | NOT NULL | TRUE |
 | updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | NOW() |
 
+#### `nvr_cameras` (galeria de câmeras de um equipamento; model `NVRCamera`)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Notas |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | PK |
+| nvr_id | UUID | uuid.UUID | NOT NULL | FK `nvrs.id` ON DELETE CASCADE |
+| canal | INTEGER | int | NOT NULL | Canal do NVR (em DIGIFORT/DEFENSE, número na galeria) |
+| nome | VARCHAR(255) | str | NOT NULL | — |
+| ip / username | VARCHAR(50) / VARCHAR(100) | str | NULL | Conexão RTSP individual (DIGIFORT e DEFENSE; NULL em NVR comum) |
+| password | TEXT | str | NULL | Fernet quando preenchida (REGRA-004) |
+| modelo | VARCHAR(50) | str | NULL | Hikvision, Intelbras, Grandstream, ONVIF, Motorola |
+| perfect_image_base64 | TEXT | str | NULL | Imagem de referência |
+| night_image_base64 / night_image_date | TEXT / TIMESTAMP WITHOUT TIME ZONE | str / datetime naive | NULL | Imagem da noite e data |
+| updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | utcnow() |
+
+A tabela nasce por `Base.metadata.create_all` (`main.py`); as colunas `ip`, `username`, `password` e `modelo` vêm da migração inline.
+
 #### `backups`
 
 | Coluna | Tipo SQL | Tipo Python | Nullable | Notas |
@@ -261,6 +301,21 @@ trilan-nvr-backup-automation/
 | zip_size | BIGINT | int | NULL | Bytes totais |
 | email_sent | BOOLEAN | bool | NOT NULL | FALSE |
 | trigger | VARCHAR(50) | str | NOT NULL | scheduled / manual / manual_dashboard |
+| created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+| run_id | UUID | uuid.UUID | NULL | FK `customer_backup_runs.id` ON DELETE SET NULL; rodada do Cliente (só máquinas com Cliente) |
+
+#### `customer_backup_runs` (rodadas de backup do Cliente: 1 e-mail por rodada)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Notas |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | PK |
+| customer_id | UUID | uuid.UUID | NOT NULL | FK `client_groups.id` ON DELETE CASCADE |
+| trigger | VARCHAR(30) | str | NOT NULL | scheduled / queue / manual_machine |
+| started_at / deadline_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | Início e prazo (`RUN_DEADLINE_HOURS`) |
+| closed_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | Preenchido ao fechar a rodada (fechamento por UPDATE condicional) |
+| status | VARCHAR(20) | str | NOT NULL | EM_ANDAMENTO / OK / PARCIAL / ERRO |
+| expected_machine_ids | JSON | list | NOT NULL | Ids (UUID em texto) das máquinas esperadas |
+| email_sent | BOOLEAN | bool | NOT NULL | FALSE |
 | created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
 
 #### `agent_logs`
@@ -382,9 +437,13 @@ datetime.utcnow()            # naive em UTC — compativel com o banco
 **Agente Windows:** API Key + Client ID
 - Headers: `X-Client-ID: <uuid>` + `X-API-Key: sk_trilan_<token>`
 - Hash SHA-256 armazenado — chave raw nunca salva no banco
-- Chave retornada UMA unica vez: na criacao do cliente
+- Chave retornada UMA unica vez por geracao: na criacao da maquina e em cada `POST /api/v1/machines/{id}/rotate-key` (a nova chave invalida a anterior)
 
 **NAO MISTURAR:** Nunca usar JWT para agentes, nem API Key para o dashboard.
+
+**Dois esquemas restritos a rotas especificas** (o contrato dos dois acima nao muda):
+- `X-Publish-Token` (`auth.py`, `verify_publish_or_admin`): so em `POST /api/v1/admin/agent-version`. E aceito no lugar do JWT quando `PUBLISH_TOKEN` esta definido no servidor (vazio = desativado; comparacao em tempo constante); sem o header, vale o JWT do admin. Nao da acesso ao painel nem as demais rotas admin.
+- `X-Dashboard-Token` (`dsh_<token>`): so em `/api/v1/public/dashboard/*` (secao 7). Nao abre nenhuma rota administrativa.
 
 ---
 
@@ -512,6 +571,8 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/test-rtsp` | Tarefa RTSP via agente (409 se já houver uma pendente) |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras` | Galeria do NVR (une `nvr_cameras` + `last_recording_status`) |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/perfect-image` | Salvar imagem de referência |
+| POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/import` | Importar câmeras para a galeria (lista `cameras` lida do CSV/XLSX pelo painel) ou, com `sync_from_machine=true`, copiar as câmeras avulsas (tipo `CAMERA`) da máquina |
+| PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/{canal}` | Editar / remover uma câmera da galeria (DIGIFORT e DEFENSE) |
 | GET/POST | `/api/v1/clients` | Listar/criar Clientes (customers.py) |
 | GET/PUT/DELETE | `/api/v1/clients/{id}` | Gerenciar Cliente |
 | POST | `/api/v1/clients/{id}/trigger-backup` · `/cancel-queue` | Fila sequencial de backup do Cliente |
@@ -529,17 +590,19 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | GET | `/api/v1/public/dashboard` · `/data` | Dashboard e dados pelo link (`X-Dashboard-Token`; 404 genérico, 429 por limite) |
 | GET/POST/PUT | `/api/v1/public/dashboard/opcoes` · `/preview` · `/layout` | Só com permissão de edição do link (403 sem ela) |
 | GET | `/api/v1/backups` | Listar backups (paginado; filtros `machine_id`, `customer_id`) |
+| GET | `/api/v1/backups/{id}` | Detalhar um backup |
 | GET | `/api/v1/backups/{id}/download` | Download de ZIP (admin) |
 | GET | `/api/v1/backups/public-download/{id}` | Download público por link de e-mail (sem auth; ver riscos abertos) |
 | GET | `/api/v1/backups/public-run-download/{run_id}` | ZIP unificado da rodada pelo link do e-mail do Cliente (mesmo modelo do public-download) |
 | POST | `/api/v1/backups/{id}/resend-email` | Reenviar e-mail do backup |
 | GET/PUT | `/api/v1/settings` | Configuracoes do sistema |
-| POST | `/api/v1/admin/agent-version` | Registrar nova versao OTA |
+| POST | `/api/v1/admin/agent-version` | Registrar nova versao OTA (JWT do admin ou `X-Publish-Token`; ver REGRA-003) |
 | GET | `/api/v1/admin/agent-version` | Listar versoes OTA |
 | PUT | `/api/v1/admin/agent-version/{id}/toggle` | Ativar/desativar versao |
 | PUT | `/api/v1/admin/agent-version/{id}` | Editar versao |
 | DELETE | `/api/v1/admin/agent-version/{id}` | Deletar versao |
 | GET | `/api/v1/stats` | Estatisticas do dashboard |
+| GET/POST/PUT/DELETE | `/api/v1/clients/{machine_id}/nvrs` · `/{nvr_id}` | **Legado** (`routers/nvrs.py`): ativo e com JWT, oculto do OpenAPI/Swagger (`include_in_schema=False`) e sem chamador no painel nem no agente. Aqui `{machine_id}` é o id da **Máquina**, embora o prefixo seja `/clients` (ADR-007); não colide com nenhuma rota do Cliente |
 | GET | `/api/health` | Health check |
 
 ### Contrato do Response `GET /api/v1/agent/update-check`
@@ -575,7 +638,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 ### Servico Windows
 
 - **Nome:** `TrilanAgentNVR`
-- **Display name:** `Trilan — Agente Backup NVR`
+- **Display name:** `Trilan — Agente Backup`
 - **Diretorio de instalacao:** `C:\Program Files (x86)\Trilan NVR Backup Agent\`
 - **Diretorio de logs:** `C:\ProgramData\Trilan NVR Backup Agent\logs\servico.log`
 - **Config file:** `agent.conf` (mesmo diretorio do exe)
@@ -585,6 +648,8 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 ```ini
 [server]
 url = https://servidor.exemplo.com
+
+[auth]
 client_id = <uuid>
 api_key = sk_trilan_<token>
 ```
@@ -596,6 +661,8 @@ O Tray dispara backup manual via Win32 Named Event:
 - O Service escuta com `win32event.WaitForMultipleObjects`
 
 ### NVR Factory — Ordem de Detecao de Tipo
+
+Quando `config_extra.marca` está definida, ela decide primeiro: `Motorola` vai direto ao passo 6; `Hikvision` e `Intelbras` usam só a sonda Hikvision (passos 1 a 5; o NVR Intelbras fala o mesmo ISAPI para câmeras e gravações). Sem `marca`, vale a ordem abaixo. A telemetria de NVR `Intelbras` é lida por SNMP (`src/nvr/intelbras/`); a dos demais, por ISAPI.
 
 ```
 1. buscar_cameras_nvr (Hikvision IP)
@@ -645,14 +712,15 @@ O Tray dispara backup manual via Win32 Named Event:
 - **Proxy:** `/api/*` -> FastAPI (porta 8000), `/*` -> Dashboard (porta 80)
 - **Backups:** Volume bind mount em `/opt/trilan/backups` no host
 - **Banco:** PostgreSQL interno via rede Docker `trilan_net`
-- **Plataforma:** Dokploy (auto-deploy via git push)
+- **Plataforma:** Dokploy (auto-deploy a cada push no ramo `isaque` de `projetoswmfa`)
 
 ### Branches Git
 
 | Branch | Repositorio | Proposito |
 |---|---|---|
-| `isaque` | `projetoswmfa/trilan-backup-automation` | Desenvolvimento principal |
-| `integracao-equipamentos` | `isaqueschaffer/backup-automation` | Producao (deploy automatico Dokploy) |
+| `isaque` | `projetoswmfa/trilan-backup-automation` (privado) | **Producao**: cada push dispara o deploy automatico no Dokploy; so o dono faz merge aqui |
+| `integracao-equipamentos` | `isaqueschaffer/backup-automation` (publico) | Colaboradores e testadores; sem acesso direto a `isaque`; recebe o espelho do push duplo |
+| `helena` | `isaqueschaffer/backup-automation` (publico) | Colaboradora; sem acesso direto a `isaque`; o codigo so chega a producao por merge auditado feito pelo dono |
 
 ### Regra de Push Duplo
 
@@ -692,6 +760,13 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 | `SMTP_PORT` | `587` | Porta SMTP |
 | `SMTP_EMAIL` | None | E-mail remetente |
 | `SMTP_PASSWORD` | None | Senha do e-mail |
+| `PUBLISH_TOKEN` | `""` (desativado) | Token só para registrar versões do agente (`POST /api/v1/admin/agent-version`), enviado em `X-Publish-Token`; não dá acesso ao painel (REGRA-003) |
+| `MAX_UPLOAD_MB` | `1024` | Tamanho máximo do ZIP enviado pelo agente (413 acima) |
+| `RUN_DEADLINE_HOURS` | `2` | Prazo da rodada de backup do Cliente, a partir do início (horas) |
+| `RUN_MAX_HOURS` | `6` | Limite absoluto: passado o prazo, a rodada espera até este total as máquinas que ainda estão em backup (agente >= 1.1.8 informa `backup_em_andamento` no ping) |
+| `RUN_UPLOAD_GRACE_SECONDS` | `90` | Espera após o último relatório antes de fechar a rodada (tempo para o ZIP chegar) |
+
+`MAX_UPLOAD_MB` e `RUN_*` não estão no `.env.example` (usam o padrão acima).
 
 ---
 
@@ -700,9 +775,10 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 | Tipo | Valor em nvrs.tipo | Integracao | Protocolo |
 |---|---|---|---|
 | NVR IP (Hikvision) | NVR | src/nvr/hikvision/ | HTTP ISAPI |
-| DVR Analogico (Hikvision) | DVR | src/nvr/hikvision/ | HTTP ISAPI |
+| DVR Analogico (Hikvision) | NVR (o agente o detecta como `DVR`) | src/nvr/hikvision/ | HTTP ISAPI |
 | NVR Hibrido (Hikvision) | NVR | src/nvr/factory.py | HTTP ISAPI |
-| Motorola (NVMS-9000) | MOTOROLA | src/nvr/motorola/ + camera/rtsp_client.py | HTTP + RTSP (`chID=N`); imagem da noite via `queryChlRecLog` |
+| NVR Intelbras | NVR com `config_extra.marca = "Intelbras"` | src/nvr/intelbras/ (telemetria) + src/nvr/hikvision/ (câmeras e gravações) | SNMPv2c (porta 161) e HTTP ISAPI |
+| Motorola (NVMS-9000) | NVR com `config_extra.marca = "Motorola"` (o agente o detecta como `MOTOROLA`) | src/nvr/motorola/ + camera/rtsp_client.py | HTTP + RTSP (`chID=N`); imagem da noite via `queryChlRecLog` |
 | OLT (Huawei, UNM2000, V-SOL) | OLT | src/olt/ (huawei_active, unm2000, vsol) | SSH Paramiko |
 | ONU | ONU | — | — |
 | PABX | PABX | src/pabx/ | — |
@@ -711,6 +787,8 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 | Intelbras Defense | DEFENSE | src/vms/defense.py | API / HTTP |
 | Misto / Custom | MIXED | — | — |
 | Câmera IP (Teste RTSP)| CAMERA | server/api/routers/equipamentos.py + agent.py (`/rtsp-result`), agent/src/camera/rtsp_client.py | RTSP (TCP) |
+
+Os valores válidos de `nvrs.tipo` são os de `TIPOS_EQUIPAMENTO` (`server/api/schemas.py`): NVR, OLT, ONU, PABX, MIKROTIK, DIGIFORT, MIXED, DEFENSE e CAMERA (outro valor: 400). `DVR` e `MOTOROLA` são tipos detectados pelo agente em tempo de execução, nunca gravados em `nvrs.tipo`; a marca do NVR fica em `config_extra.marca` (Hikvision / Intelbras / Motorola).
 
 ---
 
@@ -808,7 +886,7 @@ máquina com outro horário = 400). Vínculo e ordem da fila só pelas rotas do 
 
 **Data:** 13/10/2026 | **Status:** VIGENTE
 
-**Decisao:** `agent/dist/` (EXEs), `__pycache__/`, dumps `*.sql`, `scratch_test/` e `.claude/` ficam fora do git. Os EXEs vão por upload
+**Decisao:** `agent/dist/` (EXEs), `__pycache__/`, dumps `*.sql`, `scratch_test/` e `.claude/` (exceto `.claude/skills/`, que é versionada) ficam fora do git. Os EXEs vão por upload
 no OTA Manager (GitHub Release). Utilitários avulsos ficam em `tools/`; código legado em `archive/`.
 
 **Motivo:** Os EXEs (~50 MB cada, várias versões) inflaram o histórico para ~150 MB e o clone do Dokploy levava minutos.
@@ -833,10 +911,32 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 | IC-010 | `pending_rtsp_tasks` | Estado em memória do processo: exige 1 worker uvicorn | Documentado; multi-worker pede Redis/tabela |
 | IC-011 | Rotas `/clients` e `datetime.now(timezone.utc)` | `check_client_online`/`current_server_time` usam datetime aware, sem gravar no banco | Exceção documentada à REGRA-001 (nunca gravar) |
 | IC-012 | Credencial padrão `navarro@123` | Ainda usada como fallback em `rtsp_client.py`, `equipamentos.py`, `schemas.py` e no dashboard | ABERTO — decisão do dono (muda o comportamento do teste RTSP) |
+| IC-013 | Repositório `isaqueschaffer/backup-automation` (antes `trilan-nvr-backup-automation`; é o mesmo repositório) | É **público**, recebe pelo push duplo todo o código de produção e guarda todo o histórico, que a ADR-008 admite conter segredos. Reescrever o histórico (`git filter-repo` + force-push) não basta: quem já clonou ou baixou continua com os valores, então **os segredos expostos precisam ser trocados**. Inventário do histórico pendente | ABERTO — **CRÍTICA** — decisão do dono |
+| IC-014 | `routers/dashboards.py` (geração do link, linha 226) | O link é `PUBLIC_URL` + `/d#<token>`, e `PUBLIC_URL` é a URL pública do servidor (usada nos links de e-mail). A API e o painel ficam em hosts diferentes (`server.` e `backups.suportetrilan.com.br`), então o link pode apontar para um host que não serve a página `/d` (não confirmado). A resposta também traz `caminho` (`/d#<token>`) | ABERTO — código não alterado |
+| IC-015 | `server/docker-compose.yml` | O arquivo versionado traz `7005:7001` e o volume `pg_data_local`, valores da máquina de uma colaboradora que entraram no ramo `isaque` pelo merge `7ec3cc4` (13/10/2026) sem auditoria do compose, depois de rejeitados em 09/10 (ver changelog). A produção usa a porta 7001; o volume em uso no Dokploy precisa ser conferido. Risco: um deploy que siga o arquivo aponta o PostgreSQL para outro volume (banco vazio) | ABERTO — arquivo não alterado; confirmar no Dokploy antes de reverter |
 
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-22] — Auditoria do PROJECT_SPEC contra o código (só documentação)
+
+**Alteração:** as descrições do documento foram conferidas com o código e corrigidas. Nenhum código, REGRA, ADR (exceto a redação abaixo) ou contrato mudou.
+- Seção 2: `python-dotenv`, `pyzipper` (servidor) e `pysnmp` (agente).
+- Seção 3: `agent/src/application/estado.py`, `agent/src/nvr/intelbras/`, `services/backup_runs.py`, `api/dashboards.ts`; `routers/nvrs.py` descrito como ativo e oculto do OpenAPI.
+- Seção 5: tabelas `client_groups`, `nvr_cameras` e `customer_backup_runs`; colunas `clients.group_id`, `clients.queue_order` e `backups.run_id`; `clients.api_key_hash` é UNIQUE.
+- Seção 8: `GET /backups/{id}`, `POST .../cameras/import`, `PUT/DELETE .../cameras/{canal}`, `X-Publish-Token` no registro de versões e as rotas legadas `/clients/{machine_id}/nvrs`.
+- Seção 9: nome exibido do serviço (`Trilan — Agente Backup`), `agent.conf` com a seção `[auth]`, e a marca (`config_extra.marca`) decidindo antes da ordem de detecção do factory.
+- Seção 12: `PUBLISH_TOKEN`, `MAX_UPLOAD_MB` e `RUN_*`.
+- Seção 13: `DVR` e `MOTOROLA` são tipos detectados pelo agente, nunca gravados em `nvrs.tipo` (a marca fica em `config_extra.marca`); NVR Intelbras (SNMP).
+- Seção 17: entrada no índice; `OutputBaseFilename` do instalador é fixo.
+- Seção 11: tabela de ramos corrigida — `isaque` em `projetoswmfa` (privado) é a produção; `helena` e `integracao-equipamentos` são de colaboradores, sem acesso direto à `isaque`. A porta 7001 do documento estava certa e **não** mudou. `CLAUDE.md`: o repositório `trilan-nvr-backup-automation` é o mesmo `backup-automation` (renomeado) e foi acrescentada a linha com os papéis dos ramos.
+- ADR-008: redação ajustada para `.claude/` (exceto `.claude/skills/`, que é versionada). REGRA-003: documentados `X-Publish-Token` e `X-Dashboard-Token` (rotas específicas) e que `rotate-key` também devolve a chave; o contrato não mudou.
+- Seção 15: IC-013 (repositório público com histórico exposto — crítica), IC-014 (link do dashboard montado com `PUBLIC_URL`) e IC-015 (`docker-compose.yml` versionado com `7005` e `pg_data_local`, valores de uma colaboradora; a produção usa 7001).
+- Não alterado: o texto da REGRA-001 (exceções de `machines.py`, `storage_service.py` e `customers.py:375` aguardam aprovação) e o changelog de 09/10, que continua como registro histórico (a rejeição de `7005`/`pg_data_local` ali descrita foi desfeita no ramo `isaque` em 13/10).
+**Arquivos:** PROJECT_SPEC.md, CLAUDE.md
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-22] — Painel: pausar/retomar equipamento não recarrega mais a página inteira
 
@@ -1288,4 +1388,4 @@ Quando uma nova versão do Agente Trilan for lançada, certifique-se de atualiza
 
 1. **`server/dashboard/package.json`**: Propriedade `"version"`.
 2. **`agent/src/application/updater.py`**: Variável `CURRENT_VERSION`.
-3. **`agent/installer.iss`**: Propriedades `AppVersion` e `OutputBaseFilename` (para controle e nome do executável do InnoSetup).
+3. **`agent/installer.iss`**: Propriedade `AppVersion`. O `OutputBaseFilename` é fixo (`TrilanAgentSetup`) e não leva a versão.

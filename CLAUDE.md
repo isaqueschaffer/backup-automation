@@ -24,7 +24,8 @@ repositório **público** `isaqueschaffer/backup-automation` (as máquinas dos c
 - Anexar **apenas** `TrilanAgentService.exe` e `TrilanAgentTray.exe` (de `agent/dist/`). O `TrilanAgentSetup.exe` só se for pedido.
 - Alvo: o commit atual (`--target $(git rev-parse HEAD)`), já enviado aos repositórios.
 - Comando: `gh release create <versão> agent/dist/TrilanAgentService.exe agent/dist/TrilanAgentTray.exe -R isaqueschaffer/backup-automation --title "v<versão>" --target "$(git rev-parse HEAD)" --notes "<resumo>"`
-- Não usar `isaqueschaffer/trilan-nvr-backup-automation` para releases (não é o repositório público).
+- Não usar o nome antigo `isaqueschaffer/trilan-nvr-backup-automation` nas releases: é o mesmo repositório (foi renomeado); o nome correto é `backup-automation`.
+- Ramos: `isaque` em `projetoswmfa/trilan-backup-automation` (privado) é a produção e dispara o deploy no Dokploy. `helena` e `integracao-equipamentos` (repositório público `isaqueschaffer/backup-automation`) são de colaboradores e testadores, sem acesso direto à `isaque`; o código deles só entra na produção por merge feito pelo dono.
 - No fim, informar os links de download e os hashes SHA-256 de Service e Tray para o cadastro no painel.
 
 A versão fica em três lugares: `agent/src/application/updater.py` (`CURRENT_VERSION`), `agent/installer.iss` (`AppVersion`) e `server/dashboard/package.json`.
