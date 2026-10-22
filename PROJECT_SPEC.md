@@ -931,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-22] — Agente 1.1.21: telemetria de rede dos NVR chega aos clientes
+
+**Alteração:** versão 1.1.21 do agente, que leva a coleta de interfaces e tráfego de rede (`networks`) dos NVR Hikvision (ISAPI) e Intelbras (SNMP), integrada de `helena` no merge `dda48bc`. Servidor e painel já estavam em produção desde esse merge; o bloco de rede só aparece nos modais depois que a máquina atualiza para a 1.1.21. Versão em `updater.py`, `installer.iss` e `package.json`. Sem mudança de contrato nem de banco.
+**Arquivos:** agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-22] — Telemetria de NVR: interfaces e tráfego de rede (Hikvision e Intelbras)
 
 **Alteração (branch helena, integrada em isaque):** a telemetria de NVR/DVR passa a incluir `networks` (lista de interfaces com `name`, `ip`, `mac`, `status` UP/DOWN, `speed_mbps`, `recv_mbps` e `sent_mbps`). Hikvision: `ISAPI/System/Network/statistics` (taxa de entrada/saída em kbps, convertida para Mbps) e `ISAPI/System/Network/interfaces` (NIC, IP, MAC e velocidade); a taxa global vai na primeira interface. Intelbras: `IF-MIB` por SNMP (`1.3.6.1.2.1.2.2.1` e `1.3.6.1.2.1.31.1.1.1`), com taxa instantânea por amostragem de octetos. Servidor: `telemetria_equipamento_publica` (`widgets.py`) sanitiza `networks` (até 8 itens, textos em 50 caracteres, números validados) e só descarta a telemetria se CPU, RAM, discos e redes estiverem vazios. Painel: `NVRTelemetryModal.tsx` mostra um cartão por interface com setas de recebimento/envio em Mbps, MAC e selos de status e velocidade; `StatusBadge` ganhou `UP` (Conectado) e `DOWN` (Desconectado). Sem mudança de contrato nem de banco (a telemetria é JSON).
