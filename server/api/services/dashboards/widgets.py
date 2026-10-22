@@ -232,7 +232,22 @@ def telemetria_equipamento_publica(raw: Any) -> Optional[Dict[str, Any]]:
     ram_used_val = raw.get("ram_used_gb")
     ram_used_gb = ram_used_val if isinstance(ram_used_val, (int, float)) and not isinstance(ram_used_val, bool) else None
 
-    if cpu_percent is None and ram_percent is None and not disks_out:
+    networks_raw = raw.get("networks")
+    networks_out: List[Dict[str, Any]] = []
+    if isinstance(networks_raw, list):
+        for n in networks_raw[:8]:
+            if not isinstance(n, dict):
+                continue
+            item_n: Dict[str, Any] = {}
+            for k in ("name", "ip", "mac", "status"):
+                if n.get(k) is not None:
+                    item_n[k] = str(n[k])[:50]
+            for k in ("speed_mbps", "recv_mbps", "sent_mbps"):
+                v = n.get(k)
+                item_n[k] = v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+            networks_out.append(item_n)
+
+    if cpu_percent is None and ram_percent is None and not disks_out and not networks_out:
         return None
 
     return {
@@ -241,6 +256,7 @@ def telemetria_equipamento_publica(raw: Any) -> Optional[Dict[str, Any]]:
         "ram_total_gb": ram_total_gb,
         "ram_used_gb": ram_used_gb,
         "disks": disks_out,
+        "networks": networks_out,
     }
 
 

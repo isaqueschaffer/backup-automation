@@ -838,6 +838,19 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-22] — Telemetria de NVR: Tráfego e Interfaces de Rede (Hikvision e Intelbras) e Total de RAM
+
+**Alteração:**
+1. **Rede nos Gravadores:** A telemetria de NVR/DVR passa a incluir interfaces de rede (`telemetry.networks`), status (UP/DOWN), MAC, IP, velocidade negociada e consumo de banda em tempo real (Recebimento/Download das câmeras e Envio/Upload para visualização).
+   - **Hikvision (ISAPI):** Consulta `ISAPI/System/Network/statistics` (taxa de entrada e saída em kbps/Mbps) e `ISAPI/System/Network/interfaces` (detalhes da NIC, IP, MAC e velocidade).
+   - **Intelbras (SNMP):** Consulta a MIB padrão `IF-MIB` (`1.3.6.1.2.1.2.2.1` e `1.3.6.1.2.1.31.1.1.1`) para identificar interfaces ativas, MAC, velocidade (100M/1G) e calcula taxa instantânea de tráfego (Mbps) via amostragem de octetos.
+2. **Total de RAM:** Corrigido o cálculo de RAM do Hikvision (ISAPI retorna em MB e não em percentual; agora calcula `(uso / (uso + disp)) * 100`). O total de memória (`ram_total_gb`) e uso (`ram_used_gb`) agora são informados tanto na Hikvision quanto na Intelbras, exibindo no card principal o percentual acompanhado da capacidade física (ex.: `44% de 1,1 GB` e legenda `0,5 GB em uso`).
+3. **Modal e Painel:** `NVRTelemetryModal.tsx` exibe os cards das placas de rede com setas de recebimento/envio em Mbps, MAC e badges de status/velocidade, além do total de RAM.
+4. **Correções no Agente:** Adicionado `"telemetria": r.get("telemetria")` no payload de `post_report()` em `api_client.py` (antes descartado ao enviar ao servidor) e correção em `gerar_secretkey()` (`crypto.py`) para clientes sem `zip_password`.
+**Arquivos:** agent/src/nvr/hikvision/telemetry.py, agent/src/nvr/intelbras/telemetry.py, agent/src/application/api_client.py, agent/src/backup/crypto.py, server/api/services/dashboards/widgets.py, server/dashboard/src/api/types.ts, server/dashboard/src/components/StatusBadge.tsx, server/dashboard/src/pages/Machines/MachineDetail/components/NVRTelemetryModal.tsx, server/dashboard/src/pages/Machines/MachineDetail/components/ServerHealthCard.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** helena
+
 ### [2026-10-21] — Agente 1.1.18: Telemetria de NVR Intelbras via SNMP
 
 **Alteração:** NVR com `config_extra.marca = "Intelbras"` agora coleta telemetria por SNMPv2c (porta 161, community "Public" por padrão, configurável em `config_extra.snmp_community`) em vez de ISAPI: novo `agent/src/nvr/intelbras/telemetry.py` (`coletar_telemetria_intelbras`, usando `pysnmp.hlapi.asyncio`) lê RAM (`%` de uso, OID da MIB proprietária Intelbras) e a tabela de HDs (dispositivo, status, capacidade e livre em GB), traduzindo o status (Normal/Error/Abnormal/...) para os rótulos do `StatusBadge`. Sem OID de CPU na MIB Intelbras — o card mostra "—" nesse campo, igual a qualquer equipamento sem o dado. `factory.coletar_telemetria_nvr()` passa a receber `marca`/`snmp_community` e rotear para SNMP (Intelbras) ou ISAPI (Hikvision e demais); `buscar_cameras()` trata `marca="Intelbras"` como `"HIKVISION"` (câmeras/gravações continuam via ISAPI, que os NVRs Intelbras também falam). O resultado tem o mesmo formato do Hikvision (`cpu_percent`/`ram_percent`/`disks`), então `NVRTelemetryModal` exibe os dois fabricantes sem nenhuma mudança de frontend. Novo seletor "Intelbras" na Marca do NVR (`EquipamentoFormModal.tsx`, antes agrupado em "Hikvision / Intelbras / Outros"). Build: `pysnmp` no `requirements.txt` e `--collect-all pysnmp`/`--collect-all pyasn1` no `build.ps1` (MIBs e módulos carregados dinamicamente, precisam ser coletados à parte pelo PyInstaller).
