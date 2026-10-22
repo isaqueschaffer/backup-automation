@@ -218,6 +218,7 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 "tipo": r.get("tipo") or "NVR",
                 "status": r["status"],
                 "cameras": r.get("cameras") or [],
+                "telemetria": r.get("telemetria"),
             }
             for r in resultados
         ],
