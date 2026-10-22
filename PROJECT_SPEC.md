@@ -838,6 +838,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-22] — Painel: pausar/retomar equipamento não recarrega mais a página inteira
+
+**Problema:** em `MachineDetail/index.tsx`, depois de pausar/retomar, salvar ou remover um equipamento (e salvar a máquina ou gerar nova API Key), o código chamava `load()` com o spinner (`setLoading(true)`), que troca a tela inteira pelo carregando (`if (loading) return <spinner/>`). A página desmontava e o usuário perdia a posição (tinha de voltar à seção de equipamentos).
+**Correção:** essas ações passam a chamar `load(true)` (recarga silenciosa, a mesma do polling de 10 s): a lista atualiza no lugar, sem spinner e sem perder a rolagem. Só frontend; o servidor e o agente não mudam. Os fluxos de importação/exclusão de câmeras em lote continuam com o spinner de propósito (`setBusy`).
+**Arquivos:** server/dashboard/src/pages/Machines/MachineDetail/index.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-22] — Agente 1.1.20: RAM total/usada na telemetria dos NVR (Hikvision e Intelbras)
 
 **Alteração (branch helena, integrada em isaque):** a telemetria passa a incluir `ram_total_gb` e `ram_used_gb`. Hikvision: `_calcular_ram` em `telemetry.py` lê `memoryUsage` e `memoryAvailable` (MB) e calcula o percentual, o total e o usado em GB; sem `memoryAvailable`, mantém o valor bruto como percentual quando está entre 0 e 100. Intelbras: o SNMP lê também o OID de RAM total (`1.3.6.1.4.1.1004849.2.1.9.1.0`, em MB) e deriva o usado a partir do percentual. `crypto.gerar_secretkey` passa a aceitar senha `None` (tratada como vazia). Servidor: `telemetria_equipamento_publica` repassa os dois campos novos (só numéricos; o resto vira `None`). Painel: `types.ts`, `NVRTelemetryModal.tsx` e `ServerHealthCard.tsx` exibem a RAM em GB quando disponível. Sem mudança de contrato nem de banco (a telemetria é JSON). O efeito aparece a cada backup após a máquina atualizar para a 1.1.20.
