@@ -41,9 +41,10 @@ interface MetricTileProps {
   label: string;
   percent: number | null;
   caption: string;
+  suffix?: React.ReactNode;
 }
 
-export function MetricTile({ icon, label, percent, caption }: MetricTileProps) {
+export function MetricTile({ icon, label, percent, caption, suffix }: MetricTileProps) {
   const level = levelOf(percent);
   const color = level ? LEVEL_COLOR[level] : "var(--text-primary)";
 
@@ -75,8 +76,15 @@ export function MetricTile({ icon, label, percent, caption }: MetricTileProps) {
         {icon}
         <span>{label}</span>
       </div>
-      <div style={{ fontSize: 20, fontWeight: 700, color, lineHeight: 1.1 }}>
-        {fmtPct(percent)}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
+        <span style={{ fontSize: 20, fontWeight: 700, color, lineHeight: 1.1 }}>
+          {fmtPct(percent)}
+        </span>
+        {suffix && (
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+            {suffix}
+          </span>
+        )}
       </div>
       <PctBar percent={percent} height={4} />
       <div
