@@ -732,6 +732,17 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 
 **Excecao:** Branches de features externas (ex: `helena`) NAO devem ir para `integracao-equipamentos` sem auditoria de merge.
 
+### Auditoria de merge de ramos de colaboradores
+
+O merge de `helena` ou `integracao-equipamentos` em `isaque` e o unico portao da producao. Antes de concluir:
+1. Ver o que entra (`git log isaque..<ramo>`, `git diff --stat isaque...<ramo>`).
+2. Revisar os arquivos sensiveis: `server/docker-compose*.yml` (porta 7001, volume `pg_data`), `server/nginx/nginx.conf`, `server/api/models.py`, migracoes do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, arquivos novos na raiz e binarios.
+3. Procurar data com fuso nas linhas adicionadas (REGRA-001): `git diff isaque...<ramo> | grep -nE '^\+.*(datetime\.now|timezone)'`.
+4. Procurar segredos nas linhas adicionadas.
+5. Registrar na secao 16 o que foi incorporado e o que foi bloqueado.
+
+Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria registrada (IC-015).
+
 ---
 
 ## 12. Variáveis de Ambiente
@@ -914,10 +925,18 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 | IC-013 | Repositório `isaqueschaffer/backup-automation` (antes `trilan-nvr-backup-automation`; é o mesmo repositório) | É **público**, recebe pelo push duplo todo o código de produção e guarda todo o histórico, que a ADR-008 admite conter segredos. Reescrever o histórico (`git filter-repo` + force-push) não basta: quem já clonou ou baixou continua com os valores, então **os segredos expostos precisam ser trocados**. Inventário do histórico pendente | ABERTO — **CRÍTICA** — decisão do dono |
 | IC-014 | `routers/dashboards.py` (geração do link, linha 226) | O link é `PUBLIC_URL` + `/d#<token>`, e `PUBLIC_URL` é a URL pública do servidor (usada nos links de e-mail). A API e o painel ficam em hosts diferentes (`server.` e `backups.suportetrilan.com.br`), então o link pode apontar para um host que não serve a página `/d` (não confirmado). A resposta também traz `caminho` (`/d#<token>`) | ABERTO — código não alterado |
 | IC-015 | `server/docker-compose.yml` | O arquivo versionado traz `7005:7001` e o volume `pg_data_local`, valores da máquina de uma colaboradora que entraram no ramo `isaque` pelo merge `7ec3cc4` (13/10/2026) sem auditoria do compose, depois de rejeitados em 09/10 (ver changelog). A produção usa a porta 7001; o volume em uso no Dokploy precisa ser conferido. Risco: um deploy que siga o arquivo aponta o PostgreSQL para outro volume (banco vazio) | ABERTO — arquivo não alterado; confirmar no Dokploy antes de reverter |
+| IC-016 | `server/nginx/nginx.conf` | Traz `error_log ... debug`, o `/health` e o `proxy_pass` direto (sem `upstream`) vindos do commit `f73fc38` de uma colaboradora (30/09/2026), que nenhuma auditoria reverteu. O binário padrão da imagem `nginx` não tem suporte a debug, então provavelmente é inócuo (não confirmado), mas é configuração de depuração em produção | ABERTO — baixa; arquivo não alterado |
 
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-22] — Checagem obrigatória de merge de colaboradores
+
+**Alteração:** análise do merge de 06/10 (`538600f`, ADR-006) e do merge de 22/10 (`28212ef`, telemetria de NVR, limpo). O merge de 06/10 levou 25 arquivos, entre eles `models.py` e `routers/agent.py` com `datetime.now(timezone.utc)`, `docker-compose.yml` com `7005`/`pg_data_local`, `nginx.conf` reescrito e arquivos soltos na raiz; a correção real foi o merge auditado de 09/10 (`415f0cc`). O compose voltou em 13/10 (`4c18e45`, merge `7ec3cc4`), e desde então houve 13 merges de `helena` em `isaque` sem entrada de auditoria. Passa a valer a checagem descrita na seção 11 ("Auditoria de merge de ramos de colaboradores") e no `CLAUDE.md`. Nova incompatibilidade IC-016 (`nginx.conf` com `error_log debug`).
+**Arquivos:** PROJECT_SPEC.md, CLAUDE.md
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-22] — Auditoria do PROJECT_SPEC contra o código (só documentação)
 
