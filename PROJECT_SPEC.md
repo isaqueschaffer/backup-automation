@@ -838,11 +838,11 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
-### [2026-10-22] — Correção: telemetria dos NVR nunca chegava ao servidor
+### [2026-10-22] — Agente 1.1.19: correção: telemetria dos NVR nunca chegava ao servidor
 
 **Problema:** `post_report` (`agent/src/application/api_client.py`) montava cada item de `nvr_results` com `nome`, `tipo`, `status` e `cameras`, mas **não** com `telemetria`. O agente coletava CPU/RAM/discos (Hikvision por ISAPI, Intelbras por SNMP), o servidor já sabia gravar `nvrs.last_telemetry_status`, porém o campo se perdia no envio — `last_telemetry_status` ficava vazio e os widgets "Gravadores" e os indicadores de disco do "Resumo" apareciam sem dados. Afetava todas as versões do agente até a 1.1.18 (inclusive a branch `helena`).
 
-**Correção:** `post_report` passa a enviar `"telemetria": r.get("telemetria")` (`None` continua sendo ignorado pelo servidor). Sem mudança de contrato nem de servidor. Teste de regressão: `tools/teste_telemetria_nvr_e2e.py`. O efeito nas máquinas só aparece com uma versão nova do agente (a telemetria é coletada a cada backup).
+**Correção:** `post_report` passa a enviar `"telemetria": r.get("telemetria")` (`None` continua sendo ignorado pelo servidor). Sem mudança de contrato nem de servidor. Teste de regressão: `tools/teste_telemetria_nvr_e2e.py`. Liberada na versão 1.1.19 do agente; o efeito aparece a cada backup após a máquina atualizar.
 
 ### [2026-10-21] — Agente 1.1.18: Telemetria de NVR Intelbras via SNMP
 
