@@ -1,21 +1,32 @@
-import { fmtPct, LEVEL_COLOR, levelOf } from "../Machines/MachineDetail/telemetry";
+import { fmtPct, HealthLevel, LEVEL_COLOR, levelOf } from "../Machines/MachineDetail/telemetry";
 
 interface Props {
   percent: number | null;
-  label: string;
+  label?: string;
   caption?: string;
   size?: number;
+  valueLabel?: string;
+  nivel?: HealthLevel | null;
 }
 
 // Medidor circular em anel (donut) com valor no centro e legendas embaixo
-export default function RingGauge({ percent, label, caption, size = 58 }: Props) {
+export default function RingGauge({
+  percent,
+  label = "",
+  caption,
+  size = 58,
+  valueLabel,
+  nivel,
+}: Props) {
   const stroke = 6;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const clamped = percent === null ? 0 : Math.max(0, Math.min(100, percent));
-  const level = levelOf(percent);
+  const level = nivel !== undefined ? nivel : levelOf(percent);
   const color = level ? LEVEL_COLOR[level] : "var(--muted)";
   const center = size / 2;
+  const text = valueLabel !== undefined ? valueLabel : fmtPct(percent);
+  const fontSize = valueLabel && valueLabel.length > 4 ? size * 0.19 : size * 0.22;
 
   return (
     <div
@@ -56,29 +67,31 @@ export default function RingGauge({ percent, label, caption, size = 58 }: Props)
           y={center}
           textAnchor="middle"
           dominantBaseline="central"
-          fontSize={size * 0.22}
+          fontSize={fontSize}
           fontWeight={700}
           fill="var(--text-primary)"
         >
-          {fmtPct(percent)}
+          {text}
         </text>
       </svg>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.4px",
-          color: "var(--text-muted)",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          maxWidth: "100%",
-        }}
-        title={label}
-      >
-        {label}
-      </div>
+      {Boolean(label) && (
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: "0.4px",
+            color: "var(--text-muted)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
+          }}
+          title={label}
+        >
+          {label}
+        </div>
+      )}
       {caption && (
         <div
           style={{

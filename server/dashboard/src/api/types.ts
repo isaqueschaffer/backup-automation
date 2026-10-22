@@ -18,6 +18,8 @@ export interface NVRTelemetryDisk {
   percent?: number | null;
   total_gb?: number | null;
   free_gb?: number | null;
+  power_on_days?: number | null;
+  temperature_c?: number | null;
 }
 
 export interface NVRTelemetryNet {
@@ -36,6 +38,7 @@ export interface NVRTelemetry {
   ram_percent?: number | null;
   ram_total_gb?: number | null;
   ram_used_gb?: number | null;
+  uptime_seconds?: number | null;
   disks?: NVRTelemetryDisk[];
   networks?: NVRTelemetryNet[];
 }
@@ -247,4 +250,3 @@ export interface CustomerRun {
   has_zip: boolean;
   machines: CustomerRunMachine[];
 }
-

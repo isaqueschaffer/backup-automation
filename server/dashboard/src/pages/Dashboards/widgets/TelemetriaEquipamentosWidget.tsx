@@ -3,9 +3,10 @@ import RingGauge from "../../Overview/RingGauge";
 import {
   fmtAgo,
   fmtGb,
-  fmtPct,
-  LEVEL_COLOR,
-  levelOf,
+  fmtIdade,
+  fmtUptime,
+  nivelTemperaturaHd,
+  percentualTemperaturaHd,
 } from "../../Machines/MachineDetail/telemetry";
 import { DadosTelemetriaEquipamentos, WidgetInstancia } from "../types";
 
@@ -119,14 +120,15 @@ export default function TelemetriaEquipamentosWidget({
               </span>
             </div>
 
-            {/* Linha de anéis de CPU e RAM */}
-            {(eq.cpu_percent !== null || eq.ram_percent !== null) && (
+            {/* Linha de anéis de CPU e RAM e tempo ligado */}
+            {(eq.cpu_percent !== null || eq.ram_percent !== null || eq.uptime_seconds != null) && (
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 16,
                   padding: "2px 0",
+                  flexWrap: "wrap",
                 }}
               >
                 {eq.cpu_percent !== null && (
@@ -134,6 +136,35 @@ export default function TelemetriaEquipamentosWidget({
                 )}
                 {eq.ram_percent !== null && (
                   <RingGauge percent={eq.ram_percent} label="RAM" size={52} />
+                )}
+                {eq.uptime_seconds != null && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        textTransform: "uppercase",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Tempo ligado
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 700,
+                        color: "var(--text-primary)",
+                      }}
+                    >
+                      {fmtUptime(eq.uptime_seconds)}
+                    </span>
+                  </div>
                 )}
               </div>
             )}
@@ -146,13 +177,10 @@ export default function TelemetriaEquipamentosWidget({
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {eq.disks.map((d, idx) => {
-                  const percentVal = d.percent ?? null;
-                  const clampedPct =
-                    percentVal === null
-                      ? 0
-                      : Math.max(0, Math.min(100, percentVal));
-                  const level = levelOf(percentVal);
-                  const corBarra = level ? LEVEL_COLOR[level] : "var(--text-muted)";
+                  const semDados =
+                    d.total_gb == null &&
+                    d.percent == null &&
+                    d.temperature_c == null;
 
                   return (
                     <div
@@ -201,43 +229,41 @@ export default function TelemetriaEquipamentosWidget({
                           display: "flex",
                           alignItems: "center",
                           gap: 8,
-                          flex: "1 1 120px",
+                          flexWrap: "wrap",
+                          justifyContent: "flex-end",
                           minWidth: 0,
                         }}
                       >
-                        <div
-                          style={{
-                            flex: 1,
-                            minWidth: 40,
-                            height: 6,
-                            borderRadius: 3,
-                            backgroundColor: "var(--surface)",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: `${clampedPct}%`,
-                              height: "100%",
-                              backgroundColor: corBarra,
-                              borderRadius: 3,
-                              transition: "width 0.3s ease",
-                            }}
-                          />
-                        </div>
-
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-muted)",
-                            whiteSpace: "nowrap",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {percentVal === null && d.free_gb == null && d.total_gb == null
-                            ? "sem dados do disco"
-                            : `${fmtPct(percentVal)} · ${fmtGb(d.free_gb ?? null)} livres de ${fmtGb(d.total_gb ?? null)}`}
-                        </span>
+                        {semDados ? (
+                          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                            sem dados do disco
+                          </span>
+                        ) : (
+                          <>
+                            {d.percent != null && (
+                              <RingGauge percent={d.percent} size={40} />
+                            )}
+                            {d.temperature_c != null && (
+                              <RingGauge
+                                percent={percentualTemperaturaHd(d.temperature_c)}
+                                valueLabel={`${d.temperature_c}°`}
+                                nivel={nivelTemperaturaHd(d.temperature_c)}
+                                size={40}
+                              />
+                            )}
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: "var(--text-muted)",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {fmtGb(d.total_gb ?? null)}
+                              {d.free_gb != null && ` · ${fmtGb(d.free_gb)} livres`}
+                              {d.power_on_days != null && ` · ${fmtIdade(d.power_on_days)}`}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   );

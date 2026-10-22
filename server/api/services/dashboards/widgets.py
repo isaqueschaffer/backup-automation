@@ -209,6 +209,9 @@ def telemetria_equipamento_publica(raw: Any) -> Optional[Dict[str, Any]]:
     ram_val = raw.get("ram_percent")
     ram_percent = ram_val if isinstance(ram_val, (int, float)) and not isinstance(ram_val, bool) else None
 
+    uptime_val = raw.get("uptime_seconds")
+    uptime_seconds = uptime_val if isinstance(uptime_val, (int, float)) and not isinstance(uptime_val, bool) else None
+
     disks_raw = raw.get("disks")
     disks_out: List[Dict[str, Any]] = []
     if isinstance(disks_raw, list):
@@ -221,7 +224,7 @@ def telemetria_equipamento_publica(raw: Any) -> Optional[Dict[str, Any]]:
                 item_d["device"] = str(dev)[:40]
             st = d.get("status")
             item_d["status"] = str(st).upper()[:30] if st is not None else None
-            for nk in ("percent", "total_gb", "free_gb"):
+            for nk in ("percent", "total_gb", "free_gb", "power_on_days", "temperature_c"):
                 nv = d.get(nk)
                 item_d[nk] = nv if isinstance(nv, (int, float)) and not isinstance(nv, bool) else None
             disks_out.append(item_d)
@@ -247,7 +250,13 @@ def telemetria_equipamento_publica(raw: Any) -> Optional[Dict[str, Any]]:
                 item_n[k] = v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
             networks_out.append(item_n)
 
-    if cpu_percent is None and ram_percent is None and not disks_out and not networks_out:
+    if (
+        cpu_percent is None
+        and ram_percent is None
+        and uptime_seconds is None
+        and not disks_out
+        and not networks_out
+    ):
         return None
 
     return {
@@ -255,6 +264,7 @@ def telemetria_equipamento_publica(raw: Any) -> Optional[Dict[str, Any]]:
         "ram_percent": ram_percent,
         "ram_total_gb": ram_total_gb,
         "ram_used_gb": ram_used_gb,
+        "uptime_seconds": uptime_seconds,
         "disks": disks_out,
         "networks": networks_out,
     }
@@ -563,6 +573,7 @@ def construir_telemetria_equipamentos(ctx: ContextoDados, config: ConfigTelemetr
                 "atualizado_em": iso(e.updated_at),
                 "cpu_percent": t["cpu_percent"],
                 "ram_percent": t["ram_percent"],
+                "uptime_seconds": t["uptime_seconds"],
                 "disks": t["disks"],
                 "tem_problema": problema,
             })

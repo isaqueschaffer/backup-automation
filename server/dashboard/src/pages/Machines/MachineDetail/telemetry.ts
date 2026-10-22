@@ -225,3 +225,52 @@ export function fmtAgo(ms: number): string {
   if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
   return `há ${Math.floor(s / 86400)} d`;
 }
+
+export function fmtUptime(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return "—";
+  const totalHours = Math.floor(seconds / 3600);
+  if (totalHours < 1) return "<1 h";
+  if (totalHours < 24) return `${totalHours} h`;
+  const d = Math.floor(totalHours / 24);
+  const h = totalHours % 24;
+  if (h === 0) return `${d} d`;
+  return `${d} d ${h} h`;
+}
+
+export function fmtIdade(dias: number | null): string {
+  if (dias === null || !Number.isFinite(dias) || dias < 0) return "—";
+  const d = Math.floor(dias);
+  if (d === 0) return "menos de 1 dia";
+  if (d < 30) return d === 1 ? "1 dia" : `${d} dias`;
+
+  const anos = Math.floor(d / 365);
+  const meses = Math.min(11, Math.floor((d % 365) / 30));
+
+  const anosLabel = anos === 1 ? "1 ano" : `${anos} anos`;
+  const mesesLabel = meses === 1 ? "1 mês" : `${meses} meses`;
+
+  if (anos === 0) {
+    return mesesLabel;
+  }
+  if (meses === 0) {
+    return anosLabel;
+  }
+  return `${anosLabel} e ${mesesLabel}`;
+}
+
+export const TEMP_HD_ATENCAO = 50;
+export const TEMP_HD_CRITICA = 60;
+
+export function nivelTemperaturaHd(c: number | null): HealthLevel | null {
+  if (c === null || !Number.isFinite(c)) return null;
+  if (c > TEMP_HD_CRITICA) return "err";
+  if (c > TEMP_HD_ATENCAO) return "warn";
+  return "ok";
+}
+
+export const TEMP_HD_ESCALA_MAX = 70;
+
+export function percentualTemperaturaHd(c: number | null): number | null {
+  if (c === null || !Number.isFinite(c)) return null;
+  return Math.max(0, Math.min(100, (c / TEMP_HD_ESCALA_MAX) * 100));
+}
