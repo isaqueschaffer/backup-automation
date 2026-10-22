@@ -110,4 +110,68 @@ def coletar_telemetria_hikvision(nvr_ip, usuario, senha):
     except Exception:
         logging.warning(f"  Falha ao ler discos do NVR {nvr_ip}.", exc_info=True)
 
+    # 3. Rede (Interfaces e Estatísticas de Banda)
+    try:
+        in_kbps = None
+        out_kbps = None
+        try:
+            resp_st = fazer_get(f"http://{nvr_ip}/ISAPI/System/Network/statistics", usuario, senha, timeout=5)
+            if resp_st.status_code == 200:
+                try:
+                    data_st = resp_st.json()
+                    in_kbps = data_st.get("inputBandwidth")
+                    out_kbps = data_st.get("outputBandwidth")
+                except Exception:
+                    root_st = parse_xml_seguro(resp_st.content)
+                    ns_st = detectar_namespace(root_st)
+                    in_kbps = _numero(texto(root_st, ".//hik:inputBandwidth" if ns_st else ".//inputBandwidth", ns_st))
+                    out_kbps = _numero(texto(root_st, ".//hik:outputBandwidth" if ns_st else ".//outputBandwidth", ns_st))
+        except Exception:
+            pass
+
+        recv_mbps = round(in_kbps / 1000, 1) if (in_kbps is not None and in_kbps >= 0) else None
+        sent_mbps = round(out_kbps / 1000, 1) if (out_kbps is not None and out_kbps >= 0) else None
+
+        networks = []
+        try:
+            resp_if = fazer_get(f"http://{nvr_ip}/ISAPI/System/Network/interfaces", usuario, senha, timeout=5)
+            if resp_if.status_code == 200:
+                root_if = parse_xml_seguro(resp_if.content)
+                ns_if = detectar_namespace(root_if)
+                elementos_if = root_if.findall("hik:NetworkInterface", {"hik": ns_if}) if ns_if else root_if.findall("NetworkInterface")
+
+                for idx, nic in enumerate(elementos_if):
+                    nic_id = texto(nic, "hik:id", ns_if) if ns_if else texto(nic, "id", None)
+                    ip_addr = texto(nic, ".//hik:ipAddress", ns_if) if ns_if else texto(nic, ".//ipAddress", None)
+                    mac_addr = texto(nic, ".//hik:MACAddress", ns_if) if ns_if else texto(nic, ".//MACAddress", None)
+                    speed_str = texto(nic, ".//hik:speed", ns_if) if ns_if else texto(nic, ".//speed", None)
+                    speed_num = _numero(speed_str)
+                    speed_mbps = speed_num if (speed_num and speed_num > 0) else (1000 if speed_str == "0" else None)
+
+                    networks.append({
+                        "name": f"LAN{nic_id}" if nic_id else (f"LAN{idx + 1}" if len(elementos_if) > 1 else "LAN"),
+                        "ip": ip_addr,
+                        "mac": mac_addr,
+                        "status": "UP",
+                        "speed_mbps": speed_mbps,
+                        "recv_mbps": recv_mbps if idx == 0 else None,
+                        "sent_mbps": sent_mbps if idx == 0 else None,
+                    })
+        except Exception:
+            pass
+
+        if not networks and (recv_mbps is not None or sent_mbps is not None):
+            networks.append({
+                "name": "LAN",
+                "status": "UP",
+                "recv_mbps": recv_mbps,
+                "sent_mbps": sent_mbps,
+            })
+
+        if networks:
+            telemetria["networks"] = networks
+            teve_sucesso = True
+    except Exception:
+        logging.warning(f"  Falha ao ler dados de rede do NVR {nvr_ip}.", exc_info=True)
+
     return telemetria if teve_sucesso else None

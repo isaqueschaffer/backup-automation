@@ -19,6 +19,8 @@ const map: Record<string, { cls: string; dot: string; label: string }> = {
   NAO_FORMATADO: { cls: "warn", dot: "warn", label: "Não Formatado" },
   REPOUSO: { cls: "muted", dot: "muted", label: "Repouso" },
   DESCONHECIDO: { cls: "muted", dot: "muted", label: "Desconhecido" },
+  UP: { cls: "ok", dot: "ok", label: "Conectado" },
+  DOWN: { cls: "err", dot: "err", label: "Desconectado" },
 };
 
 export default function StatusBadge({ status }: Props) {

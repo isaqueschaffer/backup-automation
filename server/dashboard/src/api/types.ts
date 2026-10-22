@@ -20,13 +20,24 @@ export interface NVRTelemetryDisk {
   free_gb?: number | null;
 }
 
-// Telemetria de CPU/RAM/discos do NVR (Hikvision via ISAPI)
+export interface NVRTelemetryNet {
+  name: string;
+  ip?: string | null;
+  mac?: string | null;
+  status?: string | null;
+  speed_mbps?: number | null;
+  recv_mbps?: number | null;
+  sent_mbps?: number | null;
+}
+
+// Telemetria de CPU/RAM/discos/rede do NVR
 export interface NVRTelemetry {
   cpu_percent?: number | null;
   ram_percent?: number | null;
   ram_total_gb?: number | null;
   ram_used_gb?: number | null;
   disks?: NVRTelemetryDisk[];
+  networks?: NVRTelemetryNet[];
 }
 
 export interface EquipamentoConfig {
