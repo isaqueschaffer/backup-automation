@@ -931,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-22] — Agente 1.1.22: uptime, idade e temperatura dos HDs dos NVR Hikvision
+
+**Alteração:** versão 1.1.22 do agente, que leva a coleta de `uptime_seconds` e, por disco, `power_on_days` e `temperature_c` (detalhes e correção do `freeSpace` 0 na entrada abaixo). Servidor e painel já estavam em produção desde o commit `1c2e970`; os cartões dos HDs só mostram idade e temperatura depois que a máquina atualiza para a 1.1.22 e faz um backup. Versão em `updater.py`, `installer.iss` e `package.json`. Sem mudança de contrato nem de banco.
+**Arquivos:** agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-22] — Telemetria do NVR Hikvision: uptime, idade e temperatura dos HDs, capacidade correta e medidores em anel
 
 **Alteração:** a telemetria Hikvision passa a incluir `uptime_seconds` (`ISAPI/System/status`, `deviceUpTime`) e, por disco, `power_on_days` e `temperature_c` (`ISAPI/ContentMgmt/Storage/hdd/<id>/SMARTTest/status`, campos `powerOnDay` e `temprature`; consulta com timeout de 5 s por disco e falha isolada, nunca derruba a coleta). Verificado em dois NVR reais (DS-7732NI-K4/16P e DS-96256NI-I16): `powerOnDay` é o atributo SMART 9 (horas ligado) dividido por 24. **Correção:** os NVR em gravação por sobrescrita devolvem `freeSpace` = 0 em todos os discos, o que virava `percent` 100 e `free_gb` 0 (painel com "0 GB livres" e alerta de disco cheio falso); agora `freeSpace` 0 vira "desconhecido" (`percent` e `free_gb` nulos) e só a capacidade total é exibida. Servidor: `telemetria_equipamento_publica` repassa os campos novos (só numéricos) e `construir_telemetria_equipamentos` envia `uptime_seconds` ao widget. Painel: `RingGauge` ganhou `valueLabel` e `nivel` (opcionais; os usos atuais não mudam) e `label` opcional; `NVRTelemetryModal` mostra CPU e RAM em anel, tempo ligado em texto e um cartão por disco com anel de uso (quando o percentual é real), anel de temperatura (escala 0–70 °C, atenção acima de 50 e crítico acima de 60), capacidade e idade (`fmtIdade`); o widget "Gravadores" segue o mesmo padrão. Idade, uptime e rede ficam em texto (sem limite de 0 a 100%). Intelbras não muda (sem SMART/uptime; os campos novos ficam em "—"). Só o agente precisa de versão nova para coletar os dados; servidor e painel já os aceitam.
