@@ -1,5 +1,8 @@
 import logging
+import re
 import shutil
+import sys
+import time
 import requests
 from datetime import datetime
 from pathlib import Path
@@ -8,9 +11,14 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from src.core.config import load_conf, DIR_AGENT
+from src.core.config import load_conf, parse_config_extra, DIR_AGENT
 from src.application.api_client import fetch_server_config, post_report, upload_zip
-from src.nvr.factory import verificar_gravacao_nvr
+from src.nvr.factory import verificar_gravacao_nvr, coletar_telemetria_nvr
+from src.olt.unm2000 import realizar_backup_olt
+from src.olt.vsol import realizar_backup_vsol
+from src.pabx.issabel import realizar_backup_issabel
+from src.mikrotik.routeros import realizar_backup_mikrotik
+from src.vms.defense import realizar_backup_defense
 from src.backup.crypto import gerar_secretkey
 from src.backup.downloader import baixar_arquivo
 from src.backup.archiver import criar_zip, data_hoje
@@ -27,45 +35,63 @@ def setup_logging():
         fh = logging.FileHandler(log_dir / "agent.log", encoding="utf-8")
         fh.setFormatter(fmt)
         logger.addHandler(fh)
-        import sys
         if sys.stdout is not None:
             ch = logging.StreamHandler(sys.stdout)
             ch.setFormatter(logging.Formatter("%(message)s"))
             logger.addHandler(ch)
 
-def processar_nvr(nvr: dict, zip_password: str, pasta_data: Path) -> dict:
-    nome, ip, user, pwd = nvr["name"], nvr["ip"], nvr["username"], nvr["password"]
-    logging.info(f"\n{'='*50}\n{nome} (IP: {ip})\n{'='*50}")
 
-    pasta_nvr = pasta_data / nome.replace(" ", "_")
+# ─────────────────────────────────────────────────────────────
+# PROCESSADORES POR TIPO DE EQUIPAMENTO
+# ─────────────────────────────────────────────────────────────
+
+def nome_seguro(nome: str) -> str:
+    """Nome de equipamento seguro para caminhos/comandos (espacos viram '_')."""
+    return re.sub(r"[^\w.-]", "_", nome or "")
+
+
+def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None) -> dict:
+    """Processa backup de NVR (Hikvision/Motorola/Digifort)."""
+    nome, ip, user, pwd = (
+        equipamento["name"], equipamento["ip"],
+        equipamento["username"], equipamento["password"]
+    )
+    logging.info(f"\n{'='*50}\n{nome} [NVR] (IP: {ip})\n{'='*50}")
+
+    pasta_nvr = pasta_data
     pasta_nvr.mkdir(parents=True, exist_ok=True)
 
-    retorno = verificar_gravacao_nvr(ip, user, pwd)
+    config_extra = parse_config_extra(equipamento)
+    marca = config_extra.get("marca")
+
+    retorno = verificar_gravacao_nvr(ip, user, pwd, marca)
     if isinstance(retorno, tuple) and len(retorno) == 2:
-        cameras_status, tipo = retorno
+        cameras_status, tipo_nvr = retorno
     else:
-        cameras_status, tipo = retorno, "DESCONHECIDO"
-    
+        cameras_status, tipo_nvr = retorno, "DESCONHECIDO"
+
     if not cameras_status:
         logging.error("  NVR INACESSIVEL ou falha no login.")
         return {"nome": nome, "status": "ERRO"}
-        
-    logging.info(f"  NVR acessivel (Detectado: {tipo}).")
+
+    logging.info(f"  NVR acessivel (Detectado: {tipo_nvr}).")
+
+    telemetria = coletar_telemetria_nvr(ip, user, pwd, tipo_nvr, marca, config_extra.get("snmp_community"))
 
     sessao = requests.Session()
     sessao.auth = HTTPDigestAuth(user, pwd)
     sessao.verify = False
-    
+
     sucessos = 0
     status = "OK"
 
-    if tipo == "MOTOROLA":
+    if tipo_nvr == "MOTOROLA":
         logging.info("  NVR Motorola detectado. Backup de arquivos de configuracao nao suportado nativamente. Gravacoes verificadas.")
         status = "SEM_ARQUIVOS"
     else:
         try:
             sessao.get(f"http://{ip}/ISAPI/System/status", timeout=5).raise_for_status()
-            
+
             # Config NVR (.bin)
             sk, iv = gerar_secretkey(zip_password)
             url_bin = f"http://{ip}/ISAPI/System/configurationData?secretkey={sk}&security=1&iv={iv}"
@@ -80,13 +106,134 @@ def processar_nvr(nvr: dict, zip_password: str, pasta_data: Path) -> dict:
             if baixar_arquivo(sessao, url_xls, arq_xls):
                 logging.info("  Backup IPCAM OK.")
                 sucessos += 1
-                
+
             status = "OK" if sucessos == 2 else "PARCIAL"
         except Exception:
-            logging.info("  API ISAPI falhou. Backup de arquivos pulado.")
+            logging.warning("  API ISAPI falhou. Backup de arquivos pulado.", exc_info=True)
             status = "PARCIAL"
 
-    return {"nome": nome, "status": status, "cameras": cameras_status}
+    # A imagem da noite não é mais capturada no backup (atrasava backups manuais e agendados):
+    # ela é capturada sob demanda pela Galeria do NVR no painel (tarefa RTSP modo "noite").
+
+    return {"nome": nome, "status": status, "cameras": cameras_status, "telemetria": telemetria}
+
+
+def processar_olt(
+    equipamento: dict,
+    pasta_data: Path,
+    conf: dict = None,
+    trigger: str = "scheduled"
+) -> dict:
+
+    tipo = (equipamento.get("tipo") or "").lower()
+
+    config_extra = parse_config_extra(equipamento)
+
+    fabricante = (
+        equipamento.get("fabricante")
+        or config_extra.get("fabricante_olt")
+        or config_extra.get("fabricante")
+        or ""
+    ).lower().strip()
+
+    # Fallback caso fabricante não venha explícito mas esteja no nome ou config
+    if not fabricante or fabricante == "olt":
+        nome_lower = (equipamento.get("name") or "").lower()
+        if "vsol" in nome_lower:
+            fabricante = "vsol"
+        elif "unm" in nome_lower or "huawei" in nome_lower:
+            fabricante = "unm2000"
+        elif "pasta_origem" in config_extra and config_extra.get("pasta_origem"):
+            fabricante = "unm2000"
+
+    if tipo == "digifort":
+        fabricante = "unm2000"
+
+    logging.info(
+        f"[OLT] Tipo={tipo} | Fabricante={fabricante}"
+    )
+
+    if fabricante == "vsol":
+        return realizar_backup_vsol(
+            equipamento,
+            pasta_data
+        )
+
+    if fabricante == "huawei":
+        from src.olt.huawei_active import realizar_backup_huawei_ativo
+        return realizar_backup_huawei_ativo(
+            equipamento,
+            pasta_data
+        )
+
+    if fabricante in ("unm", "unm2000"):
+        return realizar_backup_olt(
+            equipamento,
+            pasta_data,
+            conf,
+            trigger
+        )
+
+    logging.error(
+        f"[OLT] Fabricante não suportado: {fabricante}"
+    )
+
+    return {
+        "nome": equipamento.get(
+            "name",
+            "OLT_desconhecida"
+        ),
+        "status": "ERRO",
+        "cameras": None,
+    }
+
+
+def processar_pabx(equipamento: dict, pasta_data: Path) -> dict:
+    pasta_data.mkdir(parents=True, exist_ok=True)
+    return realizar_backup_issabel(equipamento, pasta_data)
+
+
+def processar_mikrotik(equipamento: dict, pasta_data: Path) -> dict:
+    pasta_data.mkdir(parents=True, exist_ok=True)
+    return realizar_backup_mikrotik(equipamento, pasta_data)
+
+
+def processar_defense(equipamento: dict, pasta_data: Path, conf: dict = None) -> dict:
+    pasta_data.mkdir(parents=True, exist_ok=True)
+    return realizar_backup_defense(equipamento, pasta_data, conf)
+
+
+def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None, trigger: str = "scheduled") -> dict:
+    """
+    Despachante principal — roteia o processamento pelo tipo do equipamento.
+    Tipos suportados: NVR, OLT, PABX
+    Tipos futuros:    ONU, PABX (retornam status TIPO_NAO_SUPORTADO)
+    """
+    tipo = (equipamento.get("tipo") or "NVR").upper()
+
+    if tipo == "NVR":
+        return processar_nvr(equipamento, zip_password, pasta_data, conf)
+
+    if tipo == "OLT" or tipo == "DIGIFORT":
+        return processar_olt(equipamento, pasta_data, conf, trigger)
+
+    if tipo == "PABX":
+        return processar_pabx(equipamento, pasta_data)
+
+    if tipo == "MIKROTIK":
+        return processar_mikrotik(equipamento, pasta_data)
+
+    if tipo == "DEFENSE":
+        return processar_defense(equipamento, pasta_data, conf)
+
+    # Tipos cadastrados mas ainda não implementados
+    logging.warning(f"  Tipo '{tipo}' ainda não suportado pelo agente. Equipamento: {equipamento.get('name')}")
+    return {"nome": equipamento.get("name", "?"), "status": "TIPO_NAO_SUPORTADO", "cameras": None}
+
+
+# ─────────────────────────────────────────────────────────────
+# EXECUÇÃO PRINCIPAL
+# ─────────────────────────────────────────────────────────────
 
 def run_backup(trigger: str = "scheduled"):
     setup_logging()
@@ -101,34 +248,96 @@ def run_backup(trigger: str = "scheduled"):
         logging.error(f"Falha ao buscar config: {e}")
         return
 
-    nvrs = server_cfg["nvrs"]
-    zip_password = server_cfg.get("zip_password") or "TrilanBackup2024"
+    # Aceita tanto o campo novo (equipamentos) quanto o legado (nvrs)
+    equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+    zip_password = server_cfg.get("zip_password")
+    if not zip_password:
+        logging.warning("AVISO DE SEGURANCA: zip_password nao configurado no servidor para este cliente. O ZIP sera criado sem senha.")
     client_name = server_cfg["client_name"]
 
-    if not nvrs:
-        logging.error("Nenhum NVR configurado no servidor para este cliente.")
+    if not equipamentos:
+        logging.error("Nenhum equipamento configurado no servidor para este cliente.")
         return
 
-    logging.info(f"Cliente : {client_name}")
-    logging.info(f"NVRs    : {len(nvrs)}")
+    # Ignora as câmeras (elas não fazem parte do backup principal automático)
+    equipamentos = [eq for eq in equipamentos if str(eq.get("tipo")).upper() != "CAMERA"]
 
-    if TEMP_DIR.exists():
-        shutil.rmtree(TEMP_DIR)
-    TEMP_DIR.mkdir(parents=True)
+    # Resumo por tipo
+    por_tipo: dict = {}
+    for eq in equipamentos:
+        t = (eq.get("tipo") or "NVR").upper()
+        por_tipo[t] = por_tipo.get(t, 0) + 1
 
-    started_at = datetime.now()
-    resultados = [processar_nvr(nvr, zip_password, TEMP_DIR) for nvr in nvrs]
-    finished_at = datetime.now()
+    logging.info(f"Cliente      : {client_name}")
+    logging.info(f"Equipamentos : {len(equipamentos)} total — " + ", ".join(f"{v} {k}" for k, v in por_tipo.items()))
+
+    TEMP_DIR_WORK = DIR_AGENT / "tmp_backup_work"
+    TEMP_DIR_FINAL = DIR_AGENT / "tmp_backup_final"
+
+    for d in (TEMP_DIR_WORK, TEMP_DIR_FINAL):
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            if d.exists():
+                for item in d.iterdir():
+                    try:
+                        if item.is_dir():
+                            shutil.rmtree(item, ignore_errors=True)
+                        else:
+                            item.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        d.mkdir(parents=True, exist_ok=True)
+
+    started_at = datetime.utcnow()
+    resultados = []
+
+    for eq in equipamentos:
+        tipo = (eq.get("tipo") or "NVR").upper()
+        nome = eq.get("name", "equipamento")
+        nome_safe = nome_seguro(nome)
+
+        # Diretório temporário de trabalho
+        pasta_trabalho = TEMP_DIR_WORK / f"{tipo}_{nome_safe}"
+        pasta_trabalho.mkdir(parents=True, exist_ok=True)
+
+        res = processar_equipamento(eq, zip_password, pasta_trabalho, conf, trigger)
+        res["tipo"] = tipo
+        resultados.append(res)
+
+        # Monta a estrutura final
+        pasta_final_eq = TEMP_DIR_FINAL / tipo / f"backup_{tipo.lower()}_{nome_safe}"
+        pasta_final_eq.mkdir(parents=True, exist_ok=True)
+
+        # Cria o ZIP interno sem senha
+        zip_interno_path = pasta_final_eq / "backup.zip"
+        if any(pasta_trabalho.iterdir()):
+            criar_zip(pasta_trabalho, zip_interno_path, senha=None)
+
+    finished_at = datetime.utcnow()
 
     for r in resultados:
-        icone = {"OK": "OK", "PARCIAL": "PARCIAL", "ERRO": "ERRO", "SEM_ARQUIVOS": "SEM_ARQUIVOS"}.get(r["status"], "?")
-        logging.info(f"  {icone} {r['nome']}")
-
-    zip_path = criar_zip(TEMP_DIR, client_name, zip_password)
+        icone = {
+            "OK": "OK", "PARCIAL": "PARCIAL", "ERRO": "ERRO",
+            "SEM_ARQUIVOS": "SEM_ARQUIVOS", "JA_PROCESSADO": "JA_PROCESSADO",
+            "TIPO_NAO_SUPORTADO": "SKIP",
+            "BACKUP_ANTIGO": "ANTIGO", "BACKUP_INCOMPLETO": "INCOMPLETO",
+            "BACKUP_INCONSISTENTE": "INCONSISTENTE", "BACKUP_NAO_ENCONTRADO": "NAO_ENCONTRADO",
+            "BACKUP_EM_PROCESSAMENTO": "ESPERA", "BACKUP_CORROMPIDO": "CORROMPIDO"
+        }.get(r["status"], r["status"])
+        logging.info(f"  {icone} [{r.get('tipo', 'NVR')}] {r['nome']}")
 
     backup_id = post_report(conf, started_at, finished_at, resultados, trigger)
-    if backup_id and zip_path:
-        upload_zip(conf, backup_id, zip_path)
+    if backup_id:
+        todos_arquivos = [f for f in TEMP_DIR_FINAL.rglob("*") if f.is_file()]
+        if todos_arquivos:
+            # Nome do ZIP da máquina: backup_<Nome_Da_Maquina>_<Data>.zip (protegido pela senha da máquina)
+            nome_zip_global = f"backup_{nome_seguro(client_name)}_{data_hoje()}.zip"
 
-    shutil.rmtree(TEMP_DIR, ignore_errors=True)
+            zip_global_path = criar_zip(TEMP_DIR_FINAL, nome_zip_global, zip_password)
+            if zip_global_path:
+                logging.info(f"  Enviando pacote de backup global: {zip_global_path.name}")
+                upload_zip(conf, backup_id, zip_global_path, device_type="MIXED")
+
+    shutil.rmtree(TEMP_DIR_WORK, ignore_errors=True)
+    shutil.rmtree(TEMP_DIR_FINAL, ignore_errors=True)
     logging.info(f"\nBackup concluido em {(finished_at - started_at).total_seconds():.1f}s")

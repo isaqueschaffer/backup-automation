@@ -2,7 +2,7 @@
 
 [Setup]
 AppName=Trilan NVR Backup Agent
-AppVersion=1.0
+AppVersion=1.1.24
 DefaultDirName={pf}\Trilan NVR Backup Agent
 DefaultGroupName=Trilan NVR
 OutputBaseFilename=TrilanAgentSetup
@@ -20,14 +20,25 @@ Name: "{group}\Trilan Agent Tray"; Filename: "{app}\TrilanAgentTray.exe"
 Name: "{commonstartup}\Trilan Agent Tray"; Filename: "{app}\TrilanAgentTray.exe"
 
 [Run]
-Filename: "{app}\TrilanAgentService.exe"; Parameters: "install"; Flags: runhidden
+; pywin32 usa getopt: as opcoes (--startup) precisam vir ANTES da acao, senao sao ignoradas.
+; "remove" antes do "install" recria o servico mesmo em reinstalacao/mudanca de pasta (erro ignorado se nao existir).
+; "delayed-auto" evita o timeout de 30s do SCM (Erro 1053) enquanto o PyInstaller --onefile descompacta no boot.
+Filename: "{app}\TrilanAgentService.exe"; Parameters: "remove"; Flags: runhidden
+Filename: "{app}\TrilanAgentService.exe"; Parameters: "--startup=delayed install"; Flags: runhidden
+Filename: "sc.exe"; Parameters: "config TrilanAgentNVR start= delayed-auto"; Flags: runhidden
+Filename: "sc.exe"; Parameters: "failure TrilanAgentNVR reset= 86400 actions= restart/5000/restart/10000/restart/30000"; Flags: runhidden
+Filename: "sc.exe"; Parameters: "failureflag TrilanAgentNVR 1"; Flags: runhidden
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "start"; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""Trilan Agent Tray FTP"" dir=in action=allow program=""{app}\TrilanAgentTray.exe"" enable=yes protocol=TCP localport=21"; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""Trilan Agent Service FTP"" dir=in action=allow program=""{app}\TrilanAgentService.exe"" enable=yes protocol=TCP localport=21"; Flags: runhidden
 Filename: "{app}\TrilanAgentTray.exe"; Flags: nowait postinstall; Description: "Iniciar o Trilan Agent Tray agora"
 
 [UninstallRun]
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "stop"; Flags: runhidden
 Filename: "{app}\TrilanAgentService.exe"; Parameters: "remove"; Flags: runhidden
 Filename: "taskkill"; Parameters: "/f /im TrilanAgentTray.exe"; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""Trilan Agent Tray FTP"""; Flags: runhidden
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""Trilan Agent Service FTP"""; Flags: runhidden
 
 [Code]
 var
@@ -44,7 +55,7 @@ begin
   ConfigPage.Add('Client ID:', False);
   ConfigPage.Add('API Key:', False);
 
-  ConfigPage.Values[0] := 'http://';
+  ConfigPage.Values[0] := 'http://publico.suportetrilan.com.br:7001';
   ConfigPage.Values[1] := '';
   ConfigPage.Values[2] := '';
 end;
@@ -73,6 +84,19 @@ begin
       Exit;
     end;
   end;
+end;
+
+// Reinstalacao/atualizacao: para o servico e fecha a bandeja antes de copiar os arquivos
+// (executavel em uso nao pode ser substituido).
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop TrilanAgentNVR', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/f /im TrilanAgentTray.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(5000);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/f /im TrilanAgentService.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

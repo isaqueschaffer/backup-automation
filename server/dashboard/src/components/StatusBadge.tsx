@@ -12,7 +12,17 @@ const map: Record<string, { cls: string; dot: string; label: string }> = {
   COM_GRAVACAO: { cls: "ok", dot: "ok", label: "Gravando" },
   SEM_GRAVACAO: { cls: "warn", dot: "warn", label: "Sem Gravação" },
   NAO_VERIFICADO: { cls: "muted", dot: "muted", label: "Não Verificado" },
-  SEM_ARQUIVOS: { cls: "ok", dot: "ok", label: "Apenas Gravações (Sem Backup de Config)" },
+  EM_ANDAMENTO: { cls: "warn", dot: "warn", label: "Em andamento" },
+  NAO_EXECUTOU: { cls: "err", dot: "", label: "Não executou" },
+  SEM_ARQUIVOS:{ cls: "ok", dot: "ok", label: "Apenas Gravações (Sem Backup de Config)" },
+  NAO_INICIALIZADO: { cls: "warn", dot: "warn", label: "Não Inicializado" },
+  NAO_FORMATADO: { cls: "warn", dot: "warn", label: "Não Formatado" },
+  REPOUSO: { cls: "muted", dot: "muted", label: "Repouso" },
+  SOMENTE_LEITURA: { cls: "warn", dot: "warn", label: "Somente leitura" },
+  SAUDE_BAIXA: { cls: "warn", dot: "warn", label: "Saúde baixa" },
+  DESCONHECIDO: { cls: "muted", dot: "muted", label: "Desconhecido" },
+  UP: { cls: "ok", dot: "ok", label: "Conectado" },
+  DOWN: { cls: "err", dot: "err", label: "Desconectado" },
 };
 
 export default function StatusBadge({ status }: Props) {
