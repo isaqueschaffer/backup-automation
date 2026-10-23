@@ -250,6 +250,7 @@ def _parse_percent(el, *tag_names):
 
 # Lista exaustiva de endpoints candidatos de telemetria no NVMS-9000
 ENDPOINTS_DISCOS = [
+    "queryStorageDevInfo",
     "queryDiskStatus",
     "queryDiskDetailInfo",
     "queryDiskSmartInfo",
