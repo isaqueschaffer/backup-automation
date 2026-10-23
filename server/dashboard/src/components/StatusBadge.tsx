@@ -18,6 +18,8 @@ const map: Record<string, { cls: string; dot: string; label: string }> = {
   NAO_INICIALIZADO: { cls: "warn", dot: "warn", label: "Não Inicializado" },
   NAO_FORMATADO: { cls: "warn", dot: "warn", label: "Não Formatado" },
   REPOUSO: { cls: "muted", dot: "muted", label: "Repouso" },
+  SOMENTE_LEITURA: { cls: "warn", dot: "warn", label: "Somente leitura" },
+  SAUDE_BAIXA: { cls: "warn", dot: "warn", label: "Saúde baixa" },
   DESCONHECIDO: { cls: "muted", dot: "muted", label: "Desconhecido" },
   UP: { cls: "ok", dot: "ok", label: "Conectado" },
   DOWN: { cls: "err", dot: "err", label: "Desconectado" },

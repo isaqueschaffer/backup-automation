@@ -1,556 +1,225 @@
-import base64
-import hashlib
 import logging
 import re
-import xml.etree.ElementTree as ET
-import requests
-import urllib3
+import time
 
+from src.nvr.motorola.cameras import abrir_sessao_motorola
 from src.utils.xml_parser import parse_xml_seguro, texto
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Status de HDD do NVMS-9000 traduzidos para o StatusBadge do dashboard
-_STATUS_HDD = {
-    "ok": "OK",
-    "normal": "OK",
-    "read/write": "OK",
-    "read_write": "OK",
-    "readwrite": "OK",
-    "read": "OK",
-    "recording": "OK",
-    "idle": "OK",
-    "bad": "ERRO",
-    "error": "ERRO",
-    "abnormal": "ERRO",
-    "damage": "ERRO",
-    "lost": "ERRO",
-    "uninitialized": "NAO_INICIALIZADO",
-    "no_format": "NAO_FORMATADO",
-    "notformatted": "NAO_FORMATADO",
-    "sleep": "REPOUSO",
-    "hibernate": "REPOUSO",
-    "standby": "REPOUSO",
-    "offline": "OFFLINE",
-}
+TIMEOUT_S = 15
+PAUSA_S = 0.5
+MAX_DISCOS = 16
 
 
-def _normalizar_status_disco(st_raw: str) -> str:
-    if not st_raw:
-        return "DESCONHECIDO"
-    chave = st_raw.strip().lower()
-    return _STATUS_HDD.get(chave, st_raw.strip().upper())
-
-
-def _converter_valor_para_gb(val, unit=""):
-    unit = (unit or "").upper().strip()
-    if unit == "GB":
-        return round(val, 1)
-    elif unit == "TB":
-        return round(val * 1024, 1)
-    elif unit == "KB":
-        return round(val / (1024 * 1024), 1)
-    elif unit in ("B", "BYTE", "BYTES"):
-        return round(val / (1024 ** 3), 1)
-    elif unit == "MB":
-        return round(val / 1024, 1)
-
-    if val > 10_000_000_000:
-        return round(val / (1024 ** 3), 1)
-    elif val > 10_000_000:
-        return round(val / (1024 * 1024), 1)
-    elif val > 100:
-        return round(val / 1024, 1)
-    else:
-        return round(val, 1)
-
-
-def _parse_size_gb(el, *tag_names):
-    """Extrai capacidade/tamanho em GB considerando unit='MB'/'GB'/'KB'/'Byte' ou heurística."""
-    if el is None:
+def _numero(txt):
+    """Converte texto para inteiro ou retorna None."""
+    if not txt or not str(txt).strip():
         return None
-    for tag in tag_names:
-        for alvo in el.findall(f".//{tag}"):
-            if alvo is not None and alvo.text and alvo.text.strip():
-                texto_raw = alvo.text.strip()
-                try:
-                    texto_limpo = re.sub(r"[^\d.]", "", texto_raw)
-                    if not texto_limpo:
-                        continue
-                    val = float(texto_limpo)
-                    unit = alvo.get("unit") or ""
-                    return _converter_valor_para_gb(val, unit)
-                except (ValueError, TypeError):
-                    continue
-    return None
-
-
-def _escanear_capacidade_heuristica(el):
-    """Varre recursivamente elementos procurando tags numéricas de capacidade."""
-    if el is None:
-        return None, None
-    tot_gb, free_gb = None, None
-
-    for filho in el.iter():
-        tag_nome = filho.tag.lower()
-        if not filho.text or not filho.text.strip():
-            continue
-        texto_limpo = re.sub(r"[^\d.]", "", filho.text.strip())
-        if not texto_limpo:
-            continue
-        try:
-            val = float(texto_limpo)
-            if val <= 0:
-                continue
-            unit = filho.get("unit") or ""
-            gb = _converter_valor_para_gb(val, unit)
-
-            if tot_gb is None and any(t in tag_nome for t in ("total", "capacity", "allspace", "maxsize", "totalsize", "totalspace", "totalcap")):
-                if not any(neg in tag_nome for neg in ("free", "remain", "used", "sub", "time", "date")):
-                    tot_gb = gb
-
-            if free_gb is None and any(t in tag_nome for t in ("remain", "free", "rest", "avail")):
-                if not any(neg in tag_nome for neg in ("sub", "time", "date")):
-                    free_gb = gb
-        except Exception:
-            continue
-
-    return tot_gb, free_gb
-
-
-def _parse_percent(el, *tag_names):
-    """Extrai percentual inteiro 0-100 de uma tag."""
-    if el is None:
+    try:
+        return int(float(str(txt).strip()))
+    except (ValueError, TypeError):
         return None
-    for tag in tag_names:
-        alvo = el.find(f".//{tag}")
-        if alvo is not None and alvo.text and alvo.text.strip():
-            texto_raw = alvo.text.strip().replace("%", "").strip()
-            try:
-                val = float(texto_raw)
-                if 0 <= val <= 1:
-                    val *= 100
-                if 0 <= val <= 100:
-                    return int(round(val))
-            except (ValueError, TypeError):
-                continue
-    return None
 
 
-def autenticar_nvms9000(session: requests.Session, ip: str, usuario: str, senha: str) -> bool:
-    """Realiza o login no NVR Motorola (protocolo NVMS-9000 / TVT)."""
-    xml_header = '<?xml version="1.0" encoding="utf-8" ?>'
-    pwd_b64 = base64.b64encode(senha.encode("utf-8")).decode("utf-8")
-
-    # 1. Tentativa com reqLogin (SHA-512 + nonce)
-    xml_req = f'{xml_header}<request version="1.0" systemType="NVMS-9000" clientType="WEB"/>'
+def _post(session, nvr_ip, endpoint, corpo=""):
+    """Envia requisicao XML NVMS-9000 e retorna a raiz parseada ou None."""
+    token_val = getattr(session, "tvt_token", "") or ""
+    token_xml = f"<token>{token_val}</token>" if token_val else ""
+    xml_data = (
+        '<?xml version="1.0" encoding="utf-8" ?>'
+        f'<request version="1.0" systemType="NVMS-9000" clientType="WEB">{token_xml}{corpo}</request>'
+    )
+    url = f"http://{nvr_ip}/{endpoint}"
     try:
-        r_req = session.post(
-            f"http://{ip}/reqLogin",
-            data=xml_req.encode("utf-8"),
+        resp = session.post(
+            url,
+            data=xml_data.encode("utf-8"),
             headers={"Content-Type": "application/xml"},
-            timeout=8,
-            verify=False
+            timeout=TIMEOUT_S,
+            verify=False,
         )
+        if resp.status_code != 200:
+            return None
+        raiz = parse_xml_seguro(resp.content)
+        status = texto(raiz, ".//status", None)
+        if status != "success" and not raiz.findall(".//content"):
+            return None
+        return raiz
+    except Exception as e:
+        logging.debug(f"Falha na consulta {endpoint} em {nvr_ip}: {e}")
+        return None
+    finally:
+        time.sleep(PAUSA_S)
 
-        if r_req.status_code == 200 and "success" in r_req.text:
-            root_req = parse_xml_seguro(r_req.content)
-            nonce = texto(root_req, ".//nonce", None)
-            token = texto(root_req, ".//token", None)
 
-            if nonce and token:
-                pwd_md5 = hashlib.md5(senha.encode("utf-8")).hexdigest().upper()
-                hash_final = hashlib.sha512((pwd_md5 + "#" + nonce).encode("utf-8")).hexdigest()
-
-                xml_login = (
-                    f'{xml_header}<request version="1.0" systemType="NVMS-9000" clientType="WEB">'
-                    f'<token>{token}</token>'
-                    f'<content><userName><![CDATA[{usuario}]]></userName>'
-                    f'<password><![CDATA[{hash_final}]]></password></content></request>'
-                )
-
-                r_login = session.post(
-                    f"http://{ip}/doLogin",
-                    data=xml_login.encode("utf-8"),
-                    headers={"Content-Type": "application/xml"},
-                    timeout=8,
-                    verify=False
-                )
-
-                if r_login.status_code == 200 and "success" in r_login.text:
-                    root_login = parse_xml_seguro(r_login.content)
-                    session_id = texto(root_login, ".//sessionId", None)
-                    session.cookies.set("auInfo_N9K", pwd_b64)
-                    if session_id:
-                        session.cookies.set("sessionId", session_id.strip("{}"))
-                    session.tvt_token = token
-                    return True
-    except Exception:
-        pass
-
-    # 2. Fallback com login direto em Base64
+def coletar_telemetria_motorola(nvr_ip, usuario, senha):
+    """Coleta capacidade, idade, temperatura e saude dos HDs e status de rede de um NVR/DVR Motorola (NVMS-9000).
+    Retorna {"disks": [...], "networks": [...]} ou None se o login ou as consultas falharem."""
     try:
-        xml_login_b64 = (
-            f'{xml_header}<request version="1.0" systemType="NVMS-9000" clientType="WEB">'
-            f'<content><userName><![CDATA[{usuario}]]></userName>'
-            f'<password><![CDATA[{pwd_b64}]]></password></content></request>'
-        )
-        r_login_b64 = session.post(
-            f"http://{ip}/doLogin",
-            data=xml_login_b64.encode("utf-8"),
-            headers={"Content-Type": "application/xml"},
-            timeout=8,
-            verify=False
-        )
-        if r_login_b64.status_code == 200 and "success" in r_login_b64.text:
-            root_b64 = parse_xml_seguro(r_login_b64.content)
-            session_id = texto(root_b64, ".//sessionId", None)
-            session.cookies.set("auInfo_N9K", pwd_b64)
-            if session_id:
-                session.cookies.set("sessionId", session_id.strip("{}"))
-            session.tvt_token = ""
-            return True
-    except Exception:
-        pass
-
-    return False
-
-
-def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: requests.Session = None):
-    """
-    Coleta dados de telemetria de NVRs Motorola (protocolo NVMS-9000 / TVT):
-    - Uso de CPU (%)
-    - Uso de RAM (%, Total GB, Usado GB)
-    - Status e capacidade dos discos (HDD)
-    - Interfaces e status de rede (LAN)
-    """
-    if session is None:
-        session = requests.Session()
-        sucesso = autenticar_nvms9000(session, nvr_ip, usuario, senha)
-        if not sucesso:
-            logging.warning(f"  [Motorola {nvr_ip}] Falha na autenticacao para telemetria.")
+        session = abrir_sessao_motorola(nvr_ip, usuario, senha)
+        if session is None:
             return None
 
-    header = '<?xml version="1.0" encoding="utf-8" ?>'
-    token = getattr(session, "tvt_token", "")
-    token_tag = f"<token>{token}</token>" if token else ""
-
-    def corpo(extra=""):
-        return f'{header}<request version="1.0" systemType="NVMS-9000" clientType="WEB">{token_tag}{extra}</request>'
-
-    def post(ep, extra=""):
-        payload = corpo(extra)
-        try:
-            r = session.post(
-                f"http://{nvr_ip}/{ep}",
-                data=payload.encode("utf-8"),
-                headers={"Content-Type": "application/xml", "Accept": "application/xml, text/xml, */*"},
-                timeout=6,
-                verify=False
-            )
-            if r.status_code == 200 and ("success" in r.text.lower() or "<content" in r.text.lower()):
-                return parse_xml_seguro(r.content)
-        except Exception:
-            pass
-        return None
-
-    telemetria = {
-        "cpu_percent": None,
-        "ram_percent": None,
-        "ram_total_gb": None,
-        "ram_used_gb": None,
-        "disks": [],
-        "networks": []
-    }
-    teve_sucesso = False
-
-    # =========================================================================
-    # 1. DISCOS (queryDiskStatus + queryDiskDetailInfo / queryStorageCapacity)
-    # =========================================================================
-    discos_map = {}
-    disk_ids = []
-
-    # queryDiskStatus: Lista todos os discos instalados e status inicial
-    root_ds = post("queryDiskStatus")
-    if root_ds is not None:
-        teve_sucesso = True
-        for item in root_ds.findall(".//item"):
-            d_id = item.get("id") or str(len(discos_map) + 1)
-            st_text = item.text.strip() if item.text else ""
-            st_child = item.find("status")
-            if st_child is not None and st_child.text:
-                st_text = st_child.text.strip()
-            if d_id not in disk_ids:
-                disk_ids.append(d_id)
-            d = discos_map.setdefault(d_id, {"id": d_id})
-            if st_text:
-                d["status"] = _normalizar_status_disco(st_text)
-
-    # Detalhes de Capacidade dos discos
-    req_disk = (
-        "<requireField>"
-        "<name/><model/><sn/><totalCapacity/><remainCapacity/><freeCapacity/><freeSpace/>"
-        "<totalSpace/><capacity/><status/><property/>"
-        "</requireField>"
-    )
-
-    detalhe_endpoints = ["queryDiskDetailInfo", "queryDiskInfo", "queryStorageCapacity", "queryStorageStatus"]
-    for ep in detalhe_endpoints:
-        # Tenta consulta padrao ou requireField
-        root_det = post(ep, req_disk) or post(ep)
-        if root_det is not None:
-            teve_sucesso = True
-            itens = root_det.findall(".//disk") or root_det.findall(".//content")
-            if not itens:
-                # Evita capturar smartItems como discos
-                itens = [it for it in root_det.findall(".//item") if not it.find("rawValue") and not it.get("id", "").isdigit()]
-
+        # ---------------------------------------------------------------------
+        # 1. DISCOS (queryStorageDevInfo + queryDiskStatus + queryDiskSmartInfo)
+        # ---------------------------------------------------------------------
+        discos_info = []
+        raiz = _post(session, nvr_ip, "queryStorageDevInfo")
+        if raiz is not None:
+            itens = raiz.findall(".//diskList/item")
             for item in itens:
-                d_id = item.get("id") or item.findtext("diskId") or item.findtext("id")
-                if not d_id and disk_ids:
-                    d_id = disk_ids[0]
-                elif not d_id:
-                    d_id = list(discos_map.keys())[0] if discos_map else "1"
+                disk_id = item.get("id")
+                if not disk_id:
+                    continue
+                slot = texto(item, "slotIndex", None)
+                size_mb = _numero(texto(item, "size", None))
+                discos_info.append({"id": disk_id, "slot": slot, "size_mb": size_mb})
+                if len(discos_info) >= MAX_DISCOS:
+                    break
 
-                d = discos_map.setdefault(d_id, {"id": d_id})
-                nome = item.findtext("name") or item.findtext("devName") or item.findtext("model")
-                fonte = item.findtext("source")
-                if nome and not d.get("device"):
-                    d["device"] = nome
-                elif fonte and not d.get("device"):
-                    d["device"] = f"Disco ({fonte.capitalize()})"
+        estados = {}
+        raiz_st = _post(session, nvr_ip, "queryDiskStatus")
+        if raiz_st is not None:
+            for item in raiz_st.findall(".//content/item"):
+                item_id = item.get("id")
+                if not item_id:
+                    continue
+                valor = (item.text or "").strip()
+                if not valor:
+                    valor = texto(item, "diskStatus", None)
+                estados[item_id] = valor
 
-                st = item.findtext("status") or item.findtext("property") or item.findtext("rwProperty") or item.findtext("state")
-                if st and not d.get("status"):
-                    d["status"] = _normalizar_status_disco(st)
+        # Fallback para firmwares onde queryStorageDevInfo nao retorna diskList
+        if not discos_info and estados:
+            for idx, item_id in enumerate(estados.keys(), start=1):
+                discos_info.append({"id": item_id, "slot": str(idx), "size_mb": None})
 
-                tot = _parse_size_gb(item,
-                    "totalCapacity", "totalSpace", "capacity", "size", "totalSize",
-                    "total", "maxSize", "allSpace", "totalBlock", "diskCapacity", "totalCap")
-                free = _parse_size_gb(item,
-                    "remainCapacity", "freeCapacity", "freeSpace", "free", "freeSize",
-                    "remainSize", "remain", "remainSpace", "restSpace", "freeBlock", "remainCap")
+        discos = []
+        for info in discos_info:
+            disk_id = info["id"]
+            slot = info["slot"]
+            size_mb = info["size_mb"]
 
-                if not tot or free is None:
-                    h_tot, h_free = _escanear_capacidade_heuristica(item)
-                    tot = tot or h_tot
-                    free = free if free is not None else h_free
+            corpo_sm = f"<condition><diskId>{disk_id}</diskId></condition>"
+            raiz_sm = _post(session, nvr_ip, "queryDiskSmartInfo", corpo_sm)
 
-                if tot and not d.get("total_gb"):
-                    d["total_gb"] = tot
-                if free is not None and d.get("free_gb") is None:
-                    d["free_gb"] = free
+            power_on_days = None
+            temperature_c = None
+            saude = None
 
-        # Se ja encontrou capacidade para todos os discos, pode parar
-        if discos_map and all(d.get("total_gb") for d in discos_map.values()):
-            break
-
-    # Se ainda faltar capacidade por disco, tenta buscar individualmente por diskId
-    for d_id in disk_ids:
-        d = discos_map.get(d_id, {})
-        if not d.get("total_gb"):
-            cond = f"<condition><diskId>{d_id}</diskId></condition>{req_disk}"
-            root_ind = post("queryDiskDetailInfo", cond)
-            if root_ind is not None:
-                teve_sucesso = True
-                tot = _parse_size_gb(root_ind,
-                    "totalCapacity", "totalSpace", "capacity", "size", "totalSize",
-                    "total", "maxSize", "allSpace", "totalBlock", "diskCapacity", "totalCap")
-                free = _parse_size_gb(root_ind,
-                    "remainCapacity", "freeCapacity", "freeSpace", "free", "freeSize",
-                    "remainSize", "remain", "remainSpace", "restSpace", "freeBlock", "remainCap")
-                if not tot or free is None:
-                    h_tot, h_free = _escanear_capacidade_heuristica(root_ind)
-                    tot = tot or h_tot
-                    free = free if free is not None else h_free
-                if tot:
-                    d["total_gb"] = tot
-                if free is not None:
-                    d["free_gb"] = free
-
-    # Consulta informações S.M.A.R.T (Temperatura, Horas/Dias Ligado, Saúde física)
-    for d_id in (disk_ids or list(discos_map.keys()) or ["1"]):
-        d = discos_map.setdefault(d_id, {"id": d_id})
-        cond_smart = f"<condition><diskId>{d_id}</diskId></condition>" if not d_id.isdigit() else ""
-        root_smart = post("queryDiskSmartInfo", cond_smart) or post("queryDiskSmartInfo")
-        if root_smart is not None:
-            teve_sucesso = True
-            content_smart = root_smart.find(".//content")
-            alvo_smart = content_smart if content_smart is not None else root_smart
-
-            temp_txt = alvo_smart.findtext("temperature")
-            if temp_txt:
-                temp_num = re.sub(r"[^\d]", "", temp_txt)
-                if temp_num:
-                    d["temperature_c"] = int(temp_num)
-
-            days_txt = alvo_smart.findtext("powerOnDays")
-            if days_txt:
-                days_num = re.sub(r"[^\d]", "", days_txt)
-                if days_num:
-                    d["power_on_days"] = int(days_num)
-
-            smart_st = alvo_smart.findtext("diskStatus")
-            if smart_st and not d.get("status"):
-                d["status"] = _normalizar_status_disco(smart_st)
-
-    for idx, (d_id, d) in enumerate(discos_map.items(), start=1):
-        total_gb = d.get("total_gb")
-        free_gb = d.get("free_gb")
-        pct = None
-        if total_gb and free_gb is not None and total_gb > 0:
-            pct = round(((total_gb - free_gb) / total_gb) * 100, 1)
-
-        telemetria["disks"].append({
-            "device": d.get("device") or f"Disco {idx}",
-            "status": d.get("status") or "OK",
-            "percent": pct,
-            "total_gb": total_gb,
-            "free_gb": free_gb,
-            "temperature_c": d.get("temperature_c"),
-            "power_on_days": d.get("power_on_days")
-        })
-
-    # =========================================================================
-    # 2. CPU E MEMÓRIA RAM
-    # =========================================================================
-    req_cpu_ram = (
-        "<requireField>"
-        "<cpu/><cpuUsage/><cpuUtilization/><cpuRate/>"
-        "<memory/><memUsage/><memoryUsage/><memTotal/><memFree/><totalMemory/><freeMemory/>"
-        "</requireField>"
-    )
-
-    for ep in ("queryCpuStatus", "queryMemoryStatus", "queryDevStatus", "querySystemStatus", "queryWorkStatus"):
-        root_sys = post(ep, req_cpu_ram) or post(ep)
-        if root_sys is not None:
-            teve_sucesso = True
-            if telemetria["cpu_percent"] is None:
-                cpu = _parse_percent(root_sys, "cpuUsage", "cpuUtilization", "cpuRate", "cpuPercent", "cpu")
-                if cpu is not None:
-                    telemetria["cpu_percent"] = cpu
-
-            if telemetria["ram_percent"] is None:
-                ram_pct = _parse_percent(root_sys, "memUsage", "memoryUsage", "memUtilization", "ramPercent", "memoryPercent")
-                if ram_pct is not None:
-                    telemetria["ram_percent"] = ram_pct
-
-            if telemetria["ram_total_gb"] is None:
-                tot_ram = _parse_size_gb(root_sys, "memTotal", "totalMemory", "memoryTotal")
-                if tot_ram:
-                    telemetria["ram_total_gb"] = tot_ram
-
-            if telemetria["ram_used_gb"] is None:
-                used_ram = _parse_size_gb(root_sys, "memUsed", "usedMemory", "memoryUsed")
-                if used_ram:
-                    telemetria["ram_used_gb"] = used_ram
-
-    if telemetria["ram_total_gb"] and telemetria["ram_percent"] and not telemetria["ram_used_gb"]:
-        telemetria["ram_used_gb"] = round(telemetria["ram_total_gb"] * (telemetria["ram_percent"] / 100), 1)
-    elif telemetria["ram_total_gb"] and telemetria["ram_used_gb"] and not telemetria["ram_percent"]:
-        telemetria["ram_percent"] = int(round((telemetria["ram_used_gb"] / telemetria["ram_total_gb"]) * 100))
-
-    # =========================================================================
-    # 3. REDE (queryNetCfg / queryNetStatus / queryNICInfo)
-    # =========================================================================
-    nics_map = {}
-    bw_recv_mbps = None
-    bw_sent_mbps = None
-
-    req_net = (
-        "<requireField>"
-        "<nic/><ip/><mask/><gateway/><mac/><dns/><speed/><dhcp/><mtu/>"
-        "<linkStatus/><status/><recvRate/><sendRate/><rx/><tx/><bandwidth/>"
-        "</requireField>"
-    )
-
-    for ep in ("queryNetCfg", "queryNetStatus", "queryNICInfo", "queryEthStatus"):
-        root_net = post(ep, req_net) or post(ep)
-        if root_net is not None:
-            teve_sucesso = True
-
-            # Largura de banda global TVT/NVMS-9000 (totalBandwidth - remainBandwidth)
-            bw = root_net.find(".//bandwidth")
-            if bw is not None:
-                tot_bw = bw.findtext("totalBandwidth")
-                rem_bw = bw.findtext("remainBandwidth")
-                send_tot_bw = bw.findtext("sendTotalBandwidth")
-                send_rem_bw = bw.findtext("sendRemainBandwidth")
-                if tot_bw and rem_bw:
-                    try:
-                        bw_recv_mbps = round(float(tot_bw) - float(rem_bw), 1)
-                    except Exception:
-                        pass
-                if send_tot_bw and send_rem_bw:
-                    try:
-                        bw_sent_mbps = round(float(send_tot_bw) - float(send_rem_bw), 1)
-                    except Exception:
-                        pass
-
-            itens = root_net.findall(".//item")
-            if not itens:
-                content = root_net.find(".//content")
+            if raiz_sm is not None:
+                content = raiz_sm.find(".//content")
                 if content is not None:
-                    itens = [content]
+                    dias = _numero(texto(content, ".//powerOnDays", None))
+                    temp = _numero(texto(content, ".//temperature", None))
+                    saude_txt = texto(content, ".//diskStatus", None)
+                    saude = saude_txt if saude_txt else None
+                    if dias is not None and dias >= 0:
+                        power_on_days = dias
+                    if temp is not None and -20 <= temp <= 120:
+                        temperature_c = temp
 
-            for item in itens:
-                nic_id = item.get("id") or item.findtext("id") or "1"
-                n = nics_map.setdefault(nic_id, {"id": nic_id})
+            estado = estados.get(disk_id, "")
+            if estado == "bad" or saude == "bad":
+                status = "ERRO"
+            elif saude == "lowHealth":
+                status = "SAUDE_BAIXA"
+            elif estado == "read":
+                status = "SOMENTE_LEITURA"
+            elif estado == "read/write" or saude == "good":
+                status = "OK"
+            else:
+                status = "DESCONHECIDO"
 
-                name = item.findtext("name") or item.findtext("nicName") or item.get("id")
-                if name:
-                    n["name"] = name
-                ip_val = item.findtext("ip") or item.findtext("ipAddress")
-                if ip_val:
-                    n["ip"] = ip_val
-                mac_val = item.findtext("mac") or item.findtext("macAddress")
-                if mac_val:
-                    n["mac"] = mac_val
+            device = f"HDD{slot}" if slot else "HDD"
+            total_gb = round(size_mb / 1024, 1) if size_mb and size_mb > 0 else None
 
-                speed_raw = item.findtext("speed") or item.findtext("workMode")
-                if speed_raw:
-                    num = re.sub(r"[^\d]", "", speed_raw)
-                    if num and int(num) > 0:
-                        n["speed_mbps"] = int(num)
+            discos.append({
+                "device": device,
+                "status": status,
+                "percent": None,
+                "total_gb": total_gb,
+                "free_gb": None,
+                "power_on_days": power_on_days,
+                "temperature_c": temperature_c,
+            })
 
-                link = item.findtext("linkStatus") or item.findtext("status") or item.findtext("nicStatus")
-                is_online = item.findtext("isOnline")
-                if is_online and is_online.strip().lower() in ("true", "1"):
-                    n["status"] = "UP"
-                elif link:
-                    lk = link.strip().lower()
-                    n["status"] = "UP" if lk in ("up", "online", "connected", "linked", "1", "true") else "DOWN"
+        # ---------------------------------------------------------------------
+        # 2. REDE (queryNetStatus / queryNetCfg / bandwidth)
+        # ---------------------------------------------------------------------
+        networks = []
+        bw_recv_mbps = None
+        bw_sent_mbps = None
 
-                rx = _parse_size_gb(item, "recvRate", "rx", "inBandwidth")
-                tx = _parse_size_gb(item, "sendRate", "tx", "outBandwidth")
-                if rx is not None:
-                    n["recv_mbps"] = round(rx * 8, 1)
-                if tx is not None:
-                    n["sent_mbps"] = round(tx * 8, 1)
+        raiz_net = _post(session, nvr_ip, "queryNetStatus")
+        if raiz_net is not None:
+            bw = raiz_net.find(".//bandwidth")
+            if bw is not None:
+                tot_bw = _numero(texto(bw, ".//totalBandwidth", None))
+                rem_bw = _numero(texto(bw, ".//remainBandwidth", None))
+                send_tot_bw = _numero(texto(bw, ".//sendTotalBandwidth", None))
+                send_rem_bw = _numero(texto(bw, ".//sendRemainBandwidth", None))
+                if tot_bw is not None and rem_bw is not None:
+                    bw_recv_mbps = round(float(tot_bw - rem_bw), 1)
+                if send_tot_bw is not None and send_rem_bw is not None:
+                    bw_sent_mbps = round(float(send_tot_bw - send_rem_bw), 1)
 
-    for idx, (nid, n) in enumerate(nics_map.items(), start=1):
-        r_mbps = n.get("recv_mbps") if n.get("recv_mbps") is not None else bw_recv_mbps
-        s_mbps = n.get("sent_mbps") if n.get("sent_mbps") is not None else bw_sent_mbps
+            for item in raiz_net.findall(".//nic/item"):
+                nic_id = item.get("id") or texto(item, "id", "eth0")
+                nic_status = texto(item, "nicStatus", "") or ""
+                ip_val = texto(item, "ip", None)
+                mac_val = texto(item, "mac", None)
+                status = "UP" if nic_status.lower() in ("online", "up", "connected") else "DOWN"
 
-        telemetria["networks"].append({
-            "name": n.get("name") or f"LAN{idx}",
-            "ip": n.get("ip"),
-            "mac": n.get("mac"),
-            "status": n.get("status") or "UP",
-            "speed_mbps": n.get("speed_mbps") or 1000,
-            "recv_mbps": r_mbps,
-            "sent_mbps": s_mbps
-        })
+                networks.append({
+                    "name": nic_id,
+                    "ip": ip_val,
+                    "mac": mac_val,
+                    "status": status,
+                    "speed_mbps": 1000,
+                    "recv_mbps": bw_recv_mbps,
+                    "sent_mbps": bw_sent_mbps,
+                })
 
-    if not telemetria["networks"]:
-        telemetria["networks"].append({
-            "name": "LAN",
-            "ip": nvr_ip,
-            "mac": None,
-            "status": "UP",
-            "speed_mbps": 1000,
-            "recv_mbps": bw_recv_mbps,
-            "sent_mbps": bw_sent_mbps
-        })
+        # Se queryNetStatus nao retornou itens de placa, tenta queryNetCfg
+        if not networks:
+            raiz_cfg = _post(session, nvr_ip, "queryNetCfg")
+            if raiz_cfg is not None:
+                for item in raiz_cfg.findall(".//nicConfigs/item"):
+                    nic_id = item.get("id") or "eth0"
+                    ip_val = texto(item, "ip", None)
+                    mac_val = texto(item, "mac", None)
+                    is_online = texto(item, "isOnline", "")
+                    status = "UP" if is_online.lower() in ("true", "1") else "DOWN"
 
-    return telemetria if teve_sucesso else None
+                    networks.append({
+                        "name": nic_id,
+                        "ip": ip_val,
+                        "mac": mac_val,
+                        "status": status,
+                        "speed_mbps": 1000,
+                        "recv_mbps": bw_recv_mbps,
+                        "sent_mbps": bw_sent_mbps,
+                    })
+
+        # Fallback de placa caso nao tenha retornado lista detalhada
+        if not networks:
+            networks.append({
+                "name": "LAN",
+                "ip": nvr_ip,
+                "mac": None,
+                "status": "UP",
+                "speed_mbps": 1000,
+                "recv_mbps": bw_recv_mbps,
+                "sent_mbps": bw_sent_mbps,
+            })
+
+        if not discos and not networks:
+            return None
+
+        return {
+            "disks": discos,
+            "networks": networks,
+        }
+    except Exception as e:
+        logging.warning(f"Falha ao coletar telemetria do NVR Motorola {nvr_ip}: {e}")
+        return None
