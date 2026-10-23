@@ -931,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Telemetria de HD dos NVR/DVR Motorola (NVMS-9000)
+
+**Alteração:** a Motorola (TVT, protocolo NVMS-9000) passa a ter telemetria de discos, no mesmo formato da Hikvision: novo `agent/src/nvr/motorola/telemetry.py` (`coletar_telemetria_motorola`) consulta SOMENTE `queryStorageDevInfo` (modelo/capacidade em MB; o id do disco é um GUID), `queryDiskStatus` (`read/write`, `read` ou `bad`; o XML muda entre firmware 1.3.x, texto no `<item>`, e 1.4.x, filho `<diskStatus>`) e `queryDiskSmartInfo` por disco (`powerOnDays`, `temperature`, `diskStatus` good/lowHealth/bad). Resultado: `{"disks": [{device: "HDD<slot>", status, percent: None, total_gb, free_gb: None, power_on_days, temperature_c}]}`; `freeSpace` é sempre 0 (gravação em loop), então não há percentual de uso. Status: `ERRO` (estado `bad` ou SMART `bad`) > `SAUDE_BAIXA` (SMART `lowHealth`) > `SOMENTE_LEITURA` (estado `read`) > `OK`; `StatusBadge` ganhou `SOMENTE_LEITURA` e `SAUDE_BAIXA`. Sem CPU, RAM, uptime nem rede (a Motorola não expõe). Chamadas em sequência, pausa de 1 s e timeout de 30 s (os DVR respondem em até 30 s); qualquer falha devolve `None` e o backup segue. O login NVMS-9000 foi extraído de `buscar_cameras` para `abrir_sessao_motorola` (`cameras.py`), sem mudança de comportamento; a telemetria faz um login próprio por execução. **Regra de segurança:** o código usa lista fixa de endpoints; `queryPlatformCfg` reiniciou três NVR com firmware 1.3.3 em 22/10/2026 e nunca deve ser chamado; o XML bruto (alguns endpoints devolvem senha em texto claro) e o serial dos discos não vão para log. O agente ainda não foi liberado em versão nova; validação nos equipamentos reais pendente.
+**Arquivos:** agent/src/nvr/motorola/telemetry.py, agent/src/nvr/motorola/cameras.py, agent/src/nvr/factory.py, server/dashboard/src/components/StatusBadge.tsx, server/dashboard/src/pages/Dashboards/widgets/TelemetriaEquipamentosWidget.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-22] — Agente 1.1.22: uptime, idade e temperatura dos HDs dos NVR Hikvision
 
 **Alteração:** versão 1.1.22 do agente, que leva a coleta de `uptime_seconds` e, por disco, `power_on_days` e `temperature_c` (detalhes e correção do `freeSpace` 0 na entrada abaixo). Servidor e painel já estavam em produção desde o commit `1c2e970`; os cartões dos HDs só mostram idade e temperatura depois que a máquina atualiza para a 1.1.22 e faz um backup. Versão em `updater.py`, `installer.iss` e `package.json`. Sem mudança de contrato nem de banco.

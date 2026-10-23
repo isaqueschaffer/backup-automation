@@ -7,6 +7,7 @@ from src.nvr.motorola.cameras import buscar_cameras as buscar_cameras_motorola
 from src.nvr.motorola.recordings import buscar_datas_gravacao_motorola
 from src.nvr.hikvision.recordings import tem_gravacao_no_dia
 from src.nvr.hikvision.telemetry import coletar_telemetria_hikvision
+from src.nvr.motorola.telemetry import coletar_telemetria_motorola
 try:
     from src.nvr.intelbras.telemetry import coletar_telemetria_intelbras
 except Exception:
@@ -55,8 +56,14 @@ def buscar_cameras(nvr_ip, usuario, senha, marca=None):
     return {}, "DESCONHECIDO", None
 
 def coletar_telemetria_nvr(nvr_ip, usuario, senha, tipo_nvr, marca=None, snmp_community=None):
-    """Coleta CPU/RAM/discos do NVR. So suportado em NVR/DVR (nao Motorola).
+    """Coleta CPU/RAM/discos do NVR. Motorola usa NVMS-9000 (HDs apenas).
     Intelbras usa SNMP (porta 161); demais (Hikvision e compativeis) usam ISAPI."""
+    if tipo_nvr == "MOTOROLA":
+        try:
+            return coletar_telemetria_motorola(nvr_ip, usuario, senha)
+        except Exception:
+            logging.warning(f"  Falha ao coletar telemetria do NVR Motorola {nvr_ip}.", exc_info=True)
+            return None
     if tipo_nvr not in ("NVR", "DVR"):
         return None
     try:

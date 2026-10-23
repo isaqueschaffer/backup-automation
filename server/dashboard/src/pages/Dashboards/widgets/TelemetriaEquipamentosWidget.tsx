@@ -30,7 +30,7 @@ export default function TelemetriaEquipamentosWidget({
           textAlign: "center",
         }}
       >
-        Nenhum gravador com telemetria. A telemetria vem do backup de NVR/DVR Hikvision.
+        Nenhum gravador com telemetria. A telemetria vem do backup de NVR/DVR Hikvision, Intelbras e Motorola.
       </div>
     );
   }
