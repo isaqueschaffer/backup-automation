@@ -81,52 +81,54 @@ export default function WidgetFrame({ widget, dados, acoes, children }: Props) {
           overscrollBehavior: "contain",
         }}
       >
-        {!def ? (
-          <div
-            style={{
-              height: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--text-muted)",
-              fontSize: 12,
-            }}
-          >
-            Tipo de widget não disponível.
-          </div>
-        ) : dados === undefined ? (
-          <div
-            style={{
-              height: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <span className="spinner" />
-          </div>
-        ) : dados.ok === false ? (
-          <div
-            style={{
-              height: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 6,
-              color: "var(--text-muted)",
-              fontSize: 12,
-              padding: "0 8px",
-              textAlign: "center",
-            }}
-          >
-            <AlertCircle size={14} style={{ flexShrink: 0 }} />
-            <span>{dados.erro || "Falha ao carregar dados do widget"}</span>
-          </div>
-        ) : children ? (
-          children
-        ) : (
-          def.renderizar(dados.dados, widget)
-        )}
+        <div data-widget-conteudo style={{ height: "100%", minWidth: 0 }}>
+          {!def ? (
+            <div
+              style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--text-muted)",
+                fontSize: 12,
+              }}
+            >
+              Tipo de widget não disponível.
+            </div>
+          ) : dados === undefined ? (
+            <div
+              style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <span className="spinner" />
+            </div>
+          ) : dados.ok === false ? (
+            <div
+              style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                color: "var(--text-muted)",
+                fontSize: 12,
+                padding: "0 8px",
+                textAlign: "center",
+              }}
+            >
+              <AlertCircle size={14} style={{ flexShrink: 0 }} />
+              <span>{dados.erro || "Falha ao carregar dados do widget"}</span>
+            </div>
+          ) : children ? (
+            children
+          ) : (
+            def.renderizar(dados.dados, widget)
+          )}
+        </div>
       </div>
     </div>
   );

@@ -11,14 +11,13 @@ import {
 import { useToast } from "../../components/Toast";
 import { apiErrorMessage } from "../../utils/errors";
 import {
-  ALTURA_LINHA_PX,
   DadosDashboard,
   DashboardLayout,
-  GAP_GRADE_PX,
   OpcoesDashboard,
   Periodo,
 } from "./types";
 import { DefinicaoWidget, definicaoDe } from "./widgets/registry";
+import { linhasDoConteudo } from "./medirConteudo";
 import { useDashboardDraft } from "./useDashboardDraft";
 import DashboardCanvas from "./DashboardCanvas";
 import WidgetAcoesEdicao from "./WidgetAcoesEdicao";
@@ -206,24 +205,22 @@ export default function DashboardWorkspace({
   );
 
   const ajustarAoConteudo = useCallback(
-    (id: string) => {
+    (id: string, somenteReduzir?: boolean) => {
       const item = document.querySelector<HTMLElement>(`[data-widget-id="${id}"]`);
       if (!item) return;
-      const corpo = item.querySelector<HTMLElement>("[data-widget-corpo]");
-      if (!corpo) return;
 
       const widget = draft.widgets.find((w) => w.id === id);
       if (!widget) return;
       const def = definicaoDe(widget.tipo);
-      const minA = Math.max(1, def?.alturaMin ?? 1);
+      if (def?.alturaFluida) return;
 
-      const precisa = corpo.scrollHeight + (item.clientHeight - corpo.clientHeight);
-      const linhasCalculadas = Math.ceil(
-        (precisa + GAP_GRADE_PX) / (ALTURA_LINHA_PX + GAP_GRADE_PX)
-      );
-      const linhas = Math.max(minA, Math.min(40, linhasCalculadas));
+      const linhas = linhasDoConteudo(item);
+      if (linhas === null) return;
 
-      atualizar(id, { altura: linhas });
+      const alvo = Math.min(40, linhas);
+      if (somenteReduzir && alvo >= widget.altura) return;
+
+      atualizar(id, { altura: alvo });
     },
     [draft.widgets, atualizar]
   );

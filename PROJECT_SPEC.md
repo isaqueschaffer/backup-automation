@@ -931,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Dashboard: widget ajustado ao conteúdo ao redimensionar (sem espaço vazio)
+
+**Alteração:** a altura do widget (linhas fixas de 50 px) deixava espaço vazio quando o conteúdo era menor, e o "ajustar ao conteúdo" nunca encolhia (media `scrollHeight`, que com `height: 100%` é sempre a altura da caixa). Agora `WidgetFrame` envolve o corpo em `data-widget-conteudo` (`height: 100%`, layout igual ao anterior) e o novo `medirConteudo.ts` (`linhasDoConteudo`) mede a altura natural zerando a altura do invólucro por um instante. `ajustarAoConteudo` usa essa medida (sem aplicar `alturaMin`, o conteúdo real manda); ao soltar a alça de redimensionamento a altura só DIMINUI até o conteúdo (`somenteReduzir`, nunca cresce nem corta); durante o arraste a altura mínima passa a ser `min(alturaMin, conteúdo)`. Duplo clique na alça continua ajustando exatamente (cresce ou encolhe). Widgets com `alturaFluida: true` (por ora só `historico_backups`, cujo gráfico preenche a caixa) ficam fora. Folga restante: até uma linha da grade (~60 px), pois a altura é em linhas.
+**Arquivos:** server/dashboard/src/pages/Dashboards/medirConteudo.ts, WidgetFrame.tsx, DashboardCanvas.tsx, DashboardWorkspace.tsx, widgets/registry.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não (layouts salvos não mudam; só o comportamento do redimensionamento).
+**Branch:** isaque
+
 ### [2026-10-23] — Skills e subagentes do Antigravity (Gemini) em `.agents/`
 
 **Alteração:** o executor Antigravity (`agy`) passa a ter skills e subagentes próprios, versionados. `.agents/skills/` (10 skills em português: as 4 do projeto, `fastapi`, `docker-compose-patterns`, `react-vite-boas-praticas`, `seguranca-e-endurecimento`, `revisao-de-codigo`, `depuracao-sistematica`; as 3 últimas adaptadas de `addyosmani/agent-skills`, MIT, commit `aeac41d`), `.agents/agents/` (`backend-fastapi`, `frontend-dashboard`, `agente-windows`, e os somente leitura `revisor` e `depurador`) e `.agents/rules/subagentes.md` (regra `always_on` de quando delegar). Substitui a regra anterior do CLAUDE.md "skills só do Claude, nunca em `.agents/skills/`". As skills do Claude continuam em `.claude/skills/`, em cópias separadas. Teste headless: o `agy` lista os 5 subagentes e as 10 skills e a delegação ao `revisor` funcionou sem alterar arquivos. Também corrigida a skill `gerenciar-containers` (a produção usa a porta 7001, não 7005). Sem mudança de código do produto.

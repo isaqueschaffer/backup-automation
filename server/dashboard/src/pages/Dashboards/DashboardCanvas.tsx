@@ -8,6 +8,7 @@ import {
   WidgetInstancia,
 } from "./types";
 import { definicaoDe } from "./widgets/registry";
+import { linhasDoConteudo } from "./medirConteudo";
 import WidgetFrame from "./WidgetFrame";
 
 interface Props {
@@ -17,7 +18,7 @@ interface Props {
   editando?: boolean;
   onMover?: (id: string, alvoId: string, antes: boolean) => void;
   onRedimensionar?: (id: string, tamanho: { largura: number; altura: number }) => void;
-  onAjustar?: (id: string) => void;
+  onAjustar?: (id: string, somenteReduzir?: boolean) => void;
 }
 
 interface ResizeState {
@@ -123,7 +124,14 @@ export default function DashboardCanvas({
     const passoLinha = ALTURA_LINHA_PX + GAP_GRADE_PX;
     const def = definicaoDe(w.tipo);
     const minL = Math.max(2, def?.larguraMin ?? 2);
-    const minA = Math.max(1, def?.alturaMin ?? 1);
+    let minA = Math.max(1, def?.alturaMin ?? 1);
+    if (!def?.alturaFluida) {
+      const item = e.currentTarget.closest<HTMLElement>("[data-widget-id]");
+      const fit = item ? linhasDoConteudo(item) : null;
+      if (fit !== null) {
+        minA = Math.max(1, Math.min(minA, fit));
+      }
+    }
 
     resizeRef.current = {
       id: w.id,
@@ -174,9 +182,18 @@ export default function DashboardCanvas({
     } catch {
       // Ignora falha de liberação de ponteiro
     }
+    const id = resizeRef.current?.id;
     resizeRef.current = null;
     setResizingId(null);
     document.body.classList.remove("dash-resizing");
+
+    if (id) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          onAjustar?.(id, true);
+        });
+      });
+    }
   };
 
   if (widgets.length === 0) {

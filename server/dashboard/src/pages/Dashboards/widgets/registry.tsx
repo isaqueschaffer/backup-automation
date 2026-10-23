@@ -62,6 +62,8 @@ export interface DefinicaoWidget {
   alturaPadrao: Altura;
   larguraMin: number;
   alturaMin: number;
+  // Conteúdo que preenche a altura da caixa (gráficos): não é ajustado ao conteúdo
+  alturaFluida?: boolean;
   configPadrao: Record<string, unknown>;
   campos: CampoWidget[];
   renderizar: (dados: unknown, widget: WidgetInstancia) => ReactNode;
@@ -128,6 +130,7 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     alturaPadrao: 6,
     larguraMin: 4,
     alturaMin: 6,
+    alturaFluida: true,
     configPadrao: { maquinas: [], periodo: null, visual: "grafico" },
     campos: [
       { chave: "maquinas", tipo: "maquinas", rotulo: "Máquinas exibidas" },
