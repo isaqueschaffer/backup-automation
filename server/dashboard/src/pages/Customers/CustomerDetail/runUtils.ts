@@ -46,3 +46,32 @@ export function lastKnownStatus(
   }
   return null;
 }
+
+// Texto curto do status para tooltips e legendas
+export function statusLabel(status: string | null): string {
+  if (status === null) return "Aguardando";
+  switch (status.trim().toUpperCase()) {
+    case "OK": return "OK";
+    case "PARCIAL":
+    case "PARTIAL": return "Parcial";
+    case "ERRO":
+    case "ERROR": return "Erro";
+    case "ERRO_COMUNICACAO": return "Erro de comunicação";
+    case "NAO_EXECUTOU": return "Não executou";
+    case "SEM_ARQUIVOS": return "Apenas gravações";
+    case "EM_ANDAMENTO": return "Em andamento";
+    default: return status;
+  }
+}
+
+// Resultado da máquina nas rodadas, do mais antigo para o mais recente (para a faixa de pontinhos)
+export function historicoDaMaquina(runs: CustomerRun[], machineId: string): { status: string | null; title: string }[] {
+  const itens: { status: string | null; title: string }[] = [];
+  for (const run of [...runs].reverse()) {
+    const entry = run.machines.find(m => m.machine_id === machineId);
+    if (!entry) continue;
+    itens.push({ status: entry.status, title: `${fmtDate(run.started_at)} · ${statusLabel(entry.status)}` });
+  }
+  return itens;
+}
+

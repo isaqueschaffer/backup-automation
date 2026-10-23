@@ -1,5 +1,24 @@
 import { statusTone } from "../utils/statusTone";
 
+function Dot({ tone, title }: { tone: string; title?: string }) {
+  const isMuted = tone === "muted";
+  return (
+    <span
+      title={title}
+      aria-hidden={title ? undefined : "true"}
+      style={{
+        width: 10,
+        height: 10,
+        borderRadius: "50%",
+        flexShrink: 0,
+        boxSizing: "border-box",
+        backgroundColor: isMuted ? "transparent" : `var(--${tone})`,
+        border: isMuted ? "1.5px solid var(--text-muted)" : undefined,
+      }}
+    />
+  );
+}
+
 export default function StatusDots({
   items,
   slots = 10,
@@ -35,24 +54,50 @@ export default function StatusDots({
           }}
         />
       ))}
-      {visible.map((item, index) => {
-        const tone = statusTone(item.status);
-        return (
-          <span
-            key={`dot-${index}`}
-            title={item.title}
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: "50%",
-              flexShrink: 0,
-              boxSizing: "border-box",
-              backgroundColor: tone === "muted" ? "transparent" : `var(--${tone})`,
-              border: tone === "muted" ? "1.5px solid var(--text-muted)" : undefined,
-            }}
-          />
-        );
-      })}
+      {visible.map((item, index) => (
+        <Dot
+          key={`dot-${index}`}
+          tone={statusTone(item.status)}
+          title={item.title}
+        />
+      ))}
     </span>
+  );
+}
+
+const LEGEND_ITEMS: { tone: string; label: string }[] = [
+  { tone: "ok", label: "OK" },
+  { tone: "warn", label: "Parcial ou em andamento" },
+  { tone: "err", label: "Erro ou não executou" },
+  { tone: "muted", label: "Aguardando" },
+];
+
+export function StatusLegend() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: "6px 14px",
+        fontSize: 11,
+        color: "var(--text-muted)",
+      }}
+    >
+      <span>Cada ponto é o resultado de uma rodada (do mais antigo ao mais recente):</span>
+      {LEGEND_ITEMS.map((item) => (
+        <span
+          key={item.tone}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+          }}
+        >
+          <Dot tone={item.tone} />
+          <span>{item.label}</span>
+        </span>
+      ))}
+    </div>
   );
 }

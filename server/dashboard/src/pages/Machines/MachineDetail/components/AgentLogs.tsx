@@ -38,7 +38,7 @@ export default function AgentLogs({
   lastSeen,
   online,
 }: AgentLogsProps) {
-  const [aberta, setAberta] = useState(false);
+  const [aberta, setAberta] = useState(true);
 
   return (
     <div style={{ marginTop: 20 }}>
@@ -128,7 +128,7 @@ export default function AgentLogs({
             <div className="empty-state" style={{ padding: 24 }}>
               {mostrarPings
                 ? "Nenhum evento registrado ainda. O agente deve enviar pings a cada 15 segundos."
-                : "Nenhuma instrução ou erro recente. Marque “Mostrar pings” para ver os pings."}
+                : "Nenhuma instrução ou erro recente. Marque “Mostrar pings” para ver também os pings."}
             </div>
           ) : (
             <div

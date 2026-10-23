@@ -1,9 +1,13 @@
 import { useRef, useState } from "react";
+import type { CSSProperties, DragEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ChevronRight, GripVertical, ListOrdered, Plus, UserMinus } from "lucide-react";
-import { Customer, Machine } from "../../../../api/types";
+import { Customer, CustomerRun, Machine } from "../../../../api/types";
 import StatusBadge from "../../../../components/StatusBadge";
+import StatusDots, { StatusLegend } from "../../../../components/StatusDots";
 import { fmtDate } from "../../../../utils/date";
+import { statusTone } from "../../../../utils/statusTone";
+import { historicoDaMaquina } from "../runUtils";
 
 // Move o item de `from` para a posição de inserção `insertAt` (0..n, antes do item insertAt)
 export function moveItem<T>(list: T[], from: number, insertAt: number): T[] {
@@ -13,14 +17,22 @@ export function moveItem<T>(list: T[], from: number, insertAt: number): T[] {
   return next;
 }
 
-const dropLine: React.CSSProperties = {
+const dropLine: CSSProperties = {
   position: "absolute", left: 8, right: 8, height: 3, borderRadius: 2,
   background: "var(--primary, #6366f1)", boxShadow: "0 0 6px var(--primary, #6366f1)", pointerEvents: "none",
 };
 
-// Fila de backup do cliente: máquinas na ordem, com arrastar e soltar (HTML5 nativo)
-export default function QueueSection({ customer, saving, onReorder, onDetach, onAdd }: {
+// Máquinas e fila de backup do cliente: máquinas na ordem, com arrastar e soltar (HTML5 nativo)
+export default function QueueSection({
+  customer,
+  runs,
+  saving,
+  onReorder,
+  onDetach,
+  onAdd,
+}: {
   customer: Customer;
+  runs?: CustomerRun[] | null;
   saving: boolean;
   onReorder: (from: number, insertAt: number) => void;
   onDetach: (m: Machine) => void;
@@ -38,14 +50,14 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
 
   const resetDrag = () => { setDragIndex(null); setInsertAt(null); handleArmed.current = false; };
 
-  const onDragStart = (e: React.DragEvent, idx: number) => {
+  const onDragStart = (e: DragEvent, idx: number) => {
     if (!canDrag || !handleArmed.current) { e.preventDefault(); return; }
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", machines[idx].id); // necessário no Firefox
     setDragIndex(idx);
   };
 
-  const onDragOver = (e: React.DragEvent<HTMLDivElement>, idx: number) => {
+  const onDragOver = (e: DragEvent<HTMLDivElement>, idx: number) => {
     if (dragIndex === null) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -54,7 +66,7 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
     if (pos !== insertAt) setInsertAt(pos);
   };
 
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = (e: DragEvent) => {
     e.preventDefault();
     if (dragIndex !== null && insertAt !== null && insertAt !== dragIndex && insertAt !== dragIndex + 1) {
       onReorder(dragIndex, insertAt);
@@ -71,14 +83,14 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
     <div style={{ marginBottom: 24 }}>
       <div className="flex items-center justify-between mb-3">
         <div className="section-title" style={{ marginBottom: 0 }}>
-          <ListOrdered size={15} /> Fila de backup
+          <ListOrdered size={15} style={{ flexShrink: 0 }} /> Máquinas e fila de backup
           <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
             {machines.length} máquina(s)
           </span>
         </div>
         <button className="btn btn-secondary" onClick={onAdd} disabled={locked}
           title={locked ? "Aguarde a fila terminar para alterar as máquinas" : "Adicionar uma máquina sem cliente"}>
-          <Plus size={14} /> Adicionar máquina
+          <Plus size={14} style={{ flexShrink: 0 }} /> Adicionar máquina
         </button>
       </div>
 
@@ -88,7 +100,13 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
         </div>
       ) : machines.length > 1 && (
         <div className="text-sm text-muted" style={{ marginBottom: 10 }}>
-          Arraste pela alça <GripVertical size={12} style={{ verticalAlign: "middle" }} /> para mudar a ordem. As máquinas fazem backup uma por vez, de cima para baixo.
+          Arraste pela alça <GripVertical size={12} style={{ verticalAlign: "middle", flexShrink: 0 }} /> para mudar a ordem. As máquinas fazem backup uma por vez, de cima para baixo.
+        </div>
+      )}
+
+      {Array.isArray(runs) && machines.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <StatusLegend />
         </div>
       )}
 
@@ -105,6 +123,9 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
           {machines.map((m, idx) => {
             const isCurrent = currentId === m.id;
             const isDragged = dragIndex === idx;
+            const hist = Array.isArray(runs) ? historicoDaMaquina(runs, m.id) : null;
+            const okCount = hist ? hist.filter((item) => statusTone(item.status) === "ok").length : 0;
+
             return (
               <div key={m.id}
                 draggable={canDrag}
@@ -129,7 +150,7 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
                 <span data-drag-handle
                   title={canDrag ? "Arraste para reordenar" : locked ? "Fila em andamento" : ""}
                   style={{ display: "flex", color: "var(--text-muted)", cursor: canDrag ? "grab" : "not-allowed", opacity: canDrag ? 1 : 0.35 }}>
-                  <GripVertical size={16} />
+                  <GripVertical size={16} style={{ flexShrink: 0 }} />
                 </span>
                 <div style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "var(--text-muted)", flexShrink: 0 }}>
                   {idx + 1}
@@ -148,15 +169,25 @@ export default function QueueSection({ customer, saving, onReorder, onDetach, on
                     {m.nvr_count} equipamento(s) • Último backup: {fmtDate(m.last_backup_at, { empty: "nunca" })}
                   </div>
                 </div>
+                {hist !== null && (
+                  hist.length === 0 ? (
+                    <span className="text-xs text-muted">sem rodadas</span>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
+                      <StatusDots items={hist} />
+                      <span className="text-xs text-muted">{okCount}/{hist.length} OK</span>
+                    </div>
+                  )
+                )}
                 <StatusBadge status={m.last_backup_status} />
                 <Link to={`/maquinas/${m.id}`} className="btn btn-secondary btn-sm" title="Abrir a máquina (equipamentos, galeria, backups)"
                   style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  Abrir <ChevronRight size={13} />
+                  Abrir <ChevronRight size={13} style={{ flexShrink: 0 }} />
                 </Link>
                 <button className="btn btn-secondary btn-sm" disabled={locked || saving} onClick={() => onDetach(m)}
                   title={locked ? "Aguarde a fila terminar" : "Tirar esta máquina do cliente (ela continua cadastrada)"}
                   style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--err)" }}>
-                  <UserMinus size={13} /> Remover do cliente
+                  <UserMinus size={13} style={{ flexShrink: 0 }} /> Remover do cliente
                 </button>
               </div>
             );

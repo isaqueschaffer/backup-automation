@@ -96,6 +96,9 @@ export default function CustomerRuns({
         </div>
       ) : (
         <>
+          <div className="text-sm text-muted" style={{ marginBottom: 10 }}>
+            Clique em uma rodada para ver o resultado de cada máquina.
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {visiveis.map((run) => {
               const open = isRunOpen(run);

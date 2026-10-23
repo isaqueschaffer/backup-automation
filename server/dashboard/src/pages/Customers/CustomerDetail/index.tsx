@@ -14,11 +14,10 @@ import QueueSection, { moveItem } from "./components/QueueSection";
 import AddMachineModal from "./components/AddMachineModal";
 import CustomerSummary from "./components/CustomerSummary";
 import CustomerRuns from "./components/CustomerRuns";
-import CustomerMachines from "./components/CustomerMachines";
 
 const POLL_MS = 5000;
 
-// Detalhe do Cliente: resumo, fila de backup (ordem por arrastar e soltar), rodadas de backup e situação por máquina
+// Detalhe do Cliente: resumo, máquinas e fila de backup (arrastar e soltar) e rodadas de backup
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -214,6 +213,7 @@ export default function CustomerDetail() {
 
       <QueueSection
         customer={c}
+        runs={runs}
         saving={queueSaving}
         onReorder={handleReorder}
         onDetach={handleDetach}
@@ -221,8 +221,6 @@ export default function CustomerDetail() {
       />
 
       <CustomerRuns customerId={c.id} customerName={c.name} runs={runs} onChanged={loadRuns} />
-
-      <CustomerMachines machines={c.machines} runs={runs} />
 
       {showEdit && (
         <CustomerFormModal
