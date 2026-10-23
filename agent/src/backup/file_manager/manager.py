@@ -1,5 +1,6 @@
 import os
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any
 
@@ -8,6 +9,14 @@ from src.backup.file_manager.utils import get_agent_date, sanitize_name
 from src.backup.file_manager.parsers import BaseParser, UNM2000Parser, HuaweiParser
 from src.backup.file_manager.validators import Validator
 from src.backup.file_manager.copier import SafeCopier
+
+def _gerar_mapa_vms(is_ok: bool) -> tuple:
+    """Retorna (total_dias, mapa_15, dias_com_gravacao) para equipamentos VMS (Digifort/Defense)."""
+    hoje = datetime.now().date()
+    dias_15 = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(15)]
+    if is_ok:
+        return 15, "█" * 15, dias_15
+    return 0, "░" * 15, []
 
 class FileManager:
     def __init__(self, check_hash: bool = True):
@@ -131,6 +140,7 @@ class FileManager:
                         cam_srv = por_ip_servidor.get(ip_local)
                     ip_cam = ip_local or (cam_srv.get("ip") if cam_srv else "") or "N/A"
                     is_ok = det["status"] == "OK"
+                    total_dias, mapa_str, dias_gravados = _gerar_mapa_vms(is_ok)
                     status_cameras.append({
                         "canal": canal,
                         "nome": nome_cam,
@@ -138,8 +148,9 @@ class FileManager:
                         "online": is_ok,
                         "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
                         "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
-                        "total_dias": 1,
-                        "mapa": "OK" if is_ok else "FALHA"
+                        "total_dias": total_dias,
+                        "mapa": mapa_str,
+                        "dias_com_gravacao": dias_gravados,
                     })
                     if ip_cam and ip_cam != "N/A":
                         # O canal enviado ao servidor é o da Galeria
@@ -193,6 +204,7 @@ class FileManager:
                     status_cameras = []
                     for nome_cam, st in status_dict.items():
                         is_ok = (st == "OK")
+                        total_dias, mapa_str, dias_gravados = _gerar_mapa_vms(is_ok)
                         status_cameras.append({
                             "canal": "N/A",
                             "nome": nome_cam,
@@ -200,8 +212,9 @@ class FileManager:
                             "online": is_ok,
                             "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
                             "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
-                            "total_dias": 1,
-                            "mapa": "OK" if is_ok else "FALHA"
+                            "total_dias": total_dias,
+                            "mapa": mapa_str,
+                            "dias_com_gravacao": dias_gravados,
                         })
                     logging.info("  [DEFENSE] Status das cameras obtido com sucesso via Webhook.")
                 else:

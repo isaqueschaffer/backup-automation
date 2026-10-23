@@ -4,7 +4,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from src.core.config import parse_config_extra
 
@@ -22,6 +22,9 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
     caminho_log = config_extra.get("pasta_origem", "")
     status_webhook = get_status_cameras_defense(caminho_log)
 
+    hoje = datetime.now().date()
+    dias_15 = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(15)]
+
     cameras_para_captura = []
     status_cameras = []
     for idx, cam in enumerate(cameras_config, start=1):
@@ -35,8 +38,9 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
             "online": is_ok,
             "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
             "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
-            "total_dias": 1,
-            "mapa": "OK" if is_ok else "FALHA",
+            "total_dias": 15 if is_ok else 0,
+            "mapa": ("█" * 15) if is_ok else ("░" * 15),
+            "dias_com_gravacao": dias_15 if is_ok else [],
         })
         cameras_para_captura.append({**cam, "canal": canal, "nome": nome_cam})
 
