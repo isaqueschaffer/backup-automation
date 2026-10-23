@@ -42,7 +42,7 @@ export function eqToForm(eq: NVR): EqForm {
     tipo: eq.tipo,
     name: eq.name,
     ip: eq.tipo === "DIGIFORT" || (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000") ? "" : eq.ip,
-    username: eq.username,
+    username: eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.username === "unm2000" ? "" : eq.username,
     password: "",
     pasta_origem: cfg?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
     fabricante_olt: cfg?.fabricante_olt || "UNM2000",
@@ -92,7 +92,20 @@ export function buildEqPayload(
     payload.config_extra = cfg;
     if (eqForm.fabricante_olt === "UNM2000") {
       if (!eqForm.pasta_origem) return { error: "Para UNM2000, informe a pasta de origem dos backups." };
-      payload.ip = eqForm.pasta_origem.trim(); payload.username = "unm2000"; payload.password = "unm2000"; cfg.pasta_origem = eqForm.pasta_origem.trim();
+      payload.ip = eqForm.pasta_origem.trim();
+      cfg.pasta_origem = eqForm.pasta_origem.trim();
+      const usuarioApi = eqForm.username.trim();
+      if (!usuarioApi) {
+        payload.username = "unm2000";
+        payload.password = "unm2000";
+      } else {
+        if (!editingEqId && !eqForm.password) {
+          return { error: "Para a exportação na hora, informe usuário e senha da API do UNM2000." };
+        }
+        payload.username = usuarioApi;
+        payload.password = eqForm.password;
+        cfg.exportar_no_manual = true;
+      }
     } else if (eqForm.fabricante_olt === "HUAWEI" || eqForm.fabricante_olt === "VSOL") {
       if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.` };
       payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;

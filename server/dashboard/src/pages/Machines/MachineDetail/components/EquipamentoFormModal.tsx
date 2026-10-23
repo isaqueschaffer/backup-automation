@@ -139,6 +139,36 @@ export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, s
             </div>
           )}
 
+          {eqForm.fabricante_olt === "UNM2000" && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Usuário da API do UNM2000 (opcional)</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={eqForm.username}
+                    onChange={e => setEqForm({ ...eqForm, username: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Senha da API (opcional)</label>
+                  <input
+                    className="form-input"
+                    type="password"
+                    autoComplete="new-password"
+                    value={eqForm.password}
+                    onChange={e => setEqForm({ ...eqForm, password: e.target.value })}
+                  />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                Preencha para que o backup manual gere uma exportação nova na hora. Em branco, o backup apenas copia o arquivo mais recente da pasta.
+              </span>
+            </>
+          )}
+
           <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
             {(eqForm.fabricante_olt === "UNM2000")
               ? `Pasta onde o ${eqForm.fabricante_olt} exporta os arquivos de backup.`

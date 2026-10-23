@@ -46,6 +46,7 @@ export interface NVRTelemetry {
 export interface EquipamentoConfig {
   pasta_origem?: string;
   fabricante_olt?: string;
+  exportar_no_manual?: boolean;
   caminho_csv?: string;
   caminho_log_csv?: string;
   marca?: string;
