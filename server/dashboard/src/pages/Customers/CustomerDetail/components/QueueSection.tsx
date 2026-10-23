@@ -9,6 +9,9 @@ import { fmtDate } from "../../../../utils/date";
 import { statusTone } from "../../../../utils/statusTone";
 import { historicoDaMaquina } from "../runUtils";
 
+// Quantas rodadas recentes aparecem como pontinhos (e entram no contador "N/M OK")
+const PONTOS_HISTORICO = 10;
+
 // Move o item de `from` para a posição de inserção `insertAt` (0..n, antes do item insertAt)
 export function moveItem<T>(list: T[], from: number, insertAt: number): T[] {
   const next = [...list];
@@ -123,7 +126,8 @@ export default function QueueSection({
           {machines.map((m, idx) => {
             const isCurrent = currentId === m.id;
             const isDragged = dragIndex === idx;
-            const hist = Array.isArray(runs) ? historicoDaMaquina(runs, m.id) : null;
+            // Só as últimas rodadas aparecem como pontinhos; o contador vale para os mesmos pontos
+            const hist = Array.isArray(runs) ? historicoDaMaquina(runs, m.id).slice(-PONTOS_HISTORICO) : null;
             const okCount = hist ? hist.filter((item) => statusTone(item.status) === "ok").length : 0;
 
             return (
@@ -174,7 +178,7 @@ export default function QueueSection({
                     <span className="text-xs text-muted">sem rodadas</span>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
-                      <StatusDots items={hist} />
+                      <StatusDots items={hist} slots={PONTOS_HISTORICO} />
                       <span className="text-xs text-muted">{okCount}/{hist.length} OK</span>
                     </div>
                   )
