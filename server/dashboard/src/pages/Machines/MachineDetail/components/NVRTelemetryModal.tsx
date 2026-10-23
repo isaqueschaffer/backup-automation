@@ -3,14 +3,8 @@ import { NVRTelemetry } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import StatusBadge from "../../../../components/StatusBadge";
 import RingGauge from "../../../Overview/RingGauge";
-import {
-  fmtGb,
-  fmtIdade,
-  fmtMbps,
-  fmtUptime,
-  nivelTemperaturaHd,
-  percentualTemperaturaHd,
-} from "../telemetry";
+import Thermometer from "../../../Overview/Thermometer";
+import { fmtGb, fmtIdade, fmtMbps, fmtUptime } from "../telemetry";
 
 export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
   nvrName: string;
@@ -236,13 +230,10 @@ export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
                             <RingGauge percent={d.percent} label="Uso" size={64} />
                           )}
                           {d.temperature_c != null && (
-                            <RingGauge
-                              percent={percentualTemperaturaHd(d.temperature_c)}
-                              valueLabel={`${d.temperature_c}°`}
-                              nivel={nivelTemperaturaHd(d.temperature_c)}
+                            <Thermometer
+                              celsius={d.temperature_c}
                               label="Temperatura"
-                              caption={`${d.temperature_c} °C`}
-                              size={64}
+                              height={96}
                             />
                           )}
                         </div>

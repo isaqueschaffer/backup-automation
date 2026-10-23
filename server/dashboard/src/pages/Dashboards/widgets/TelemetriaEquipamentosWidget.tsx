@@ -1,12 +1,11 @@
 import StatusBadge from "../../../components/StatusBadge";
 import RingGauge from "../../Overview/RingGauge";
+import Thermometer from "../../Overview/Thermometer";
 import {
   fmtAgo,
   fmtGb,
   fmtIdade,
   fmtUptime,
-  nivelTemperaturaHd,
-  percentualTemperaturaHd,
 } from "../../Machines/MachineDetail/telemetry";
 import { DadosTelemetriaEquipamentos, WidgetInstancia } from "../types";
 
@@ -244,12 +243,7 @@ export default function TelemetriaEquipamentosWidget({
                               <RingGauge percent={d.percent} size={40} />
                             )}
                             {d.temperature_c != null && (
-                              <RingGauge
-                                percent={percentualTemperaturaHd(d.temperature_c)}
-                                valueLabel={`${d.temperature_c}°`}
-                                nivel={nivelTemperaturaHd(d.temperature_c)}
-                                size={40}
-                              />
+                              <Thermometer celsius={d.temperature_c} height={64} />
                             )}
                             <span
                               style={{

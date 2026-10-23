@@ -269,8 +269,3 @@ export function nivelTemperaturaHd(c: number | null): HealthLevel | null {
 }
 
 export const TEMP_HD_ESCALA_MAX = 70;
-
-export function percentualTemperaturaHd(c: number | null): number | null {
-  if (c === null || !Number.isFinite(c)) return null;
-  return Math.max(0, Math.min(100, (c / TEMP_HD_ESCALA_MAX) * 100));
-}
