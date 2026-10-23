@@ -932,6 +932,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Agente 1.1.25: planilhas da configuração dos NVR, telemetria de rede/SMART Motorola e NVR Intelbras completo
+
+**Alteração:** versão 1.1.25 do agente, que leva o trabalho da Helena incorporado no merge da entrada abaixo (planilha `.xlsx` por NVR no pacote do backup, telemetria de rede e SMART dos discos Motorola, uptime do Intelbras por SNMP, NVR Intelbras completo, mapa de gravação de 15 dias do Digifort/Defense) e o `openpyxl` como dependência nova. Versão em `updater.py`, `installer.iss` e `package.json`. O painel ganha, no mesmo deploy, o widget "Gravadores" personalizável, o termômetro, o ajuste de altura dos widgets e os HDs alinhados em colunas.
+**Arquivos:** agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-23] — Merge do ramo `helena` em `isaque` (auditado)
 
 **Alteração:** merge de `isaque_repo/helena` (`f379534`): planilha `.xlsx` da configuração dos NVR (Motorola, Hikvision e Intelbras), telemetria de rede e SMART dos discos Motorola, uptime do NVR Intelbras via SNMP, suporte completo ao NVR Intelbras (câmeras, gravações, backup), correção do mapa de gravação dos VMS Digifort/Defense, `openpyxl` no `agent/requirements.txt` e `customer_name` opcional em `GET /agent/config`. **Verificação do CLAUDE.md:** compose, nginx, `models.py`, migrações e `.env*` sem mudança; nenhum segredo nas linhas adicionadas; sem `queryPlatformCfg`; sem `datetime.now(timezone.utc)` (os `datetime.now()` sem fuso do agente são só data local de consulta de gravação e rótulo "Coletado em" das planilhas, nada vai para o banco). **Bloqueado no merge:** a pasta `teste backup motorola/` (um backup binário de configuração de NVR, `ConfigurationBackupFile`, que pode conter credenciais, e dois scripts de dump) por ser material solto de teste e o repositório de `integracao-equipamentos` ser público; permanecem no ramo `helena`. **Atenção operacional:** a telemetria e a planilha Motorola usam endpoints de leitura além da lista que o spec validou (`queryNetCfg`, `queryDiskDetailInfo`, `queryBasicCfg` e outros); a Helena registra validação em equipamentos reais, mas firmware 1.3.x é frágil (ver `queryPlatformCfg`), então a primeira rodada em Motorola de cliente deve ser acompanhada. Conflito único resolvido: ordem das entradas do changelog.
