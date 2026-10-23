@@ -128,9 +128,10 @@ trilan-nvr-backup-automation/
 │       ├── core/config.py       <- Lê agent.conf (ConfigError, parse_config_extra)
 │       ├── nvr/
 │       │   ├── factory.py       <- Detecta tipo de NVR e orquestra busca/gravação
-│       │   ├── hikvision/       <- NVR/DVR Hikvision (ISAPI; telemetria CPU/RAM/discos)
-│       │   ├── intelbras/       <- NVR Intelbras: telemetria por SNMP (câmeras e gravações usam o ISAPI de hikvision/)
-│       │   └── motorola/        <- NVR Motorola/NVMS-9000 (cameras, recordings, queryChlRecLog)
+│       │   ├── planilha_comum.py<- Estilo, abas e aba 'Câmeras (completo)' das planilhas de configuração dos NVR
+│       │   ├── hikvision/       <- NVR/DVR Hikvision (ISAPI; telemetria CPU/RAM/discos; planilha .xlsx)
+│       │   ├── intelbras/       <- NVR Intelbras: telemetria por SNMP; planilha .xlsx pelo CGI Dahua (câmeras e gravações usam o ISAPI de hikvision/)
+│       │   └── motorola/        <- NVR Motorola/NVMS-9000 (cameras, recordings, queryChlRecLog, telemetry, planilha .xlsx)
 │       ├── olt/                 <- huawei_active, unm2000, vsol
 │       ├── pabx/issabel.py
 │       ├── mikrotik/routeros.py
@@ -546,7 +547,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 
 | Metodo | Path | Descricao |
 |---|---|---|
-| GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente |
+| GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente (`client_name` = nome da máquina; `customer_name` = nome do Cliente da máquina, opcional) |
 | POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup` |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
@@ -930,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-23] — Planilha da configuração dos NVR (Motorola, Hikvision e Intelbras) gerada junto com o backup
+
+**Alteração:** todo backup de NVR/DVR passa a gerar uma planilha `.xlsx` com a configuração lida do equipamento. É um inventário legível (ajuda a reconfigurar o NVR na mão), não um arquivo restaurável: não muda o status do backup (Motorola segue `SEM_ARQUIVOS`; Hikvision e Intelbras seguem com o `.bin`/`.backup` de sempre). Um módulo por marca, escolhido pelo tipo detectado (`PLANILHAS_NVR` em `backup_job.py`: `MOTOROLA`, `INTELBRAS`, `NVR`/`DVR` = Hikvision): `motorola/planilha.py` (NVMS-9000), `hikvision/planilha.py` (ISAPI, só GET) e `intelbras/planilha.py` (CGI Dahua, só `getConfig` e consultas de leitura). A parte comum (estilo, `eh_sensivel`, `SMART_NOMES`, aba **Câmeras (completo)**) fica em `nvr/planilha_comum.py`. **Abas:** Resumo; **Câmeras (completo)** (uma linha por câmera, cada dado em sua coluna, grupos coloridos `Stream |`, `Gravação |`/`Agenda |`, `Movimento |`, `Eventos |`, `Imagem |`; é a aba que abre por padrão); Câmeras; Stream; Gravação/Agendamento; Movimento; Eventos; Imagem; Discos; SMART (Motorola e Hikvision); Rede; configuração do sistema e **Comandos** (resultado de cada consulta, para ver o que o firmware não oferece). Por marca: *Hikvision* (validada no DS-7732NI-K4/16P, firmware V4.74.210, 26 canais): InputProxy (IP, modelo, série, firmware e força da senha de cada câmera, online), Streaming (principal/sub/terceiro: codec, resolução, CBR/VBR, bitrate, FPS, GOP, Smart Codec, áudio), trilhas de gravação e agenda, movimento por canal (sensibilidade, área, agenda), ações por tipo de evento, imagem/OSD, discos com SMART, rede, NTP, portas, UPnP, DDNS, IO; consultas por canal só nas câmeras online (as offline respondem 403). *Intelbras* (validada no iNVD 3016, firmware 4.001, 16 canais): ChannelTitle, RemoteDevice (IP, portas, modelo, série, firmware), Encode (3 formatos principais e 2 sub-streams), Record/RecordMode e agenda (índice 7 = feriado), MotionDetect (área em `MotionDetectWindow[n]` no firmware V3.0), perda de vídeo e máscara, ações dos eventos do sistema, alarmes, discos, rede. O CGI não informa se a câmera está online. *Motorola*: ver entrada anterior (refatorada para usar o módulo comum; ganhou nova tentativa quando a conexão cai). **Segurança:** `userName`/`password` (tag, atributo ou chave) nunca vão para a planilha (`eh_sensivel`); a consulta de usuários do NVR (`userManager`) não é usada; só leitura, pausa entre consultas, timeout, nova tentativa em queda de conexão e limite total de 300 s por NVR; o primeiro recurso (`deviceInfo`/`getSystemInfo`) sem resposta aborta a coleta sem insistir (evita bloquear a conta por login inválido). Uma seção com erro de leitura fica vazia sem derrubar o resto. **Pacote:** `processar_nvr` grava a planilha na pasta de trabalho e devolve o caminho em `_planilha`; `run_backup` remove essa chave antes de reportar ao servidor e move o arquivo para `NVR/PLANILHA/<cliente>_<máquina>_<DD-MM-AAAA>.xlsx` dentro do pacote final (ZIP global da máquina; fica fora do `backup.zip` do equipamento). Com mais de um NVR na máquina, o nome do NVR entra no nome de todas as planilhas; sem `customer_name` (servidor antigo ou máquina sem Cliente) o nome fica `<máquina>_<data>.xlsx`. API: `GET /agent/config` ganhou `customer_name` (opcional). Dependência nova: `openpyxl>=3.1.0` (se não carregar, só as planilhas somem). Tempo acrescentado por NVR: cerca de 15 a 40 s. **Validação:** `processar_equipamento` do agente nos equipamentos reais (Motorola 192.168.124.2, Hikvision 192.168.20.2, Intelbras 192.168.75.6); formato dos XMLs da Motorola conferido também em 192.168.5.2 e 192.168.5.5. Não testados: firmware Motorola 1.4.x, DVR analógico Hikvision/Intelbras e o build do PyInstaller com `openpyxl`. Versão do agente não alterada (entra na próxima).
+**Arquivos:** agent/src/nvr/planilha_comum.py, agent/src/nvr/motorola/planilha.py, agent/src/nvr/hikvision/planilha.py, agent/src/nvr/intelbras/planilha.py, agent/src/application/backup_job.py, agent/requirements.txt, server/api/schemas.py, server/api/routers/agent.py, PROJECT_SPEC.md
+**Breaking Change:** Não. Campo novo e opcional em `GET /agent/config`; agentes antigos o ignoram e servidores antigos não o enviam.
+**Branch:** helena
 
 ### [2026-10-23] — Agente 1.1.24: backup manual do UNM2000 gera uma exportação nova na hora
 

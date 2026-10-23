@@ -15,6 +15,19 @@ from src.core.config import load_conf, parse_config_extra, DIR_AGENT
 from src.application.api_client import fetch_server_config, post_report, upload_zip
 from src.nvr.factory import verificar_gravacao_nvr, coletar_telemetria_nvr
 from src.nvr.intelbras.backup import baixar_configuracao_intelbras
+try:
+    from src.nvr.hikvision.planilha import gerar_planilha_hikvision
+    from src.nvr.intelbras.planilha import gerar_planilha_intelbras
+    from src.nvr.motorola.planilha import gerar_planilha_motorola
+    # tipo de NVR detectado -> funcao que grava a planilha da configuracao
+    PLANILHAS_NVR = {
+        "MOTOROLA": gerar_planilha_motorola, "INTELBRAS": gerar_planilha_intelbras,
+        "NVR": gerar_planilha_hikvision, "DVR": gerar_planilha_hikvision,
+    }
+except Exception:
+    # openpyxl ausente ou incompativel: so a planilha dos NVR fica indisponivel (o backup segue normal)
+    logging.warning("Planilha dos NVR indisponivel: falha ao carregar o openpyxl.", exc_info=True)
+    PLANILHAS_NVR = {}
 from src.olt.unm2000 import realizar_backup_olt
 from src.olt.vsol import realizar_backup_vsol
 from src.pabx.issabel import realizar_backup_issabel
@@ -90,7 +103,7 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
     status = "OK"
 
     if tipo_nvr == "MOTOROLA":
-        logging.info("  NVR Motorola detectado. Backup de arquivos de configuracao nao suportado nativamente. Gravacoes verificadas.")
+        logging.info("  NVR Motorola detectado. Backup restauravel da configuracao nao suportado nativamente. Gravacoes verificadas.")
         status = "SEM_ARQUIVOS"
     elif tipo_nvr == "INTELBRAS" or (marca and marca.upper() == "INTELBRAS"):
         logging.info("  NVR Intelbras detectado. Baixando configuracao completa via CGI...")
@@ -126,7 +139,18 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
     # A imagem da noite não é mais capturada no backup (atrasava backups manuais e agendados):
     # ela é capturada sob demanda pela Galeria do NVR no painel (tarefa RTSP modo "noite").
 
-    return {"nome": nome, "status": status, "cameras": cameras_status, "telemetria": telemetria}
+    # Planilha com a configuracao lida do equipamento (qualquer marca); falha nunca muda o status do backup
+    planilha = None
+    gerar_planilha = PLANILHAS_NVR.get(tipo_nvr)
+    if gerar_planilha is not None:
+        arq_planilha = pasta_nvr / f"PLANILHA_{nome_seguro(nome)}.xlsx"
+        if gerar_planilha(ip, user, pwd, arq_planilha):
+            planilha = arq_planilha  # o run_backup move para NVR/PLANILHA/ do pacote final
+
+    resultado = {"nome": nome, "status": status, "cameras": cameras_status, "telemetria": telemetria}
+    if planilha is not None:
+        resultado["_planilha"] = planilha  # caminho local; o run_backup remove antes de reportar ao servidor
+    return resultado
 
 
 def processar_olt(
@@ -242,6 +266,30 @@ def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path
     return {"nome": equipamento.get("name", "?"), "status": "TIPO_NAO_SUPORTADO", "cameras": None}
 
 
+def _guardar_planilha(origem: Path, pasta_final: Path, cliente: str, maquina: str, nvr_nome: str, planilhas: dict) -> Path:
+    """Move a planilha do NVR para NVR/PLANILHA/<cliente>_<maquina>_<data>.xlsx do pacote final.
+    Com mais de um NVR Motorola na maquina, o nome do NVR entra no nome de todas as planilhas."""
+    pasta = pasta_final / "NVR" / "PLANILHA"
+    pasta.mkdir(parents=True, exist_ok=True)
+
+    def nome_arquivo(nvr: str = "") -> str:
+        partes = [nome_seguro(p) for p in (cliente, maquina, nvr) if p]
+        return "_".join(partes + [data_hoje()]) + ".xlsx"
+
+    if not planilhas:
+        destino = pasta / nome_arquivo()
+    else:
+        for anterior, caminho in list(planilhas.items()):
+            novo = pasta / nome_arquivo(anterior)
+            if caminho != novo:
+                caminho.replace(novo)
+                planilhas[anterior] = novo
+        destino = pasta / nome_arquivo(nvr_nome)
+    shutil.move(str(origem), str(destino))
+    planilhas[nvr_nome] = destino
+    return destino
+
+
 # ─────────────────────────────────────────────────────────────
 # EXECUÇÃO PRINCIPAL
 # ─────────────────────────────────────────────────────────────
@@ -265,6 +313,7 @@ def run_backup(trigger: str = "scheduled"):
     if not zip_password:
         logging.warning("AVISO DE SEGURANCA: zip_password nao configurado no servidor para este cliente. O ZIP sera criado sem senha.")
     client_name = server_cfg["client_name"]
+    customer_name = server_cfg.get("customer_name")  # None em servidor antigo: o nome do arquivo fica sem o cliente
 
     if not equipamentos:
         logging.error("Nenhum equipamento configurado no servidor para este cliente.")
@@ -301,6 +350,7 @@ def run_backup(trigger: str = "scheduled"):
 
     started_at = datetime.utcnow()
     resultados = []
+    planilhas = {}  # nome do NVR -> planilha ja colocada em NVR/PLANILHA/
 
     for eq in equipamentos:
         tipo = (eq.get("tipo") or "NVR").upper()
@@ -313,7 +363,15 @@ def run_backup(trigger: str = "scheduled"):
 
         res = processar_equipamento(eq, zip_password, pasta_trabalho, conf, trigger)
         res["tipo"] = tipo
+        planilha = res.pop("_planilha", None)
         resultados.append(res)
+
+        if planilha is not None:
+            try:
+                destino = _guardar_planilha(planilha, TEMP_DIR_FINAL, customer_name, client_name, nome, planilhas)
+                logging.info(f"  Planilha do NVR salva em NVR/PLANILHA/{destino.name}")
+            except Exception:
+                logging.warning(f"  Nao foi possivel guardar a planilha do NVR {nome}.", exc_info=True)
 
         # Monta a estrutura final
         pasta_final_eq = TEMP_DIR_FINAL / tipo / f"backup_{tipo.lower()}_{nome_safe}"

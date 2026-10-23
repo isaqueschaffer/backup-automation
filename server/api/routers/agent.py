@@ -113,6 +113,7 @@ def get_agent_config(machine: Machine = Depends(get_current_machine), db: Sessio
     # `client_name` é campo do contrato JSON com o agente: não renomear
     return AgentConfigResponse(
         client_name=machine.name,
+        customer_name=machine.customer.name if machine.customer is not None else None,
         backup_hour=backup_hour,
         backup_minute=backup_minute,
         zip_password=zip_pw,
