@@ -14,9 +14,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _STATUS_HDD = {
     "ok": "OK",
     "normal": "OK",
+    "read/write": "OK",
+    "read_write": "OK",
+    "readwrite": "OK",
+    "read": "OK",
     "recording": "OK",
     "idle": "OK",
-    "readwrite": "OK",
+    "bad": "ERRO",
     "error": "ERRO",
     "abnormal": "ERRO",
     "damage": "ERRO",
@@ -38,45 +42,88 @@ def _normalizar_status_disco(st_raw: str) -> str:
     return _STATUS_HDD.get(chave, st_raw.strip().upper())
 
 
+def _converter_valor_para_gb(val, unit=""):
+    unit = (unit or "").upper().strip()
+    if unit == "GB":
+        return round(val, 1)
+    elif unit == "TB":
+        return round(val * 1024, 1)
+    elif unit == "KB":
+        return round(val / (1024 * 1024), 1)
+    elif unit in ("B", "BYTE", "BYTES"):
+        return round(val / (1024 ** 3), 1)
+    elif unit == "MB":
+        return round(val / 1024, 1)
+
+    if val > 10_000_000_000:
+        return round(val / (1024 ** 3), 1)
+    elif val > 10_000_000:
+        return round(val / (1024 * 1024), 1)
+    elif val > 100:
+        return round(val / 1024, 1)
+    else:
+        return round(val, 1)
+
+
 def _parse_size_gb(el, *tag_names):
     """Extrai capacidade/tamanho em GB considerando unit='MB'/'GB'/'KB'/'Byte' ou heurística."""
+    if el is None:
+        return None
     for tag in tag_names:
-        alvo = el.find(f".//{tag}") if el is not None else None
-        if alvo is not None and alvo.text and alvo.text.strip():
-            texto_raw = alvo.text.strip()
-            try:
-                texto_limpo = re.sub(r"[^\d.]", "", texto_raw)
-                val = float(texto_limpo)
-                unit = (alvo.get("unit") or "").upper().strip()
-
-                if unit == "GB":
-                    return round(val, 1)
-                elif unit == "TB":
-                    return round(val * 1024, 1)
-                elif unit == "KB":
-                    return round(val / (1024 * 1024), 1)
-                elif unit in ("B", "BYTE", "BYTES"):
-                    return round(val / (1024 ** 3), 1)
-                elif unit == "MB":
-                    return round(val / 1024, 1)
-
-                if val > 10_000_000_000:
-                    return round(val / (1024 ** 3), 1)
-                elif val > 10_000_000:
-                    return round(val / (1024 * 1024), 1)
-                elif val > 100:
-                    return round(val / 1024, 1)
-                else:
-                    return round(val, 1)
-            except (ValueError, TypeError):
-                continue
+        for alvo in el.findall(f".//{tag}"):
+            if alvo is not None and alvo.text and alvo.text.strip():
+                texto_raw = alvo.text.strip()
+                try:
+                    texto_limpo = re.sub(r"[^\d.]", "", texto_raw)
+                    if not texto_limpo:
+                        continue
+                    val = float(texto_limpo)
+                    unit = alvo.get("unit") or ""
+                    return _converter_valor_para_gb(val, unit)
+                except (ValueError, TypeError):
+                    continue
     return None
+
+
+def _escanear_capacidade_heuristica(el):
+    """Varre recursivamente elementos procurando tags numéricas de capacidade."""
+    if el is None:
+        return None, None
+    tot_gb, free_gb = None, None
+
+    for filho in el.iter():
+        tag_nome = filho.tag.lower()
+        if not filho.text or not filho.text.strip():
+            continue
+        texto_limpo = re.sub(r"[^\d.]", "", filho.text.strip())
+        if not texto_limpo:
+            continue
+        try:
+            val = float(texto_limpo)
+            if val <= 0:
+                continue
+            unit = filho.get("unit") or ""
+            gb = _converter_valor_para_gb(val, unit)
+
+            if tot_gb is None and any(t in tag_nome for t in ("total", "capacity", "allspace", "maxsize", "totalsize", "totalspace", "totalcap")):
+                if not any(neg in tag_nome for neg in ("free", "remain", "used", "sub", "time", "date")):
+                    tot_gb = gb
+
+            if free_gb is None and any(t in tag_nome for t in ("remain", "free", "rest", "avail")):
+                if not any(neg in tag_nome for neg in ("sub", "time", "date")):
+                    free_gb = gb
+        except Exception:
+            continue
+
+    return tot_gb, free_gb
 
 
 def _parse_percent(el, *tag_names):
     """Extrai percentual inteiro 0-100 de uma tag."""
+    if el is None:
+        return None
     for tag in tag_names:
-        alvo = el.find(f".//{tag}") if el is not None else None
+        alvo = el.find(f".//{tag}")
         if alvo is not None and alvo.text and alvo.text.strip():
             texto_raw = alvo.text.strip().replace("%", "").strip()
             try:
@@ -253,30 +300,42 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
         root_det = post(ep, req_disk) or post(ep)
         if root_det is not None:
             teve_sucesso = True
-            itens = root_det.findall(".//item")
+            itens = root_det.findall(".//disk") or root_det.findall(".//content")
             if not itens:
-                content = root_det.find(".//content")
-                if content is not None:
-                    itens = [content]
+                # Evita capturar smartItems como discos
+                itens = [it for it in root_det.findall(".//item") if not it.find("rawValue") and not it.get("id", "").isdigit()]
 
             for item in itens:
                 d_id = item.get("id") or item.findtext("diskId") or item.findtext("id")
                 if not d_id and disk_ids:
                     d_id = disk_ids[0]
                 elif not d_id:
-                    d_id = "1"
+                    d_id = list(discos_map.keys())[0] if discos_map else "1"
 
                 d = discos_map.setdefault(d_id, {"id": d_id})
                 nome = item.findtext("name") or item.findtext("devName") or item.findtext("model")
+                fonte = item.findtext("source")
                 if nome and not d.get("device"):
                     d["device"] = nome
+                elif fonte and not d.get("device"):
+                    d["device"] = f"Disco ({fonte.capitalize()})"
 
-                st = item.findtext("status") or item.findtext("property") or item.findtext("state")
+                st = item.findtext("status") or item.findtext("property") or item.findtext("rwProperty") or item.findtext("state")
                 if st and not d.get("status"):
                     d["status"] = _normalizar_status_disco(st)
 
-                tot = _parse_size_gb(item, "totalCapacity", "totalSpace", "capacity", "size")
-                free = _parse_size_gb(item, "remainCapacity", "freeCapacity", "freeSpace", "free")
+                tot = _parse_size_gb(item,
+                    "totalCapacity", "totalSpace", "capacity", "size", "totalSize",
+                    "total", "maxSize", "allSpace", "totalBlock", "diskCapacity", "totalCap")
+                free = _parse_size_gb(item,
+                    "remainCapacity", "freeCapacity", "freeSpace", "free", "freeSize",
+                    "remainSize", "remain", "remainSpace", "restSpace", "freeBlock", "remainCap")
+
+                if not tot or free is None:
+                    h_tot, h_free = _escanear_capacidade_heuristica(item)
+                    tot = tot or h_tot
+                    free = free if free is not None else h_free
+
                 if tot and not d.get("total_gb"):
                     d["total_gb"] = tot
                 if free is not None and d.get("free_gb") is None:
@@ -294,12 +353,46 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
             root_ind = post("queryDiskDetailInfo", cond)
             if root_ind is not None:
                 teve_sucesso = True
-                tot = _parse_size_gb(root_ind, "totalCapacity", "totalSpace", "capacity", "size")
-                free = _parse_size_gb(root_ind, "remainCapacity", "freeCapacity", "freeSpace", "free")
+                tot = _parse_size_gb(root_ind,
+                    "totalCapacity", "totalSpace", "capacity", "size", "totalSize",
+                    "total", "maxSize", "allSpace", "totalBlock", "diskCapacity", "totalCap")
+                free = _parse_size_gb(root_ind,
+                    "remainCapacity", "freeCapacity", "freeSpace", "free", "freeSize",
+                    "remainSize", "remain", "remainSpace", "restSpace", "freeBlock", "remainCap")
+                if not tot or free is None:
+                    h_tot, h_free = _escanear_capacidade_heuristica(root_ind)
+                    tot = tot or h_tot
+                    free = free if free is not None else h_free
                 if tot:
                     d["total_gb"] = tot
                 if free is not None:
                     d["free_gb"] = free
+
+    # Consulta informações S.M.A.R.T (Temperatura, Horas/Dias Ligado, Saúde física)
+    for d_id in (disk_ids or list(discos_map.keys()) or ["1"]):
+        d = discos_map.setdefault(d_id, {"id": d_id})
+        cond_smart = f"<condition><diskId>{d_id}</diskId></condition>" if not d_id.isdigit() else ""
+        root_smart = post("queryDiskSmartInfo", cond_smart) or post("queryDiskSmartInfo")
+        if root_smart is not None:
+            teve_sucesso = True
+            content_smart = root_smart.find(".//content")
+            alvo_smart = content_smart if content_smart is not None else root_smart
+
+            temp_txt = alvo_smart.findtext("temperature")
+            if temp_txt:
+                temp_num = re.sub(r"[^\d]", "", temp_txt)
+                if temp_num:
+                    d["temperature_c"] = int(temp_num)
+
+            days_txt = alvo_smart.findtext("powerOnDays")
+            if days_txt:
+                days_num = re.sub(r"[^\d]", "", days_txt)
+                if days_num:
+                    d["power_on_days"] = int(days_num)
+
+            smart_st = alvo_smart.findtext("diskStatus")
+            if smart_st and not d.get("status"):
+                d["status"] = _normalizar_status_disco(smart_st)
 
     for idx, (d_id, d) in enumerate(discos_map.items(), start=1):
         total_gb = d.get("total_gb")
@@ -309,11 +402,13 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
             pct = round(((total_gb - free_gb) / total_gb) * 100, 1)
 
         telemetria["disks"].append({
-            "device": d.get("device") or f"HDD{idx}",
+            "device": d.get("device") or f"Disco {idx}",
             "status": d.get("status") or "OK",
             "percent": pct,
             "total_gb": total_gb,
-            "free_gb": free_gb
+            "free_gb": free_gb,
+            "temperature_c": d.get("temperature_c"),
+            "power_on_days": d.get("power_on_days")
         })
 
     # =========================================================================
@@ -359,6 +454,9 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
     # 3. REDE (queryNetCfg / queryNetStatus / queryNICInfo)
     # =========================================================================
     nics_map = {}
+    bw_recv_mbps = None
+    bw_sent_mbps = None
+
     req_net = (
         "<requireField>"
         "<nic/><ip/><mask/><gateway/><mac/><dns/><speed/><dhcp/><mtu/>"
@@ -370,6 +468,25 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
         root_net = post(ep, req_net) or post(ep)
         if root_net is not None:
             teve_sucesso = True
+
+            # Largura de banda global TVT/NVMS-9000 (totalBandwidth - remainBandwidth)
+            bw = root_net.find(".//bandwidth")
+            if bw is not None:
+                tot_bw = bw.findtext("totalBandwidth")
+                rem_bw = bw.findtext("remainBandwidth")
+                send_tot_bw = bw.findtext("sendTotalBandwidth")
+                send_rem_bw = bw.findtext("sendRemainBandwidth")
+                if tot_bw and rem_bw:
+                    try:
+                        bw_recv_mbps = round(float(tot_bw) - float(rem_bw), 1)
+                    except Exception:
+                        pass
+                if send_tot_bw and send_rem_bw:
+                    try:
+                        bw_sent_mbps = round(float(send_tot_bw) - float(send_rem_bw), 1)
+                    except Exception:
+                        pass
+
             itens = root_net.findall(".//item")
             if not itens:
                 content = root_net.find(".//content")
@@ -380,7 +497,7 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
                 nic_id = item.get("id") or item.findtext("id") or "1"
                 n = nics_map.setdefault(nic_id, {"id": nic_id})
 
-                name = item.findtext("name") or item.findtext("nicName")
+                name = item.findtext("name") or item.findtext("nicName") or item.get("id")
                 if name:
                     n["name"] = name
                 ip_val = item.findtext("ip") or item.findtext("ipAddress")
@@ -396,10 +513,13 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
                     if num and int(num) > 0:
                         n["speed_mbps"] = int(num)
 
-                link = item.findtext("linkStatus") or item.findtext("status")
-                if link:
+                link = item.findtext("linkStatus") or item.findtext("status") or item.findtext("nicStatus")
+                is_online = item.findtext("isOnline")
+                if is_online and is_online.strip().lower() in ("true", "1"):
+                    n["status"] = "UP"
+                elif link:
                     lk = link.strip().lower()
-                    n["status"] = "UP" if lk in ("up", "connected", "linked", "1", "true") else "DOWN"
+                    n["status"] = "UP" if lk in ("up", "online", "connected", "linked", "1", "true") else "DOWN"
 
                 rx = _parse_size_gb(item, "recvRate", "rx", "inBandwidth")
                 tx = _parse_size_gb(item, "sendRate", "tx", "outBandwidth")
@@ -409,14 +529,17 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
                     n["sent_mbps"] = round(tx * 8, 1)
 
     for idx, (nid, n) in enumerate(nics_map.items(), start=1):
+        r_mbps = n.get("recv_mbps") if n.get("recv_mbps") is not None else bw_recv_mbps
+        s_mbps = n.get("sent_mbps") if n.get("sent_mbps") is not None else bw_sent_mbps
+
         telemetria["networks"].append({
             "name": n.get("name") or f"LAN{idx}",
             "ip": n.get("ip"),
             "mac": n.get("mac"),
             "status": n.get("status") or "UP",
-            "speed_mbps": n.get("speed_mbps"),
-            "recv_mbps": n.get("recv_mbps"),
-            "sent_mbps": n.get("sent_mbps")
+            "speed_mbps": n.get("speed_mbps") or 1000,
+            "recv_mbps": r_mbps,
+            "sent_mbps": s_mbps
         })
 
     if not telemetria["networks"]:
@@ -426,8 +549,8 @@ def coletar_telemetria_motorola(nvr_ip: str, usuario: str, senha: str, session: 
             "mac": None,
             "status": "UP",
             "speed_mbps": 1000,
-            "recv_mbps": None,
-            "sent_mbps": None
+            "recv_mbps": bw_recv_mbps,
+            "sent_mbps": bw_sent_mbps
         })
 
     return telemetria if teve_sucesso else None

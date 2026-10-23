@@ -1440,6 +1440,22 @@ Integração (merge em isaque): a dependência foi fixada em `pysnmp>=7.1,<8.0.0
 
 ---
 
+### [2026-10-23] — Telemetria de NVR Motorola (NVMS-9000 / TVT)
+
+**Alteração:** Suporte completo à telemetria de NVRs Motorola (protocolo NVMS-9000 / arquitetura TVT, modelo MTR16IP / TD-3116B2).
+**Implementação:**
+- Módulo `agent/src/nvr/motorola/telemetry.py` integrado à `factory.coletar_telemetria_nvr`.
+- Autenticação com desafio SHA-512 (`reqLogin`/`doLogin`) e fallback Base64.
+- Coleta de Rede: status de interface (`nicStatus` online -> `UP`), IP, MAC, e taxa de transferência real extraída de `<bandwidth>` (`totalBandwidth` - `remainBandwidth` para Rx de câmeras; `sendTotalBandwidth` - `sendRemainBandwidth` para Tx de visualização).
+- Coleta de Discos: status de operação (`queryDiskStatus` read/write -> `OK`), dados S.M.A.R.T (`queryDiskSmartInfo`: temperatura em °C, dias de operação `powerOnDays`, integridade física).
+- CPU e RAM: tratados como nulos de forma segura (`—`), exibindo traço no modal de telemetria do dashboard (`NVRTelemetryModal.tsx`).
+- Script de diagnóstico e dump offline: `teste backup motorola/dump_motorola_telemetria.py`.
+**Arquivos:** `agent/src/nvr/motorola/telemetry.py`, `agent/src/nvr/factory.py`, `teste backup motorola/dump_motorola_telemetria.py`
+**Breaking Change:** Não
+**Branch:** helena
+
+---
+
 ## 17. Fluxo de Atualização de Versão (Release)
 
 Quando uma nova versão do Agente Trilan for lançada, certifique-se de atualizar o número da versão nos seguintes arquivos:

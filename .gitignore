@@ -53,7 +53,10 @@ __pycache__/
 scratch_test/
 agent/index.xml
 test*.jpg
+respostas_telemetria_*/
+teste backup motorola/respostas_telemetria_*/
 
 # Configuração local do Claude Code (permissões pessoais); só as skills entram no git
 .claude/*
 !.claude/skills/
+
