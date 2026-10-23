@@ -11,10 +11,12 @@ interface Props {
   label?: string;
   caption?: string;
   height?: number;
+  inline?: boolean;
 }
 
-// Termômetro vertical com escala em °C; marcas coloridas nos limites de atenção e crítico
-export default function Thermometer({ celsius, label = "", caption, height = 80 }: Props) {
+// Termômetro vertical com escala em °C; marcas coloridas nos limites de atenção e crítico.
+// Com `inline`, o valor fica ao lado do termômetro (para linhas compactas).
+export default function Thermometer({ celsius, label = "", caption, height = 80, inline = false }: Props) {
   const width = 46;
   const tubeW = 8;
   const bulbR = 8;
@@ -38,10 +40,10 @@ export default function Thermometer({ celsius, label = "", caption, height = 80 
     <div
       style={{
         display: "flex",
-        flexDirection: "column",
+        flexDirection: inline ? "row" : "column",
         alignItems: "center",
-        textAlign: "center",
-        gap: 3,
+        textAlign: inline ? "left" : "center",
+        gap: inline ? 4 : 3,
         minWidth: 0,
       }}
     >
@@ -113,7 +115,14 @@ export default function Thermometer({ celsius, label = "", caption, height = 80 
           strokeWidth={1.5}
         />
       </svg>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", whiteSpace: "nowrap" }}>
+      <div
+        style={{
+          fontSize: inline ? 14 : 12,
+          fontWeight: 700,
+          color: nivel ? color : "var(--text-primary)",
+          whiteSpace: "nowrap",
+        }}
+      >
         {celsius === null ? "—" : `${celsius} °C`}
       </div>
       {Boolean(label) && (

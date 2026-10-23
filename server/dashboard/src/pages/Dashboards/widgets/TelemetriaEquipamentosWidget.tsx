@@ -243,7 +243,7 @@ export default function TelemetriaEquipamentosWidget({
                               <RingGauge percent={d.percent} size={40} />
                             )}
                             {d.temperature_c != null && (
-                              <Thermometer celsius={d.temperature_c} height={64} />
+                              <Thermometer celsius={d.temperature_c} height={52} inline />
                             )}
                             <span
                               style={{
