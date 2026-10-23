@@ -932,6 +932,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Painel: página "Backups" (/backups) mais limpa
+
+**Alteração:** a tabela passa de 9 para 7 colunas (Máquina com o Cliente embaixo, Data/Hora com a origem embaixo em português: Agendado, Fila, Avulso, Manual; Status; Equipamentos; Tamanho; E-mail; Baixar). "Equipamentos" deixa de usar blocos de cor sólida e passa a usar o selo `.badge` do painel (`TIPO ok/total`, clicável) com o detalhe num `Modal` padrão (sem o overlay feito à mão e sem o link "Detalhes"); linhas com erro ou parcial ganham uma faixa lateral colorida; e-mail enviado vira ícone de check e o reenvio vira botão de ícone; campos de data no mesmo estilo dos filtros; subtítulo corrigido (o download desta página é o ZIP da máquina) e resumo "N backup(s) · página X de Y". Removido o import sem uso de `Backups.tsx`: `tsc --noEmit` do painel passa sem erros.
+**Arquivos:** server/dashboard/src/pages/Backups.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-23] — Painel: telas do Cliente e da Máquina simplificadas (feedback de uso)
 
 **Alteração:** a tela ficou confusa (pontinhos sem significado, mesmas máquinas em três lugares, histórico e eventos escondidos). **Cliente:** a seção "Situação por máquina" (`CustomerMachines.tsx`, removido) deixa de existir, porque a fila já mostrava por máquina o estado online, a data do último backup e o último status; a seção passa a se chamar "Máquinas e fila de backup" (`QueueSection`) e ganha, em cada linha, a faixa de pontinhos dos últimos resultados (`historicoDaMaquina` em `runUtils.ts`) com contador "N/M OK" e uma legenda (`StatusLegend` em `components/StatusDots.tsx`: OK, parcial/em andamento, erro/não executou, aguardando; do mais antigo ao mais recente); a lista de rodadas ganhou a dica "Clique em uma rodada para ver o resultado de cada máquina". **Máquina:** o histórico mostra sempre as linhas compactas (sem pontinhos, sem cartão de destaque, sem botão para esconder) com o selo "último" na primeira; "Eventos do Agente" começa aberto (continua só com instruções e erros, interruptor "Mostrar pings" desligado por padrão). Sem mudança de API. `tsc` conferido em container: sem erros novos.
