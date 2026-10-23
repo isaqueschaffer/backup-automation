@@ -94,6 +94,13 @@ def ids_referenciados(layout: DashboardLayout) -> Tuple[Set[UUID], Set[UUID]]:
                     u = _parse_uuid(e)
                     if u:
                         ids_de_equipamentos.add(u)
+            if w.tipo == "telemetria_equipamentos":
+                discos_cfg = w.config.get("discos")
+                if isinstance(discos_cfg, dict):
+                    for chave in discos_cfg.keys():
+                        u = _parse_uuid(chave)
+                        if u:
+                            ids_de_equipamentos.add(u)
     return ids_de_maquinas, ids_de_equipamentos
 
 

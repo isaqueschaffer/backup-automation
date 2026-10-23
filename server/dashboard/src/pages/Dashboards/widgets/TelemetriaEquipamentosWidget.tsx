@@ -9,6 +9,17 @@ import {
 } from "../../Machines/MachineDetail/telemetry";
 import { DadosTelemetriaEquipamentos, WidgetInstancia } from "../types";
 
+const TODAS_METRICAS = [
+  "cpu",
+  "ram",
+  "uptime",
+  "disco_uso",
+  "disco_temperatura",
+  "disco_saude",
+  "disco_capacidade",
+  "disco_idade",
+];
+
 export default function TelemetriaEquipamentosWidget({
   dados,
 }: {
@@ -34,6 +45,11 @@ export default function TelemetriaEquipamentosWidget({
     );
   }
 
+  const ativas = new Set<string>(
+    dados.metricas && dados.metricas.length > 0 ? dados.metricas : TODAS_METRICAS
+  );
+  const temMetricaDisco = Array.from(ativas).some((m) => m.startsWith("disco_"));
+
   return (
     <div
       style={{
@@ -48,6 +64,11 @@ export default function TelemetriaEquipamentosWidget({
         const tempoAtualizado = eq.atualizado_em
           ? fmtAgo(Date.now() - new Date(eq.atualizado_em).getTime())
           : null;
+
+        const temLinhaCpu =
+          eq.cpu_percent !== null || eq.ram_percent !== null || eq.uptime_seconds != null;
+        const temDiscosComDado = temMetricaDisco && Boolean(eq.disks && eq.disks.length > 0);
+        const temAlgoParaMostrar = temLinhaCpu || temDiscosComDado;
 
         return (
           <div
@@ -119,150 +140,168 @@ export default function TelemetriaEquipamentosWidget({
               </span>
             </div>
 
-            {/* Linha de anéis de CPU e RAM e tempo ligado */}
-            {(eq.cpu_percent !== null || eq.ram_percent !== null || eq.uptime_seconds != null) && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 16,
-                  padding: "2px 0",
-                  flexWrap: "wrap",
-                }}
-              >
-                {eq.cpu_percent !== null && (
-                  <RingGauge percent={eq.cpu_percent} label="CPU" size={52} />
-                )}
-                {eq.ram_percent !== null && (
-                  <RingGauge percent={eq.ram_percent} label="RAM" size={52} />
-                )}
-                {eq.uptime_seconds != null && (
+            {!temAlgoParaMostrar ? (
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                Sem dados para as métricas escolhidas
+              </div>
+            ) : (
+              <>
+                {/* Linha de anéis de CPU e RAM e tempo ligado */}
+                {temLinhaCpu && (
                   <div
                     style={{
                       display: "flex",
-                      flexDirection: "column",
-                      gap: 2,
+                      alignItems: "center",
+                      gap: 16,
+                      padding: "2px 0",
+                      flexWrap: "wrap",
                     }}
                   >
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 600,
-                        textTransform: "uppercase",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      Tempo ligado
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 15,
-                        fontWeight: 700,
-                        color: "var(--text-primary)",
-                      }}
-                    >
-                      {fmtUptime(eq.uptime_seconds)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Lista de discos */}
-            {!eq.disks || eq.disks.length === 0 ? (
-              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                Sem dados de disco
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {eq.disks.map((d, idx) => {
-                  const semDados =
-                    d.total_gb == null &&
-                    d.percent == null &&
-                    d.temperature_c == null;
-
-                  return (
-                    <div
-                      key={d.device || idx}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        flexWrap: "wrap",
-                        gap: "6px 10px",
-                        fontSize: 12,
-                        minWidth: 0,
-                      }}
-                    >
+                    {eq.cpu_percent !== null && (
+                      <RingGauge percent={eq.cpu_percent} label="CPU" size={52} />
+                    )}
+                    {eq.ram_percent !== null && (
+                      <RingGauge percent={eq.ram_percent} label="RAM" size={52} />
+                    )}
+                    {eq.uptime_seconds != null && (
                       <div
                         style={{
                           display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          flexShrink: 0,
-                          minWidth: 0,
+                          flexDirection: "column",
+                          gap: 2,
                         }}
                       >
                         <span
                           style={{
+                            fontSize: 10,
                             fontWeight: 600,
-                            color: "var(--text-primary)",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            maxWidth: 100,
-                            flexShrink: 0,
+                            textTransform: "uppercase",
+                            color: "var(--text-muted)",
                           }}
-                          title={d.device}
                         >
-                          {d.device || "Disco"}
+                          Tempo ligado
                         </span>
-
-                        <div style={{ flexShrink: 0 }}>
-                          {d.status && <StatusBadge status={d.status} />}
-                        </div>
+                        <span
+                          style={{
+                            fontSize: 15,
+                            fontWeight: 700,
+                            color: "var(--text-primary)",
+                          }}
+                        >
+                          {fmtUptime(eq.uptime_seconds)}
+                        </span>
                       </div>
+                    )}
+                  </div>
+                )}
 
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          flexWrap: "wrap",
-                          justifyContent: "flex-end",
-                          minWidth: 0,
-                        }}
-                      >
-                        {semDados ? (
-                          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                            sem dados do disco
-                          </span>
-                        ) : (
-                          <>
-                            {d.percent != null && (
-                              <RingGauge percent={d.percent} size={40} />
-                            )}
-                            {d.temperature_c != null && (
-                              <Thermometer celsius={d.temperature_c} height={52} inline />
-                            )}
-                            <span
+                {/* Lista de discos */}
+                {temMetricaDisco && (
+                  !eq.disks || eq.disks.length === 0 ? (
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Sem dados de disco
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {eq.disks.map((d, idx) => {
+                        const semDados =
+                          d.total_gb == null &&
+                          d.free_gb == null &&
+                          d.percent == null &&
+                          d.temperature_c == null &&
+                          !d.status &&
+                          d.power_on_days == null;
+
+                        const partesTexto: string[] = [];
+                        if (d.total_gb != null) partesTexto.push(fmtGb(d.total_gb));
+                        if (d.free_gb != null) partesTexto.push(`${fmtGb(d.free_gb)} livres`);
+                        if (d.power_on_days != null) partesTexto.push(fmtIdade(d.power_on_days));
+
+                        return (
+                          <div
+                            key={d.device || idx}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              flexWrap: "wrap",
+                              gap: "6px 10px",
+                              fontSize: 12,
+                              minWidth: 0,
+                            }}
+                          >
+                            <div
                               style={{
-                                fontSize: 11,
-                                color: "var(--text-muted)",
-                                whiteSpace: "nowrap",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                flexShrink: 0,
+                                minWidth: 0,
                               }}
                             >
-                              {fmtGb(d.total_gb ?? null)}
-                              {d.free_gb != null && ` · ${fmtGb(d.free_gb)} livres`}
-                              {d.power_on_days != null && ` · ${fmtIdade(d.power_on_days)}`}
-                            </span>
-                          </>
-                        )}
-                      </div>
+                              <span
+                                style={{
+                                  fontWeight: 600,
+                                  color: "var(--text-primary)",
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  maxWidth: 100,
+                                  flexShrink: 0,
+                                }}
+                                title={d.device}
+                              >
+                                {d.device || "Disco"}
+                              </span>
+
+                              <div style={{ flexShrink: 0 }}>
+                                {d.status && <StatusBadge status={d.status} />}
+                              </div>
+                            </div>
+
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                flexWrap: "wrap",
+                                justifyContent: "flex-end",
+                                minWidth: 0,
+                              }}
+                            >
+                              {semDados ? (
+                                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                                  sem dados do disco
+                                </span>
+                              ) : (
+                                <>
+                                  {d.percent != null && (
+                                    <RingGauge percent={d.percent} size={40} />
+                                  )}
+                                  {d.temperature_c != null && (
+                                    <Thermometer celsius={d.temperature_c} height={52} inline />
+                                  )}
+                                  {partesTexto.length > 0 && (
+                                    <span
+                                      style={{
+                                        fontSize: 11,
+                                        color: "var(--text-muted)",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {partesTexto.join(" · ")}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                  )
+                )}
+              </>
             )}
           </div>
         );

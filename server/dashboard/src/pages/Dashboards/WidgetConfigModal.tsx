@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import Modal from "../../components/Modal";
+import TelemetriaConfigEditor from "./TelemetriaConfigEditor";
 import { OpcoesDashboard, WidgetInstancia } from "./types";
 import { CampoWidget, definicaoDe } from "./widgets/registry";
 
@@ -359,6 +360,16 @@ export default function WidgetConfigModal({
             {texto.length}/{campo.max}
           </div>
         </div>
+      );
+    }
+
+    if (campo.tipo === "telemetria") {
+      return (
+        <TelemetriaConfigEditor
+          config={config}
+          setConfig={setConfig}
+          opcoes={opcoes}
+        />
       );
     }
 

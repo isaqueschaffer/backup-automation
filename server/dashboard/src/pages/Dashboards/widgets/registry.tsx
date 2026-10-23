@@ -42,7 +42,8 @@ export type CampoWidget =
   | { chave: string; tipo: "periodo"; rotulo: string }
   | { chave: string; tipo: "opcao"; rotulo: string; opcoes: { valor: string; rotulo: string }[] }
   | { chave: string; tipo: "booleano"; rotulo: string }
-  | { chave: string; tipo: "texto"; rotulo: string; max: number };
+  | { chave: string; tipo: "texto"; rotulo: string; max: number }
+  | { chave: string; tipo: "telemetria"; rotulo: string };
 
 export const LARGURAS: { valor: Largura; rotulo: string }[] = [
   { valor: 3, rotulo: "¼" },
@@ -170,20 +171,22 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
   telemetria_equipamentos: {
     tipo: "telemetria_equipamentos",
     rotulo: "Gravadores (CPU, RAM e discos)",
-    descricao: "CPU, memória e discos dos gravadores (NVR/DVR) com alerta de disco com problema ou cheio",
+    descricao:
+      "Telemetria dos gravadores (NVR/DVR) personalizável: escolha CPU, memória, tempo ligado e, por disco, uso, temperatura, saúde, capacidade e idade",
     icone: HardDrive,
     larguraPadrao: 6,
     alturaPadrao: 6,
     larguraMin: 4,
     alturaMin: 7,
-    configPadrao: { equipamentos: [], apenas_problemas: false },
+    configPadrao: { equipamentos: [], apenas_problemas: false, metricas: [], discos: {} },
     campos: [
       { chave: "equipamentos", tipo: "equipamentos", rotulo: "Gravadores exibidos", tipos: ["NVR"] },
+      { chave: "metricas", tipo: "telemetria", rotulo: "O que exibir" },
       { chave: "apenas_problemas", tipo: "booleano", rotulo: "Mostrar apenas gravadores com problema" },
     ],
     renderizar: (dados, widget) => {
       // Cast tipado para telemetria dos gravadores
-      const d = (dados || { equipamentos: [] }) as DadosTelemetriaEquipamentos;
+      const d = (dados || { metricas: [], equipamentos: [] }) as DadosTelemetriaEquipamentos;
       return <TelemetriaEquipamentosWidget dados={d} widget={widget} />;
     },
   },

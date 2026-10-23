@@ -931,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Dashboard: widget "Gravadores" personalizável e termômetro de temperatura dos HDs
+
+**Alteração:** a temperatura dos HDs deixa de ser um anel e vira um termômetro vertical com escala 0–70 °C e marcas de atenção (50) e crítico (60) (`Overview/Thermometer.tsx`, usado no modal do NVR e no widget; `percentualTemperaturaHd` removida). O widget `telemetria_equipamentos` ganha dois campos de configuração: `metricas` (lista de `cpu`, `ram`, `uptime`, `disco_uso`, `disco_temperatura`, `disco_saude`, `disco_capacidade`, `disco_idade`; vazio = todas) e `discos` (objeto `{id do gravador: [nomes dos HDs]}`; ausente ou vazio = todos os HDs daquele gravador). O servidor projeta a resposta só com o que foi escolhido (vale também para o link público) e devolve `metricas` com a lista efetiva; o selo "Atenção/Saudável" continua calculado com a telemetria completa. `GET .../dashboard/opcoes` passa a trazer `discos` (nomes dos HDs) em cada equipamento, e as chaves de `discos` entram na validação de isolamento por cliente (`ids_referenciados`). O modal de configuração ganhou o editor `TelemetriaConfigEditor.tsx` (botões de marcar, atalhos e seleção de HDs por gravador). Sem mudança de banco.
+**Arquivos:** server/api/services/dashboards/widgets.py, layout.py, esquemas.py, dados.py, server/dashboard/src/pages/Dashboards/TelemetriaConfigEditor.tsx, WidgetConfigModal.tsx, types.ts, widgets/registry.tsx, widgets/TelemetriaEquipamentosWidget.tsx, server/dashboard/src/pages/Overview/Thermometer.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não (campos novos opcionais; dashboards antigos exibem tudo como antes).
+**Branch:** isaque
+
 ### [2026-10-23] — Agente 1.1.24: backup manual do UNM2000 gera uma exportação nova na hora
 
 **Alteração:** versão 1.1.24 do agente, que leva a exportação sob demanda do UNM2000 (entrada abaixo). Versão em `updater.py`, `installer.iss` e `package.json`.

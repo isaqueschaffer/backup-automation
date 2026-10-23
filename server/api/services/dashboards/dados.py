@@ -1,12 +1,17 @@
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
 from models import Customer
 from .layout import DashboardLayout
 from .registro import REGISTRO
-from .widgets import carregar_contexto, equipamentos_ativos, iso
+from .widgets import (
+    carregar_contexto,
+    equipamentos_ativos,
+    iso,
+    telemetria_equipamento_publica,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +44,23 @@ def listar_opcoes(db: Session, customer: Customer) -> Dict[str, Any]:
     equipamentos = []
     for m in ctx.maquinas:
         for e in equipamentos_ativos(m):
+            t = telemetria_equipamento_publica(e.last_telemetry_status)
+            discos: List[str] = []
+            if t and isinstance(t.get("disks"), list):
+                vistos = set()
+                for d in t["disks"]:
+                    if isinstance(d, dict):
+                        dev = d.get("device")
+                        if dev and dev not in vistos:
+                            vistos.add(dev)
+                            discos.append(dev)
             equipamentos.append({
                 "id": e.id,
                 "nome": e.name,
                 "tipo": e.tipo or "NVR",
                 "maquina_id": m.id,
                 "maquina": m.name,
+                "discos": discos,
             })
     return {
         "maquinas": maquinas,

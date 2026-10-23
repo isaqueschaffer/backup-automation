@@ -59,6 +59,7 @@ export interface OpcaoEquipamento {
   tipo: string;
   maquina_id: string;
   maquina: string;
+  discos?: string[];
 }
 
 export interface OpcoesDashboard {
@@ -120,6 +121,7 @@ export interface DadosResumo {
 }
 
 export interface DadosTelemetriaEquipamentos {
+  metricas?: string[];
   equipamentos: {
     id: string;
     nome: string;

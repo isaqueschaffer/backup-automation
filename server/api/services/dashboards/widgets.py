@@ -545,13 +545,58 @@ def construir_cameras(ctx: ContextoDados, config: ConfigCameras) -> Dict[str, An
 
 
 # ─── Gravadores (CPU, RAM e discos) ────────────────────────────────────
+METRICAS_TELEMETRIA = (
+    "cpu", "ram", "uptime",
+    "disco_uso", "disco_temperatura", "disco_saude", "disco_capacidade", "disco_idade",
+)
+MetricaTelemetria = Literal[
+    "cpu", "ram", "uptime",
+    "disco_uso", "disco_temperatura", "disco_saude", "disco_capacidade", "disco_idade",
+]
+
+
 class ConfigTelemetriaEquipamentos(BaseModel):
     model_config = {"extra": "forbid"}
     equipamentos: List[UUID] = Field(default_factory=list, max_length=500)
     apenas_problemas: bool = False
+    metricas: List[MetricaTelemetria] = Field(default_factory=list, max_length=8)
+    discos: Dict[UUID, List[str]] = Field(default_factory=dict)
+
+    @field_validator("metricas")
+    @classmethod
+    def _validar_metricas(cls, metricas: List[MetricaTelemetria]) -> List[MetricaTelemetria]:
+        vistas = set()
+        resultado = []
+        for m in metricas:
+            if m not in vistas:
+                vistas.add(m)
+                resultado.append(m)
+        return resultado
+
+    @field_validator("discos")
+    @classmethod
+    def _validar_discos(cls, discos: Dict[UUID, List[str]]) -> Dict[UUID, List[str]]:
+        if len(discos) > 500:
+            raise ValueError("Número de gravadores em discos não pode exceder 500")
+        limpo: Dict[UUID, List[str]] = {}
+        for eq_id, nomes in discos.items():
+            if len(nomes) > 32:
+                raise ValueError(f"Gravador {eq_id} tem mais de 32 discos")
+            nomes_unicos = []
+            vistos = set()
+            for nome in nomes:
+                s = (str(nome) if nome is not None else "").strip()[:40]
+                if s and s not in vistos:
+                    vistos.add(s)
+                    nomes_unicos.append(s)
+            if nomes_unicos:
+                limpo[eq_id] = nomes_unicos
+        return limpo
 
 
 def construir_telemetria_equipamentos(ctx: ContextoDados, config: ConfigTelemetriaEquipamentos) -> Dict[str, Any]:
+    metricas = set(config.metricas) if config.metricas else set(METRICAS_TELEMETRIA)
+    tem_metrica_disco = any(m.startswith("disco_") for m in metricas)
     filtro_ids = set(config.equipamentos) if config.equipamentos else None
     itens = []
 
@@ -565,21 +610,54 @@ def construir_telemetria_equipamentos(ctx: ContextoDados, config: ConfigTelemetr
             problema = equipamento_tem_problema(t)
             if config.apenas_problemas and not problema:
                 continue
+
+            if not tem_metrica_disco:
+                discos_projetados: List[Dict[str, Any]] = []
+            else:
+                escolhidos = config.discos.get(e.id)
+                escolhidos_set = set(escolhidos) if escolhidos else None
+                discos_filtrados = [
+                    d for d in (t.get("disks") or [])
+                    if not escolhidos_set or d.get("device") in escolhidos_set
+                ]
+                discos_projetados = []
+                for d in discos_filtrados:
+                    item_d: Dict[str, Any] = {"device": d.get("device")}
+                    if "disco_uso" in metricas:
+                        item_d["percent"] = d.get("percent")
+                    if "disco_temperatura" in metricas:
+                        item_d["temperature_c"] = d.get("temperature_c")
+                    if "disco_saude" in metricas:
+                        item_d["status"] = d.get("status")
+                    if "disco_capacidade" in metricas:
+                        item_d["total_gb"] = d.get("total_gb")
+                        item_d["free_gb"] = d.get("free_gb")
+                    if "disco_idade" in metricas:
+                        item_d["power_on_days"] = d.get("power_on_days")
+                    discos_projetados.append(item_d)
+
+            cpu_val = t["cpu_percent"] if "cpu" in metricas else None
+            ram_val = t["ram_percent"] if "ram" in metricas else None
+            uptime_val = t["uptime_seconds"] if "uptime" in metricas else None
+
             itens.append({
                 "id": str(e.id),
                 "nome": e.name,
                 "tipo": e.tipo or "NVR",
                 "maquina": m.name,
                 "atualizado_em": iso(e.updated_at),
-                "cpu_percent": t["cpu_percent"],
-                "ram_percent": t["ram_percent"],
-                "uptime_seconds": t["uptime_seconds"],
-                "disks": t["disks"],
+                "cpu_percent": cpu_val,
+                "ram_percent": ram_val,
+                "uptime_seconds": uptime_val,
+                "disks": discos_projetados,
                 "tem_problema": problema,
             })
 
     itens.sort(key=lambda item: 0 if item["tem_problema"] else 1)
-    return {"equipamentos": itens}
+    return {
+        "metricas": [m for m in METRICAS_TELEMETRIA if m in metricas],
+        "equipamentos": itens,
+    }
 
 
 # ─── Equipamentos ───────────────────────────────────────────────────────
@@ -728,7 +806,7 @@ registrar(TipoWidget(
 registrar(TipoWidget(
     tipo="telemetria_equipamentos",
     rotulo="Gravadores (CPU, RAM e discos)",
-    descricao="CPU, memória e discos dos gravadores (NVR/DVR) com alerta de disco com problema ou cheio",
+    descricao="Telemetria dos gravadores (NVR/DVR) personalizável: escolha CPU, memória, tempo ligado e, por disco, uso, temperatura, saúde, capacidade e idade",
     config_model=ConfigTelemetriaEquipamentos,
     largura_padrao=6,
     altura_padrao=6,

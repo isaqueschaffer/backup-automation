@@ -92,6 +92,7 @@ class OpcaoEquipamento(BaseModel):
     tipo: str
     maquina_id: UUID
     maquina: str
+    discos: List[str] = Field(default_factory=list)
 
 
 class OpcoesResposta(BaseModel):
