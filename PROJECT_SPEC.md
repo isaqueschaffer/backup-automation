@@ -128,9 +128,10 @@ trilan-nvr-backup-automation/
 │       ├── core/config.py       <- Lê agent.conf (ConfigError, parse_config_extra)
 │       ├── nvr/
 │       │   ├── factory.py       <- Detecta tipo de NVR e orquestra busca/gravação
-│       │   ├── hikvision/       <- NVR/DVR Hikvision (ISAPI; telemetria CPU/RAM/discos)
-│       │   ├── intelbras/       <- NVR Intelbras: telemetria por SNMP (câmeras e gravações usam o ISAPI de hikvision/)
-│       │   └── motorola/        <- NVR Motorola/NVMS-9000 (cameras, recordings, queryChlRecLog)
+│       │   ├── planilha_comum.py<- Estilo, abas e aba 'Câmeras (completo)' das planilhas de configuração dos NVR
+│       │   ├── hikvision/       <- NVR/DVR Hikvision (ISAPI; telemetria CPU/RAM/discos; planilha .xlsx)
+│       │   ├── intelbras/       <- NVR Intelbras: telemetria por SNMP; planilha .xlsx pelo CGI Dahua (câmeras e gravações usam o ISAPI de hikvision/)
+│       │   └── motorola/        <- NVR Motorola/NVMS-9000 (cameras, recordings, queryChlRecLog, telemetry, planilha .xlsx)
 │       ├── olt/                 <- huawei_active, unm2000, vsol
 │       ├── pabx/issabel.py
 │       ├── mikrotik/routeros.py
@@ -546,7 +547,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 
 | Metodo | Path | Descricao |
 |---|---|---|
-| GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente |
+| GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente (`client_name` = nome da máquina; `customer_name` = nome do Cliente da máquina, opcional) |
 | POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup` |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
@@ -931,6 +932,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Merge do ramo `helena` em `isaque` (auditado)
+
+**Alteração:** merge de `isaque_repo/helena` (`f379534`): planilha `.xlsx` da configuração dos NVR (Motorola, Hikvision e Intelbras), telemetria de rede e SMART dos discos Motorola, uptime do NVR Intelbras via SNMP, suporte completo ao NVR Intelbras (câmeras, gravações, backup), correção do mapa de gravação dos VMS Digifort/Defense, `openpyxl` no `agent/requirements.txt` e `customer_name` opcional em `GET /agent/config`. **Verificação do CLAUDE.md:** compose, nginx, `models.py`, migrações e `.env*` sem mudança; nenhum segredo nas linhas adicionadas; sem `queryPlatformCfg`; sem `datetime.now(timezone.utc)` (os `datetime.now()` sem fuso do agente são só data local de consulta de gravação e rótulo "Coletado em" das planilhas, nada vai para o banco). **Bloqueado no merge:** a pasta `teste backup motorola/` (um backup binário de configuração de NVR, `ConfigurationBackupFile`, que pode conter credenciais, e dois scripts de dump) por ser material solto de teste e o repositório de `integracao-equipamentos` ser público; permanecem no ramo `helena`. **Atenção operacional:** a telemetria e a planilha Motorola usam endpoints de leitura além da lista que o spec validou (`queryNetCfg`, `queryDiskDetailInfo`, `queryBasicCfg` e outros); a Helena registra validação em equipamentos reais, mas firmware 1.3.x é frágil (ver `queryPlatformCfg`), então a primeira rodada em Motorola de cliente deve ser acompanhada. Conflito único resolvido: ordem das entradas do changelog.
+**Arquivos:** agent/src/**, server/api/routers/agent.py, server/api/schemas.py, agent/requirements.txt, .gitignore, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque (merge de helena)
+
 ### [2026-10-23] — Dashboard: HDs do widget "Gravadores" alinhados em colunas
 
 **Alteração:** cada HD era uma linha flexível com o grupo da direita alinhado ao fim, então um texto de idade mais curto ("1 mês") deslocava o termômetro e a temperatura em relação às demais linhas. A lista de HDs de cada gravador passa a ser uma grade CSS compartilhada (colunas `max-content`: nome, selo de saúde, uso, termômetro, capacidade e idade; só entram as colunas que têm dado em algum HD do gravador), dentro de um contêiner com `overflowX: auto`. Células sem dado ficam vazias para manter as colunas; o HD sem nenhum dado mostra "sem dados do disco" ao lado do nome.
@@ -958,6 +966,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 **Arquivos:** server/api/services/dashboards/widgets.py, layout.py, esquemas.py, dados.py, server/dashboard/src/pages/Dashboards/TelemetriaConfigEditor.tsx, WidgetConfigModal.tsx, types.ts, widgets/registry.tsx, widgets/TelemetriaEquipamentosWidget.tsx, server/dashboard/src/pages/Overview/Thermometer.tsx, PROJECT_SPEC.md
 **Breaking Change:** Não (campos novos opcionais; dashboards antigos exibem tudo como antes).
 **Branch:** isaque
+
+### [2026-10-23] — Planilha da configuração dos NVR (Motorola, Hikvision e Intelbras) gerada junto com o backup
+
+**Alteração:** todo backup de NVR/DVR passa a gerar uma planilha `.xlsx` com a configuração lida do equipamento. É um inventário legível (ajuda a reconfigurar o NVR na mão), não um arquivo restaurável: não muda o status do backup (Motorola segue `SEM_ARQUIVOS`; Hikvision e Intelbras seguem com o `.bin`/`.backup` de sempre). Um módulo por marca, escolhido pelo tipo detectado (`PLANILHAS_NVR` em `backup_job.py`: `MOTOROLA`, `INTELBRAS`, `NVR`/`DVR` = Hikvision): `motorola/planilha.py` (NVMS-9000), `hikvision/planilha.py` (ISAPI, só GET) e `intelbras/planilha.py` (CGI Dahua, só `getConfig` e consultas de leitura). A parte comum (estilo, `eh_sensivel`, `SMART_NOMES`, aba **Câmeras (completo)**) fica em `nvr/planilha_comum.py`. **Abas:** Resumo; **Câmeras (completo)** (uma linha por câmera, cada dado em sua coluna, grupos coloridos `Stream |`, `Gravação |`/`Agenda |`, `Movimento |`, `Eventos |`, `Imagem |`; é a aba que abre por padrão); Câmeras; Stream; Gravação/Agendamento; Movimento; Eventos; Imagem; Discos; SMART (Motorola e Hikvision); Rede; configuração do sistema e **Comandos** (resultado de cada consulta, para ver o que o firmware não oferece). Por marca: *Hikvision* (validada no DS-7732NI-K4/16P, firmware V4.74.210, 26 canais): InputProxy (IP, modelo, série, firmware e força da senha de cada câmera, online), Streaming (principal/sub/terceiro: codec, resolução, CBR/VBR, bitrate, FPS, GOP, Smart Codec, áudio), trilhas de gravação e agenda, movimento por canal (sensibilidade, área, agenda), ações por tipo de evento, imagem/OSD, discos com SMART, rede, NTP, portas, UPnP, DDNS, IO; consultas por canal só nas câmeras online (as offline respondem 403). *Intelbras* (validada no iNVD 3016, firmware 4.001, 16 canais): ChannelTitle, RemoteDevice (IP, portas, modelo, série, firmware), Encode (3 formatos principais e 2 sub-streams), Record/RecordMode e agenda (índice 7 = feriado), MotionDetect (área em `MotionDetectWindow[n]` no firmware V3.0), perda de vídeo e máscara, ações dos eventos do sistema, alarmes, discos, rede. O CGI não informa se a câmera está online. *Motorola*: ver entrada anterior (refatorada para usar o módulo comum; ganhou nova tentativa quando a conexão cai). **Segurança:** `userName`/`password` (tag, atributo ou chave) nunca vão para a planilha (`eh_sensivel`); a consulta de usuários do NVR (`userManager`) não é usada; só leitura, pausa entre consultas, timeout, nova tentativa em queda de conexão e limite total de 300 s por NVR; o primeiro recurso (`deviceInfo`/`getSystemInfo`) sem resposta aborta a coleta sem insistir (evita bloquear a conta por login inválido). Uma seção com erro de leitura fica vazia sem derrubar o resto. **Pacote:** `processar_nvr` grava a planilha na pasta de trabalho e devolve o caminho em `_planilha`; `run_backup` remove essa chave antes de reportar ao servidor e move o arquivo para `NVR/PLANILHA/<cliente>_<máquina>_<DD-MM-AAAA>.xlsx` dentro do pacote final (ZIP global da máquina; fica fora do `backup.zip` do equipamento). Com mais de um NVR na máquina, o nome do NVR entra no nome de todas as planilhas; sem `customer_name` (servidor antigo ou máquina sem Cliente) o nome fica `<máquina>_<data>.xlsx`. API: `GET /agent/config` ganhou `customer_name` (opcional). Dependência nova: `openpyxl>=3.1.0` (se não carregar, só as planilhas somem). Tempo acrescentado por NVR: cerca de 15 a 40 s. **Validação:** `processar_equipamento` do agente nos equipamentos reais (Motorola 192.168.124.2, Hikvision 192.168.20.2, Intelbras 192.168.75.6); formato dos XMLs da Motorola conferido também em 192.168.5.2 e 192.168.5.5. Não testados: firmware Motorola 1.4.x, DVR analógico Hikvision/Intelbras e o build do PyInstaller com `openpyxl`. Versão do agente não alterada (entra na próxima).
+**Arquivos:** agent/src/nvr/planilha_comum.py, agent/src/nvr/motorola/planilha.py, agent/src/nvr/hikvision/planilha.py, agent/src/nvr/intelbras/planilha.py, agent/src/application/backup_job.py, agent/requirements.txt, server/api/schemas.py, server/api/routers/agent.py, PROJECT_SPEC.md
+**Breaking Change:** Não. Campo novo e opcional em `GET /agent/config`; agentes antigos o ignoram e servidores antigos não o enviam.
+**Branch:** helena
 
 ### [2026-10-23] — Agente 1.1.24: backup manual do UNM2000 gera uma exportação nova na hora
 
@@ -1062,6 +1077,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 **Problema:** `post_report` (`agent/src/application/api_client.py`) montava cada item de `nvr_results` com `nome`, `tipo`, `status` e `cameras`, mas **não** com `telemetria`. O agente coletava CPU/RAM/discos (Hikvision por ISAPI, Intelbras por SNMP), o servidor já sabia gravar `nvrs.last_telemetry_status`, porém o campo se perdia no envio — `last_telemetry_status` ficava vazio e os widgets "Gravadores" e os indicadores de disco do "Resumo" apareciam sem dados. Afetava todas as versões do agente até a 1.1.18 (inclusive a branch `helena`).
 
 **Correção:** `post_report` passa a enviar `"telemetria": r.get("telemetria")` (`None` continua sendo ignorado pelo servidor). Sem mudança de contrato nem de servidor. Teste de regressão: `tools/teste_telemetria_nvr_e2e.py`. Liberada na versão 1.1.19 do agente; o efeito aparece a cada backup após a máquina atualizar.
+
+### [2026-10-23] — Telemetria de NVRs Motorola (CPU, RAM, Discos e Rede)
+
+**Alteração:** Suporte a coleta de telemetria em gravadores Motorola (arquitetura NVMS-9000 / TVT):
+1. Script de diagnóstico e dump (`teste backup motorola/dump_motorola_telemetria.py`): baseado no padrão do `dump_motorola_cameras.py`, conecta via NVMS-9000 (`reqLogin`/`doLogin` com SHA-512 ou Base64), testa envelopes gerais e com `requireField` para armazenamento (`queryDiskStatus`, `queryDiskDetailInfo`, `queryStorageCapacity`), CPU/RAM (`queryCpuStatus`, `queryMemoryStatus`, `queryDevStatus`) e rede (`queryNetCfg`, `queryNetStatus`), salvando os XMLs brutos em `respostas_telemetria_<ip>/` e exibindo o resumo consolidado e o JSON formatado.
+2. Agente (`agent/src/nvr/motorola/telemetry.py`): novo módulo `coletar_telemetria_motorola` extrai CPU (`%`), RAM (`%`, total e usado em GB), tabela de discos (identificador, status normalizado para o `StatusBadge`, percentual de uso, capacidade total e livre em GB) e interfaces de rede (nome, status UP/DOWN, IP, MAC, velocidade e taxas de envio/recebimento).
+3. Despacho no `agent/src/nvr/factory.py`: `coletar_telemetria_nvr()` roteia para `coletar_telemetria_motorola` quando `marca == "MOTOROLA"` ou `tipo_nvr == "MOTOROLA"`, integrando diretamente à tela de telemetria (`NVRTelemetryModal`) e aos widgets de gravadores sem exigir mudanças no backend ou frontend.
+**Arquivos:** agent/src/nvr/motorola/telemetry.py, agent/src/nvr/factory.py, teste backup motorola/dump_motorola_telemetria.py, teste backup motorola/dump_motorola_cameras.py, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** helena
 
 ### [2026-10-21] — Agente 1.1.18: Telemetria de NVR Intelbras via SNMP
 
@@ -1483,6 +1508,22 @@ Integração (merge em isaque): a dependência foi fixada em `pysnmp>=7.1,<8.0.0
 **Breaking Change:** Não (body do ping é opcional; agentes antigos continuam funcionando).
 **Requer:** nova build do agente para enviar telemetria.
 **Branch:** isaque
+
+---
+
+### [2026-10-23] — Telemetria de NVR Motorola (NVMS-9000 / TVT)
+
+**Alteração:** Suporte completo à telemetria de NVRs Motorola (protocolo NVMS-9000 / arquitetura TVT, modelo MTR16IP / TD-3116B2).
+**Implementação:**
+- Módulo `agent/src/nvr/motorola/telemetry.py` integrado à `factory.coletar_telemetria_nvr`.
+- Autenticação com desafio SHA-512 (`reqLogin`/`doLogin`) e fallback Base64.
+- Coleta de Rede: status de interface (`nicStatus` online -> `UP`), IP, MAC, e taxa de transferência real extraída de `<bandwidth>` (`totalBandwidth` - `remainBandwidth` para Rx de câmeras; `sendTotalBandwidth` - `sendRemainBandwidth` para Tx de visualização).
+- Coleta de Discos: status de operação (`queryDiskStatus` read/write -> `OK`), dados S.M.A.R.T (`queryDiskSmartInfo`: temperatura em °C, dias de operação `powerOnDays`, integridade física).
+- CPU e RAM: tratados como nulos de forma segura (`—`), exibindo traço no modal de telemetria do dashboard (`NVRTelemetryModal.tsx`).
+- Script de diagnóstico e dump offline: `teste backup motorola/dump_motorola_telemetria.py`.
+**Arquivos:** `agent/src/nvr/motorola/telemetry.py`, `agent/src/nvr/factory.py`, `teste backup motorola/dump_motorola_telemetria.py`
+**Breaking Change:** Não
+**Branch:** helena
 
 ---
 

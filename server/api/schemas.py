@@ -250,6 +250,7 @@ class AgentNVR(AgentEquipamento):
 
 class AgentConfigResponse(BaseModel):
     client_name: str
+    customer_name: Optional[str] = None  # nome do Cliente da máquina (vai no nome da planilha do NVR Motorola)
     backup_hour: int
     backup_minute: int
     zip_password: Optional[str]

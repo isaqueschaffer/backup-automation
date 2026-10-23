@@ -10,6 +10,7 @@ TIMEOUT = 2.0
 COMMUNITY_PADRAO = "Public"
 
 # MIB proprietaria Intelbras: nao expoe utilizacao de CPU, so RAM e discos.
+_OID_SYS_UPTIME = "1.3.6.1.2.1.1.3.0"        # RFC1213-MIB / SNMPv2-MIB: sysUpTime (TimeTicks em centésimos de segundo)
 _OID_RAM_TOTAL_MB = "1.3.6.1.4.1.1004849.2.1.9.1.0"
 _OID_RAM_USO_PCT = "1.3.6.1.4.1.1004849.2.1.9.2.0"
 _OID_TABELA_HDD = "1.3.6.1.4.1.1004849.2.4.1.1"  # .4={device} .5={status} .6={total_gb} .7={free_gb}
@@ -20,6 +21,9 @@ _OID_IFX_TABLE = "1.3.6.1.2.1.31.1.1.1" # IF-MIB XTable: .6=inHC, .10=outHC, .15
 _STATUS_DISCO = {
     "normal": "OK",
     "ok": "OK",
+    "running": "OK",
+    "idle": "OK",
+    "sleep": "OK",
     "error": "ERRO",
     "abnormal": "ERRO",
     "lost": "ERRO",
@@ -57,18 +61,32 @@ async def _coletar_async(nvr_ip, community):
     try:
         err_ind, err_status, _, var_binds = await get_cmd(
             engine, auth, target, ctx,
+            ObjectType(ObjectIdentity(_OID_SYS_UPTIME)),
             ObjectType(ObjectIdentity(_OID_RAM_USO_PCT)),
             ObjectType(ObjectIdentity(_OID_RAM_TOTAL_MB)),
         )
         if not err_ind and not err_status and var_binds:
+            # Uptime (centésimos de segundo -> segundos)
             try:
-                telemetria["ram_percent"] = int(var_binds[0][1].prettyPrint())
-                teve_sucesso = True
+                timeticks = int(var_binds[0][1].prettyPrint())
+                if timeticks >= 0:
+                    telemetria["uptime_seconds"] = int(timeticks / 100)
+                    teve_sucesso = True
             except (ValueError, IndexError):
                 pass
+
+            # RAM %
             try:
                 if len(var_binds) > 1:
-                    total_mb = int(var_binds[1][1].prettyPrint())
+                    telemetria["ram_percent"] = int(var_binds[1][1].prettyPrint())
+                    teve_sucesso = True
+            except (ValueError, IndexError):
+                pass
+
+            # RAM Total e Usada
+            try:
+                if len(var_binds) > 2:
+                    total_mb = int(var_binds[2][1].prettyPrint())
                     if total_mb > 0:
                         total_gb = round(total_mb / 1024, 1)
                         telemetria["ram_total_gb"] = total_gb
@@ -77,7 +95,7 @@ async def _coletar_async(nvr_ip, community):
             except (ValueError, IndexError):
                 pass
     except Exception:
-        logging.warning(f"  Falha ao ler memoria SNMP do NVR {nvr_ip}.", exc_info=True)
+        logging.warning(f"  Falha ao ler uptime e memoria SNMP do NVR {nvr_ip}.", exc_info=True)
 
     discos_map = {}
     try:

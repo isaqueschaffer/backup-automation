@@ -1,11 +1,12 @@
 import logging
+import re
 import time
 
 from src.nvr.motorola.cameras import abrir_sessao_motorola
 from src.utils.xml_parser import parse_xml_seguro, texto
 
-TIMEOUT_S = 30
-PAUSA_S = 1
+TIMEOUT_S = 15
+PAUSA_S = 0.5
 MAX_DISCOS = 16
 
 
@@ -40,7 +41,7 @@ def _post(session, nvr_ip, endpoint, corpo=""):
             return None
         raiz = parse_xml_seguro(resp.content)
         status = texto(raiz, ".//status", None)
-        if status != "success":
+        if status != "success" and not raiz.findall(".//content"):
             return None
         return raiz
     except Exception as e:
@@ -51,31 +52,29 @@ def _post(session, nvr_ip, endpoint, corpo=""):
 
 
 def coletar_telemetria_motorola(nvr_ip, usuario, senha):
-    """Coleta capacidade, idade, temperatura e saude dos HDs de um NVR/DVR Motorola (NVMS-9000).
-    Retorna {"disks": [...]} ou None se o login ou a lista de discos falhar."""
+    """Coleta capacidade, idade, temperatura e saude dos HDs e status de rede de um NVR/DVR Motorola (NVMS-9000).
+    Retorna {"disks": [...], "networks": [...]} ou None se o login ou as consultas falharem."""
     try:
         session = abrir_sessao_motorola(nvr_ip, usuario, senha)
         if session is None:
             return None
 
-        raiz = _post(session, nvr_ip, "queryStorageDevInfo")
-        if raiz is None:
-            return None
-
-        itens = raiz.findall(".//diskList/item")
+        # ---------------------------------------------------------------------
+        # 1. DISCOS (queryStorageDevInfo + queryDiskStatus + queryDiskSmartInfo)
+        # ---------------------------------------------------------------------
         discos_info = []
-        for item in itens:
-            disk_id = item.get("id")
-            if not disk_id:
-                continue
-            slot = texto(item, "slotIndex", None)
-            size_mb = _numero(texto(item, "size", None))
-            discos_info.append({"id": disk_id, "slot": slot, "size_mb": size_mb})
-            if len(discos_info) >= MAX_DISCOS:
-                break
-
-        if not discos_info:
-            return None
+        raiz = _post(session, nvr_ip, "queryStorageDevInfo")
+        if raiz is not None:
+            itens = raiz.findall(".//diskList/item")
+            for item in itens:
+                disk_id = item.get("id")
+                if not disk_id:
+                    continue
+                slot = texto(item, "slotIndex", None)
+                size_mb = _numero(texto(item, "size", None))
+                discos_info.append({"id": disk_id, "slot": slot, "size_mb": size_mb})
+                if len(discos_info) >= MAX_DISCOS:
+                    break
 
         estados = {}
         raiz_st = _post(session, nvr_ip, "queryDiskStatus")
@@ -88,6 +87,11 @@ def coletar_telemetria_motorola(nvr_ip, usuario, senha):
                 if not valor:
                     valor = texto(item, "diskStatus", None)
                 estados[item_id] = valor
+
+        # Fallback para firmwares onde queryStorageDevInfo nao retorna diskList
+        if not discos_info and estados:
+            for idx, item_id in enumerate(estados.keys(), start=1):
+                discos_info.append({"id": item_id, "slot": str(idx), "size_mb": None})
 
         discos = []
         for info in discos_info:
@@ -139,10 +143,83 @@ def coletar_telemetria_motorola(nvr_ip, usuario, senha):
                 "temperature_c": temperature_c,
             })
 
-        if not discos:
+        # ---------------------------------------------------------------------
+        # 2. REDE (queryNetStatus / queryNetCfg / bandwidth)
+        # ---------------------------------------------------------------------
+        networks = []
+        bw_recv_mbps = None
+        bw_sent_mbps = None
+
+        raiz_net = _post(session, nvr_ip, "queryNetStatus")
+        if raiz_net is not None:
+            bw = raiz_net.find(".//bandwidth")
+            if bw is not None:
+                tot_bw = _numero(texto(bw, ".//totalBandwidth", None))
+                rem_bw = _numero(texto(bw, ".//remainBandwidth", None))
+                send_tot_bw = _numero(texto(bw, ".//sendTotalBandwidth", None))
+                send_rem_bw = _numero(texto(bw, ".//sendRemainBandwidth", None))
+                if tot_bw is not None and rem_bw is not None:
+                    bw_recv_mbps = round(float(tot_bw - rem_bw), 1)
+                if send_tot_bw is not None and send_rem_bw is not None:
+                    bw_sent_mbps = round(float(send_tot_bw - send_rem_bw), 1)
+
+            for item in raiz_net.findall(".//nic/item"):
+                nic_id = item.get("id") or texto(item, "id", "eth0")
+                nic_status = texto(item, "nicStatus", "") or ""
+                ip_val = texto(item, "ip", None)
+                mac_val = texto(item, "mac", None)
+                status = "UP" if nic_status.lower() in ("online", "up", "connected") else "DOWN"
+
+                networks.append({
+                    "name": nic_id,
+                    "ip": ip_val,
+                    "mac": mac_val,
+                    "status": status,
+                    "speed_mbps": 1000,
+                    "recv_mbps": bw_recv_mbps,
+                    "sent_mbps": bw_sent_mbps,
+                })
+
+        # Se queryNetStatus nao retornou itens de placa, tenta queryNetCfg
+        if not networks:
+            raiz_cfg = _post(session, nvr_ip, "queryNetCfg")
+            if raiz_cfg is not None:
+                for item in raiz_cfg.findall(".//nicConfigs/item"):
+                    nic_id = item.get("id") or "eth0"
+                    ip_val = texto(item, "ip", None)
+                    mac_val = texto(item, "mac", None)
+                    is_online = texto(item, "isOnline", "")
+                    status = "UP" if is_online.lower() in ("true", "1") else "DOWN"
+
+                    networks.append({
+                        "name": nic_id,
+                        "ip": ip_val,
+                        "mac": mac_val,
+                        "status": status,
+                        "speed_mbps": 1000,
+                        "recv_mbps": bw_recv_mbps,
+                        "sent_mbps": bw_sent_mbps,
+                    })
+
+        # Fallback de placa caso nao tenha retornado lista detalhada
+        if not networks:
+            networks.append({
+                "name": "LAN",
+                "ip": nvr_ip,
+                "mac": None,
+                "status": "UP",
+                "speed_mbps": 1000,
+                "recv_mbps": bw_recv_mbps,
+                "sent_mbps": bw_sent_mbps,
+            })
+
+        if not discos and not networks:
             return None
 
-        return {"disks": discos}
+        return {
+            "disks": discos,
+            "networks": networks,
+        }
     except Exception as e:
         logging.warning(f"Falha ao coletar telemetria do NVR Motorola {nvr_ip}: {e}")
         return None

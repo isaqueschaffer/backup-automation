@@ -13,6 +13,7 @@ O backup (`run_backup` em `src/application/backup_job.py`) busca os equipamentos
 | Caminho | Conteúdo |
 |---|---|
 | `src/nvr/hikvision/`, `src/nvr/motorola/` | NVR/DVR por marca (câmeras e gravações); `src/nvr/factory.py` escolhe a marca |
+| `src/nvr/<marca>/planilha.py`, `src/nvr/planilha_comum.py` | Planilha `.xlsx` da configuração do NVR, gerada no backup (`PLANILHAS_NVR` em `backup_job.py`); nunca grava usuário/senha |
 | `src/olt/` | `unm2000.py`, `vsol.py`, `huawei_active.py` |
 | `src/pabx/issabel.py`, `src/mikrotik/routeros.py`, `src/vms/defense.py` | um módulo por fabricante |
 | `src/camera/rtsp_client.py` | captura RTSP com ffmpeg |
