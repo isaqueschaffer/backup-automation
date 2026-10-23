@@ -132,7 +132,8 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
 def processar_olt(
     equipamento: dict,
     pasta_data: Path,
-    conf: dict = None
+    conf: dict = None,
+    trigger: str = "scheduled"
 ) -> dict:
 
     tipo = (equipamento.get("tipo") or "").lower()
@@ -180,7 +181,8 @@ def processar_olt(
         return realizar_backup_olt(
             equipamento,
             pasta_data,
-            conf
+            conf,
+            trigger
         )
 
     logging.error(
@@ -212,7 +214,7 @@ def processar_defense(equipamento: dict, pasta_data: Path, conf: dict = None) ->
     return realizar_backup_defense(equipamento, pasta_data, conf)
 
 
-def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None) -> dict:
+def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None, trigger: str = "scheduled") -> dict:
     """
     Despachante principal — roteia o processamento pelo tipo do equipamento.
     Tipos suportados: NVR, OLT, PABX
@@ -224,7 +226,7 @@ def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path
         return processar_nvr(equipamento, zip_password, pasta_data, conf)
 
     if tipo == "OLT" or tipo == "DIGIFORT":
-        return processar_olt(equipamento, pasta_data, conf)
+        return processar_olt(equipamento, pasta_data, conf, trigger)
 
     if tipo == "PABX":
         return processar_pabx(equipamento, pasta_data)
@@ -309,7 +311,7 @@ def run_backup(trigger: str = "scheduled"):
         pasta_trabalho = TEMP_DIR_WORK / f"{tipo}_{nome_safe}"
         pasta_trabalho.mkdir(parents=True, exist_ok=True)
 
-        res = processar_equipamento(eq, zip_password, pasta_trabalho, conf)
+        res = processar_equipamento(eq, zip_password, pasta_trabalho, conf, trigger)
         res["tipo"] = tipo
         resultados.append(res)
 
