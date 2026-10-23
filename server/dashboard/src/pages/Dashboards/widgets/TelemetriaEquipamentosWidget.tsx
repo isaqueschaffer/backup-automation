@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import StatusBadge from "../../../components/StatusBadge";
 import RingGauge from "../../Overview/RingGauge";
 import Thermometer from "../../Overview/Thermometer";
@@ -69,6 +70,21 @@ export default function TelemetriaEquipamentosWidget({
           eq.cpu_percent !== null || eq.ram_percent !== null || eq.uptime_seconds != null;
         const temDiscosComDado = temMetricaDisco && Boolean(eq.disks && eq.disks.length > 0);
         const temAlgoParaMostrar = temLinhaCpu || temDiscosComDado;
+
+        const disks = eq.disks || [];
+        const temStatus = disks.some((d) => Boolean(d.status));
+        const temUso = disks.some((d) => d.percent != null);
+        const temTemp = disks.some((d) => d.temperature_c != null);
+        const temCapacidade = disks.some((d) => d.total_gb != null || d.free_gb != null);
+        const temIdade = disks.some((d) => d.power_on_days != null);
+
+        const colunasDiscos = ["max-content"];
+        if (temStatus) colunasDiscos.push("max-content");
+        if (temUso) colunasDiscos.push("max-content");
+        if (temTemp) colunasDiscos.push("max-content");
+        if (temCapacidade) colunasDiscos.push("max-content");
+        if (temIdade) colunasDiscos.push("max-content");
+        if (colunasDiscos.length === 1) colunasDiscos.push("max-content");
 
         return (
           <div
@@ -202,43 +218,35 @@ export default function TelemetriaEquipamentosWidget({
                       Sem dados de disco
                     </div>
                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {eq.disks.map((d, idx) => {
-                        const semDados =
-                          d.total_gb == null &&
-                          d.free_gb == null &&
-                          d.percent == null &&
-                          d.temperature_c == null &&
-                          !d.status &&
-                          d.power_on_days == null;
+                    <div style={{ overflowX: "auto" }}>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: colunasDiscos.join(" "),
+                          columnGap: 18,
+                          rowGap: 8,
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          minWidth: "min-content",
+                          fontSize: 12,
+                        }}
+                      >
+                        {eq.disks.map((d, idx) => {
+                          const semDados =
+                            d.total_gb == null &&
+                            d.free_gb == null &&
+                            d.percent == null &&
+                            d.temperature_c == null &&
+                            !d.status &&
+                            d.power_on_days == null;
 
-                        const partesTexto: string[] = [];
-                        if (d.total_gb != null) partesTexto.push(fmtGb(d.total_gb));
-                        if (d.free_gb != null) partesTexto.push(`${fmtGb(d.free_gb)} livres`);
-                        if (d.power_on_days != null) partesTexto.push(fmtIdade(d.power_on_days));
+                          const partesCapacidade: string[] = [];
+                          if (d.total_gb != null) partesCapacidade.push(fmtGb(d.total_gb));
+                          if (d.free_gb != null) partesCapacidade.push(`${fmtGb(d.free_gb)} livres`);
+                          const textoCapacidade = partesCapacidade.join(" · ");
 
-                        return (
-                          <div
-                            key={d.device || idx}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              flexWrap: "wrap",
-                              gap: "6px 10px",
-                              fontSize: 12,
-                              minWidth: 0,
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                flexShrink: 0,
-                                minWidth: 0,
-                              }}
-                            >
+                          return (
+                            <Fragment key={d.device || idx}>
                               <span
                                 style={{
                                   fontWeight: 600,
@@ -247,57 +255,81 @@ export default function TelemetriaEquipamentosWidget({
                                   overflow: "hidden",
                                   textOverflow: "ellipsis",
                                   maxWidth: 100,
-                                  flexShrink: 0,
                                 }}
                                 title={d.device}
                               >
                                 {d.device || "Disco"}
                               </span>
 
-                              <div style={{ flexShrink: 0 }}>
-                                {d.status && <StatusBadge status={d.status} />}
-                              </div>
-                            </div>
-
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                flexWrap: "wrap",
-                                justifyContent: "flex-end",
-                                minWidth: 0,
-                              }}
-                            >
                               {semDados ? (
-                                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                                <span
+                                  style={{
+                                    gridColumn: "2 / -1",
+                                    fontSize: 11,
+                                    color: "var(--text-muted)",
+                                  }}
+                                >
                                   sem dados do disco
                                 </span>
                               ) : (
                                 <>
-                                  {d.percent != null && (
-                                    <RingGauge percent={d.percent} size={40} />
+                                  {temStatus && (
+                                    d.status ? <StatusBadge status={d.status} /> : <span />
                                   )}
-                                  {d.temperature_c != null && (
-                                    <Thermometer celsius={d.temperature_c} height={52} inline />
+                                  {temUso && (
+                                    d.percent != null ? (
+                                      <RingGauge percent={d.percent} size={40} />
+                                    ) : (
+                                      <span />
+                                    )
                                   )}
-                                  {partesTexto.length > 0 && (
-                                    <span
-                                      style={{
-                                        fontSize: 11,
-                                        color: "var(--text-muted)",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                    >
-                                      {partesTexto.join(" · ")}
-                                    </span>
+                                  {temTemp && (
+                                    d.temperature_c != null ? (
+                                      <Thermometer
+                                        celsius={d.temperature_c}
+                                        height={52}
+                                        inline
+                                      />
+                                    ) : (
+                                      <span />
+                                    )
+                                  )}
+                                  {temCapacidade && (
+                                    textoCapacidade ? (
+                                      <span
+                                        style={{
+                                          fontSize: 11,
+                                          color: "var(--text-muted)",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {textoCapacidade}
+                                      </span>
+                                    ) : (
+                                      <span />
+                                    )
+                                  )}
+                                  {temIdade && (
+                                    d.power_on_days != null ? (
+                                      <span
+                                        style={{
+                                          fontSize: 11,
+                                          color: "var(--text-muted)",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {fmtIdade(d.power_on_days)}
+                                      </span>
+                                    ) : (
+                                      <span />
+                                    )
                                   )}
                                 </>
                               )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                            </Fragment>
+                          );
+                        })}
+                      </div>
                     </div>
                   )
                 )}

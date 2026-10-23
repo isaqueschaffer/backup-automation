@@ -931,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Dashboard: HDs do widget "Gravadores" alinhados em colunas
+
+**Alteração:** cada HD era uma linha flexível com o grupo da direita alinhado ao fim, então um texto de idade mais curto ("1 mês") deslocava o termômetro e a temperatura em relação às demais linhas. A lista de HDs de cada gravador passa a ser uma grade CSS compartilhada (colunas `max-content`: nome, selo de saúde, uso, termômetro, capacidade e idade; só entram as colunas que têm dado em algum HD do gravador), dentro de um contêiner com `overflowX: auto`. Células sem dado ficam vazias para manter as colunas; o HD sem nenhum dado mostra "sem dados do disco" ao lado do nome.
+**Arquivos:** server/dashboard/src/pages/Dashboards/widgets/TelemetriaEquipamentosWidget.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-23] — Dashboard: widget ajustado ao conteúdo ao redimensionar (sem espaço vazio)
 
 **Alteração:** a altura do widget (linhas fixas de 50 px) deixava espaço vazio quando o conteúdo era menor, e o "ajustar ao conteúdo" nunca encolhia (media `scrollHeight`, que com `height: 100%` é sempre a altura da caixa). Agora `WidgetFrame` envolve o corpo em `data-widget-conteudo` (`height: 100%`, layout igual ao anterior) e o novo `medirConteudo.ts` (`linhasDoConteudo`) mede a altura natural zerando a altura do invólucro por um instante. `ajustarAoConteudo` usa essa medida (sem aplicar `alturaMin`, o conteúdo real manda); ao soltar a alça de redimensionamento a altura só DIMINUI até o conteúdo (`somenteReduzir`, nunca cresce nem corta); durante o arraste a altura mínima passa a ser `min(alturaMin, conteúdo)`. Duplo clique na alça continua ajustando exatamente (cresce ou encolhe). Widgets com `alturaFluida: true` (por ora só `historico_backups`, cujo gráfico preenche a caixa) ficam fora. Folga restante: até uma linha da grade (~60 px), pois a altura é em linhas.
