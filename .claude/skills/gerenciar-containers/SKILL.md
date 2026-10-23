@@ -8,7 +8,7 @@ description: Docker do projeto — ambiente local (server/docker-compose.local.y
 | Arquivo | Uso |
 |---|---|
 | `server/docker-compose.local.yml` | **Desenvolvimento e testes nesta máquina**: painel em http://localhost:7001, Postgres em `localhost:5433` |
-| `server/docker-compose.yml` | **Produção**: o Dokploy faz o deploy a cada push na branch `isaque`. Não subir localmente (bind mount em `/opt/trilan/backups`, porta 7005) |
+| `server/docker-compose.yml` | **Produção**: o Dokploy faz o deploy a cada push na branch `isaque`. Não subir localmente (bind mount em `/opt/trilan/backups`). A porta de produção é 7001; o `7005:7001` e o volume `pg_data_local` desse arquivo vieram da máquina da Helena e não devem ser tratados como produção nem alterados sem pedido |
 
 Serviços: `nginx` (proxy, porta 7001), `api` (FastAPI na 8000 interna), `dashboard` (build do Vite servido por nginx) e `db` (Postgres 15 com healthcheck).
 Manter os nomes `docker-compose*.yml` (o Dokploy usa o de produção), mesmo que a skill `docker-compose-patterns` recomende `compose.yaml`.

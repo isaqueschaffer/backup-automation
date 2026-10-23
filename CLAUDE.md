@@ -1,19 +1,20 @@
 # Instruções do projeto
 
-## Skills (só o Claude)
+## Skills e subagentes (Claude e Antigravity)
 
-As skills do projeto ficam em `.claude/skills/<nome>/SKILL.md` e são de uso exclusivo do Claude Code.
-Não criar nem mover skills para `.agents/skills/`: essa pasta é lida automaticamente pelo Antigravity (`agy`),
-que só executa os planos e não deve ter acesso a skills. Quando uma skill for útil para uma tarefa do executor,
-o Claude aplica o conteúdo dela no próprio plano.
+Cada ferramenta tem a sua pasta, com cópias separadas (não há link entre elas; ao mudar uma skill de conteúdo comum, atualizar as duas):
+- **Claude Code**: skills em `.claude/skills/<nome>/SKILL.md`.
+- **Antigravity (`agy`, o Gemini que executa os planos)**: skills em `.agents/skills/<nome>/SKILL.md`, subagentes em `.agents/agents/<nome>/agent.md` e regras em `.agents/rules/`. Desde 23/10/2026 o Gemini enxerga e usa skills e delega a subagentes especializados (`backend-fastapi`, `frontend-dashboard`, `agente-windows`, `revisor`, `depurador`); a regra `.agents/rules/subagentes.md` explica quando usar cada um.
+- As skills do Gemini ficam em português e já trazem as regras do projeto; skills externas só entram depois de lidas por inteiro (viram instrução) e com origem e commit anotados no frontmatter.
 
-Skills do projeto: `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers`, `criar-widget-dashboard` (mantidas aqui; atualizar quando a estrutura mudar).
+Skills do Claude (mantidas aqui; atualizar quando a estrutura mudar): `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers`, `criar-widget-dashboard`.
+Skills do Gemini: as mesmas quatro, mais `fastapi`, `docker-compose-patterns`, `react-vite-boas-praticas` (versão enxuta da `vercel-react-best-practices`), `seguranca-e-endurecimento`, `revisao-de-codigo` e `depuracao-sistematica` (as três últimas adaptadas de `addyosmani/agent-skills`, MIT, commit `aeac41d`).
 
 Skills externas e como aplicá-las aqui (as regras do projeto sempre prevalecem):
 - `fastapi` (oficial do FastAPI): o projeto usa FastAPI 0.111, SQLAlchemy 2.0 síncrono e `requests`. Não migrar para SQLModel, HTTPX, uv, Ruff ou ty, e não usar recursos de versões novas (`app.frontend()`, `fastapi.sse`, OpenTelemetry nativo). `Annotated` pode.
 - `vercel-react-best-practices` (Vercel): o dashboard é SPA Vite, sem Next.js. Ignorar as regras `server-*` e de hidratação/RSC; no lugar de `next/dynamic`, usar `React.lazy`/`import()`. Não adicionar SWR nem outras dependências sem pedido.
 - `docker-compose-patterns` (Docker): manter os nomes `docker-compose.yml` e `docker-compose.local.yml` (o Dokploy usa o de produção) e nunca rodar `down -v` sem confirmação.
-- `find-skills`: para procurar skills novas. Instalar sem `npx skills`, porque ele grava a cópia principal em `.agents/skills/`. Baixar os arquivos do GitHub num commit fixo, ler tudo antes (vira instrução para o Claude) e salvar em `.claude/skills/<nome>/`. Atualizar é repetir o processo.
+- `find-skills`: para procurar skills novas. Instalar sem `npx skills` (ele grava só em `.agents/skills/` e deixa a decisão fora do nosso controle). Baixar os arquivos do GitHub num commit fixo, ler tudo antes (vira instrução) e salvar em `.claude/skills/<nome>/` (Claude) e/ou `.agents/skills/<nome>/` (Gemini), adaptando para o projeto. Atualizar é repetir o processo.
 
 ## Publicação de versões do agente (regra fixa)
 

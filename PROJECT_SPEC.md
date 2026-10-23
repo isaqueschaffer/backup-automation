@@ -931,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Skills e subagentes do Antigravity (Gemini) em `.agents/`
+
+**Alteração:** o executor Antigravity (`agy`) passa a ter skills e subagentes próprios, versionados. `.agents/skills/` (10 skills em português: as 4 do projeto, `fastapi`, `docker-compose-patterns`, `react-vite-boas-praticas`, `seguranca-e-endurecimento`, `revisao-de-codigo`, `depuracao-sistematica`; as 3 últimas adaptadas de `addyosmani/agent-skills`, MIT, commit `aeac41d`), `.agents/agents/` (`backend-fastapi`, `frontend-dashboard`, `agente-windows`, e os somente leitura `revisor` e `depurador`) e `.agents/rules/subagentes.md` (regra `always_on` de quando delegar). Substitui a regra anterior do CLAUDE.md "skills só do Claude, nunca em `.agents/skills/`". As skills do Claude continuam em `.claude/skills/`, em cópias separadas. Teste headless: o `agy` lista os 5 subagentes e as 10 skills e a delegação ao `revisor` funcionou sem alterar arquivos. Também corrigida a skill `gerenciar-containers` (a produção usa a porta 7001, não 7005). Sem mudança de código do produto.
+**Arquivos:** .agents/skills/**, .agents/agents/**, .agents/rules/subagentes.md, .claude/skills/gerenciar-containers/SKILL.md, CLAUDE.md, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-23] — Dashboard: widget "Gravadores" personalizável e termômetro de temperatura dos HDs
 
 **Alteração:** a temperatura dos HDs deixa de ser um anel e vira um termômetro vertical com escala 0–70 °C e marcas de atenção (50) e crítico (60) (`Overview/Thermometer.tsx`, usado no modal do NVR e no widget; `percentualTemperaturaHd` removida). O widget `telemetria_equipamentos` ganha dois campos de configuração: `metricas` (lista de `cpu`, `ram`, `uptime`, `disco_uso`, `disco_temperatura`, `disco_saude`, `disco_capacidade`, `disco_idade`; vazio = todas) e `discos` (objeto `{id do gravador: [nomes dos HDs]}`; ausente ou vazio = todos os HDs daquele gravador). O servidor projeta a resposta só com o que foi escolhido (vale também para o link público) e devolve `metricas` com a lista efetiva; o selo "Atenção/Saudável" continua calculado com a telemetria completa. `GET .../dashboard/opcoes` passa a trazer `discos` (nomes dos HDs) em cada equipamento, e as chaves de `discos` entram na validação de isolamento por cliente (`ids_referenciados`). O modal de configuração ganhou o editor `TelemetriaConfigEditor.tsx` (botões de marcar, atalhos e seleção de HDs por gravador). Sem mudança de banco.
