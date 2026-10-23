@@ -934,6 +934,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Agente 1.1.26: captura da imagem da noite respeita o canal das câmeras de IP compartilhado
+
+**Alteração:** versão 1.1.26 do agente, que leva a correção da Galeria DIGIFORT/DEFENSE (entrada abaixo): `canal_rtsp` na captura e no envio da imagem da noite, câmera de IP compartilhado sem canal marcada com FALHA e motivo, e pareamento por IP só quando é único. Versão em `updater.py`, `installer.iss` e `package.json`. As câmeras de IP compartilhado só voltam a receber imagem da madrugada depois que o `canal_rtsp` de cada uma for preenchido na Galeria.
+**Arquivos:** agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-23] — Armazenamento dos backups no servidor segue Cliente > Máquina
 
 **Alteração:** no disco, cada máquina era uma pasta solta na raiz (`<MAQUINA>_<uuid>/`) mesmo com o painel já organizado em Cliente > Máquina. A estrutura passa a ser `BACKUP_STORAGE_PATH/<CLIENTE>_<uuid_cliente>/<MAQUINA>_<uuid_maquina>/backup_*.zip`; máquina sem Cliente em `_sem_cliente/<MAQUINA>_<uuid>/`; `lixeira/` como antes. O UUID no fim do nome é a identidade (a pasta é achada por sufixo `_<uuid>`, então renomear Cliente ou Máquina não perde arquivos). **Leitura** (`get_zip_path`, agora com `customer=`): procura a pasta canônica e depois QUALQUER pasta da máquina (raiz legada, outro Cliente, `_sem_cliente`), mantendo as estruturas legadas. **Escrita** (`save_zip_stream`, `customer=machine.customer`): usa a pasta canônica; se ela não existe mas a máquina já tem pasta (estrutura antiga), continua nela (não divide a máquina); só cria a canônica quando a máquina não tem pasta. **Movimentação:** `reorganizar_maquina` (mover/unir sem sobrescrever; conflitos são reportados) roda, em melhor esforço e sem derrubar a rota, ao adicionar/remover a máquina de um Cliente, ao excluir o Cliente (máquinas vão para `_sem_cliente` e a pasta vazia do Cliente é removida) e `renomear_pasta_do_cliente` ao renomear o Cliente. **Dados antigos:** `POST /api/v1/admin/storage/reorganizar?aplicar=false|true` (admin) simula/executa a mudança de todas as máquinas, devolvendo resumo por ação e caminhos relativos. Sem mudança de banco nem de agente. `delete_old_backups` passou a usar `datetime.utcnow()` (REGRA-001). Teste novo `tests/test_storage_hierarquia.py` (8 casos), rodado em container; os testes antigos de `tests/test_storage.py` já estavam desatualizados em relação ao nome da pasta e não foram tocados.
