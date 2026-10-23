@@ -931,6 +931,20 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-23] — Agente 1.1.24: backup manual do UNM2000 gera uma exportação nova na hora
+
+**Alteração:** versão 1.1.24 do agente, que leva a exportação sob demanda do UNM2000 (entrada abaixo). Versão em `updater.py`, `installer.iss` e `package.json`.
+**Arquivos:** agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-23] — UNM2000: o backup manual dispara uma exportação nova pela API local
+
+**Alteração:** no equipamento OLT/UNM2000 (agente instalado no próprio servidor do UNM2000), o backup MANUAL do dashboard passa a pedir ao UNM2000 uma exportação completa da configuração antes de copiar o zip (hoje o agente só copiava o `AAAAMMDD_HHMMSS_allback.zip` gerado pelo agendamento das 03:00 do próprio UNM2000, na pasta de origem). Novo `agent/src/olt/unm2000_api.py` (`exportar_configuracao_unm2000`): `POST http://127.0.0.1:52302/unmcmcgi` (JSON), `Logon` (senha em MD5), lista os zips (`GetStoreFileInfo`, `storeflag` 1), espera ficar ocioso (`GetExportEMSCfgStatus`), `ExportEMSCfg` (`type` 0) e aguarda um zip novo aparecer e o status voltar a 100%; limite de 10 minutos; só esses 4 operadores (sem `Logout`, que devolve erro 502 no UNM2000). A exportação leva cerca de 46 s (medido em produção). `trigger` passa por `run_backup` → `processar_equipamento` → `processar_olt` → `realizar_backup_olt`; o backup agendado NÃO muda (usa o zip das 03:00). A exportação é OPT-IN: só roda com `config_extra.exportar_no_manual` verdadeiro, gravado pelo painel quando o formulário do UNM2000 recebe usuário e senha da API (campos novos e opcionais em `EquipamentoFormModal.tsx`/`utils.ts`; em branco o equipamento fica como antes, com o preenchimento `unm2000`/`unm2000`). Host `127.0.0.1` e porta `52302` por padrão (`config_extra.host_api` e `porta_api` opcionais, sem campo no painel). Falha ou tempo esgotado da exportação marca o equipamento como ERRO. Atenção: a retenção local do UNM2000 (10 arquivos, definida pelo cliente) faz cada exportação apagar o zip mais antigo da pasta; o agente copia o novo logo em seguida. Um teste real em 23/10/2026 confirmou a API e a rotação. Fluxo validado com respostas simuladas (sintaxe e 4 cenários) no Docker.
+**Arquivos:** agent/src/olt/unm2000_api.py, agent/src/olt/unm2000.py, agent/src/application/backup_job.py, server/dashboard/src/api/types.ts, server/dashboard/src/pages/Machines/MachineDetail/utils.ts, server/dashboard/src/pages/Machines/MachineDetail/components/EquipamentoFormModal.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-23] — Agente 1.1.23: telemetria de HD dos NVR/DVR Motorola
 
 **Alteração:** versão 1.1.23 do agente, que leva a telemetria de HD da Motorola (detalhes na entrada abaixo). Validada em 23/10/2026 nos equipamentos reais .9 (firmware 1.4.8), .10 (DVR, 1.3.8) e .8 (1.3.4): capacidade, idade e temperatura coincidem com o relatório da exploração, e a descoberta de câmeras (login extraído) continua igual. Versão em `updater.py`, `installer.iss` e `package.json`. Sem mudança de contrato nem de banco.
