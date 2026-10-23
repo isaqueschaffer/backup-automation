@@ -1,10 +1,16 @@
-import { ArrowDown, ArrowUp, Cpu, MemoryStick, Network } from "lucide-react";
+import { ArrowDown, ArrowUp, Clock, Network } from "lucide-react";
 import { NVRTelemetry } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import StatusBadge from "../../../../components/StatusBadge";
-import { fmtGb, fmtMbps, fmtPct } from "../telemetry";
-import { PctBar } from "./TelemetryBar";
-import { MetricTile } from "./ServerHealthCard";
+import RingGauge from "../../../Overview/RingGauge";
+import {
+  fmtGb,
+  fmtIdade,
+  fmtMbps,
+  fmtUptime,
+  nivelTemperaturaHd,
+  percentualTemperaturaHd,
+} from "../telemetry";
 
 export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
   nvrName: string;
@@ -13,10 +19,10 @@ export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
 }) {
   const disks = telemetry?.disks || [];
   const networks = telemetry?.networks || [];
-  const ramSuffix = telemetry?.ram_total_gb ? `de ${fmtGb(telemetry.ram_total_gb)}` : undefined;
-  const ramCaption = telemetry?.ram_used_gb != null
-    ? `${fmtGb(telemetry.ram_used_gb)} em uso`
-    : "Memória";
+  const ramCaption =
+    telemetry?.ram_used_gb != null && telemetry?.ram_total_gb != null
+      ? `${fmtGb(telemetry.ram_used_gb)} de ${fmtGb(telemetry.ram_total_gb)}`
+      : "Memória";
 
   return (
     <Modal title={`Telemetria — ${nvrName}`} onClose={onClose}>
@@ -24,16 +30,74 @@ export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
         <div className="empty-state">Sem dados de telemetria disponíveis.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 8 }}>
-            <MetricTile icon={<Cpu size={11} />} label="CPU" percent={telemetry.cpu_percent ?? null} caption="Processador" />
-            <MetricTile
-              icon={<MemoryStick size={11} />}
-              label="RAM"
-              percent={telemetry.ram_percent ?? null}
-              caption={ramCaption}
-              suffix={ramSuffix}
-            />
-          </div>
+          {(telemetry.cpu_percent != null || telemetry.ram_percent != null || telemetry.uptime_seconds != null) && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
+              {(telemetry.cpu_percent != null || telemetry.ram_percent != null) && (
+                <>
+                  <RingGauge
+                    percent={telemetry.cpu_percent ?? null}
+                    label="CPU"
+                    caption="Processador"
+                    size={72}
+                  />
+                  <RingGauge
+                    percent={telemetry.ram_percent ?? null}
+                    label="RAM"
+                    caption={ramCaption}
+                    size={72}
+                  />
+                </>
+              )}
+              {telemetry.uptime_seconds != null && (
+                <div
+                  style={{
+                    background: "var(--surface-2)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "10px 12px",
+                    flex: "1 1 160px",
+                    minWidth: 140,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: "var(--text-muted)",
+                      letterSpacing: "0.5px",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    <Clock size={11} style={{ flexShrink: 0 }} />
+                    <span>Tempo ligado</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
+                    <span style={{ fontSize: 20, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.1 }}>
+                      {fmtUptime(telemetry.uptime_seconds)}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-muted)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    title="Desde o último reinício"
+                  >
+                    Desde o último reinício
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {networks.length > 0 && (
             <div>
@@ -56,7 +120,7 @@ export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Network size={14} color="var(--primary)" />
+                        <Network size={14} color="var(--primary)" style={{ flexShrink: 0 }} />
                         <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)" }}>{n.name}</span>
                         {n.status && <StatusBadge status={n.status} />}
                         {n.speed_mbps && (
@@ -109,34 +173,101 @@ export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
               <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 8 }}>
                 {`Discos (${disks.length})`}
               </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Disco</th>
-                      <th>Status</th>
-                      <th>Uso</th>
-                      <th>Capacidade</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {disks.map((d, i) => (
-                      <tr key={i}>
-                        <td>{d.device || `Disco ${i + 1}`}</td>
-                        <td><StatusBadge status={d.status} /></td>
-                        <td style={{ minWidth: 160 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <div style={{ flex: 1 }}><PctBar percent={d.percent ?? null} height={6} /></div>
-                            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{fmtPct(d.percent ?? null)}</span>
-                          </div>
-                        </td>
-                        <td style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                          {`${fmtGb(d.free_gb ?? null)} livres de ${fmtGb(d.total_gb ?? null)}`}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))",
+                  gap: 10,
+                }}
+              >
+                {disks.map((d, i) => {
+                  const nomeDisco = d.device || `Disco ${i + 1}`;
+                  const temAneis = d.percent != null || d.temperature_c != null;
+
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        background: "var(--surface-2)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius-sm)",
+                        padding: "10px 12px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        minWidth: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontWeight: 600,
+                            color: "var(--text-primary)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                          title={nomeDisco}
+                        >
+                          {nomeDisco}
+                        </span>
+                        <div style={{ flexShrink: 0 }}>
+                          <StatusBadge status={d.status} />
+                        </div>
+                      </div>
+
+                      {temAneis && (
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-around",
+                            flexWrap: "wrap",
+                            gap: 8,
+                          }}
+                        >
+                          {d.percent != null && (
+                            <RingGauge percent={d.percent} label="Uso" size={64} />
+                          )}
+                          {d.temperature_c != null && (
+                            <RingGauge
+                              percent={percentualTemperaturaHd(d.temperature_c)}
+                              valueLabel={`${d.temperature_c}°`}
+                              nivel={nivelTemperaturaHd(d.temperature_c)}
+                              label="Temperatura"
+                              caption={`${d.temperature_c} °C`}
+                              size={64}
+                            />
+                          )}
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          gap: 2,
+                        }}
+                      >
+                        <div>
+                          {`Capacidade: ${fmtGb(d.total_gb ?? null)}`}
+                          {d.free_gb != null && ` · ${fmtGb(d.free_gb)} livres`}
+                        </div>
+                        <div>
+                          {`Idade: ${fmtIdade(d.power_on_days ?? null)}`}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

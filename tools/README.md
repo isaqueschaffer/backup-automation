@@ -11,6 +11,7 @@ Nenhum deles é importado pelo código de produção.
 | `snmp_sniffer.py` | Escuta traps SNMP para diagnóstico |
 | `test_webhook.py` | Dispara um webhook de teste |
 | `teste_print_hikvision.py` | Teste manual de login/consulta em NVR Hikvision (pede credenciais por argumento) |
+| `teste_telemetria_nvr_e2e.py` | Telemetria de NVR ponta a ponta (post_report real do agente → API → widget Gravadores); roda em container contra a stack local |
 
 Credenciais e chaves de API **nunca** devem ser gravadas nestes scripts: passe por argumento ou variável de ambiente.
 

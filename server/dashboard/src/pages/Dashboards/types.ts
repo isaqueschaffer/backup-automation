@@ -128,7 +128,16 @@ export interface DadosTelemetriaEquipamentos {
     atualizado_em: string | null;
     cpu_percent: number | null;
     ram_percent: number | null;
-    disks: { device?: string; status?: string | null; percent?: number | null; total_gb?: number | null; free_gb?: number | null }[];
+    uptime_seconds: number | null;
+    disks: {
+      device?: string;
+      status?: string | null;
+      percent?: number | null;
+      total_gb?: number | null;
+      free_gb?: number | null;
+      power_on_days?: number | null;
+      temperature_c?: number | null;
+    }[];
     tem_problema: boolean;
   }[];
 }

@@ -27,6 +27,32 @@ def _numero(texto_bruto):
         return None
 
 
+def _coletar_smart_disco(nvr_ip, usuario, senha, hdd_id):
+    """Le idade (dias ligado) e temperatura de um disco pelo SMART do ISAPI.
+    Retorna (power_on_days, temperature_c); (None, None) se o NVR nao expuser o endpoint."""
+    try:
+        resp = fazer_get(
+            f"http://{nvr_ip}/ISAPI/ContentMgmt/Storage/hdd/{hdd_id}/SMARTTest/status",
+            usuario,
+            senha,
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            return None, None
+        root = parse_xml_seguro(resp.content)
+        ns = detectar_namespace(root)
+        dias_raw = texto(root, ".//hik:powerOnDay" if ns else ".//powerOnDay", ns)
+        temp_raw = texto(root, ".//hik:temprature" if ns else ".//temprature", ns)
+        dias = _numero(dias_raw)
+        temp = _numero(temp_raw)
+        power_on_days = dias if dias is not None and dias >= 0 else None
+        temperature_c = temp if temp is not None and -20 <= temp <= 120 else None
+        return power_on_days, temperature_c
+    except Exception:
+        logging.debug(f"Falha ao ler SMART do disco {hdd_id} no NVR {nvr_ip}.", exc_info=True)
+        return None, None
+
+
 def _calcular_ram(mem_uso_raw, mem_disp_raw=None):
     """Retorna (ram_percent, ram_total_gb, ram_used_gb)."""
     if not mem_uso_raw or not mem_uso_raw.strip():
@@ -66,10 +92,13 @@ def coletar_telemetria_hikvision(nvr_ip, usuario, senha):
             root = parse_xml_seguro(resp.content)
             ns = detectar_namespace(root)
             cpu = texto(root, ".//hik:cpuUtilization" if ns else ".//cpuUtilization", ns)
+            uptime = texto(root, ".//hik:deviceUpTime" if ns else ".//deviceUpTime", ns)
             mem_uso = texto(root, ".//hik:memoryUsage" if ns else ".//memoryUsage", ns)
             mem_disp = texto(root, ".//hik:memoryAvailable" if ns else ".//memoryAvailable", ns)
             ram_pct, ram_total, ram_used = _calcular_ram(mem_uso, mem_disp)
+            uptime_seg = _numero(uptime)
             telemetria["cpu_percent"] = _numero(cpu)
+            telemetria["uptime_seconds"] = uptime_seg if uptime_seg is not None and uptime_seg >= 0 else None
             telemetria["ram_percent"] = ram_pct
             telemetria["ram_total_gb"] = ram_total
             telemetria["ram_used_gb"] = ram_used
@@ -85,17 +114,25 @@ def coletar_telemetria_hikvision(nvr_ip, usuario, senha):
             elementos = root.findall("hik:hdd", {"hik": ns}) if ns else root.findall("hdd")
 
             discos = []
-            for hdd in elementos:
+            for hdd in elementos[:32]:
                 hdd_id = texto(hdd, "hik:id", ns) if ns else texto(hdd, "id", None)
                 capacidade_mb = _numero(texto(hdd, "hik:capacity", ns) if ns else texto(hdd, "capacity", None))
                 livre_mb = _numero(texto(hdd, "hik:freeSpace", ns) if ns else texto(hdd, "freeSpace", None))
                 status_bruto = texto(hdd, "hik:status", ns) if ns else texto(hdd, "status", None)
 
                 total_gb = round(capacidade_mb / 1024, 1) if capacidade_mb else None
-                free_gb = round(livre_mb / 1024, 1) if livre_mb is not None else None
+                free_gb = None
                 percent = None
-                if capacidade_mb and livre_mb is not None:
-                    percent = round((capacidade_mb - livre_mb) / capacidade_mb * 100, 1)
+                if livre_mb and livre_mb > 0:
+                    free_gb = round(livre_mb / 1024, 1)
+                    if capacidade_mb:
+                        percent = round((capacidade_mb - livre_mb) / capacidade_mb * 100, 1)
+
+                power_on_days, temperature_c = (
+                    _coletar_smart_disco(nvr_ip, usuario, senha, hdd_id)
+                    if hdd_id
+                    else (None, None)
+                )
 
                 discos.append({
                     "device": f"HDD{hdd_id}" if hdd_id else "HDD",
@@ -103,6 +140,8 @@ def coletar_telemetria_hikvision(nvr_ip, usuario, senha):
                     "percent": percent,
                     "total_gb": total_gb,
                     "free_gb": free_gb,
+                    "power_on_days": power_on_days,
+                    "temperature_c": temperature_c,
                 })
 
             telemetria["disks"] = discos

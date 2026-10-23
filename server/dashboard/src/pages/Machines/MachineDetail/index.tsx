@@ -160,7 +160,7 @@ export default function MachineDetail() {
       setShowEqModal(false);
       setEqForm(emptyEqForm());
       setEditingEqId(null);
-      load();
+      load(true);
     } catch { toast("Erro ao salvar equipamento.", "error"); }
     finally { setSaving(false); }
   };
@@ -170,7 +170,7 @@ export default function MachineDetail() {
       const isCurrentlyActive = eq.active !== false; // true if true or undefined
       await updateEquipamento(id!, eq.id, { active: !isCurrentlyActive });
       toast(isCurrentlyActive ? "Equipamento pausado." : "Equipamento retomado.", "success");
-      load();
+      load(true);
     } catch { toast("Erro ao alterar estado.", "error"); }
   };
 
@@ -179,7 +179,7 @@ export default function MachineDetail() {
     try {
       await deleteEquipamento(id!, eqId);
       toast("Equipamento removido.", "success");
-      load();
+      load(true);
     } catch { toast("Erro ao remover equipamento.", "error"); }
   };
 
@@ -213,7 +213,7 @@ export default function MachineDetail() {
       await updateMachine(id!, payload);
       toast("Máquina atualizada!", "success");
       setShowEditModal(false);
-      load();
+      load(true);
     } catch (e) { toast(apiErrorMessage(e, "Erro ao salvar a máquina."), "error"); }
     finally { setSaving(false); }
   };
@@ -223,7 +223,7 @@ export default function MachineDetail() {
     try {
       const data = await rotateMachineKey(id!);
       setRotatedKey(data.api_key || null);
-      load();
+      load(true);
     } catch { toast("Erro ao gerar nova API Key.", "error"); }
   };
 
