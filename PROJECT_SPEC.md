@@ -851,6 +851,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 **Breaking Change:** Não.
 **Branch:** helena
 
+### [2026-10-23] — Telemetria de NVRs Motorola (CPU, RAM, Discos e Rede)
+
+**Alteração:** Suporte a coleta de telemetria em gravadores Motorola (arquitetura NVMS-9000 / TVT):
+1. Script de diagnóstico e dump (`teste backup motorola/dump_motorola_telemetria.py`): baseado no padrão do `dump_motorola_cameras.py`, conecta via NVMS-9000 (`reqLogin`/`doLogin` com SHA-512 ou Base64), testa envelopes gerais e com `requireField` para armazenamento (`queryDiskStatus`, `queryDiskDetailInfo`, `queryStorageCapacity`), CPU/RAM (`queryCpuStatus`, `queryMemoryStatus`, `queryDevStatus`) e rede (`queryNetCfg`, `queryNetStatus`), salvando os XMLs brutos em `respostas_telemetria_<ip>/` e exibindo o resumo consolidado e o JSON formatado.
+2. Agente (`agent/src/nvr/motorola/telemetry.py`): novo módulo `coletar_telemetria_motorola` extrai CPU (`%`), RAM (`%`, total e usado em GB), tabela de discos (identificador, status normalizado para o `StatusBadge`, percentual de uso, capacidade total e livre em GB) e interfaces de rede (nome, status UP/DOWN, IP, MAC, velocidade e taxas de envio/recebimento).
+3. Despacho no `agent/src/nvr/factory.py`: `coletar_telemetria_nvr()` roteia para `coletar_telemetria_motorola` quando `marca == "MOTOROLA"` ou `tipo_nvr == "MOTOROLA"`, integrando diretamente à tela de telemetria (`NVRTelemetryModal`) e aos widgets de gravadores sem exigir mudanças no backend ou frontend.
+**Arquivos:** agent/src/nvr/motorola/telemetry.py, agent/src/nvr/factory.py, teste backup motorola/dump_motorola_telemetria.py, teste backup motorola/dump_motorola_cameras.py, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** helena
+
 ### [2026-10-21] — Agente 1.1.18: Telemetria de NVR Intelbras via SNMP
 
 **Alteração:** NVR com `config_extra.marca = "Intelbras"` agora coleta telemetria por SNMPv2c (porta 161, community "Public" por padrão, configurável em `config_extra.snmp_community`) em vez de ISAPI: novo `agent/src/nvr/intelbras/telemetry.py` (`coletar_telemetria_intelbras`, usando `pysnmp.hlapi.asyncio`) lê RAM (`%` de uso, OID da MIB proprietária Intelbras) e a tabela de HDs (dispositivo, status, capacidade e livre em GB), traduzindo o status (Normal/Error/Abnormal/...) para os rótulos do `StatusBadge`. Sem OID de CPU na MIB Intelbras — o card mostra "—" nesse campo, igual a qualquer equipamento sem o dado. `factory.coletar_telemetria_nvr()` passa a receber `marca`/`snmp_community` e rotear para SNMP (Intelbras) ou ISAPI (Hikvision e demais); `buscar_cameras()` trata `marca="Intelbras"` como `"HIKVISION"` (câmeras/gravações continuam via ISAPI, que os NVRs Intelbras também falam). O resultado tem o mesmo formato do Hikvision (`cpu_percent`/`ram_percent`/`disks`), então `NVRTelemetryModal` exibe os dois fabricantes sem nenhuma mudança de frontend. Novo seletor "Intelbras" na Marca do NVR (`EquipamentoFormModal.tsx`, antes agrupado em "Hikvision / Intelbras / Outros"). Build: `pysnmp` no `requirements.txt` e `--collect-all pysnmp`/`--collect-all pyasn1` no `build.ps1` (MIBs e módulos carregados dinamicamente, precisam ser coletados à parte pelo PyInstaller).
