@@ -14,6 +14,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from src.core.config import load_conf, parse_config_extra, DIR_AGENT
 from src.application.api_client import fetch_server_config, post_report, upload_zip
 from src.nvr.factory import verificar_gravacao_nvr, coletar_telemetria_nvr
+from src.nvr.intelbras.backup import baixar_configuracao_intelbras
 from src.olt.unm2000 import realizar_backup_olt
 from src.olt.vsol import realizar_backup_vsol
 from src.pabx.issabel import realizar_backup_issabel
@@ -70,9 +71,12 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
     else:
         cameras_status, tipo_nvr = retorno, "DESCONHECIDO"
 
-    if not cameras_status:
+    if not cameras_status and tipo_nvr == "DESCONHECIDO":
         logging.error("  NVR INACESSIVEL ou falha no login.")
         return {"nome": nome, "status": "ERRO"}
+
+    if not cameras_status:
+        logging.warning("  Nenhuma câmera encontrada no NVR. Prosseguindo com backup de configurações.")
 
     logging.info(f"  NVR acessivel (Detectado: {tipo_nvr}).")
 
@@ -88,6 +92,13 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
     if tipo_nvr == "MOTOROLA":
         logging.info("  NVR Motorola detectado. Backup de arquivos de configuracao nao suportado nativamente. Gravacoes verificadas.")
         status = "SEM_ARQUIVOS"
+    elif tipo_nvr == "INTELBRAS" or (marca and marca.upper() == "INTELBRAS"):
+        logging.info("  NVR Intelbras detectado. Baixando configuracao completa via CGI...")
+        arq_cfg = pasta_nvr / f"CONFIG_INTELBRAS_{data_hoje()}.backup"
+        if baixar_configuracao_intelbras(ip, user, pwd, arq_cfg):
+            status = "OK"
+        else:
+            status = "PARCIAL"
     else:
         try:
             sessao.get(f"http://{ip}/ISAPI/System/status", timeout=5).raise_for_status()

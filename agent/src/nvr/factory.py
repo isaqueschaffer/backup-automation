@@ -8,6 +8,8 @@ from src.nvr.motorola.recordings import buscar_datas_gravacao_motorola
 from src.nvr.hikvision.recordings import tem_gravacao_no_dia
 from src.nvr.hikvision.telemetry import coletar_telemetria_hikvision
 from src.nvr.motorola.telemetry import coletar_telemetria_motorola
+from src.nvr.intelbras.cameras import buscar_cameras as buscar_cameras_intelbras
+from src.nvr.intelbras.recordings import tem_gravacao_no_dia as tem_gravacao_no_dia_intelbras
 try:
     from src.nvr.intelbras.telemetry import coletar_telemetria_intelbras
 except Exception:
@@ -39,16 +41,31 @@ def buscar_cameras(nvr_ip, usuario, senha, marca=None):
         if marca == "MOTOROLA":
             cameras, sessao = buscar_cameras_motorola(nvr_ip, usuario, senha)
             return cameras, "MOTOROLA", sessao
-        elif marca in ("HIKVISION", "INTELBRAS"):
-            # NVR Intelbras usa o mesmo protocolo ISAPI do Hikvision para cameras/gravacoes.
+        elif marca == "INTELBRAS":
+            cameras = buscar_cameras_intelbras(nvr_ip, usuario, senha)
+            if cameras:
+                return cameras, "INTELBRAS", None
+            # Fallback para ISAPI caso seja um modelo Intelbras antigo/rebranded Hikvision
+            cameras, tipo = _probe_hikvision(nvr_ip, usuario, senha)
+            if cameras:
+                return cameras, tipo, None
+            return {}, "INTELBRAS", None
+        elif marca == "HIKVISION":
             cameras, tipo = _probe_hikvision(nvr_ip, usuario, senha)
             return (cameras, tipo, None) if cameras else ({}, "DESCONHECIDO", None)
 
-    # Fallback: probe both
+    # Fallback sem marca informada:
+    # 1. Tenta Hikvision ISAPI
     cameras, tipo = _probe_hikvision(nvr_ip, usuario, senha)
     if cameras:
         return cameras, tipo, None
 
+    # 2. Tenta Intelbras Dahua CGI
+    cameras = buscar_cameras_intelbras(nvr_ip, usuario, senha)
+    if cameras:
+        return cameras, "INTELBRAS", None
+
+    # 3. Tenta Motorola
     cameras, sessao = buscar_cameras_motorola(nvr_ip, usuario, senha)
     if cameras:
         return cameras, "MOTOROLA", sessao
@@ -68,10 +85,10 @@ def coletar_telemetria_nvr(nvr_ip, usuario, senha, tipo_nvr, marca=None, snmp_co
             logging.warning(f"  Falha ao coletar telemetria do NVR Motorola {nvr_ip}.", exc_info=True)
             return None
 
-    if tipo_nvr not in ("NVR", "DVR"):
+    if tipo_nvr not in ("NVR", "DVR", "INTELBRAS") and marca_up not in ("HIKVISION", "INTELBRAS"):
         return None
     try:
-        if marca_up == "INTELBRAS":
+        if marca_up == "INTELBRAS" or tipo_nvr == "INTELBRAS":
             if coletar_telemetria_intelbras is None:
                 return None
             if snmp_community:
@@ -148,15 +165,17 @@ def verificar_gravacao_nvr(nvr_ip, usuario, senha, marca=None):
                 })
             return resultados, tipo
 
-        # Demais Marcas (Hikvision)
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        # Demais Marcas (Hikvision e Intelbras)
+        fn_tem_gravacao = tem_gravacao_no_dia_intelbras if tipo == "INTELBRAS" else tem_gravacao_no_dia
+        workers = 5 if tipo == "INTELBRAS" else 10
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             for canal_id, camera in cameras.items():
                 nome = camera["nome"]
                 ip = camera["ip"]
                 online = camera["online"]
 
                 future_to_day = {
-                    executor.submit(tem_gravacao_no_dia, nvr_ip, usuario, senha, canal_id, hoje - timedelta(days=i)): (hoje - timedelta(days=i))
+                    executor.submit(fn_tem_gravacao, nvr_ip, usuario, senha, canal_id, hoje - timedelta(days=i)): (hoje - timedelta(days=i))
                     for i in range(DIAS_VERIFICAR)
                 }
 
