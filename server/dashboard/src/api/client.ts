@@ -57,8 +57,8 @@ export const triggerBackupAll = () =>
   api.post("/machines/trigger-backup-all").then((r) => r.data);
 export const restartAgentAll = () =>
   api.post("/machines/restart-agent-all").then((r) => r.data);
-export const fetchMachineLogs = (id: string) =>
-  api.get(`/machines/${id}/logs`).then((r) => r.data);
+export const fetchMachineLogs = (id: string, incluirPings = true) =>
+  api.get(`/machines/${id}/logs`, { params: { incluir_pings: incluirPings } }).then((r) => r.data);
 
 // ── Equipamentos ──────────────────────────────────────────────
 export const fetchEquipamentos = (machineId: string) =>

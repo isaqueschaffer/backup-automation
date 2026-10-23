@@ -38,6 +38,9 @@ export default function MachineDetail() {
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [mostrarPings, setMostrarPings] = useState(false);
+  const mostrarPingsRef = useRef(false);
+
   const [showEqModal, setShowEqModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: CameraRecStatus[] }>({ show: false, nvrName: "", cameras: [] });
@@ -68,7 +71,7 @@ export default function MachineDetail() {
         fetchMachine(reqId),
         fetchEquipamentos(reqId),
         fetchBackups({ machine_id: reqId, size: 10 }),
-        fetchMachineLogs(reqId),
+        fetchMachineLogs(reqId, mostrarPingsRef.current),
       ]);
       if (!isCurrent()) return;
       setMachine(m); setEquipamentos(eqs); setBackups(b.items); setLogs(lg);
@@ -83,6 +86,12 @@ export default function MachineDetail() {
       if (!silent && isCurrent()) setLoading(false);
     }
   }, [id, toast]);
+
+  const handleTogglePings = (v: boolean) => {
+    mostrarPingsRef.current = v;
+    setMostrarPings(v);
+    load(true);
+  };
 
   useEffect(() => {
     activeIdRef.current = id;
@@ -270,7 +279,7 @@ export default function MachineDetail() {
     <>
       <MachineHeader
         machine={machine} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr}
-        onBack={() => navigate(machine.customer_id ? `/clientes/${machine.customer_id}` : "/maquinas")}onEdit={openEditMachine} onRotateKey={handleRotateKey}
+        onBack={() => navigate(machine.customer_id ? `/clientes/${machine.customer_id}` : "/maquinas")} onEdit={openEditMachine} onRotateKey={handleRotateKey}
         onTriggerBackup={handleTriggerBackup} onRestartAgent={handleRestartAgent}
       />
 
@@ -337,7 +346,13 @@ export default function MachineDetail() {
       />
 
       {/* ── Histórico de Eventos do Agente ── */}
-      <AgentLogs logs={logs} />
+      <AgentLogs
+        logs={logs}
+        mostrarPings={mostrarPings}
+        onTogglePings={handleTogglePings}
+        lastSeen={machine?.last_seen ?? null}
+        online={machine?.is_online}
+      />
 
       {/* ── Modal: Adicionar/Editar Equipamento ── */}
       {showEqModal && (

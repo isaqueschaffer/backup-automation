@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   attachMachine, cancelCustomerQueue, deleteCustomer, detachMachine, downloadCustomerZip,
-  fetchBackups, fetchCustomer, fetchCustomerRuns, reorderCustomerQueue, triggerCustomerBackup, updateCustomer,
+  fetchCustomer, fetchCustomerRuns, reorderCustomerQueue, triggerCustomerBackup, updateCustomer,
 } from "../../../api/client";
-import { Backup, Customer, CustomerRun, Machine } from "../../../api/types";
+import { Customer, CustomerRun, Machine } from "../../../api/types";
 import { useToast } from "../../../components/Toast";
 import { fmtSchedule } from "../../../utils/date";
 import { apiErrorMessage } from "../../../utils/errors";
@@ -12,12 +12,13 @@ import CustomerFormModal, { CustomerForm, parseEmailList } from "../components/C
 import CustomerHeader, { CustomerAction } from "./components/CustomerHeader";
 import QueueSection, { moveItem } from "./components/QueueSection";
 import AddMachineModal from "./components/AddMachineModal";
-import CustomerBackups from "./components/CustomerBackups";
+import CustomerSummary from "./components/CustomerSummary";
 import CustomerRuns from "./components/CustomerRuns";
+import CustomerMachines from "./components/CustomerMachines";
 
 const POLL_MS = 5000;
 
-// Detalhe do Cliente: dados, fila de backup (ordem por arrastar e soltar), rodadas de backup e backups por máquina
+// Detalhe do Cliente: resumo, fila de backup (ordem por arrastar e soltar), rodadas de backup e situação por máquina
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -26,7 +27,6 @@ export default function CustomerDetail() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [backups, setBackups] = useState<Backup[] | null>(null);
   const [runs, setRuns] = useState<CustomerRun[] | null>(null);
   const [busy, setBusy] = useState<CustomerAction | null>(null);
   const [queueSaving, setQueueSaving] = useState(false);
@@ -85,22 +85,11 @@ export default function CustomerDetail() {
 
   useEffect(() => {
     activeIdRef.current = id;
-    setLoading(true); setCustomer(null); setNotFound(false); setBackups(null); setRuns(null);
+    setLoading(true); setCustomer(null); setNotFound(false); setRuns(null);
     refresh(true);
     const t = setInterval(() => refresh(), POLL_MS);
     return () => { clearInterval(t); activeIdRef.current = undefined; };
   }, [id, refresh]);
-
-  // Backups recentes: recarrega quando muda o último backup ou o conjunto de máquinas
-  const backupKey = customer ? `${customer.last_backup_at}|${customer.machines.map(m => m.id).join(",")}` : "";
-  useEffect(() => {
-    if (!id || !backupKey) return;
-    let cancelled = false;
-    fetchBackups({ customer_id: id, size: 10 })
-      .then(r => { if (!cancelled) setBackups(r.items); })
-      .catch(() => { if (!cancelled) setBackups(prev => prev ?? []); });
-    return () => { cancelled = true; };
-  }, [id, backupKey]);
 
   if (loading) return <div className="loading-state"><div className="spinner" /></div>;
   if (notFound || !customer) {
@@ -221,6 +210,8 @@ export default function CustomerDetail() {
     <>
       <CustomerHeader customer={c} busy={busy} onBack={() => navigate("/clientes")} onAction={handleAction} onDashboard={() => navigate(`/clientes/${c.id}/dashboard`)} />
 
+      <CustomerSummary runs={runs} machines={c.machines} />
+
       <QueueSection
         customer={c}
         saving={queueSaving}
@@ -231,7 +222,7 @@ export default function CustomerDetail() {
 
       <CustomerRuns customerId={c.id} customerName={c.name} runs={runs} onChanged={loadRuns} />
 
-      <CustomerBackups backups={backups} />
+      <CustomerMachines machines={c.machines} runs={runs} />
 
       {showEdit && (
         <CustomerFormModal

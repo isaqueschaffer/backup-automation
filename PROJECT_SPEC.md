@@ -566,7 +566,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | POST | `/api/v1/machines/{id}/trigger-backup` | Solicitar backup manual |
 | POST | `/api/v1/machines/{id}/restart-agent` | Solicitar reinicio do agente |
 | POST | `/api/v1/machines/trigger-backup-all` · `/restart-agent-all` | Ação em massa nas máquinas online (`{queued, skipped_offline}`) |
-| GET | `/api/v1/machines/{id}/logs` | Listar logs do agente |
+| GET | `/api/v1/machines/{id}/logs` | Listar logs do agente (`incluir_pings=false` oculta os eventos `ping`; limite 50) |
 | GET/POST | `/api/v1/machines/{id}/equipamentos` | Listar/criar equipamentos da máquina |
 | GET/PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{eq_id}` | Gerenciar equipamento |
 | POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/test-rtsp` | Tarefa RTSP via agente (409 se já houver uma pendente) |
@@ -931,6 +931,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-23] — Painel: telas do Cliente e da Máquina mais limpas
+
+**Alteração:** **Cliente:** resumo no topo (`CustomerSummary`: última rodada, sucesso em 7 dias, máquinas com falha, e-mail da última rodada); "Rodadas de backup" em linhas compactas e expansíveis (5 últimas, "Ver todas"; rodada aberta sempre expandida; o modal de detalhes deixou de existir); a tabela "Backups por máquina" foi substituída por "Situação por máquina" (`CustomerMachines`: faixa de pontinhos dos últimos 10 resultados, último status, download do ZIP; máquinas com problema primeiro). Tudo é derivado das rodadas (`GET /clients/{id}/runs`), então a tela deixou de chamar `GET /backups?customer_id=`. "Problema" = erro ou parcial (`isStatusProblem`); backup em andamento não conta como falha. **Máquina:** "Histórico de Backups" vira faixa de pontinhos + último backup em destaque (lista dos 10 atrás de um botão); "Eventos do Agente" começa recolhido, com resumo do último ping (online/offline e data) e interruptor "Mostrar pings" (desligado por padrão). **API:** `GET /machines/{id}/logs` ganha `incluir_pings` (padrão `true`; com `false` filtra o tipo `ping` no servidor, senão o limite de 50 eventos ficaria cheio de pings e esconderia as instruções). Componentes compartilhados: `components/StatusDots.tsx` e `utils/statusTone.ts`. Removidos: `CustomerBackups.tsx` e `RunDetailsModal.tsx`. `tsc` conferido em container: sem erros novos (o único erro, `Backups.tsx:3` import sem uso, já existia e não bloqueia o build, que é só `vite build`).
+**Arquivos:** server/api/routers/machines.py, server/dashboard/src/api/client.ts, components/StatusDots.tsx, utils/statusTone.ts, pages/Customers/CustomerDetail/{index.tsx,runUtils.ts,components/CustomerSummary.tsx,CustomerRuns.tsx,CustomerMachines.tsx}, pages/Machines/MachineDetail/{index.tsx,components/AgentLogs.tsx,BackupHistory.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não (parâmetro novo opcional).
+**Branch:** isaque
 
 ### [2026-10-23] — Agente 1.1.25: planilhas da configuração dos NVR, telemetria de rede/SMART Motorola e NVR Intelbras completo
 

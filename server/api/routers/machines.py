@@ -244,12 +244,9 @@ def request_agent_restart(machine_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/{machine_id}/logs", response_model=List[AgentLogResponse], dependencies=[Depends(verify_admin_token)])
-def get_machine_logs(machine_id: UUID, db: Session = Depends(get_db), limit: int = 50):
+def get_machine_logs(machine_id: UUID, db: Session = Depends(get_db), limit: int = 50, incluir_pings: bool = True):
     _get_machine_or_404(machine_id, db)
-    return (
-        db.query(AgentLog)
-        .filter(AgentLog.machine_id == machine_id)
-        .order_by(AgentLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(AgentLog).filter(AgentLog.machine_id == machine_id)
+    if not incluir_pings:
+        q = q.filter(AgentLog.event_type != "ping")
+    return q.order_by(AgentLog.created_at.desc()).limit(limit).all()
