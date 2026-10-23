@@ -1,6 +1,7 @@
 import io
 import zipfile
 import tempfile
+import logging
 from typing import List
 from uuid import UUID
 from datetime import datetime
@@ -20,7 +21,11 @@ from schemas import (
     CustomerRunResponse,
 )
 from routers.machines import machine_to_response, check_machine_online, next_queue_order
-from services.storage_service import get_zip_path
+from services.storage_service import (
+    reorganizar_maquina,
+    renomear_pasta_do_cliente,
+    remover_pasta_vazia_do_cliente,
+)
 from services.backup_runs import (
     build_run_zip,
     build_client_zip_with_password,
@@ -33,6 +38,8 @@ from services.backup_runs import (
     send_run_email,
 )
 from services.crypto_service import encrypt as crypto_encrypt, decrypt as crypto_decrypt
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/clients", tags=["Clientes"])
 
@@ -171,6 +178,8 @@ def get_customer(customer_id: UUID, db: Session = Depends(get_db)):
 def update_customer(customer_id: UUID, body: CustomerUpdate, db: Session = Depends(get_db)):
     customer = _get_customer_or_404(customer_id, db)
 
+    name_changed = body.name is not None and body.name.strip() != customer.name
+
     schedule_changed = (
         (body.backup_hour is not None and body.backup_hour != customer.backup_hour) or
         (body.backup_minute is not None and body.backup_minute != customer.backup_minute)
@@ -199,6 +208,13 @@ def update_customer(customer_id: UUID, body: CustomerUpdate, db: Session = Depen
 
     db.commit()
     db.refresh(customer)
+
+    if name_changed:
+        try:
+            renomear_pasta_do_cliente(customer.id, customer.name)
+        except Exception:
+            logger.exception("Falha ao renomear pasta do cliente %s para '%s'", customer.id, customer.name)
+
     return _to_response(customer, db)
 
 
@@ -206,12 +222,23 @@ def update_customer(customer_id: UUID, body: CustomerUpdate, db: Session = Depen
                dependencies=[Depends(verify_admin_token)])
 def delete_customer(customer_id: UUID, db: Session = Depends(get_db)):
     customer = _get_customer_or_404(customer_id, db)
+    machines = list(customer.machines)
     # Máquinas ficam sem cliente (mantêm o horário atual)
-    for machine in customer.machines:
+    for machine in machines:
         machine.customer_id = None
         machine.queue_order = 0
     db.delete(customer)
     db.commit()
+
+    try:
+        for m in machines:
+            try:
+                reorganizar_maquina(m.id, m.name, None)
+            except Exception:
+                logger.exception("Falha ao reorganizar pastas da máquina %s ao excluir cliente %s", m.id, customer_id)
+        remover_pasta_vazia_do_cliente(customer_id)
+    except Exception:
+        logger.exception("Falha ao limpar pasta do cliente excluído %s", customer_id)
 
 
 # ─── Vínculo de máquinas e ordem da fila ───────────────────────────────────
@@ -245,6 +272,12 @@ def link_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(get_
 
     db.commit()
     db.refresh(customer)
+
+    try:
+        reorganizar_maquina(machine.id, machine.name, customer)
+    except Exception:
+        logger.exception("Falha ao reorganizar pastas ao vincular máquina %s ao cliente %s", machine.id, customer.id)
+
     return _to_response(customer, db)
 
 
@@ -270,6 +303,12 @@ def unlink_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(ge
         m.queue_order = pos
     db.commit()
     db.refresh(customer)
+
+    try:
+        reorganizar_maquina(machine.id, machine.name, None)
+    except Exception:
+        logger.exception("Falha ao reorganizar pastas ao desvincular máquina %s do cliente %s", machine.id, customer.id)
+
     return _to_response(customer, db)
 
 
@@ -372,7 +411,7 @@ def download_customer_zip(customer_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Nenhum backup disponível para as máquinas deste cliente")
 
     safe_customer_name = customer.name.replace(" ", "_").replace("/", "_")
-    date_today = datetime.now().strftime("%d-%m-%Y")
+    date_today = datetime.utcnow().strftime("%d-%m-%Y")
     filename = f"cliente_{safe_customer_name}_{date_today}.zip"
 
     return StreamingResponse(

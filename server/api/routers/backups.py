@@ -12,7 +12,7 @@ from auth import verify_admin_token
 from database import get_db
 from models import Backup, Machine
 from schemas import BackupResponse, PaginatedBackups
-from services.storage_service import get_zip_path
+from services.storage_service import get_zip_path, pasta_canonica_da_maquina
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +109,9 @@ def download_backup_zip(
         raise HTTPException(status_code=404, detail="ZIP nao disponivel para este backup")
 
     date_str = (b.started_at or b.created_at).strftime("%d-%m-%Y")
-    path = get_zip_path(b.machine_id, b.machine.name, b.zip_filename, date_str=date_str)
+    path = get_zip_path(b.machine_id, b.machine.name, b.zip_filename, date_str=date_str, customer=b.machine.customer)
     if not path:
-        from pathlib import Path
-        from config import settings
-        from services.storage_service import _get_machine_dir_name
-        search_base = Path(settings.BACKUP_STORAGE_PATH) / _get_machine_dir_name(b.machine_id, b.machine.name)
+        search_base = pasta_canonica_da_maquina(b.machine_id, b.machine.name, b.machine.customer)
         logger.error(
             "ZIP nao encontrado em disco. backup_id=%s filename=%s search_base=%s exists=%s",
             backup_id, b.zip_filename, search_base, search_base.exists()
@@ -151,7 +148,7 @@ def public_download_backup_zip(backup_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="ZIP nao disponivel para este backup")
 
     date_str = (b.started_at or b.created_at).strftime("%d-%m-%Y")
-    path = get_zip_path(b.machine_id, b.machine.name, b.zip_filename, date_str=date_str)
+    path = get_zip_path(b.machine_id, b.machine.name, b.zip_filename, date_str=date_str, customer=b.machine.customer)
     if not path:
         raise HTTPException(status_code=404, detail="Arquivo ZIP nao encontrado no servidor.")
 
@@ -223,7 +220,7 @@ def resend_backup_email(backup_id: UUID, request: Request, db: Session = Depends
     date_str = (b.started_at or b.created_at).strftime("%d-%m-%Y")
     zip_path = None
     if b.zip_filename:
-        zip_path = get_zip_path(b.machine_id, b.machine.name, b.zip_filename, date_str=date_str)
+        zip_path = get_zip_path(b.machine_id, b.machine.name, b.zip_filename, date_str=date_str, customer=b.machine.customer)
 
     from services.email_service import send_backup_report
     from config import settings
@@ -266,4 +263,3 @@ def resend_backup_email(backup_id: UUID, request: Request, db: Session = Depends
         raise HTTPException(status_code=500, detail="Falha ao reenviar e-mail. Verifique os logs e configurações SMTP.")
 
     return {"status": "ok", "message": "E-mail reenviado com sucesso!"}
-

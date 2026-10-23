@@ -553,6 +553,7 @@ def upload_backup_zip(
             filename=filename,
             source=file.file,
             max_bytes=settings.MAX_UPLOAD_MB * 1024 * 1024,
+            customer=machine.customer,
         )
     except UploadTooLargeError:
         raise HTTPException(

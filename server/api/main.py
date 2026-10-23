@@ -11,7 +11,7 @@ from models import Machine, Customer, Backup
 from schemas import StatsResponse
 from auth import verify_admin_token
 from config import settings
-from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -189,6 +189,7 @@ openapi_tags = [
     {"name": "backups", "description": "Histórico e relatórios de backups"},
     {"name": "agent", "description": "Comunicação e heartbeat com os Agentes Windows"},
     {"name": "settings", "description": "Configurações do sistema (SMTP, retenção)"},
+    {"name": "Armazenamento", "description": "Operações administrativas sobre o armazenamento de backups"},
 ]
 
 # ─── App ───────────────────────────────────────────────────────────────────
@@ -224,6 +225,7 @@ app.include_router(agent.router)
 app.include_router(settings_router.router)
 app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
+app.include_router(storage_admin.router)  # Armazenamento admin: /api/v1/admin/storage
 
 
 # ─── Tarefa de fundo: fechamento das rodadas de backup do Cliente ──────────

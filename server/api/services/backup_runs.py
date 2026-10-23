@@ -517,12 +517,12 @@ def build_single_backup_zip_with_customer_password(
     if not machine or not backup.zip_filename:
         return None
 
+    customer = machine.customer
     date_str = (backup.started_at or backup.created_at).strftime("%d-%m-%Y")
-    path = get_zip_path(machine.id, machine.name, backup.zip_filename, date_str=date_str)
+    path = get_zip_path(machine.id, machine.name, backup.zip_filename, date_str=date_str, customer=customer)
     if not path or not path.exists():
         return None
 
-    customer = machine.customer
     if client_password is None and customer and customer.zip_password:
         try:
             client_password = crypto_decrypt(customer.zip_password)
@@ -598,7 +598,7 @@ def build_run_zip(db: Session, run: CustomerBackupRun, client_password: Optional
                 if b is None or m is None or not b.zip_filename:
                     continue
                 date_str = (b.started_at or b.created_at).strftime("%d-%m-%Y")
-                path = get_zip_path(m.id, m.name, b.zip_filename, date_str=date_str)
+                path = get_zip_path(m.id, m.name, b.zip_filename, date_str=date_str, customer=m.customer or run.customer)
                 if not path or not path.exists():
                     continue
 
@@ -662,7 +662,7 @@ def build_customer_latest_zip(db: Session, customer: Customer, client_password: 
                 if not latest or not latest.zip_filename:
                     continue
                 date_str = (latest.started_at or latest.created_at).strftime("%d-%m-%Y")
-                path = get_zip_path(machine.id, machine.name, latest.zip_filename, date_str=date_str)
+                path = get_zip_path(machine.id, machine.name, latest.zip_filename, date_str=date_str, customer=customer)
                 if not path or not path.exists():
                     continue
 
@@ -677,7 +677,6 @@ def build_customer_latest_zip(db: Session, customer: Customer, client_password: 
         return None
     tmp.seek(0)
     return tmp
-
 
 
 def iter_file(f, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:

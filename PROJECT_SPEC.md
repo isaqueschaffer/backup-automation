@@ -598,6 +598,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | GET | `/api/v1/backups/public-run-download/{run_id}` | ZIP unificado da rodada pelo link do e-mail do Cliente (mesmo modelo do public-download) |
 | POST | `/api/v1/backups/{id}/resend-email` | Reenviar e-mail do backup |
 | GET/PUT | `/api/v1/settings` | Configuracoes do sistema |
+| POST | `/api/v1/admin/storage/reorganizar` | Move as pastas de backup para a estrutura Cliente > Maquina (admin; `aplicar=false` so simula, `true` executa; caminhos relativos ao armazenamento) |
 | POST | `/api/v1/admin/agent-version` | Registrar nova versao OTA (JWT do admin ou `X-Publish-Token`; ver REGRA-003) |
 | GET | `/api/v1/admin/agent-version` | Listar versoes OTA |
 | PUT | `/api/v1/admin/agent-version/{id}/toggle` | Ativar/desativar versao |
@@ -767,7 +768,7 @@ Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose 
 |---|---|---|
 | `ACCESS_TOKEN_EXPIRE_HOURS` | `8` | Expiracao do JWT |
 | `CORS_ORIGINS` | `""` | Origens permitidas (separadas por virgula) |
-| `BACKUP_STORAGE_PATH` | `/data/backups` | Diretorio de armazenamento de ZIPs |
+| `BACKUP_STORAGE_PATH` | `/data/backups` | Raiz do armazenamento de ZIPs: `<CLIENTE>_<uuid>/<MAQUINA>_<uuid>/` (maquina sem Cliente em `_sem_cliente/`; `lixeira/` para maquinas excluidas). Ver o changelog de 23/10/2026 |
 | `PUBLIC_URL` | None | URL publica do servidor |
 | `SMTP_SERVER` | None | Servidor SMTP |
 | `SMTP_PORT` | `587` | Porta SMTP |
@@ -932,6 +933,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-23] — Armazenamento dos backups no servidor segue Cliente > Máquina
+
+**Alteração:** no disco, cada máquina era uma pasta solta na raiz (`<MAQUINA>_<uuid>/`) mesmo com o painel já organizado em Cliente > Máquina. A estrutura passa a ser `BACKUP_STORAGE_PATH/<CLIENTE>_<uuid_cliente>/<MAQUINA>_<uuid_maquina>/backup_*.zip`; máquina sem Cliente em `_sem_cliente/<MAQUINA>_<uuid>/`; `lixeira/` como antes. O UUID no fim do nome é a identidade (a pasta é achada por sufixo `_<uuid>`, então renomear Cliente ou Máquina não perde arquivos). **Leitura** (`get_zip_path`, agora com `customer=`): procura a pasta canônica e depois QUALQUER pasta da máquina (raiz legada, outro Cliente, `_sem_cliente`), mantendo as estruturas legadas. **Escrita** (`save_zip_stream`, `customer=machine.customer`): usa a pasta canônica; se ela não existe mas a máquina já tem pasta (estrutura antiga), continua nela (não divide a máquina); só cria a canônica quando a máquina não tem pasta. **Movimentação:** `reorganizar_maquina` (mover/unir sem sobrescrever; conflitos são reportados) roda, em melhor esforço e sem derrubar a rota, ao adicionar/remover a máquina de um Cliente, ao excluir o Cliente (máquinas vão para `_sem_cliente` e a pasta vazia do Cliente é removida) e `renomear_pasta_do_cliente` ao renomear o Cliente. **Dados antigos:** `POST /api/v1/admin/storage/reorganizar?aplicar=false|true` (admin) simula/executa a mudança de todas as máquinas, devolvendo resumo por ação e caminhos relativos. Sem mudança de banco nem de agente. `delete_old_backups` passou a usar `datetime.utcnow()` (REGRA-001). Teste novo `tests/test_storage_hierarquia.py` (8 casos), rodado em container; os testes antigos de `tests/test_storage.py` já estavam desatualizados em relação ao nome da pasta e não foram tocados.
+**Arquivos:** server/api/services/storage_service.py, routers/storage_admin.py (novo), routers/customers.py, routers/backups.py, routers/agent.py, services/backup_runs.py, main.py, tests/test_storage_hierarquia.py (novo), PROJECT_SPEC.md
+**Breaking Change:** Não (leitura aceita todas as estruturas; os dados antigos só mudam de lugar ao rodar a reorganização ou ao vincular/desvincular a máquina).
+**Branch:** isaque
 
 ### [2026-10-23] — Galeria DIGIFORT/DEFENSE: câmeras de IP compartilhado recebiam a imagem do mesmo canal
 
