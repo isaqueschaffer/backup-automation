@@ -145,6 +145,7 @@ class NVRCamera(Base):
     username = Column(String(100), nullable=True)
     password = Column(Text, nullable=True)  # Fernet-encrypted quando preenchido
     modelo = Column(String(50), nullable=True)  # Hikvision, Intelbras, Grandstream, ONVIF
+    canal_rtsp = Column(Integer, nullable=True)  # canal da câmera dentro do equipamento do IP (IP compartilhado entre câmeras)
     perfect_image_base64 = Column(Text, nullable=True)
     night_image_base64 = Column(Text, nullable=True)
     night_image_date = Column(DateTime, nullable=True)

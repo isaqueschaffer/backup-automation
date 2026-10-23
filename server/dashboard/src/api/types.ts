@@ -77,6 +77,8 @@ export interface NvrCamera {
   ip?: string | null;
   username?: string | null;
   modelo?: string | null;
+  canal_rtsp?: number | null;
+  ip_compartilhado?: boolean;
   has_password?: boolean;
   status_comunicacao?: string;
   captura_status?: string;

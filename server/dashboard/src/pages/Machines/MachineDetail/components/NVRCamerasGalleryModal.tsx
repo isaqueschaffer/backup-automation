@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Edit2, Image, Moon, Plus, RefreshCw, Upload, Video } from "lucide-react";
+import { AlertTriangle, Edit2, Image, Moon, Plus, RefreshCw, Upload, Video } from "lucide-react";
 import api from "../../../../api/client";
 import { NvrCamera, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
@@ -75,7 +75,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
   // ── Galeria RTSP (DIGIFORT/DEFENSE): importar CSV/XLSX, sincronizar da máquina, editar conexão ──
   const vmsFileInput = useRef<HTMLInputElement>(null);
   const [vmsBusy, setVmsBusy] = useState(false);
-  const [editCam, setEditCam] = useState<{ canal: number; nome: string; ip: string; username: string; password: string; modelo: string } | null>(null);
+  const [editCam, setEditCam] = useState<{ canal: number; nome: string; ip: string; username: string; password: string; modelo: string; canal_rtsp: string } | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -159,6 +159,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       username: cam?.username || "admin",
       password: "",
       modelo: cam?.modelo || "Hikvision",
+      canal_rtsp: cam ? String(cam.canal_rtsp ?? "") : "",
     });
   };
 
@@ -170,6 +171,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       await api.put(`/machines/${machineId}/equipamentos/${nvrId}/cameras/${editCam.canal}`, {
         nome: editCam.nome, ip: editCam.ip, username: editCam.username || "admin",
         password: editCam.password || undefined, modelo: editCam.modelo,
+        canal_rtsp: editCam.canal_rtsp.trim() ? Number(editCam.canal_rtsp) : null,
       });
       toast("Câmera salva.", "success");
       const canalSalvo = editCam.canal;
@@ -425,8 +427,22 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
                         onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
                         <Video size={15} color={isSelected ? "var(--primary)" : "var(--text-muted)"} style={{ marginTop: 2, flexShrink: 0 }} />
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: isSelected ? 600 : 500, fontSize: 13, color: isSelected ? "var(--primary-dark)" : "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {nomeCam(cam)}
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <span style={{ fontWeight: isSelected ? 600 : 500, fontSize: 13, color: isSelected ? "var(--primary-dark)" : "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {nomeCam(cam)}
+                            </span>
+                            {cam.ip_compartilhado && !cam.canal_rtsp && (
+                              <span
+                                className="badge warn"
+                                title="As imagens desta câmera podem estar trocadas com as de outras do mesmo IP. Edite a câmera, informe o canal dela no equipamento e capture de novo."
+                                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, padding: "1px 6px" }}
+                              >
+                                <AlertTriangle size={12} style={{ flexShrink: 0 }} /> IP compartilhado: informe o canal
+                              </span>
+                            )}
+                            {cam.ip_compartilhado && cam.canal_rtsp && (
+                              <span className="text-xs text-muted" style={{ fontSize: 10 }}>canal {cam.canal_rtsp} do equipamento</span>
+                            )}
                           </div>
                           {isVms && (
                             <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -459,6 +475,18 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
                         <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "monospace" }}>
                           {selectedCam.ip || "sem IP"}{selectedCam.modelo ? ` · ${selectedCam.modelo}` : ""}
                         </span>
+                      )}
+                      {selectedCam.ip_compartilhado && !selectedCam.canal_rtsp && (
+                        <span
+                          className="badge warn"
+                          title="As imagens desta câmera podem estar trocadas com as de outras do mesmo IP. Edite a câmera, informe o canal dela no equipamento e capture de novo."
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                        >
+                          <AlertTriangle size={12} style={{ flexShrink: 0 }} /> IP compartilhado: informe o canal
+                        </span>
+                      )}
+                      {selectedCam.ip_compartilhado && selectedCam.canal_rtsp && (
+                        <span className="text-xs text-muted">canal {selectedCam.canal_rtsp} do equipamento</span>
                       )}
                       {selectedCam.status_comunicacao === "OFFLINE" && <span className="badge err">OFFLINE</span>}
                       {isVms && (
@@ -573,6 +601,21 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
                   <option value="ONVIF">ONVIF Genérico</option>
                   <option value="Motorola">Motorola (ONVIF)</option>
                 </select>
+              </label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Canal no equipamento (para IP compartilhado)
+                <input
+                  type="number"
+                  min={1}
+                  max={512}
+                  className="form-input"
+                  value={editCam.canal_rtsp}
+                  onChange={e => setEditCam({ ...editCam, canal_rtsp: e.target.value })}
+                  placeholder="Ex.: 1, 2, 3..."
+                  style={{ marginTop: 4 }}
+                />
+                <span className="text-xs text-muted" style={{ display: "block", marginTop: 4, lineHeight: 1.3 }}>
+                  Use quando várias câmeras têm o mesmo IP (gravador/encoder com vários canais). Deixe em branco se o IP é só desta câmera.
+                </span>
               </label>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 20, justifyContent: "flex-end" }}>

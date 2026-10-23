@@ -29,7 +29,11 @@ from schemas import (
 )
 from routers.machines import check_machine_online
 from services.crypto_service import decrypt
-from services.galeria_vms import parear_cameras
+from services.galeria_vms import (
+    parear_cameras,
+    ips_compartilhados,
+    bloqueada_por_ip_compartilhado,
+)
 from services.storage_service import save_zip_stream, UploadTooLargeError, _sanitize_name
 from services.email_service import send_backup_report
 from services.backup_runs import attach_report_to_run, finish_queue_run
@@ -46,6 +50,7 @@ def _build_cameras_config(machine: Machine, nvr: NVR):
     if (nvr.tipo or "NVR").upper() not in ("DIGIFORT", "DEFENSE"):
         return None
     cams_db = sorted(nvr.cameras_status or [], key=lambda c: c.canal)
+    compartilhados = ips_compartilhados(cams_db)
     out = []
     for c in cams_db:
         if not c.ip:
@@ -61,6 +66,8 @@ def _build_cameras_config(machine: Machine, nvr: NVR):
             "username": c.username or "admin",
             "password": pwd,
             "modelo": c.modelo or "Hikvision",
+            "canal_rtsp": c.canal_rtsp,
+            "ip_compartilhado": (c.ip or "").strip() in compartilhados,
         })
     if out:
         return out
@@ -78,6 +85,8 @@ def _build_cameras_config(machine: Machine, nvr: NVR):
             "username": mc.username or "admin",
             "password": pwd,
             "modelo": (mc.config_extra or {}).get("modelo") or "Hikvision",
+            "canal_rtsp": None,
+            "ip_compartilhado": False,
         })
     return out
 
@@ -346,6 +355,22 @@ def receive_night_image(
         cameras_db = list(nvr.cameras_status)
         entrada = [{"canal": canal, "nome": body.nome, "ip": body.ip}]
         _, _, camera, canal = parear_cameras(cameras_db, entrada)[0]
+
+        if camera is not None:
+            if bloqueada_por_ip_compartilhado(camera, cameras_db) or (
+                (camera.ip or "").strip() in ips_compartilhados(cameras_db) and body.canal_rtsp != camera.canal_rtsp
+            ):
+                return {
+                    "status": "ignored",
+                    "message": "IP compartilhado: informe o canal da câmera na Galeria (e use um agente que envie o canal).",
+                }
+        else:
+            body_ip = (body.ip or "").strip()
+            if body_ip and any((c.ip or "").strip() == body_ip for c in cameras_db):
+                return {
+                    "status": "ignored",
+                    "message": "IP compartilhado: informe o canal da câmera na Galeria (e use um agente que envie o canal).",
+                }
     else:
         camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id, NVRCamera.canal == canal).first()
 

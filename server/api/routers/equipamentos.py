@@ -20,7 +20,13 @@ from schemas import (
     NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
 )
 from services.crypto_service import encrypt, decrypt
-from services.galeria_vms import canal_int as _canal_int, ip_valido, parear_cameras
+from services.galeria_vms import (
+    canal_int as _canal_int,
+    ip_valido,
+    parear_cameras,
+    ips_compartilhados,
+    bloqueada_por_ip_compartilhado,
+)
 
 TIPOS_VMS = ("DIGIFORT", "DEFENSE")
 
@@ -200,6 +206,14 @@ async def test_equipamento_rtsp(
                 db.refresh(cam_db)
             else:
                 return RTSPTestResponse(success=False, error_message="Câmera sem endereço IP configurado na galeria. Importe o CSV ou configure o IP da câmera.")
+
+        todas = db.query(NVRCamera).filter(NVRCamera.nvr_id == equipamento_id).all()
+        if bloqueada_por_ip_compartilhado(cam_db, todas):
+            return RTSPTestResponse(
+                success=False,
+                error_message=f"O IP {cam_db.ip} é usado por mais de uma câmera (gravador ou encoder com vários canais). Edite a câmera e informe o canal dela no equipamento.",
+            )
+
         try:
             cam_password = decrypt(cam_db.password) if cam_db.password else "navarro@123"
         except Exception:
@@ -211,7 +225,7 @@ async def test_equipamento_rtsp(
             "marca": cam_db.modelo or "Hikvision",
             "username": cam_db.username or "admin",
             "password": cam_password,
-            "canal": 1,
+            "canal": cam_db.canal_rtsp or 1,
             "stream_principal": True,
             "direct_camera": True,
             "modo": modo,
@@ -346,16 +360,20 @@ def get_nvr_cameras(
     if is_vms:
         # Pareia relatório do agente e Galeria por nome/IP (o canal do agente não é o da Galeria)
         merged_cameras = []
+        compartilhados = ips_compartilhados(cameras_db)
         for _, st, c_db, ch in parear_cameras(cameras_db, report_status):
             st = st or {}
+            ip_item = (c_db.ip if c_db and c_db.ip else None) or ip_valido(st.get("ip")) or None
             obj = {
                 "id": c_db.id if c_db else None,
                 "nvr_id": id,
                 "canal": ch,
                 "nome": (c_db.nome if c_db and c_db.nome else None) or (st.get("nome") or "").strip() or f"Canal {ch}",
-                "ip": (c_db.ip if c_db and c_db.ip else None) or ip_valido(st.get("ip")) or None,
+                "ip": ip_item,
                 "username": c_db.username if c_db else None,
                 "modelo": c_db.modelo if c_db else st.get("modelo"),
+                "canal_rtsp": c_db.canal_rtsp if c_db else None,
+                "ip_compartilhado": (ip_item or "").strip() in compartilhados,
                 "has_password": bool(c_db and c_db.password),
                 "perfect_image_base64": c_db.perfect_image_base64 if c_db else None,
                 "night_image_base64": c_db.night_image_base64 if c_db else None,
@@ -399,6 +417,8 @@ def get_nvr_cameras(
             "ip": c_db.ip if c_db else None,
             "username": c_db.username if c_db else None,
             "modelo": c_db.modelo if c_db else None,
+            "canal_rtsp": None,
+            "ip_compartilhado": False,
             "has_password": bool(c_db and c_db.password),
             "perfect_image_base64": c_db.perfect_image_base64 if c_db else None,
             "night_image_base64": c_db.night_image_base64 if c_db else None,
@@ -433,6 +453,8 @@ def _camera_response_dict(c: NVRCamera) -> dict:
         "ip": c.ip,
         "username": c.username,
         "modelo": c.modelo,
+        "canal_rtsp": c.canal_rtsp,
+        "ip_compartilhado": False,
         "has_password": bool(c.password),
         "perfect_image_base64": c.perfect_image_base64,
         "night_image_base64": c.night_image_base64,
@@ -510,6 +532,8 @@ def import_cameras(
         else:
             camera.canal = canal
             camera.nome = item.nome
+        if item.canal_rtsp is not None:
+            camera.canal_rtsp = item.canal_rtsp
         camera.ip = item.ip
         camera.username = item.username or "admin"
         camera.modelo = item.modelo or "Hikvision"
@@ -550,6 +574,7 @@ def set_camera_rtsp(
         db.add(camera)
     else:
         camera.nome = payload.nome
+    camera.canal_rtsp = payload.canal_rtsp
     camera.ip = payload.ip
     camera.username = payload.username or "admin"
     camera.modelo = payload.modelo or "Hikvision"

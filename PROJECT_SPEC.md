@@ -282,11 +282,12 @@ trilan-nvr-backup-automation/
 | ip / username | VARCHAR(50) / VARCHAR(100) | str | NULL | Conexão RTSP individual (DIGIFORT e DEFENSE; NULL em NVR comum) |
 | password | TEXT | str | NULL | Fernet quando preenchida (REGRA-004) |
 | modelo | VARCHAR(50) | str | NULL | Hikvision, Intelbras, Grandstream, ONVIF, Motorola |
+| canal_rtsp | INTEGER | int | NULL | Canal da câmera dentro do equipamento do IP; obrigatório na prática quando o mesmo IP é usado por 2 ou mais câmeras da Galeria (gravador/encoder com vários canais) |
 | perfect_image_base64 | TEXT | str | NULL | Imagem de referência |
 | night_image_base64 / night_image_date | TEXT / TIMESTAMP WITHOUT TIME ZONE | str / datetime naive | NULL | Imagem da noite e data |
 | updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | utcnow() |
 
-A tabela nasce por `Base.metadata.create_all` (`main.py`); as colunas `ip`, `username`, `password` e `modelo` vêm da migração inline.
+A tabela nasce por `Base.metadata.create_all` (`main.py`); as colunas `ip`, `username`, `password`, `modelo` e `canal_rtsp` vêm da migração inline.
 
 #### `backups`
 
@@ -931,6 +932,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-23] — Galeria DIGIFORT/DEFENSE: câmeras de IP compartilhado recebiam a imagem do mesmo canal
+
+**Alteração:** num equipamento DIGIFORT, câmeras diferentes compartilhavam o mesmo IP (gravador/encoder com vários canais; ex.: ELEVADOR A/B/C em um IP e D/E/F em outro) e a captura RTSP (painel e agente) usava só o IP, sempre o canal 1: as imagens da Galeria dessas câmeras eram a mesma. Confirmado com as imagens reais da produção. **Correção:** (1) `nvr_cameras.canal_rtsp` (migração inline; editável em `PUT .../cameras/{canal}` e no formulário da Galeria, "Canal no equipamento"). (2) IP compartilhado = mesmo IP em 2 ou mais câmeras da mesma Galeria (`ips_compartilhados` em `services/galeria_vms.py`). Câmera de IP compartilhado SEM `canal_rtsp` não é capturada (o `test-rtsp` do painel devolve erro explicativo e o agente marca FALHA com o motivo) e não aceita upload de imagem da noite; COM `canal_rtsp` a captura usa o canal (`test-rtsp` envia `canal = canal_rtsp`; o agente repassa `canal_rtsp` ao `test_rtsp_camera`). (3) `POST /agent/nvr-cameras/night-image` aceita `canal_rtsp` e, em IP compartilhado, só grava se o canal enviado for o da câmera da Galeria (agentes antigos não enviam e têm o upload ignorado, em vez de gravar a imagem errada); upload sem par e com IP já existente na Galeria também é ignorado. (4) `parear_cameras` pareia por IP somente quando há exatamente 1 câmera livre com aquele IP (antes pegava a primeira, trocando nome/status/imagem). (5) Agente (`manager.py`, DIGIFORT): o índice por IP guarda a lista de câmeras e só casa por IP quando é única (antes guardava a última). (6) `GET /agent/config` envia `canal_rtsp` e `ip_compartilhado` em `cameras_config`; `GET .../cameras` devolve `canal_rtsp` e `ip_compartilhado`; o painel mostra o selo "IP compartilhado: informe o canal". As imagens já gravadas NÃO são apagadas (o selo avisa que podem estar trocadas). Exige nova versão do agente para a captura da madrugada usar o canal. `tsc` e `pyflakes` conferidos em container.
+**Arquivos:** server/api/models.py, main.py, schemas.py, services/galeria_vms.py, routers/equipamentos.py, routers/agent.py, agent/src/backup/file_manager/manager.py, agent/src/camera/rtsp_client.py, server/dashboard/src/api/types.ts, pages/Machines/MachineDetail/components/NVRCamerasGalleryModal.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não (campo novo opcional; câmeras de IP único seguem como antes).
+**Branch:** isaque
 
 ### [2026-10-23] — Painel: página "Backups" (/backups) mais limpa
 

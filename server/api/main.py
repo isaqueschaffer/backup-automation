@@ -144,6 +144,7 @@ _MIGRACOES_COLUNAS = [
     ("nvr_cameras", "username", "ALTER TABLE nvr_cameras ADD COLUMN username VARCHAR(100);"),
     ("nvr_cameras", "password", "ALTER TABLE nvr_cameras ADD COLUMN password TEXT;"),
     ("nvr_cameras", "modelo", "ALTER TABLE nvr_cameras ADD COLUMN modelo VARCHAR(50);"),
+    ("nvr_cameras", "canal_rtsp", "ALTER TABLE nvr_cameras ADD COLUMN canal_rtsp INTEGER;"),
 ]
 
 _colunas_cache: dict = {}

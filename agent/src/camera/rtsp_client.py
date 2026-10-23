@@ -677,11 +677,16 @@ def capturar_imagens_noite_vms(equipamento_nome: str, cameras_lista: list, conf:
             cam["imagem_noite"] = {"status": "FALHA", "motivo": "Tempo limite da captura esgotado", "horario": None}
             continue
 
+        if cam.get("ip_compartilhado") and not cam.get("canal_rtsp"):
+            cam["imagem_noite"] = {"status": "FALHA", "motivo": "IP compartilhado por várias câmeras: informe o canal da câmera no equipamento, na Galeria", "horario": None}
+            continue
+
         res = test_rtsp_camera({
             "ip": ip,
             "username": cam.get("username") or "admin",
             "password": cam.get("password") or "navarro@123",
             "modelo": cam.get("modelo") or "Hikvision",
+            "canal": cam.get("canal_rtsp"),
             "stream_principal": True,
         })
 
@@ -695,6 +700,7 @@ def capturar_imagens_noite_vms(equipamento_nome: str, cameras_lista: list, conf:
                 "night_image_date": horario_iso,
                 "ip": ip,
                 "modelo": cam.get("modelo") or "Hikvision",
+                "canal_rtsp": cam.get("canal_rtsp"),
             })
             cam["imagem_noite"] = (
                 {"status": "OK", "motivo": None, "horario": horario_iso} if enviado

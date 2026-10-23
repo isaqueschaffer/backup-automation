@@ -55,6 +55,8 @@ class NVRCameraResponse(BaseModel):
     ip: Optional[str] = None
     username: Optional[str] = None
     modelo: Optional[str] = None
+    canal_rtsp: Optional[int] = None
+    ip_compartilhado: bool = False
     has_password: bool = False
     perfect_image_base64: Optional[str] = None
     night_image_base64: Optional[str] = None
@@ -77,6 +79,7 @@ class NVRCameraConfigItem(BaseModel):
     username: str = "admin"
     password: Optional[str] = None
     modelo: str = "Hikvision"
+    canal_rtsp: Optional[int] = Field(None, ge=1, le=512)
 
 
 class NVRCameraBulkImport(BaseModel):
@@ -114,6 +117,7 @@ class NVRCameraNightImage(BaseModel):
     night_image_date: datetime
     ip: Optional[str] = None
     modelo: Optional[str] = None
+    canal_rtsp: Optional[int] = None
 
 
 # ─────────────────────────────────────────────
