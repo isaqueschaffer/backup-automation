@@ -13,11 +13,12 @@ from sqlalchemy.orm import Session
 
 from auth import verify_admin_token
 from database import get_db
-from models import Machine, NVR, NVRCamera
+from models import Machine, NVR, NVRCamera, NVRPlanilha
 from routers.agent import mascarar_credenciais, pending_rtsp_tasks
 from schemas import (
     NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse,
     NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
+    NVRPlanilhaEntrada, NVRPlanilhaResposta,
 )
 from services.crypto_service import encrypt, decrypt
 from services.galeria_vms import (
@@ -26,6 +27,12 @@ from services.galeria_vms import (
     parear_cameras,
     ips_compartilhados,
     bloqueada_por_ip_compartilhado,
+)
+from services.planilha_vms import (
+    colunas_senha,
+    mascarar_senhas,
+    empacotar,
+    desempacotar,
 )
 
 TIPOS_VMS = ("DIGIFORT", "DEFENSE")
@@ -265,8 +272,8 @@ async def test_equipamento_rtsp(
     # Libera a conexão do banco durante a espera (a captura pela gravação pode levar ~2 min)
     db.close()
 
-    # Ao vivo: até 35s. Pela gravação: busca dia a dia no NVR (o agente desiste em ~100s + envio).
-    espera = 35.0 if modo == "ao_vivo" else 130.0
+    # Ao vivo: até 55s. Pela gravação: busca dia a dia no NVR (o agente desiste em ~100s + envio).
+    espera = 55.0 if modo == "ao_vivo" else 130.0
     try:
         await asyncio.wait_for(event.wait(), timeout=espera)
     except asyncio.TimeoutError:
@@ -636,3 +643,119 @@ def set_perfect_image(
     db.commit()
     db.refresh(camera)
     return camera
+
+
+# ─────────────────────────────────────────────
+# Planilha VMS (DIGIFORT / DEFENSE)
+# ─────────────────────────────────────────────
+@router.put("/{id}/planilha", response_model=NVRPlanilhaResposta)
+def salvar_planilha(
+    machine_id: UUID,
+    id: UUID,
+    payload: NVRPlanilhaEntrada,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+):
+    """Cria ou substitui a planilha importada de um equipamento VMS (DIGIFORT/DEFENSE)."""
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Planilha só é suportada para DIGIFORT e DEFENSE.")
+
+    planilha = db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).first()
+    total = len(payload.linhas)
+    dados_enc = empacotar(payload.linhas)
+    agora = datetime.utcnow()
+
+    if not planilha:
+        planilha = NVRPlanilha(
+            nvr_id=id,
+            nome_arquivo=payload.nome_arquivo,
+            linha_cabecalho=payload.linha_cabecalho,
+            total_linhas=total,
+            dados=dados_enc,
+            importado_em=agora,
+        )
+        db.add(planilha)
+    else:
+        planilha.nome_arquivo = payload.nome_arquivo
+        planilha.linha_cabecalho = payload.linha_cabecalho
+        planilha.total_linhas = total
+        planilha.dados = dados_enc
+        planilha.importado_em = agora
+
+    db.commit()
+    db.refresh(planilha)
+
+    cols = colunas_senha(payload.linhas, payload.linha_cabecalho)
+    linhas_mascaradas = mascarar_senhas(payload.linhas, payload.linha_cabecalho, cols)
+
+    return NVRPlanilhaResposta(
+        nome_arquivo=planilha.nome_arquivo,
+        linha_cabecalho=planilha.linha_cabecalho,
+        total_linhas=planilha.total_linhas,
+        importado_em=planilha.importado_em,
+        colunas_senha=cols,
+        senhas_ocultas=True,
+        linhas=linhas_mascaradas,
+    )
+
+
+@router.get("/{id}/planilha", response_model=NVRPlanilhaResposta)
+def obter_planilha(
+    machine_id: UUID,
+    id: UUID,
+    mostrar_senhas: bool = Query(False),
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+):
+    """Devolve a última planilha importada no equipamento, mascarando senhas por padrão."""
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Planilha só é suportada para DIGIFORT e DEFENSE.")
+
+    planilha = db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).first()
+    if not planilha:
+        raise HTTPException(status_code=404, detail="Nenhuma planilha importada neste equipamento.")
+
+    linhas = desempacotar(planilha.dados)
+    cols = colunas_senha(linhas, planilha.linha_cabecalho)
+
+    if not mostrar_senhas:
+        linhas = mascarar_senhas(linhas, planilha.linha_cabecalho, cols)
+
+    return NVRPlanilhaResposta(
+        nome_arquivo=planilha.nome_arquivo,
+        linha_cabecalho=planilha.linha_cabecalho,
+        total_linhas=planilha.total_linhas,
+        importado_em=planilha.importado_em,
+        colunas_senha=cols,
+        senhas_ocultas=not mostrar_senhas,
+        linhas=linhas,
+    )
+
+
+@router.delete("/{id}/planilha", status_code=status.HTTP_204_NO_CONTENT)
+def remover_planilha(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+):
+    """Remove a planilha guardada no equipamento."""
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Planilha só é suportada para DIGIFORT e DEFENSE.")
+
+    planilha = db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).first()
+    if not planilha:
+        raise HTTPException(status_code=404, detail="Nenhuma planilha importada neste equipamento.")
+
+    db.delete(planilha)
+    db.commit()
+    return None

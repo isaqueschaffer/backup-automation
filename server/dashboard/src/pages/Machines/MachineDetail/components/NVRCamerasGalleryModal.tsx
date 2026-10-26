@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Edit2, Image, Moon, Plus, RefreshCw, Upload, Video } from "lucide-react";
+import { AlertTriangle, Edit2, FileSpreadsheet, Image, Moon, Plus, RefreshCw, Upload, Video } from "lucide-react";
 import api from "../../../../api/client";
-import { NvrCamera, TipoEquipamento } from "../../../../api/types";
+import { NvrCamera, PlanilhaVms, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
 import { fmtDate } from "../../../../utils/date";
-import { readRowsFromFile, rowsToCameras } from "../hooks/useCameraImport";
+import { colunasDeSenha, linhaDoCabecalho, linhasParaTexto, readRowsFromFile, rowsToCameras } from "../hooks/useCameraImport";
 import CameraImagePanel from "./CameraImagePanel";
+import PlanilhaVmsModal from "./PlanilhaVmsModal";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // arquivo original
 const MAX_LADO = 3840; // reduz imagens maiores que 4K
@@ -77,6 +78,26 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
   const [vmsBusy, setVmsBusy] = useState(false);
   const [editCam, setEditCam] = useState<{ canal: number; nome: string; ip: string; username: string; password: string; modelo: string; canal_rtsp: string } | null>(null);
 
+  // Estados da prévia de importação e do modal de planilha salva
+  interface PreviaVms {
+    nomeArquivo: string;
+    linhas: string[][];
+    linhaCabecalho: number;
+    colunasSenha: number[];
+    cams: Array<{
+      nome: string;
+      ip: string;
+      modelo: string;
+      senha: string;
+      situacao: "nova" | "atualiza";
+    }>;
+  }
+  const [previa, setPrevia] = useState<PreviaVms | null>(null);
+  const [previaMostrarSenhas, setPreviaMostrarSenhas] = useState(false);
+  const [planilhaSalva, setPlanilhaSalva] = useState<PlanilhaVms | null>(null);
+  const [planilhaSalvaMostrarSenhas, setPlanilhaSalvaMostrarSenhas] = useState(false);
+  const [carregandoPlanilhaSalva, setCarregandoPlanilhaSalva] = useState(false);
+
   useEffect(() => {
     aliveRef.current = true;
     return () => { aliveRef.current = false; cancelLote.current = true; };
@@ -117,7 +138,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     }
   };
 
-  // Importa um CSV/XLSX exportado do Digifort/Defense/NVR direto na galeria (ip/usuário/senha/modelo por canal)
+  // Lê CSV/XLSX exportado do Digifort/Defense/NVR e abre prévia antes de importar
   const importarArquivoVms = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -125,15 +146,130 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     setVmsBusy(true);
     try {
       const rows = await readRowsFromFile(file);
-      const cams = rowsToCameras(rows).map(c => ({ nome: c.name, ip: c.ip, username: "admin", password: c.password, modelo: c.modelo }));
-      if (cams.length === 0) { toast("Nenhuma câmera encontrada no arquivo.", "error"); return; }
-      await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/import`, { cameras: cams });
-      toast(`Importadas ${cams.length} câmera(s) com sucesso!`, "success");
+      const cams = rowsToCameras(rows);
+      if (cams.length === 0) {
+        toast("Nenhuma câmera encontrada no arquivo.", "error");
+        return;
+      }
+
+      const linhas = linhasParaTexto(rows);
+      const cabecalhoIdx = linhaDoCabecalho(linhas);
+      const colSenhas = colunasDeSenha(linhas, cabecalhoIdx);
+
+      const camsComSituacao = cams.map(c => {
+        const nomeLimpo = (c.name || "").trim().toLowerCase();
+        const ipLimpo = (c.ip || "").trim();
+        const jaExiste = cameras.some(existente => {
+          const exNome = (existente.nome || "").trim().toLowerCase();
+          const exIp = (existente.ip || "").trim();
+          return (nomeLimpo !== "" && exNome === nomeLimpo) || (ipLimpo !== "" && exIp === ipLimpo);
+        });
+        return {
+          nome: c.name,
+          ip: c.ip,
+          modelo: c.modelo,
+          senha: c.password,
+          situacao: (jaExiste ? "atualiza" : "nova") as "nova" | "atualiza",
+        };
+      });
+
+      setPrevia({
+        nomeArquivo: file.name,
+        linhas,
+        linhaCabecalho: cabecalhoIdx,
+        colunasSenha: colSenhas,
+        cams: camsComSituacao,
+      });
+      setPreviaMostrarSenhas(false);
+    } catch (err) {
+      toast(erroDaApi(err, "Erro ao ler arquivo."), "error");
+    } finally {
+      setVmsBusy(false);
+    }
+  };
+
+  const confirmarImportacaoPrevia = async () => {
+    if (!previa) return;
+    setVmsBusy(true);
+    try {
+      const payloadCams = previa.cams.map(c => ({
+        nome: c.nome,
+        ip: c.ip,
+        username: "admin",
+        password: c.senha,
+        modelo: c.modelo,
+      }));
+      await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/import`, {
+        cameras: payloadCams,
+      });
+
+      try {
+        await api.put(`/machines/${machineId}/equipamentos/${nvrId}/planilha`, {
+          nome_arquivo: previa.nomeArquivo,
+          linha_cabecalho: previa.linhaCabecalho,
+          linhas: previa.linhas,
+        });
+        toast(`Importadas ${payloadCams.length} câmera(s) com sucesso!`, "success");
+      } catch (putErr) {
+        console.error("Falha ao salvar planilha após importação de câmeras:", putErr);
+        toast("Câmeras importadas, mas não foi possível guardar a planilha.", "info");
+      }
+
+      setPrevia(null);
       await recarregarCameras();
     } catch (err) {
       toast(erroDaApi(err, "Erro ao importar câmeras."), "error");
     } finally {
       setVmsBusy(false);
+    }
+  };
+
+  const abrirPlanilhaSalva = async () => {
+    setVmsBusy(true);
+    try {
+      const res = await api.get<PlanilhaVms>(`/machines/${machineId}/equipamentos/${nvrId}/planilha`, {
+        params: { mostrar_senhas: false },
+      });
+      setPlanilhaSalva(res.data);
+      setPlanilhaSalvaMostrarSenhas(false);
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        toast("Nenhuma planilha importada ainda.", "info");
+      } else {
+        toast(erroDaApi(err, "Erro ao buscar planilha."), "error");
+      }
+    } finally {
+      setVmsBusy(false);
+    }
+  };
+
+  const alternarMostrarSenhasPlanilhaSalva = async (novoMostrar: boolean) => {
+    setCarregandoPlanilhaSalva(true);
+    try {
+      const res = await api.get<PlanilhaVms>(`/machines/${machineId}/equipamentos/${nvrId}/planilha`, {
+        params: { mostrar_senhas: novoMostrar },
+      });
+      setPlanilhaSalva(res.data);
+      setPlanilhaSalvaMostrarSenhas(novoMostrar);
+    } catch (err) {
+      toast(erroDaApi(err, "Erro ao atualizar exibição de senhas."), "error");
+    } finally {
+      setCarregandoPlanilhaSalva(false);
+    }
+  };
+
+  const removerPlanilhaSalva = async () => {
+    if (!confirm("Tem certeza que deseja remover a planilha salva deste equipamento?")) return;
+    setCarregandoPlanilhaSalva(true);
+    try {
+      await api.delete(`/machines/${machineId}/equipamentos/${nvrId}/planilha`);
+      setPlanilhaSalva(null);
+      toast("Planilha removida.", "success");
+    } catch (err) {
+      toast(erroDaApi(err, "Erro ao remover planilha."), "error");
+    } finally {
+      setCarregandoPlanilhaSalva(false);
     }
   };
 
@@ -355,6 +491,10 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={() => vmsFileInput.current?.click()}
         style={{ display: "flex", alignItems: "center", gap: 6 }} title="Lê a planilha exportada do Digifort/Defense e grava as câmeras na galeria">
         <Upload size={13} /> Importar CSV/XLSX
+      </button>
+      <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={abrirPlanilhaSalva}
+        style={{ display: "flex", alignItems: "center", gap: 6 }} title="Mostra a última planilha importada nesta galeria">
+        <FileSpreadsheet size={13} /> Planilha importada
       </button>
       <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={sincronizarDaMaquina}
         style={{ display: "flex", alignItems: "center", gap: 6 }} title="Copia as câmeras já importadas em 'Câmeras da Máquina' para esta galeria">
@@ -624,6 +764,38 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
             </div>
           </div>
         </div>
+      )}
+
+      {previa && (
+        <PlanilhaVmsModal
+          titulo={`Prévia da planilha: ${previa.nomeArquivo}`}
+          linhas={previa.linhas}
+          linhaCabecalho={previa.linhaCabecalho}
+          colunasSenha={previa.colunasSenha}
+          mostrarSenhas={previaMostrarSenhas}
+          onMostrarSenhas={setPreviaMostrarSenhas}
+          info={`${previa.cams.length} câmera(s) identificada(s)`}
+          camerasLidas={previa.cams}
+          confirmarLabel="Importar câmeras"
+          confirmando={vmsBusy}
+          onConfirmar={confirmarImportacaoPrevia}
+          onClose={() => !vmsBusy && setPrevia(null)}
+        />
+      )}
+
+      {planilhaSalva && (
+        <PlanilhaVmsModal
+          titulo={`Planilha importada: ${nvrName}`}
+          linhas={planilhaSalva.linhas}
+          linhaCabecalho={planilhaSalva.linha_cabecalho}
+          colunasSenha={planilhaSalva.colunas_senha}
+          mostrarSenhas={planilhaSalvaMostrarSenhas}
+          onMostrarSenhas={alternarMostrarSenhasPlanilhaSalva}
+          info={`${planilhaSalva.nome_arquivo} · importada em ${fmtDate(planilhaSalva.importado_em)} · ${planilhaSalva.total_linhas} linhas`}
+          onRemover={removerPlanilhaSalva}
+          carregando={carregandoPlanilhaSalva}
+          onClose={() => setPlanilhaSalva(null)}
+        />
       )}
     </>
   );

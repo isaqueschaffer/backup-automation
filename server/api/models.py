@@ -154,6 +154,19 @@ class NVRCamera(Base):
     nvr = relationship("NVR", back_populates="cameras_status")
 
 
+class NVRPlanilha(Base):
+    """Última planilha (CSV/XLSX) importada na Galeria de um equipamento DIGIFORT/DEFENSE. O conteúdo vai criptografado (Fernet), pois pode ter senhas."""
+    __tablename__ = "nvr_planilhas"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nvr_id = Column(UUID(as_uuid=True), ForeignKey("nvrs.id", ondelete="CASCADE"), nullable=False, unique=True)
+    nome_arquivo = Column(String(255), nullable=False)
+    linha_cabecalho = Column(Integer, nullable=False, default=0)
+    total_linhas = Column(Integer, nullable=False, default=0)
+    dados = Column(Text, nullable=False)  # JSON das linhas, criptografado (Fernet)
+    importado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class Backup(Base):
     __tablename__ = "backups"
 

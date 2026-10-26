@@ -89,6 +89,16 @@ export interface NvrCamera {
   night_image_base64?: string | null;
 }
 
+export interface PlanilhaVms {
+  nome_arquivo: string;
+  linha_cabecalho: number;
+  total_linhas: number;
+  importado_em: string;
+  colunas_senha: number[];
+  senhas_ocultas: boolean;
+  linhas: string[][];
+}
+
 export interface AgentLog {
   id: string;
   event_type: string;

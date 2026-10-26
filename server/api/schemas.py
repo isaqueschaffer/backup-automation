@@ -88,6 +88,39 @@ class NVRCameraBulkImport(BaseModel):
     replace_existing: bool = False
 
 
+class NVRPlanilhaEntrada(BaseModel):
+    nome_arquivo: str = Field(..., min_length=1, max_length=255)
+    linha_cabecalho: int = Field(0, ge=0, le=20)
+    linhas: List[List[str]]
+
+    @field_validator("linhas")
+    @classmethod
+    def _validar_linhas(cls, v: List[List[str]]) -> List[List[str]]:
+        if not v:
+            raise ValueError("A planilha não pode estar vazia.")
+        if len(v) > 5000:
+            raise ValueError("A planilha não pode ter mais de 5000 linhas.")
+        resultado: List[List[str]] = []
+        for linha in v:
+            if len(linha) > 100:
+                raise ValueError("Cada linha pode ter no máximo 100 colunas.")
+            resultado.append([
+                (c[:500] if isinstance(c, str) else ("" if c is None else str(c)[:500]))
+                for c in linha
+            ])
+        return resultado
+
+
+class NVRPlanilhaResposta(BaseModel):
+    nome_arquivo: str
+    linha_cabecalho: int
+    total_linhas: int
+    importado_em: datetime
+    colunas_senha: List[int]
+    senhas_ocultas: bool
+    linhas: List[List[str]]
+
+
 class NVRCameraSetPerfect(BaseModel):
     canal: int
     nome: str

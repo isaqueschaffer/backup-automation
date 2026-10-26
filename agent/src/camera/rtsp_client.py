@@ -20,8 +20,6 @@ def _capturar_frame_ffmpeg(ffmpeg_exe: str, rtsp_url: str, transport: str = "tcp
         ffmpeg_exe, "-y",
         "-rtsp_transport", transport,
         "-timeout", "5000000",
-        "-analyzeduration", "1000000",
-        "-probesize", "1000000",
     ]
     if skip_nokey:
         cmd.extend(["-skip_frame", "nokey"])
@@ -45,9 +43,9 @@ def _capturar_frame_ffmpeg(ffmpeg_exe: str, rtsp_url: str, transport: str = "tcp
 
 
 def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
-    """Testa a conexao RTSP da camera localmente pelo agente e retorna a imagem em base64.
-    Possui fallback automático entre TCP e UDP e entre stream principal e secundário, garantindo
-    que câmeras antigas (como Hikvision DS-2CD2012-I e DS-2CD2020-I) funcionem sem timeout."""
+    """Testa a conexão RTSP da câmera localmente pelo agente e retorna a imagem em base64.
+    Tenta até 4 URLs candidatas via TCP (com fallback seletivo para UDP em falhas de conexão/tempo)
+    e acumula os motivos das tentativas, respeitando prazo total e interrompendo em 401."""
     senha_pura = task.get("password", "navarro@123")
     senha_enc = urllib.parse.quote(senha_pura, safe='')
     usuario = task.get("username", "admin")
@@ -103,8 +101,12 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}")
         if nvr_canal:
             urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_num}02")
-        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_num}")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch_num}&subtype=0")
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile1")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_num}")
+
+    # Garante remoção de URLs duplicadas preservando a ordem
+    urls_candidatas = list(dict.fromkeys(urls_candidatas))
 
     import imageio_ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -115,44 +117,82 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     except OSError:
         return {"success": False, "error_message": f"Porta RTSP 554 inacessível em {ip} (IP incorreto, câmera desligada ou bloqueio de rede)"}
 
-    # Limite rigoroso de segurança contra bloqueio por força bruta (account lockout):
-    # Câmeras de segurança costumam travar com 5 a 7 tentativas falhas.
-    MAX_TENTATIVAS_SEGURANCA = 4
+    # Limite rigoroso de segurança: no máximo 4 URLs diferentes
+    urls = urls_candidatas[:4]
+    prazo_max = time.monotonic() + 40.0
+    motivos = []
 
-    tentativas = []
-    url_principal = urls_candidatas[0]
-    tentativas.append((url_principal, "tcp", True, 6))
-    tentativas.append((url_principal, "udp", True, 6))
-
-    for alt_url in urls_candidatas[1:]:
-        tentativas.append((alt_url, "tcp", True, 5))
-        tentativas.append((alt_url, "udp", True, 5))
-
-    # Garante que a lista nunca ultrapasse o limite de segurança
-    tentativas = tentativas[:MAX_TENTATIVAS_SEGURANCA]
-
-    ultimo_erro = "Falha ao conectar via RTSP."
-    prazo_max = time.monotonic() + 20.0
-
-    for idx, (url, transport, skip_nokey, timeout_s) in enumerate(tentativas, start=1):
-        if time.monotonic() >= prazo_max:
+    for url in urls:
+        caminho_curto = url.split(":554", 1)[-1]
+        if prazo_max - time.monotonic() < 4.0:
             break
+
+        # 1. Tentativa TCP
+        timeout_tcp_desejado = 18 if url == urls[0] else 8
+        timeout_efetivo = min(timeout_tcp_desejado, max(1, int(prazo_max - time.monotonic())))
         jpeg_bytes, stderr_txt = _capturar_frame_ffmpeg(
-            ffmpeg_exe, url, transport=transport, skip_nokey=skip_nokey, timeout=timeout_s
+            ffmpeg_exe, url, transport="tcp", skip_nokey=True, timeout=timeout_efetivo
         )
         if jpeg_bytes:
             b64_str = base64.b64encode(jpeg_bytes).decode('utf-8')
             return {"success": True, "error_message": None, "image_base64": b64_str}
-        if stderr_txt:
-            ultimo_erro = _motivo_ao_vivo(stderr_txt) if "Tempo esgotado" not in stderr_txt else stderr_txt
-            # Credenciais recusadas (401): para na 1ª tentativa. Insistir em outras URLs com a mesma
-            # senha errada consumiria as tentativas e bloquearia a câmera do cliente.
-            if "401 Unauthorized" in stderr_txt:
-                ultimo_erro = "Usuário ou senha RTSP recusados pela câmera (interrompido na 1ª tentativa para evitar bloqueio)"
+
+        stderr_txt = stderr_txt or "Falha desconhecida"
+        if "401 Unauthorized" in stderr_txt:
+            logging.warning(f"Câmera {ip} retornou 401 Unauthorized. Abortando imediatamente para prevenir lockout.")
+            motivos.append(f"TCP {caminho_curto}: Usuário ou senha RTSP recusados pela câmera (interrompido na 1ª tentativa para evitar bloqueio)")
+            break
+
+        motivo = stderr_txt if "Tempo esgotado" in stderr_txt else _motivo_ao_vivo(stderr_txt)
+        if motivo.startswith("Caminho RTSP não encontrado"):
+            motivo = "Caminho RTSP não encontrado"
+        entrada_motivo = f"TCP {caminho_curto}: {motivo}"
+        if not motivos or motivos[-1] != entrada_motivo:
+            motivos.append(entrada_motivo)
+
+        # Verificar se deve tentar UDP:
+        # NÃO tentar UDP se erro for 401, 404 ("404 Not Found"), 400 ("400 Bad Request") ou 453/503.
+        # Tentar UDP somente se a falha TCP for de tempo ("Tempo esgotado") ou de conexão.
+        nao_tentar_udp = any(cod in stderr_txt for cod in [
+            "401 Unauthorized", "404 Not Found", "400 Bad Request",
+            "453 Not Enough Bandwidth", "503 Service Unavailable",
+        ])
+        erros_conexao = ["Connection reset", "Connection refused", "timed out", "Invalid data found"]
+        eh_elegivel_udp = not nao_tentar_udp and ("Tempo esgotado" in stderr_txt or any(err in stderr_txt for err in erros_conexao))
+
+        if eh_elegivel_udp:
+            if prazo_max - time.monotonic() < 4.0:
+                break
+            timeout_udp_desejado = 8 if url == urls[0] else 6
+            timeout_efetivo_udp = min(timeout_udp_desejado, max(1, int(prazo_max - time.monotonic())))
+            jpeg_bytes_udp, stderr_txt_udp = _capturar_frame_ffmpeg(
+                ffmpeg_exe, url, transport="udp", skip_nokey=True, timeout=timeout_efetivo_udp
+            )
+            if jpeg_bytes_udp:
+                b64_str = base64.b64encode(jpeg_bytes_udp).decode('utf-8')
+                return {"success": True, "error_message": None, "image_base64": b64_str}
+
+            stderr_txt_udp = stderr_txt_udp or "Falha desconhecida"
+            if "401 Unauthorized" in stderr_txt_udp:
                 logging.warning(f"Câmera {ip} retornou 401 Unauthorized. Abortando imediatamente para prevenir lockout.")
+                motivos.append(f"UDP {caminho_curto}: Usuário ou senha RTSP recusados pela câmera (interrompido na 1ª tentativa para evitar bloqueio)")
                 break
 
-    return {"success": False, "error_message": f"FALHA RTSP ({ip}): {ultimo_erro}"}
+            motivo_udp = stderr_txt_udp if "Tempo esgotado" in stderr_txt_udp else _motivo_ao_vivo(stderr_txt_udp)
+            if motivo_udp.startswith("Caminho RTSP não encontrado"):
+                motivo_udp = "Caminho RTSP não encontrado"
+            entrada_udp = f"UDP {caminho_curto}: {motivo_udp}"
+            if not motivos or motivos[-1] != entrada_udp:
+                motivos.append(entrada_udp)
+
+    if motivos:
+        msg = "; ".join(motivos)
+        if "Caminho RTSP não encontrado" in msg:
+            msg += " (confira o modelo da câmera: Hikvision, Intelbras, Grandstream ou ONVIF)"
+        msg = msg[:320]
+        return {"success": False, "error_message": f"FALHA RTSP ({ip}): {msg}"}
+
+    return {"success": False, "error_message": f"FALHA RTSP ({ip}): Falha ao conectar via RTSP."}
 
 
 def _motivo_ffmpeg(stderr: str) -> str:
