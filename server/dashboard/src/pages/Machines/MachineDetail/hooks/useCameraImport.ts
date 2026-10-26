@@ -126,10 +126,27 @@ export function rowsToCameras(rows: unknown[][]): CameraRow[] {
   const idxModelo = headers.findIndex(h =>
     h.includes("modelo") || h.includes("protocolo") || h.includes("protocol") || h.includes("marca") || h.includes("fabricante")
   );
+  const idxTipo = headers.findIndex(h =>
+    h.includes("tipo de dispositivo") ||
+    h.includes("tipo do dispositivo") ||
+    h.includes("tipo dispositivo") ||
+    h.includes("tipo de equipamento") ||
+    h.includes("device type") ||
+    h === "tipo"
+  );
 
   for (let i = headerRowIdx + 1; i < rows.length; i++) {
     const cols = rows[i];
     if (!cols || cols.length === 0 || (!cols[0] && !cols[1])) continue;
+
+    // Se a planilha possuir coluna de tipo de dispositivo (ex: Intelbras Defense),
+    // desconsidera tudo que não for tipo câmera ("camera", "câmera")
+    if (idxTipo >= 0) {
+      const tipoVal = cleanCell(cols[idxTipo]).toLowerCase();
+      if (!tipoVal.includes("camera") && !tipoVal.includes("câmera")) {
+        continue;
+      }
+    }
 
     let desc = "";
     let ender = "";
@@ -169,7 +186,7 @@ export function rowsToCameras(rows: unknown[][]): CameraRow[] {
       else if (rowStr.includes("INTELBRAS")) modelo = "Intelbras";
       else if (rowStr.includes("GRANDSTREAM")) modelo = "Grandstream";
       else if (rowStr.includes("ONVIF") || rowStr.includes("MOTOROLA") || rowStr.includes("MTI")) modelo = "ONVIF";
-      else if (rowStr.includes("CÂMERA IP") || rowStr.includes("CAMERA IP")) modelo = "Intelbras";
+      else if (rowStr.includes("CÂMERA") || rowStr.includes("CAMERA")) modelo = "Intelbras";
       else modelo = "Hikvision";
     }
 
