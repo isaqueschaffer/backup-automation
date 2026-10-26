@@ -272,8 +272,8 @@ async def test_equipamento_rtsp(
     # Libera a conexão do banco durante a espera (a captura pela gravação pode levar ~2 min)
     db.close()
 
-    # Ao vivo: até 35s. Pela gravação: busca dia a dia no NVR (o agente desiste em ~100s + envio).
-    espera = 35.0 if modo == "ao_vivo" else 130.0
+    # Ao vivo: até 55s. Pela gravação: busca dia a dia no NVR (o agente desiste em ~100s + envio).
+    espera = 55.0 if modo == "ao_vivo" else 130.0
     try:
         await asyncio.wait_for(event.wait(), timeout=espera)
     except asyncio.TimeoutError:

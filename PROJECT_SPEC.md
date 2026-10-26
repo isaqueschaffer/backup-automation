@@ -949,6 +949,17 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-26] — Digifort/Defense: captura RTSP da Galeria estourava o tempo (regressão de 21/10)
+
+**Alteração:** Na Galeria de câmeras de equipamentos Digifort/Defense, capturas RTSP falhavam com "Tempo esgotado (5s) via UDP" (60 de 155 câmeras do Navarro falhavam). Causa: tentativas com timeout de apenas 5–6 s (insuficientes para esperar o próximo quadro-chave em streams H.265+/Smart Codec) e UDP gastando metade do limite de 4 tentativas, testando apenas 2 URLs candidatas e reportando apenas o erro da última tentativa UDP.
+Solução:
+- Agente (`rtsp_client.py`): removidos `-analyzeduration` e `-probesize` (retorno ao padrão do ffmpeg); timeout TCP de 18 s na URL principal e 8 s nas alternativas; fallback UDP seletivo (8 s na principal, 6 s nas alternativas) executado apenas após falhas de tempo ("Tempo esgotado") ou conexão ("Connection reset", "Connection refused", "timed out", "Invalid data found"); erros 404 e 400 não repetem em UDP; 401 continua parando na 1ª tentativa para evitar lockout; limite de até 4 URLs diferentes dentro de um prazo total de 40 s; motivo de cada tentativa acumulado na mensagem de erro (sem credenciais); no ramo genérico (Hikvision e marca incerta) a ordem das URLs passou a ser `Channels/{n}01`, `Channels/{n}02`, caminho Intelbras/Dahua (`/cam/realmonitor?channel={n}&subtype=0`), ONVIF (`/profile1`) e por último `Channels/{n}` (como só as 4 primeiras são usadas, câmera de outra marca cadastrada como Hikvision agora chega aos caminhos dela); com 404 a mensagem lista cada caminho como "Caminho RTSP não encontrado" e traz uma única dica para conferir o modelo. Versão 1.1.27 do agente (`updater.py`, `installer.iss`, `package.json`).
+- Servidor (`equipamentos.py`): espera do painel em modo ao vivo no `test_equipamento_rtsp` elevada de 35 s para 55 s.
+As câmeras com `Usuário ou senha RTSP recusados` (credenciais da Galeria erradas) e `Caminho RTSP não encontrado` (modelo cadastrado errado) continuam exigindo correção do cadastro; exige nova versão do agente.
+**Arquivos:** agent/src/camera/rtsp_client.py, server/api/routers/equipamentos.py, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-26] — Galeria DIGIFORT/DEFENSE: prévia e guarda da planilha importada
 
 **Alteração:** O usuário não conseguia conferir o conteúdo da planilha antes da importação nem consultá-la depois. Implementada prévia interativa com abas de câmeras lidas (situação nova/atualiza) e visualização da planilha completa antes de importar; o servidor agora armazena a última planilha importada por equipamento DIGIFORT/DEFENSE na tabela `nvr_planilhas`, com os dados integralmente criptografados via Fernet (REGRA-004). Na listagem da planilha salva, as colunas de senha vêm mascaradas por padrão e podem ser reveladas pelo admin via interruptor "Mostrar senhas". Adicionado botão "Planilha importada" na barra de ações da Galeria e rotas PUT/GET/DELETE dedicadas.
