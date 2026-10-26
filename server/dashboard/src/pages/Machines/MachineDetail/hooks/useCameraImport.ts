@@ -46,6 +46,53 @@ function cleanCell(val: unknown): string {
   return String(val).replace(/^\uFEFF/, "").replace(/^ï»¿/, "").replace(/\0/g, "").trim();
 }
 
+// Converte linhas brutas em matriz de texto limpo (máx. 100 colunas por linha e descarta linhas vazias)
+export function linhasParaTexto(rows: unknown[][]): string[][] {
+  if (!rows || rows.length === 0) return [];
+  const result: string[][] = [];
+  for (const r of rows) {
+    if (!r || r.length === 0) continue;
+    const cols = r.slice(0, 100).map(cleanCell);
+    if (cols.some(c => c !== "")) {
+      result.push(cols);
+    }
+  }
+  return result;
+}
+
+// Retorna os índices das colunas de senha baseado no cabeçalho
+export function colunasDeSenha(linhas: string[][], linhaCabecalho: number): number[] {
+  if (!linhas || linhaCabecalho < 0 || linhaCabecalho >= linhas.length) return [];
+  const cabecalho = linhas[linhaCabecalho] || [];
+  const colunas: number[] = [];
+  cabecalho.forEach((col, idx) => {
+    const c = (col || "").toLowerCase();
+    if (c.includes("senha") || c.includes("pass")) {
+      colunas.push(idx);
+    }
+  });
+  return colunas;
+}
+
+// Localiza o índice da linha do cabeçalho nas primeiras 5 linhas
+export function linhaDoCabecalho(rows: unknown[][]): number {
+  if (!rows || rows.length === 0) return 0;
+  for (let r = 0; r < Math.min(rows.length, 5); r++) {
+    const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+    if (
+      rowStr.some(c =>
+        c.includes("ip camera address") ||
+        c.includes("ip do dispositivo") ||
+        c.includes("endere") ||
+        c.includes("descri")
+      )
+    ) {
+      return r;
+    }
+  }
+  return 0;
+}
+
 // Converte linhas (CSV/XLSX) em câmeras a importar
 export function rowsToCameras(rows: unknown[][]): CameraRow[] {
   if (!rows || rows.length === 0) return [];

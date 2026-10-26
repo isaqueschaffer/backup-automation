@@ -289,6 +289,20 @@ trilan-nvr-backup-automation/
 
 A tabela nasce por `Base.metadata.create_all` (`main.py`); as colunas `ip`, `username`, `password`, `modelo` e `canal_rtsp` vêm da migração inline.
 
+#### `nvr_planilhas` (última planilha importada na Galeria de um equipamento DIGIFORT/DEFENSE; model `NVRPlanilha`)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Notas |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | PK |
+| nvr_id | UUID | uuid.UUID | NOT NULL | FK `nvrs.id` ON DELETE CASCADE, UNIQUE (1 planilha por equipamento) |
+| nome_arquivo | VARCHAR(255) | str | NOT NULL | Nome original do arquivo (CSV/XLSX) |
+| linha_cabecalho | INTEGER | int | NOT NULL | Índice da linha do cabeçalho (0-based) |
+| total_linhas | INTEGER | int | NOT NULL | Quantidade de linhas na planilha |
+| dados | TEXT | str | NOT NULL | Matriz de células em JSON criptografada com Fernet (REGRA-004) |
+| importado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | Data/hora de importação (utcnow) |
+
+A tabela nasce por `Base.metadata.create_all` (`main.py`), sem migração inline.
+
 #### `backups`
 
 | Coluna | Tipo SQL | Tipo Python | Nullable | Notas |
@@ -575,6 +589,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/perfect-image` | Salvar imagem de referência |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/import` | Importar câmeras para a galeria (lista `cameras` lida do CSV/XLSX pelo painel) ou, com `sync_from_machine=true`, copiar as câmeras avulsas (tipo `CAMERA`) da máquina |
 | PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/{canal}` | Editar / remover uma câmera da galeria (DIGIFORT e DEFENSE) |
+| PUT/GET/DELETE | `/api/v1/machines/{id}/equipamentos/{nvr_id}/planilha` | Salvar / obter / remover a planilha importada na galeria (admin, só DIGIFORT e DEFENSE; GET mascara colunas de senha por padrão, salvo `mostrar_senhas=true`) |
 | GET/POST | `/api/v1/clients` | Listar/criar Clientes (customers.py) |
 | GET/PUT/DELETE | `/api/v1/clients/{id}` | Gerenciar Cliente |
 | POST | `/api/v1/clients/{id}/trigger-backup` · `/cancel-queue` | Fila sequencial de backup do Cliente |
@@ -933,6 +948,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-26] — Galeria DIGIFORT/DEFENSE: prévia e guarda da planilha importada
+
+**Alteração:** O usuário não conseguia conferir o conteúdo da planilha antes da importação nem consultá-la depois. Implementada prévia interativa com abas de câmeras lidas (situação nova/atualiza) e visualização da planilha completa antes de importar; o servidor agora armazena a última planilha importada por equipamento DIGIFORT/DEFENSE na tabela `nvr_planilhas`, com os dados integralmente criptografados via Fernet (REGRA-004). Na listagem da planilha salva, as colunas de senha vêm mascaradas por padrão e podem ser reveladas pelo admin via interruptor "Mostrar senhas". Adicionado botão "Planilha importada" na barra de ações da Galeria e rotas PUT/GET/DELETE dedicadas.
+**Arquivos:** server/api/models.py, server/api/schemas.py, server/api/services/planilha_vms.py, server/api/routers/equipamentos.py, server/api/tests/test_planilha_vms.py, server/dashboard/src/api/types.ts, server/dashboard/src/pages/Machines/MachineDetail/hooks/useCameraImport.ts, server/dashboard/src/pages/Machines/MachineDetail/components/PlanilhaVmsModal.tsx, server/dashboard/src/pages/Machines/MachineDetail/components/NVRCamerasGalleryModal.tsx, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-23] — Agente 1.1.26: captura da imagem da noite respeita o canal das câmeras de IP compartilhado
 
