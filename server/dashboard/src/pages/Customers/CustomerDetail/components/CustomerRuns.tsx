@@ -9,6 +9,7 @@ import { fmtDate } from "../../../../utils/date";
 import { extractBlobError } from "../../../../utils/download";
 import { apiErrorMessage } from "../../../../utils/errors";
 import { isRunOpen, runTriggerLabel, runZipFilename } from "../runUtils";
+import { useRotulos } from "../../../../contexts/AuthContext";
 
 // Rodadas de backup do cliente: cada rodada agrupa os backups das máquinas e gera 1 e-mail.
 // A lista vem do polling da tela (index.tsx); onChanged pede um recarregamento após uma ação.
@@ -23,6 +24,7 @@ export default function CustomerRuns({
   runs: CustomerRun[] | null;
   onChanged: () => void;
 }) {
+  const { singularMin } = useRotulos();
   const { toast } = useToast();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export default function CustomerRuns({
       !confirm(
         `Reenviar o e-mail da rodada de ${fmtDate(run.started_at)} (${runTriggerLabel(
           run
-        )}) para os e-mails do cliente "${customerName}"?`
+        )}) para os e-mails do ${singularMin} "${customerName}"?`
       )
     )
       return;
@@ -64,7 +66,7 @@ export default function CustomerRuns({
       if (r.email_sent) toast("E-mail da rodada reenviado.", "success");
       else
         toast(
-          "O servidor não conseguiu enviar o e-mail. Verifique os e-mails do cliente e o SMTP.",
+          `O servidor não conseguiu enviar o e-mail. Verifique os e-mails do ${singularMin} e o SMTP.`,
           "error"
         );
       onChanged();

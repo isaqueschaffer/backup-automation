@@ -22,6 +22,7 @@ import {
 import { serverUtcMs } from "../Machines/MachineDetail/utils";
 import { Span, SPANS } from "./layout";
 import RingGauge from "./RingGauge";
+import { useRotulos } from "../../contexts/AuthContext";
 
 interface Props {
   machine: Machine;
@@ -41,6 +42,7 @@ export default function MachineHealthCard({
   onSpanChange,
   onHide,
 }: Props) {
+  const { singularMin } = useRotulos();
   const t = useMemo(() => parseTelemetry(machine.telemetry), [machine.telemetry]);
   const level = t ? overallLevel(t) : null;
   const isOnline = machine.active && machine.is_online;
@@ -137,9 +139,9 @@ export default function MachineHealthCard({
             <div
               className="client-name"
               style={{ fontSize: 13, marginBottom: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-              title={machine.customer_name || "Sem cliente"}
+              title={machine.customer_name || `Sem ${singularMin}`}
             >
-              {machine.customer_name || "Sem cliente"}
+              {machine.customer_name || `Sem ${singularMin}`}
             </div>
             <div
               style={{

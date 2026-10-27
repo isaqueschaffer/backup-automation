@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { Customer } from "../../../api/types";
 import Modal from "../../../components/Modal";
 import { fmtSchedule } from "../../../utils/date";
+import { useRotulos } from "../../../contexts/AuthContext";
 
 export interface NewMachineForm {
   name: string;
@@ -20,6 +21,7 @@ export default function NewMachineModal({ customers, initialCustomerId, saving, 
   onSave: (form: NewMachineForm) => void;
   onClose: () => void;
 }) {
+  const { singular, singularMin } = useRotulos();
   const [form, setForm] = useState<NewMachineForm>({
     name: "", customer_id: initialCustomerId || "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
   });
@@ -33,19 +35,19 @@ export default function NewMachineModal({ customers, initialCustomerId, saving, 
           onChange={e => setForm({ ...form, name: e.target.value })} />
       </div>
       <div className="form-group">
-        <label className="form-label">Cliente (opcional)</label>
+        <label className="form-label">{singular} (opcional)</label>
         <select className="form-input" value={form.customer_id}
           onChange={e => setForm({ ...form, customer_id: e.target.value })}>
-          <option value="">Sem cliente</option>
+          <option value="">Sem {singularMin}</option>
           {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </div>
       {customer ? (
         <div className="form-group">
           <label className="form-label">Horário do backup</label>
-          <input className="form-input" disabled value={`${fmtSchedule(customer.backup_hour, customer.backup_minute)} — definido pelo cliente ${customer.name}`} />
+          <input className="form-input" disabled value={`${fmtSchedule(customer.backup_hour, customer.backup_minute)} — definido pelo ${singularMin} ${customer.name}`} />
           <div className="text-xs text-muted" style={{ marginTop: 4 }}>
-            Máquinas de um cliente herdam o horário dele e entram no fim da fila de backup do cliente.
+            Máquinas de um {singularMin} herdam o horário dele e entram no fim da fila de backup do {singularMin}.
           </div>
         </div>
       ) : (

@@ -5,6 +5,7 @@ import { fetchMachines } from "../../../../api/client";
 import { Machine } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { fmtSchedule } from "../../../../utils/date";
+import { useRotulos } from "../../../../contexts/AuthContext";
 
 // Seletor de máquinas sem cliente para vincular a este cliente
 export default function AddMachineModal({ customerName, scheduleLabel, attachingId, onAttach, onClose }: {
@@ -14,6 +15,7 @@ export default function AddMachineModal({ customerName, scheduleLabel, attaching
   onAttach: (m: Machine) => void;
   onClose: () => void;
 }) {
+  const { singularMin } = useRotulos();
   const [machines, setMachines] = useState<Machine[] | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -28,7 +30,7 @@ export default function AddMachineModal({ customerName, scheduleLabel, attaching
   return (
     <Modal title={`Adicionar máquina a ${customerName}`} onClose={onClose}>
       <p className="text-sm text-muted" style={{ marginTop: 0, marginBottom: 16 }}>
-        A máquina entra no fim da fila e passa a usar o horário do cliente ({scheduleLabel}).
+        A máquina entra no fim da fila e passa a usar o horário do {singularMin} ({scheduleLabel}).
         Se o horário dela mudar, o agente é reiniciado automaticamente.
       </p>
 
@@ -38,9 +40,9 @@ export default function AddMachineModal({ customerName, scheduleLabel, attaching
         <div className="loading-state"><div className="spinner" /></div>
       ) : machines.length === 0 ? (
         <div className="empty-state" style={{ padding: 24 }}>
-          <div>Não há máquinas sem cliente.</div>
+          <div>Não há máquinas sem {singularMin}.</div>
           <div className="text-sm mt-2">
-            Cadastre uma nova máquina ou remova uma de outro cliente em <Link to="/maquinas" onClick={onClose}>Máquinas</Link>.
+            Cadastre uma nova máquina ou remova uma de outro {singularMin} em <Link to="/maquinas" onClick={onClose}>Máquinas</Link>.
           </div>
         </div>
       ) : (

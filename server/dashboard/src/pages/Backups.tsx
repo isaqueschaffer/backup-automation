@@ -9,6 +9,7 @@ import { fmtDate, localDateStr } from "../utils/date";
 import { extractBlobError, saveBlob } from "../utils/download";
 import { isStatusProblem, statusTone } from "../utils/statusTone";
 import { Check, Download, Mail, Search } from "lucide-react";
+import { useRotulos } from "../contexts/AuthContext";
 
 function fmtSize(n: number | null) {
   if (!n) return "—";
@@ -106,6 +107,7 @@ function EquipamentosCell({ results }: { results: NVRResult[] | null }) {
 }
 
 export default function Backups() {
+  const { singular, pluralMin, singularMin } = useRotulos();
   const [data, setData] = useState<PaginatedBackups | null>(null);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -147,8 +149,8 @@ export default function Backups() {
 
   useEffect(() => {
     fetchMachines().then(setMachines).catch(() => toast("Erro ao carregar máquinas.", "error"));
-    fetchCustomers().then(setCustomers).catch(() => toast("Erro ao carregar clientes.", "error"));
-  }, [toast]);
+    fetchCustomers().then(setCustomers).catch(() => toast(`Erro ao carregar ${pluralMin}.`, "error"));
+  }, [pluralMin, toast]);
 
   // No filtro de máquina, só as máquinas do cliente escolhido
   const machineOptions = useMemo(
@@ -210,10 +212,10 @@ export default function Backups() {
         <select
           className="form-input"
           value={customerFilter}
-          title="Filtrar por cliente"
+          title={`Filtrar por ${singularMin}`}
           onChange={e => { setCustomerFilter(e.target.value); setMachineFilter(""); setPage(1); }}
         >
-          <option value="">Todos os clientes</option>
+          <option value="">Todos os {pluralMin}</option>
           {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <select
@@ -308,10 +310,10 @@ export default function Backups() {
                         <div className="text-xs text-muted" style={{ marginTop: 2 }}>
                           {b.customer_id ? (
                             <Link to={`/clientes/${b.customer_id}`}>
-                              {b.customer_name || "Cliente"}
+                              {b.customer_name || singular}
                             </Link>
                           ) : (
-                            "Sem cliente"
+                            `Sem ${singularMin}`
                           )}
                         </div>
                       </td>

@@ -28,8 +28,10 @@ import RecordingModal from "./components/RecordingModal";
 import NVRCamerasGalleryModal from "./components/NVRCamerasGalleryModal";
 import NVRTelemetryModal from "./components/NVRTelemetryModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
+import { useSomenteLeitura } from "../../../contexts/AuthContext";
 
 export default function MachineDetail() {
+  const somenteLeitura = useSomenteLeitura();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -320,9 +322,11 @@ export default function MachineDetail() {
               {otherEquipamentos.length}
             </span>
           </div>
-          <button className="btn btn-secondary" onClick={() => openEqModal(emptyEqForm(), null)}>
-            <Plus size={14} /> Adicionar
-          </button>
+          {!somenteLeitura && (
+            <button className="btn btn-secondary" onClick={() => openEqModal(emptyEqForm(), null)}>
+              <Plus size={14} /> Adicionar
+            </button>
+          )}
         </div>
 
         {otherEquipamentos.length === 0 ? (
@@ -366,6 +370,7 @@ export default function MachineDetail() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                       {g.itens.map(eq => (
                         <EqCard key={eq.id} eq={eq}
+                          somenteLeitura={somenteLeitura}
                           onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
                           onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
                           onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}

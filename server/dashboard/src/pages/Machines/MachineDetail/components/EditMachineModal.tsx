@@ -1,4 +1,5 @@
 import Modal from "../../../../components/Modal";
+import { useRotulos } from "../../../../contexts/AuthContext";
 
 // Campos editáveis da máquina (email_to como texto separado por vírgula).
 // Cliente e posição na fila são alterados na tela do Cliente.
@@ -21,6 +22,7 @@ export default function EditMachineModal({ form, setForm, customerName, emailCus
   onSave: () => void;
   onClose: () => void;
 }) {
+  const { singularMin } = useRotulos();
   const locked = customerName !== null;
   const emailLocked = emailCustomerName !== null;
   return (
@@ -46,7 +48,7 @@ export default function EditMachineModal({ form, setForm, customerName, emailCus
         </div>
         {locked && (
           <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-            Definido pelo cliente {customerName}. Para mudar, edite o horário na tela do cliente.
+            Definido pelo {singularMin} {customerName}. Para mudar, edite o horário na tela do {singularMin}.
           </div>
         )}
       </div>
@@ -56,8 +58,8 @@ export default function EditMachineModal({ form, setForm, customerName, emailCus
           onChange={e => setForm({ ...form, email_to: e.target.value })} />
         {emailLocked && (
           <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-            Definido pelo cliente {emailCustomerName}. O relatório sai em um único e-mail por rodada do cliente;
-            para mudar os destinatários, edite o cliente.
+            Definido pelo {singularMin} {emailCustomerName}. O relatório sai em um único e-mail por rodada do {singularMin};
+            para mudar os destinatários, edite o {singularMin}.
           </div>
         )}
       </div>
@@ -66,7 +68,7 @@ export default function EditMachineModal({ form, setForm, customerName, emailCus
         <input className="form-input" type="password" value={form.zip_password}
           onChange={e => setForm({ ...form, zip_password: e.target.value })} />
         <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-          Esta senha protege exclusivamente os arquivos de backup desta máquina, independente da senha do cliente.
+          Esta senha protege exclusivamente os arquivos de backup desta máquina, independente da senha do {singularMin}.
         </div>
       </div>
       <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>

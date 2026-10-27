@@ -16,8 +16,10 @@ import { Machine, Stats } from "../../api/types";
 import { useToast } from "../../components/Toast";
 import { Span, useOverviewLayout } from "./layout";
 import MachineHealthCard from "./MachineHealthCard";
+import { useRotulos } from "../../contexts/AuthContext";
 
 export default function Overview() {
+  const { plural, singularMin } = useRotulos();
   const [stats, setStats] = useState<Stats | null>(null);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -129,18 +131,18 @@ export default function Overview() {
     return [...layout.all]
       .filter(m => {
         if (!term) return true;
-        const cName = (m.customer_name || "Sem cliente").toLowerCase();
+        const cName = (m.customer_name || `Sem ${singularMin}`).toLowerCase();
         const mName = m.name.toLowerCase();
         return cName.includes(term) || mName.includes(term);
       })
       .sort((a, b) => {
-        const cA = a.customer_name || "Sem cliente";
-        const cB = b.customer_name || "Sem cliente";
+        const cA = a.customer_name || `Sem ${singularMin}`;
+        const cB = b.customer_name || `Sem ${singularMin}`;
         const comp = cA.localeCompare(cB);
         if (comp !== 0) return comp;
         return a.name.localeCompare(b.name);
       });
-  }, [layout.all, searchPicker]);
+  }, [layout.all, searchPicker, singularMin]);
 
   return (
     <>
@@ -165,7 +167,7 @@ export default function Overview() {
             )}
           </button>
           <button className="btn btn-secondary" onClick={() => navigate("/clientes")}>
-            <Users size={15} /> Clientes
+            <Users size={15} /> {plural}
           </button>
           <button className="btn btn-primary" onClick={() => navigate("/maquinas")}>
             <Server size={15} /> Máquinas
@@ -176,7 +178,7 @@ export default function Overview() {
       {/* Stats */}
       <div className="stats-grid">
         <div className="stat-card purple" style={{ cursor: "pointer" }} onClick={() => navigate("/clientes")}>
-          <div className="stat-label">Clientes</div>
+          <div className="stat-label">{plural}</div>
           <div className="stat-value purple">{stats?.customers_total ?? "—"}</div>
           <Users size={28} className="stat-icon" color="var(--accent)" />
         </div>
@@ -262,7 +264,7 @@ export default function Overview() {
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Buscar cliente ou máquina..."
+                  placeholder={`Buscar ${singularMin} ou máquina...`}
                   value={searchPicker}
                   onChange={(e) => setSearchPicker(e.target.value)}
                   style={{ paddingLeft: 34 }}
@@ -298,7 +300,7 @@ export default function Overview() {
                         style={{ flexShrink: 0 }}
                       />
                       <span>
-                        <strong>{m.customer_name || "Sem cliente"}</strong> — {m.name}
+                        <strong>{m.customer_name || `Sem ${singularMin}`}</strong> — {m.name}
                       </span>
                     </label>
                   );

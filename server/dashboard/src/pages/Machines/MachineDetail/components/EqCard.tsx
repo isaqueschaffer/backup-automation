@@ -2,8 +2,9 @@ import { Activity, Edit2, FolderOpen, Image, RefreshCw, Trash2, Video } from "lu
 import { NVR } from "../../../../api/types";
 import { eqCor, eqIcone } from "./eqTipos";
 
-export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onEdit, onToggleActive }: {
+export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onEdit, onToggleActive }: {
   eq: NVR;
+  somenteLeitura?: boolean;
   onDelete: () => void;
   onViewRecording: () => void;
   onViewCameras?: () => void;
@@ -79,15 +80,19 @@ export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, o
             <Activity size={13} /> Telemetria
           </button>
         )}
-        <button className="btn-icon" title={eq.active === false ? "Retomar Backup" : "Pausar Backup"} onClick={onToggleActive}>
-          {eq.active === false ? <RefreshCw size={14} /> : <div style={{width:14, height:14, borderLeft:'3px solid currentColor', borderRight:'3px solid currentColor'}}/>}
-        </button>
-        <button className="btn-icon" title="Editar" onClick={onEdit}>
-          <Edit2 size={14} />
-        </button>
-        <button className="btn-icon" style={{ color: "var(--err)" }} title="Remover" onClick={onDelete}>
-          <Trash2 size={14} />
-        </button>
+        {!somenteLeitura && (
+          <>
+            <button className="btn-icon" title={eq.active === false ? "Retomar Backup" : "Pausar Backup"} onClick={onToggleActive}>
+              {eq.active === false ? <RefreshCw size={14} /> : <div style={{width:14, height:14, borderLeft:'3px solid currentColor', borderRight:'3px solid currentColor'}}/>}
+            </button>
+            <button className="btn-icon" title="Editar" onClick={onEdit}>
+              <Edit2 size={14} />
+            </button>
+            <button className="btn-icon" style={{ color: "var(--err)" }} title="Remover" onClick={onDelete}>
+              <Trash2 size={14} />
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

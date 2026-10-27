@@ -243,7 +243,7 @@ export default function SharePanel({
                 disabled={ocupado}
               />
               <span>
-                Permitir que o cliente personalize o dashboard (reordenar, adicionar e remover componentes)
+                Permitir que quem recebe o link personalize o dashboard (reordenar, adicionar e remover componentes)
               </span>
             </label>
 
@@ -373,7 +373,7 @@ export default function SharePanel({
                   disabled={ocupado}
                   onChange={(e) => handleTogglePermiteEdicao(e.target.checked)}
                 />
-                <span>Permitir que o cliente personalize o dashboard</span>
+                <span>Permitir que quem recebe o link personalize o dashboard</span>
               </label>
             </div>
 

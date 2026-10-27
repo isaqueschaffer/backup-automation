@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Machine } from "../../../../api/types";
 import StatusBadge from "../../../../components/StatusBadge";
 import { fmtDate } from "../../../../utils/date";
+import { useRotulos, useSomenteLeitura } from "../../../../contexts/AuthContext";
 
 // Cabeçalho da máquina: nome, último backup, ações e aviso de comando pendente
 export default function MachineHeader({ machine, isAgentOnline, nextPingStr, onBack, onEdit, onRotateKey, onTriggerBackup, onRestartAgent }: {
@@ -15,20 +16,22 @@ export default function MachineHeader({ machine, isAgentOnline, nextPingStr, onB
   onTriggerBackup: () => void;
   onRestartAgent: () => void;
 }) {
+  const { singular, singularMin } = useRotulos();
+  const somenteLeitura = useSomenteLeitura();
   const isPendingAction = machine.backup_requested || machine.restart_requested;
   const emBackup = !!machine.telemetry?.backup_em_andamento; // agente >= 1.1.8
   return (
     <>
       <div className="page-header">
         <div className="flex items-center gap-3">
-          <button className="btn-icon" onClick={onBack} title={machine.customer_id ? `Voltar para o cliente ${machine.customer_name || ""}` : "Voltar para Máquinas"}>
+          <button className="btn-icon" onClick={onBack} title={machine.customer_id ? `Voltar para o ${singularMin} ${machine.customer_name || ""}` : "Voltar para Máquinas"}>
             <ArrowLeft size={16} />
           </button>
           <div>
             {machine.customer_id && (
               <div className="text-xs text-muted" style={{ marginBottom: 2 }}>
                 <Link to={`/clientes/${machine.customer_id}`} style={{ color: "var(--text-muted)" }}>
-                  Cliente: {machine.customer_name || "vinculado"}
+                  {singular}: {machine.customer_name || "vinculado"}
                 </Link>
                 {" › "}{machine.name}
               </div>
@@ -40,22 +43,24 @@ export default function MachineHeader({ machine, isAgentOnline, nextPingStr, onB
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={onEdit}>
-            <Edit2 size={15} /> Editar Máquina
-          </button>
-          <button className="btn btn-secondary" onClick={onRotateKey}>
-            <RefreshCw size={15} /> Rodar API Key
-          </button>
-          <button className="btn btn-secondary" onClick={onTriggerBackup}
-            title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
-            <CloudLightning size={15} /> Gerar Backup
-          </button>
-          <button className="btn btn-secondary" onClick={onRestartAgent}
-            title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
-            <RotateCcw size={15} /> Reiniciar agente
-          </button>
-        </div>
+        {!somenteLeitura && (
+          <div className="flex gap-2">
+            <button className="btn btn-secondary" onClick={onEdit}>
+              <Edit2 size={15} /> Editar Máquina
+            </button>
+            <button className="btn btn-secondary" onClick={onRotateKey}>
+              <RefreshCw size={15} /> Rodar API Key
+            </button>
+            <button className="btn btn-secondary" onClick={onTriggerBackup}
+              title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
+              <CloudLightning size={15} /> Gerar Backup
+            </button>
+            <button className="btn btn-secondary" onClick={onRestartAgent}
+              title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
+              <RotateCcw size={15} /> Reiniciar agente
+            </button>
+          </div>
+        )}
       </div>
 
       {isPendingAction && (

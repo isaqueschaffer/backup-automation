@@ -14,11 +14,13 @@ import QueueSection, { moveItem } from "./components/QueueSection";
 import AddMachineModal from "./components/AddMachineModal";
 import CustomerSummary from "./components/CustomerSummary";
 import CustomerRuns from "./components/CustomerRuns";
+import { useRotulos } from "../../../contexts/AuthContext";
 
 const POLL_MS = 5000;
 
 // Detalhe do Cliente: resumo, máquinas e fila de backup (arrastar e soltar) e rodadas de backup
 export default function CustomerDetail() {
+  const { singular, plural, singularMin } = useRotulos();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -76,7 +78,7 @@ export default function CustomerDetail() {
       if (activeIdRef.current !== reqId || !initial) return; // polling falha em silêncio
       const status = (e as { response?: { status?: number } })?.response?.status;
       if (status === 404) setNotFound(true);
-      else toast("Erro ao carregar o cliente.", "error");
+      else toast(`Erro ao carregar o ${singularMin}.`, "error");
     } finally {
       if (initial && activeIdRef.current === reqId) setLoading(false);
     }
@@ -94,8 +96,8 @@ export default function CustomerDetail() {
   if (notFound || !customer) {
     return (
       <div className="empty-state">
-        <div>{notFound ? "Cliente não encontrado." : "Não foi possível carregar o cliente."}</div>
-        <button className="btn btn-secondary mt-2" onClick={() => navigate("/clientes")}>Voltar para Clientes</button>
+        <div>{notFound ? `${singular} não encontrado.` : `Não foi possível carregar o ${singularMin}.`}</div>
+        <button className="btn btn-secondary mt-2" onClick={() => navigate("/clientes")}>Voltar para {plural}</button>
       </div>
     );
   }
@@ -107,14 +109,14 @@ export default function CustomerDetail() {
     if (action === "edit") { setShowEdit(true); return; }
     if (action === "delete") {
       const msg = c.machines_total > 0
-        ? `Excluir o cliente "${c.name}"?\nAs ${c.machines_total} máquina(s) dele continuam cadastradas, mas ficarão sem cliente.`
-        : `Excluir o cliente "${c.name}"?`;
+        ? `Excluir o ${singularMin} "${c.name}"?\nAs ${c.machines_total} máquina(s) dele continuam cadastradas, mas ficarão sem ${singularMin}.`
+        : `Excluir o ${singularMin} "${c.name}"?`;
       if (!confirm(msg)) return;
       try {
         await deleteCustomer(c.id);
-        toast("Cliente excluído.", "success");
+        toast(`${singular} excluído.`, "success");
         navigate("/clientes");
-      } catch (e) { toast(apiErrorMessage(e, "Erro ao excluir cliente."), "error"); }
+      } catch (e) { toast(apiErrorMessage(e, `Erro ao excluir ${singularMin}.`), "error"); }
       return;
     }
     if (action === "backup" && !confirm(`Iniciar o backup em fila das ${c.machines_total} máquina(s) de "${c.name}"?\nElas farão o backup uma por vez, na ordem da fila.`)) return;
@@ -158,9 +160,9 @@ export default function CustomerDetail() {
       applyCustomer(updated);
       setShowEdit(false);
       toast(scheduleChanged
-        ? "Cliente atualizado. O novo horário foi aplicado a todas as máquinas (agentes reiniciados)."
-        : "Cliente atualizado.", "success");
-    } catch (e) { toast(apiErrorMessage(e, "Erro ao salvar o cliente."), "error"); }
+        ? `${singular} atualizado. O novo horário foi aplicado a todas as máquinas (agentes reiniciados).`
+        : `${singular} atualizado.`, "success");
+    } catch (e) { toast(apiErrorMessage(e, `Erro ao salvar o ${singularMin}.`), "error"); }
     finally { setEditSaving(false); }
   };
 
@@ -186,12 +188,12 @@ export default function CustomerDetail() {
   };
 
   const handleDetach = async (m: Machine) => {
-    if (!confirm(`Remover a máquina "${m.name}" do cliente "${c.name}"?\nEla continua cadastrada em Máquinas, fica sem cliente e mantém o horário atual.`)) return;
+    if (!confirm(`Remover a máquina "${m.name}" do ${singularMin} "${c.name}"?\nEla continua cadastrada em Máquinas, fica sem ${singularMin} e mantém o horário atual.`)) return;
     setQueueSaving(true);
     try {
       applyCustomer(await detachMachine(c.id, m.id));
-      toast(`Máquina "${m.name}" removida do cliente.`, "success");
-    } catch (e) { toast(apiErrorMessage(e, "Erro ao remover a máquina do cliente."), "error"); }
+      toast(`Máquina "${m.name}" removida do ${singularMin}.`, "success");
+    } catch (e) { toast(apiErrorMessage(e, `Erro ao remover a máquina do ${singularMin}.`), "error"); }
     finally { setQueueSaving(false); }
   };
 
@@ -200,7 +202,7 @@ export default function CustomerDetail() {
     try {
       applyCustomer(await attachMachine(c.id, m.id));
       setShowAdd(false);
-      toast(`Máquina "${m.name}" adicionada ao cliente.`, "success");
+      toast(`Máquina "${m.name}" adicionada ao ${singularMin}.`, "success");
     } catch (e) { toast(apiErrorMessage(e, "Erro ao adicionar a máquina."), "error"); }
     finally { setAttachingId(null); }
   };
@@ -224,7 +226,7 @@ export default function CustomerDetail() {
 
       {showEdit && (
         <CustomerFormModal
-          title="Editar cliente"
+          title={`Editar ${singular}`}
           isEdit
           initial={{
             name: c.name, description: c.description || "", backup_hour: c.backup_hour, backup_minute: c.backup_minute,

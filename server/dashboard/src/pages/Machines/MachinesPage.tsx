@@ -11,10 +11,13 @@ import { apiErrorMessage } from "../../utils/errors";
 import { Plus, Trash2, Eye, RotateCcw, Play } from "lucide-react";
 import NewMachineModal, { NewMachineForm } from "./components/NewMachineModal";
 import NewMachineKeyModal from "./components/NewMachineKeyModal";
+import { useRotulos, useSomenteLeitura } from "../../contexts/AuthContext";
 
 const NO_CUSTOMER = "__none__";
 
 export default function MachinesPage() {
+  const { singular, singularMin } = useRotulos();
+  const somenteLeitura = useSomenteLeitura();
   const [machines, setMachines] = useState<Machine[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,26 +103,28 @@ export default function MachinesPage() {
           <h1 className="page-title">Máquinas</h1>
           <p className="page-subtitle">{machines.length} máquina(s) cadastrada(s)</p>
         </div>
-        <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={() => handleBulk("restart")} disabled={bulkBusy}
-            title="Reinicia o agente de todas as máquinas online">
-            <RotateCcw size={15} /> Reiniciar todas
-          </button>
-          <button className="btn btn-secondary" onClick={() => handleBulk("backup")} disabled={bulkBusy}
-            title="Dispara o backup em todas as máquinas online">
-            <Play size={15} /> Backup de todas
-          </button>
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            <Plus size={15} /> Nova Máquina
-          </button>
-        </div>
+        {!somenteLeitura && (
+          <div className="flex gap-2">
+            <button className="btn btn-secondary" onClick={() => handleBulk("restart")} disabled={bulkBusy}
+              title="Reinicia o agente de todas as máquinas online">
+              <RotateCcw size={15} /> Reiniciar todas
+            </button>
+            <button className="btn btn-secondary" onClick={() => handleBulk("backup")} disabled={bulkBusy}
+              title="Dispara o backup em todas as máquinas online">
+              <Play size={15} /> Backup de todas
+            </button>
+            <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+              <Plus size={15} /> Nova Máquina
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="filters-bar">
         <select className="form-input" value={customerFilter} onChange={e => setCustomerFilter(e.target.value)}
-          title="Filtrar por cliente">
-          <option value="">Cliente: Todos</option>
-          <option value={NO_CUSTOMER}>Sem cliente</option>
+          title={`Filtrar por ${singularMin}`}>
+          <option value="">{singular}: Todos</option>
+          <option value={NO_CUSTOMER}>Sem {singularMin}</option>
           {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </div>
@@ -135,7 +140,9 @@ export default function MachinesPage() {
         <div className="empty-state">
           <div className="empty-icon">🖥️</div>
           <div>Nenhuma máquina cadastrada ainda.</div>
-          <button className="btn btn-primary mt-2" onClick={() => setShowCreate(true)}>Cadastrar agora</button>
+          {!somenteLeitura && (
+            <button className="btn btn-primary mt-2" onClick={() => setShowCreate(true)}>Cadastrar agora</button>
+          )}
         </div>
       ) : visible.length === 0 ? (
         <div className="empty-state">Nenhuma máquina para este filtro.</div>
@@ -145,7 +152,7 @@ export default function MachinesPage() {
             <thead>
               <tr>
                 <th>Máquina</th>
-                <th>Cliente</th>
+                <th>{singular}</th>
                 <th>Status</th>
                 <th>Equipamentos</th>
                 <th>Horário</th>
@@ -163,14 +170,14 @@ export default function MachinesPage() {
                   </td>
                   <td>
                     {m.customer_id
-                      ? <Link to={`/clientes/${m.customer_id}`}>{m.customer_name || "Cliente"}</Link>
+                      ? <Link to={`/clientes/${m.customer_id}`}>{m.customer_name || singular}</Link>
                       : <span className="text-muted">—</span>}
                   </td>
                   <td>
                     <StatusBadge status={!m.active ? "DESATIVADO" : m.is_online ? "ONLINE" : "OFFLINE"} />
                   </td>
                   <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>{m.nvr_count}</td>
-                  <td className="text-secondary" title={m.schedule_from_customer ? "Definido pelo cliente" : "Horário próprio"}>
+                  <td className="text-secondary" title={m.schedule_from_customer ? `Definido pelo ${singularMin}` : "Horário próprio"}>
                     {fmtSchedule(m.backup_hour, m.backup_minute)}
                   </td>
                   <td className="text-secondary text-sm">{fmtDate(m.last_backup_at)}</td>
@@ -180,10 +187,12 @@ export default function MachinesPage() {
                       <button className="btn-icon" title="Abrir máquina" onClick={() => navigate(`/maquinas/${m.id}`)}>
                         <Eye size={14} />
                       </button>
-                      <button className="btn-icon" title="Excluir máquina" style={{ color: "var(--err)" }}
-                        onClick={() => handleDelete(m)}>
-                        <Trash2 size={14} />
-                      </button>
+                      {!somenteLeitura && (
+                        <button className="btn-icon" title="Excluir máquina" style={{ color: "var(--err)" }}
+                          onClick={() => handleDelete(m)}>
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

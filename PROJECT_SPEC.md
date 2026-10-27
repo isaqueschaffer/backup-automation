@@ -1007,6 +1007,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-27] — Multi-contas (etapa 4b): rótulo Cliente/Setor nas telas e modo somente leitura
+
+**Alteração:** as telas de Clientes, Máquinas, Backups, Visão Geral e Dashboard usam o rótulo da conta (`useRotulos`): "Setor/Setores" na conta de cliente final e "Cliente/Clientes" no integrador e no super admin sem conta escolhida (rotas, nomes de campos e o dashboard público não mudam). Com conta vencida/suspensa ou usuário LEITURA (`useSomenteLeitura`), ficam ocultos: criar/excluir Cliente/Setor e Máquina, editar, backup em fila, parar fila, adicionar/remover máquina da fila e arrastar a ordem, editar máquina, girar chave, gerar backup, reiniciar agente, adicionar/editar/pausar/remover equipamento, editar o dashboard e o compartilhamento. Downloads, galeria, gravações, telemetria e consultas continuam. O servidor já recusa a escrita com 403. No compartilhamento do dashboard, "o cliente" virou "quem recebe o link".
+**Arquivos:** server/dashboard/src/pages/{Customers/CustomersPage.tsx,Customers/components/CustomerFormModal.tsx,Customers/CustomerDetail/index.tsx,Customers/CustomerDetail/components/{AddMachineModal,CustomerHeader,CustomerRuns,QueueSection}.tsx,Machines/MachinesPage.tsx,Machines/components/NewMachineModal.tsx,Machines/MachineDetail/index.tsx,Machines/MachineDetail/components/{EditMachineModal,EqCard,MachineHeader,MachineInfoCards}.tsx,Backups.tsx,Overview/{index,MachineHealthCard}.tsx,Dashboards/{DashboardAdminPage,WidgetConfigModal,SharePanel}.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-27] — Multi-contas (etapa 4a): painel com login por e-mail, faixa de vencimento e seletor de conta
 
 **Alteração:** login por e-mail e senha (o administrador da plataforma entra pelo botão "Entrar como administrador da plataforma", só com a senha). O painel carrega `GET /auth/me` (recarrega a cada 10 min e ao voltar à aba) e mostra no topo a faixa da validade (amarela a partir de 15 dias, vermelha a partir de 3 dias, vermelha fixa quando vencida/suspensa com aviso de somente leitura) e, para usuário LEITURA, "Seu acesso é somente leitura". O super admin escolhe a conta no menu lateral (enviada em `X-Conta-ID`, guardada em `localStorage`; uma requisição que já traga o header não é sobrescrita); "Configurações" só aparece para ele. O item do menu vira "Setores" em conta de cliente final.
