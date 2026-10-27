@@ -17,6 +17,7 @@ import { useRtspTest } from "./hooks/useRtspTest";
 import MachineHeader from "./components/MachineHeader";
 import MachineInfoCards from "./components/MachineInfoCards";
 import EqCard from "./components/EqCard";
+import { EQ_TIPO_ORDEM, eqCor, eqIcone, eqRotulo } from "./components/eqTipos";
 import BackupHistory from "./components/BackupHistory";
 import CamerasSection from "./components/CamerasSection";
 import AgentLogs from "./components/AgentLogs";
@@ -139,6 +140,19 @@ export default function MachineDetail() {
 
   const cameras = equipamentos.filter(e => e.tipo === "CAMERA");
   const otherEquipamentos = equipamentos.filter(e => e.tipo !== "CAMERA");
+
+  const gruposEquipamentos = (() => {
+    const porTipo = new Map<string, NVR[]>();
+    for (const eq of otherEquipamentos) {
+      const lista = porTipo.get(eq.tipo) ?? [];
+      lista.push(eq);
+      porTipo.set(eq.tipo, lista);
+    }
+    const posicao = (t: string) => { const i = EQ_TIPO_ORDEM.indexOf(t); return i === -1 ? EQ_TIPO_ORDEM.length : i; };
+    return [...porTipo.entries()]
+      .sort((a, b) => posicao(a[0]) - posicao(b[0]) || a[0].localeCompare(b[0]))
+      .map(([tipo, itens]) => ({ tipo, itens: [...itens].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })) }));
+  })();
 
   const { fileInputRef, importFile, deleteAll } = useCameraImport({
     machineId: id, cameras, setBusy: setLoading, reload: load, toast,
@@ -306,16 +320,26 @@ export default function MachineDetail() {
             <div>Nenhum equipamento cadastrado.</div>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {otherEquipamentos.map(eq => (
-              <EqCard key={eq.id} eq={eq}
-                onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
-                onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
-                onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}
-                onViewTelemetry={() => setShowTelemetryModal({ show: true, nvrName: eq.name, telemetry: eq.last_telemetry_status })}
-                onEdit={() => openEqModal(eqToForm(eq), eq.id)}
-                onToggleActive={() => handleToggleEquipamento(eq)}
-              />
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {gruposEquipamentos.map(g => (
+              <div key={g.tipo}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, color: eqCor(g.tipo), fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                  {eqIcone(g.tipo, 14)} {eqRotulo(g.tipo)}
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>{g.itens.length}</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {g.itens.map(eq => (
+                    <EqCard key={eq.id} eq={eq}
+                      onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
+                      onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
+                      onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}
+                      onViewTelemetry={() => setShowTelemetryModal({ show: true, nvrName: eq.name, telemetry: eq.last_telemetry_status })}
+                      onEdit={() => openEqModal(eqToForm(eq), eq.id)}
+                      onToggleActive={() => handleToggleEquipamento(eq)}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

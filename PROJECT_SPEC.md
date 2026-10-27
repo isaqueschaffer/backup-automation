@@ -949,6 +949,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-27] — Painel: equipamentos da Máquina agrupados por tipo
+
+**Alteração:** na tela da Máquina, a seção "Equipamentos" deixa de ser uma fila única e passa a ser dividida por tipo (NVR/DVR, Digifort, Defense IA, OLT, ONU, Mikrotik, PABX, Misto), cada grupo com cabeçalho (ícone, nome e contagem) e os equipamentos em ordem alfabética. Ícone, cor e rótulo dos tipos foram centralizados em `components/eqTipos.tsx` (antes duplicados no `EqCard`). Só visual; sem mudança de API.
+**Arquivos:** server/dashboard/src/pages/Machines/MachineDetail/{index.tsx,components/EqCard.tsx,components/eqTipos.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-26] — Digifort/Defense: captura RTSP da Galeria estourava o tempo (regressão de 21/10)
 
 **Alteração:** Na Galeria de câmeras de equipamentos Digifort/Defense, capturas RTSP falhavam com "Tempo esgotado (5s) via UDP" (60 de 155 câmeras do Navarro falhavam). Causa: tentativas com timeout de apenas 5–6 s (insuficientes para esperar o próximo quadro-chave em streams H.265+/Smart Codec) e UDP gastando metade do limite de 4 tentativas, testando apenas 2 URLs candidatas e reportando apenas o erro da última tentativa UDP.

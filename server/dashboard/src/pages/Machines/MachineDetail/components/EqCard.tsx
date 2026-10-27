@@ -1,5 +1,6 @@
-import { Activity, Edit2, FolderOpen, Image, Network, Phone, RefreshCw, Trash2, Video, Wifi, WifiOff } from "lucide-react";
+import { Activity, Edit2, FolderOpen, Image, RefreshCw, Trash2, Video } from "lucide-react";
 import { NVR } from "../../../../api/types";
+import { eqCor, eqIcone } from "./eqTipos";
 
 export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onEdit, onToggleActive }: {
   eq: NVR;
@@ -10,19 +11,7 @@ export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, o
   onEdit: () => void;
   onToggleActive: () => void;
 }) {
-  const getEqIcon = (tipo: string) => {
-    const m: Record<string, React.ReactNode> = {
-      NVR: <Video size={18} />, OLT: <Wifi size={18} />, ONU: <WifiOff size={18} />, PABX: <Phone size={18} />, MIKROTIK: <Network size={18} />, DIGIFORT: <Video size={18} />, DEFENSE: <Video size={18} />
-    };
-    return m[tipo] || <Video size={18} />;
-  };
-  const getEqColor = (tipo: string) => {
-    const m: Record<string, string> = {
-      NVR: "var(--primary)", OLT: "#10b981", ONU: "#f59e0b", PABX: "#8b5cf6", MIKROTIK: "#3b82f6", DIGIFORT: "#f43f5e", DEFENSE: "#ec4899"
-    };
-    return m[tipo] || "var(--text-muted)";
-  };
-  const color = getEqColor(eq.tipo);
+  const color = eqCor(eq.tipo);
 
   return (
     <div style={{
@@ -40,7 +29,7 @@ export default function EqCard({ eq, onDelete, onViewRecording, onViewCameras, o
         background: `${color}18`, border: `1px solid ${color}40`,
         display: "flex", alignItems: "center", justifyContent: "center", color
       }}>
-        {getEqIcon(eq.tipo)}
+        {eqIcone(eq.tipo)}
       </div>
 
       {/* Info */}
