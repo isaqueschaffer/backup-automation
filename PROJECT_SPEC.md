@@ -951,7 +951,7 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ### [2026-10-27] — Painel: equipamentos da Máquina agrupados por tipo
 
-**Alteração:** na tela da Máquina, a seção "Equipamentos" deixa de ser uma fila única e passa a ser dividida por tipo (NVR/DVR, Digifort, Defense IA, OLT, ONU, Mikrotik, PABX, Misto), cada grupo com cabeçalho (ícone, nome e contagem) e os equipamentos em ordem alfabética. Ícone, cor e rótulo dos tipos foram centralizados em `components/eqTipos.tsx` (antes duplicados no `EqCard`). Só visual; sem mudança de API.
+**Alteração:** na tela da Máquina, a seção "Equipamentos" deixa de ser uma fila única e passa a ser dividida por tipo (NVR/DVR, Digifort, Defense IA, OLT, ONU, Mikrotik, PABX, Misto), cada grupo com cabeçalho (ícone, nome e contagem) e os equipamentos em ordem alfabética. Ícone, cor e rótulo dos tipos foram centralizados em `components/eqTipos.tsx` (antes duplicados no `EqCard`). Só visual; sem mudança de API. Os grupos são recolhíveis (cabeçalho clicável com seta) e começam todos recolhidos ao abrir a tela; o estado fica só na memória da página.
 **Arquivos:** server/dashboard/src/pages/Machines/MachineDetail/{index.tsx,components/EqCard.tsx,components/eqTipos.tsx}, PROJECT_SPEC.md
 **Breaking Change:** Não.
 **Branch:** isaque
