@@ -392,6 +392,42 @@ async def _stop_run_closer() -> None:
         _run_closer_task.cancel()
 
 
+# ─── Tarefa de fundo: avisos de vencimento das Contas (multi-contas) ───────
+# A cada hora envia os e-mails de 7/3/1 dia e do vencimento (marcos em contas.avisos_enviados).
+# Mesma limitação de 1 worker uvicorn do laço acima; o marco gravado evita e-mail repetido.
+VENCIMENTOS_INTERVAL_SECONDS = 3600
+_vencimentos_task = None
+
+
+def _verificar_vencimentos_once() -> None:
+    from services.avisos_conta import verificar_vencimentos
+    with SessionLocal() as db:
+        verificar_vencimentos(db)
+
+
+async def _vencimentos_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(_verificar_vencimentos_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Falha na tarefa de avisos de vencimento das contas")
+        await asyncio.sleep(VENCIMENTOS_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_vencimentos() -> None:
+    global _vencimentos_task
+    _vencimentos_task = asyncio.create_task(_vencimentos_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_vencimentos() -> None:
+    if _vencimentos_task is not None:
+        _vencimentos_task.cancel()
+
+
 # ─── Stats endpoint ────────────────────────────────────────────────────────
 @app.get("/api/v1/stats", response_model=StatsResponse)
 def get_stats(db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):

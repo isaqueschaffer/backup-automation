@@ -1007,6 +1007,20 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-27] — Multi-contas (etapa 4a): painel com login por e-mail, faixa de vencimento e seletor de conta
+
+**Alteração:** login por e-mail e senha (o administrador da plataforma entra pelo botão "Entrar como administrador da plataforma", só com a senha). O painel carrega `GET /auth/me` (recarrega a cada 10 min e ao voltar à aba) e mostra no topo a faixa da validade (amarela a partir de 15 dias, vermelha a partir de 3 dias, vermelha fixa quando vencida/suspensa com aviso de somente leitura) e, para usuário LEITURA, "Seu acesso é somente leitura". O super admin escolhe a conta no menu lateral (enviada em `X-Conta-ID`, guardada em `localStorage`; uma requisição que já traga o header não é sobrescrita); "Configurações" só aparece para ele. O item do menu vira "Setores" em conta de cliente final.
+**Arquivos:** server/dashboard/src/{App.tsx,api/types.ts,api/client.ts,api/contas.ts,contexts/AuthContext.tsx,utils/date.ts,pages/Login.tsx,components/AvisoConta.tsx,components/Layout.tsx,components/Sidebar.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não (a tela de login muda: a senha única fica no botão "Entrar como administrador da plataforma").
+**Branch:** isaque
+
+### [2026-10-27] — Multi-contas (etapa 3): avisos de vencimento por e-mail e testes de isolamento
+
+**Alteração:** tarefa de fundo de hora em hora (`main.py`, `services/avisos_conta.py`) envia e-mail ao contato e aos administradores da conta a 7, 3 e 1 dia do vencimento e no dia em que vence (marcos gravados em `contas.avisos_enviados`, zerados ao renovar; só o marco mais urgente é enviado; SMTP fora do ar tenta de novo na hora seguinte). Testes: `test_avisos_conta.py` (marcos) e `test_isolamento_contas.py` (integração contra o PostgreSQL local, só com `TRILAN_TESTE_ISOLAMENTO=1` e `httpx` no container de teste). Executado em 27/10/2026 no ambiente local: isolamento 10/10 aprovado (conta A não vê nem vincula dados da B, LEITURA e conta vencida recebem 403, super admin filtra por `X-Conta-ID`, agente da conta vencida recebe config vazia e 403 no relatório, troca de senha derruba o token antigo). Rodar o de integração num processo separado dos testes unitários (estes trocam `DATABASE_URL` para SQLite ao serem importados). Os 4 testes que falham em `test_storage.py`/`test_planilha_vms.py` já falhavam antes do multi-contas (mesmo resultado no commit `688b9ed`; a do `test_planilha_vms.py` é a chave Fernet de teste com 31 bytes).
+**Arquivos:** server/api/main.py, server/api/services/avisos_conta.py, server/api/tests/{test_avisos_conta.py,test_isolamento_contas.py}, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-27] — Multi-contas (etapa 2b): isolamento por conta e bloqueio da conta vencida
 
 **Alteração:** as rotas do painel (Clientes, Máquinas, Equipamentos, Backups, Dashboards e `/stats`) recebem o `Contexto` e só enxergam a conta do usuário (helpers em `services/escopo.py`; recurso de outra conta = 404; super admin sem `X-Conta-ID` vê tudo e cria na conta da plataforma). Vincular máquina a Cliente de outra conta → 409. Conta vencida/suspensa: `/agent/config` devolve a lista de equipamentos vazia (o agente encerra o backup sem erro de rede), o ping não dispara backup nem recuperação, `report`/upload respondem 403 e o link público do dashboard responde 404. `conta_id` passa a NOT NULL em `client_groups` e `clients` depois do backfill. Contrato do agente sem mudança.
