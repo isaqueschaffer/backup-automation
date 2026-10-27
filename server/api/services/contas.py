@@ -1,13 +1,14 @@
 """Contas (inquilinos): validade do plano e conta da plataforma."""
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from models import Conta, Setting
+from models import Conta, ContaRenovacao, Customer, Machine, Plano, Setting, Usuario
 
 logger = logging.getLogger("trilan.contas")
 
@@ -88,3 +89,111 @@ def garantir_conta_plataforma(db: Session) -> UUID:
         db.add(Setting(key=SETTING_CONTA_PLATAFORMA, value=str(conta.id)))
     logger.info("Conta da plataforma criada: %s", conta.id)
     return conta.id
+
+
+def rotulos_da_conta(conta) -> dict:
+    """Rótulos da hierarquia conforme o tipo da conta."""
+    tipo = getattr(conta, "tipo", None) if conta else None
+    if tipo == "CLIENTE_FINAL":
+        return {"grupo_singular": "Setor", "grupo_plural": "Setores"}
+    return {"grupo_singular": "Cliente", "grupo_plural": "Clientes"}
+
+
+def resumo_da_conta(conta, plataforma_id: Optional[UUID]) -> dict:
+    """Dicionário com os campos de ContaResumo."""
+    status, dias = status_da_conta(conta)
+    plano_nome = conta.plano.nome if getattr(conta, "plano", None) else None
+    return {
+        "id": conta.id,
+        "nome": conta.nome,
+        "tipo": conta.tipo,
+        "plano_nome": plano_nome,
+        "expira_em": conta.expira_em,
+        "dias_restantes": dias,
+        "status": status,
+        "bloqueada": status in STATUS_BLOQUEIO,
+        "plataforma": (conta.id == plataforma_id) if plataforma_id else False,
+    }
+
+
+def contagens_por_conta(db: Session) -> dict[UUID, tuple[int, int, int]]:
+    """Devolve {conta_id: (total_clientes, total_maquinas, total_usuarios)} para todas as contas."""
+    res: dict[UUID, list[int]] = {}
+
+    # Clientes
+    q_cli = (
+        db.query(Customer.conta_id, func.count(Customer.id))
+        .filter(Customer.conta_id.isnot(None))
+        .group_by(Customer.conta_id)
+        .all()
+    )
+    for cid, cnt in q_cli:
+        if cid:
+            res.setdefault(cid, [0, 0, 0])[0] = cnt
+
+    # Máquinas
+    q_mac = (
+        db.query(Machine.conta_id, func.count(Machine.id))
+        .filter(Machine.conta_id.isnot(None))
+        .group_by(Machine.conta_id)
+        .all()
+    )
+    for cid, cnt in q_mac:
+        if cid:
+            res.setdefault(cid, [0, 0, 0])[1] = cnt
+
+    # Usuários
+    q_usr = (
+        db.query(Usuario.conta_id, func.count(Usuario.id))
+        .filter(Usuario.conta_id.isnot(None))
+        .group_by(Usuario.conta_id)
+        .all()
+    )
+    for cid, cnt in q_usr:
+        if cid:
+            res.setdefault(cid, [0, 0, 0])[2] = cnt
+
+    return {cid: (vals[0], vals[1], vals[2]) for cid, vals in res.items()}
+
+
+def renovar_conta(db: Session, conta: Conta, plano: Plano, feito_por: Optional[str] = None) -> ContaRenovacao:
+    """Registra uma renovação de plano para a conta e estende sua validade. Não faz commit."""
+    agora = datetime.utcnow()
+    base = max(agora, conta.expira_em or agora)
+    nova = base + timedelta(days=plano.duracao_dias)
+    renovacao = ContaRenovacao(
+        conta_id=conta.id,
+        plano_id=plano.id,
+        plano_nome=plano.nome,
+        dias=plano.duracao_dias,
+        expira_em_anterior=conta.expira_em,
+        expira_em_nova=nova,
+        feito_por=feito_por,
+    )
+    db.add(renovacao)
+    conta.expira_em = nova
+    conta.plano_id = plano.id
+    conta.avisos_enviados = []
+    return renovacao
+
+
+def ajustar_validade(db: Session, conta: Conta, nova: datetime, feito_por: Optional[str] = None) -> ContaRenovacao:
+    """Ajusta manualmente a validade da conta. Não faz commit."""
+    if nova.tzinfo is not None:
+        from datetime import timezone
+        nova = nova.astimezone(timezone.utc).replace(tzinfo=None)
+    agora = datetime.utcnow()
+    dias = round((nova - (conta.expira_em or agora)).total_seconds() / 86400)
+    renovacao = ContaRenovacao(
+        conta_id=conta.id,
+        plano_id=None,
+        plano_nome="Ajuste manual",
+        dias=dias,
+        expira_em_anterior=conta.expira_em,
+        expira_em_nova=nova,
+        feito_por=feito_por,
+    )
+    db.add(renovacao)
+    conta.expira_em = nova
+    conta.avisos_enviados = []
+    return renovacao

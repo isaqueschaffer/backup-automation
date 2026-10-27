@@ -11,7 +11,7 @@ from models import Machine, Customer, Backup, Plano
 from schemas import StatsResponse
 from auth import verify_admin_token
 from config import settings
-from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -287,6 +287,8 @@ _semear_multicontas()
 
 openapi_tags = [
     {"name": "auth", "description": "Autenticação administrativa"},
+    {"name": "Contas", "description": "Contas (inquilinos), planos e super admins — só administrador da plataforma"},
+    {"name": "Conta", "description": "Minha conta: validade do plano e usuários"},
     {"name": "Clientes", "description": "Gestão de Clientes (empresas atendidas: máquinas vinculadas, fila de backup e download consolidado)"},
     {"name": "Máquinas", "description": "Gestão de Máquinas (computadores com o agente: configuração, status e chaves)"},
     {"name": "Equipamentos", "description": "Equipamentos vinculados às máquinas (NVR, OLT, ONU, PABX, etc.)"},
@@ -319,6 +321,8 @@ app.add_middleware(
 
 # ─── Routers ───────────────────────────────────────────────────────────────
 app.include_router(auth_router.router)
+app.include_router(contas_admin.router)  # Multi-contas (super admin): /api/v1/admin/contas, planos, super-admins
+app.include_router(conta.router)  # Multi-contas: /api/v1/conta (minha conta e usuários)
 app.include_router(customers.router)     # Clientes: /api/v1/clients
 app.include_router(machines.router)      # Máquinas: /api/v1/machines
 app.include_router(equipamentos.router)  # Equipamentos: /api/v1/machines/{machine_id}/equipamentos

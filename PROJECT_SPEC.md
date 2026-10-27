@@ -1007,6 +1007,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-27] — Multi-contas (etapa 2a): login por usuário e rotas de contas
+
+**Alteração:** login por e-mail e senha (bcrypt, `services/senhas.py`) com papéis SUPER_ADMIN, ADMIN e LEITURA; o login só com senha continua sendo o administrador da plataforma (JWT `sub=admin`). Dependência `get_contexto` (`auth.py`) com a conta do usuário, `X-Conta-ID` para o super admin escolher a conta e bloqueio de escrita (403) para conta vencida/suspensa ou usuário LEITURA. `verify_admin_token` passa a aceitar só o super admin até as rotas serem isoladas por conta (etapa 2b). Rotas novas: `GET /auth/me`, `POST /auth/trocar-senha`, `/admin/planos`, `/admin/contas` (criar, editar, renovar, suspender, reativar), `/admin/clientes/{id}/mover-conta`, `/admin/super-admins`, `/conta` e `/conta/usuarios`. Limite de 10 tentativas de login erradas por IP em 5 min (429). `bcrypt==4.2.1` nas dependências.
+**Arquivos:** server/api/{auth.py,schemas.py,main.py,requirements.txt}, server/api/routers/{auth_router.py,contas_admin.py,conta.py}, server/api/services/{senhas.py,contas.py}, PROJECT_SPEC.md
+**Breaking Change:** Não (login só com senha mantido).
+**Branch:** isaque
+
 ### [2026-10-27] — Multi-contas (etapa 1): banco de contas, planos e usuários
 
 **Alteração:** primeira etapa do multi-contas (Integradores com Clientes e Clientes finais com Setores, cada conta com plano e validade). Novas tabelas `planos`, `contas`, `conta_renovacoes` e `usuarios`; colunas `conta_id` (nullable, com índice) em `client_groups` e `clients`. No startup: semente dos planos (Teste 15, Mensal 30, Trimestral 90, Semestral 180, Anual 365, só com a tabela vazia), conta da plataforma "Trilan" (INTEGRADOR, sem validade, id em `settings.conta_plataforma_id`) e backfill de `conta_id` dos Clientes e Máquinas sem conta (a Máquina herda a do Cliente). Regras de validade em `services/contas.py` (`status_da_conta`: OK, AVISO ≤ 15 dias, CRITICO ≤ 3, VENCIDA, SUSPENSA, VITALICIA). Nenhuma rota ou tela muda nesta etapa.
