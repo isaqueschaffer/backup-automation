@@ -10,6 +10,8 @@ import {
   Settings,
   LogOut,
   Server,
+  UserCircle,
+  Building2,
 } from "lucide-react";
 import pkg from "../../package.json";
 
@@ -51,7 +53,12 @@ export default function Sidebar() {
     { to: "/clientes", icon: Users, label: plural },
     { to: "/maquinas", icon: Server, label: "Máquinas" },
     { to: "/backups", icon: Archive, label: "Backups" },
-    ...(isSuperAdmin ? [{ to: "/settings", icon: Settings, label: "Configurações" }] : []),
+    { to: "/minha-conta", icon: UserCircle, label: "Minha conta" },
+  ];
+
+  const plataformaItems = [
+    { to: "/contas", icon: Building2, label: "Contas" },
+    { to: "/settings", icon: Settings, label: "Configurações" },
   ];
 
   return (
@@ -118,6 +125,23 @@ export default function Sidebar() {
             {label}
           </NavLink>
         ))}
+
+        {isSuperAdmin && (
+          <>
+            <div className="sidebar-section-label">Plataforma</div>
+            {plataformaItems.map(({ to, icon: Icon, label }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={to === "/"}
+                className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+              >
+                <Icon size={16} style={{ flexShrink: 0 }} />
+                {label}
+              </NavLink>
+            ))}
+          </>
+        )}
       </nav>
 
       <div className="sidebar-footer">

@@ -1,21 +1,23 @@
-import { ArrowLeft, Clock, CloudLightning, Download, Edit2, LayoutDashboard, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Clock, CloudLightning, Download, Edit2, LayoutDashboard, RotateCcw, Trash2 } from "lucide-react";
 import { Customer } from "../../../../api/types";
 import { fmtDate, fmtSchedule } from "../../../../utils/date";
 import HealthBadge, { QueueBadge } from "../../components/HealthBadge";
-import { useRotulos, useSomenteLeitura } from "../../../../contexts/AuthContext";
+import { useRotulos, useSomenteLeitura, useSuperAdmin } from "../../../../contexts/AuthContext";
 
 export type CustomerAction = "backup" | "stop" | "zip" | "edit" | "delete";
 
 // Cabeçalho do cliente: nome, resumo e ações principais
-export default function CustomerHeader({ customer, busy, onBack, onAction, onDashboard }: {
+export default function CustomerHeader({ customer, busy, onBack, onAction, onDashboard, onMoverConta }: {
   customer: Customer;
   busy: CustomerAction | null;
   onBack: () => void;
   onAction: (a: CustomerAction) => void;
   onDashboard?: () => void;
+  onMoverConta?: () => void;
 }) {
   const { plural, singularMin } = useRotulos();
   const somenteLeitura = useSomenteLeitura();
+  const superAdmin = useSuperAdmin();
   const c = customer;
   return (
     <>
@@ -32,6 +34,16 @@ export default function CustomerHeader({ customer, busy, onBack, onAction, onDas
           </div>
         </div>
         <div className="flex gap-2" style={{ flexWrap: "wrap" }}>
+          {superAdmin && onMoverConta && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onMoverConta}
+              title="Mover de conta"
+            >
+              <ArrowRightLeft size={15} style={{ flexShrink: 0 }} /> Mover de conta
+            </button>
+          )}
           {!somenteLeitura && (
             c.queue_active ? (
               <button className="btn btn-secondary" disabled={busy === "stop"} onClick={() => onAction("stop")}

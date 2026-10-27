@@ -1063,6 +1063,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-27] — Multi-contas (etapa 5): telas de Contas, Planos e Minha conta
+
+**Alteração:** super admin ganha a tela "Contas" (`/contas`: lista com busca e filtros por situação e tipo, resumo, criação da conta com o primeiro administrador, modal de Planos e seção de administradores da plataforma) e o detalhe da conta (`/contas/:id`: renovar com prévia da nova validade, ajustar a validade à mão até o fim do dia escolhido em Brasília, suspender/reativar, usuários da conta e histórico de validade, "Entrar na conta"). Todos os usuários têm "Minha conta" (`/minha-conta`: plano, validade, histórico, usuários para o ADMIN e troca da própria senha). No detalhe do Cliente/Setor, o super admin pode movê-lo (com as máquinas) para outra conta. Menu: "Minha conta" para todos e seção "Plataforma" (Contas, Configurações) para o super admin. Revisão: o campo de validade passou a mostrar o dia local (`diaLocalDaValidade`), igual ao cartão; antes usava o dia em UTC e podia aparecer um dia depois. Validado no ambiente local: tsc, `vite build` e 23 verificações de ponta a ponta pela API (criar conta, renovar 30 + 365 = 395 dias, login do cliente com "Setores", usuário LEITURA, último admin protegido, suspender/reativar, ajuste para data passada = VENCIDA, conta da plataforma protegida).
+**Arquivos:** server/dashboard/src/{App.tsx,components/Sidebar.tsx,pages/Contas/{ContasPage,ContaDetalhePage,ContaFormModal,PlanosModal,UsuariosSection,HistoricoValidade,contaUi}.tsx,pages/MinhaConta.tsx,pages/Customers/CustomerDetail/index.tsx,pages/Customers/CustomerDetail/components/CustomerHeader.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
 ### [2026-10-27] — Multi-contas (etapa 6): documentação, regra de isolamento e skills
 
 **Alteração:** ADR-009 (multi-contas: tipos de conta, validade, bloqueio da conta vencida, conta da plataforma, fora do escopo), REGRA-010 (isolamento por conta nas rotas do painel), REGRA-003 atualizada (login por usuário com bcrypt e papéis; senha única do administrador da plataforma mantida), seção 7 (fluxo de login e `X-Conta-ID`) e seção 8 (rotas novas; rotas só da plataforma marcadas). Skills e subagentes do Claude e do Gemini passam a ensinar `get_contexto` + `services/escopo.py` no lugar de `verify_admin_token` (`criar-endpoint-fastapi` nas duas cópias, `revisao-de-codigo`, `seguranca-e-endurecimento`, `revisor`, `backend-fastapi`); o revisor trata violação da REGRA-010 como crítica. CLAUDE.md: checagem de isolamento no merge de ramos de colaboradores.
