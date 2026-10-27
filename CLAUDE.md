@@ -60,6 +60,7 @@ O merge em `isaque` é o único portão da produção (cada push dispara o deplo
 2. Olhar com atenção os arquivos sensíveis: `server/docker-compose*.yml` (porta 7001 e volume `pg_data`), `server/nginx/nginx.conf`, `server/api/models.py`, a parte de migrações do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, além de arquivos novos na raiz e binários.
 3. Procurar data com fuso nas linhas adicionadas (REGRA-001): `git diff isaque...<ramo> | grep -nE '^\+.*(datetime\.now|timezone)'`.
 4. Procurar segredos nas linhas adicionadas (chaves `sk_trilan_`, senhas, tokens, credenciais de equipamentos).
-5. Se algo violar uma REGRA ou o compose, resolver no merge (manter a versão de `isaque`) e registrar no changelog do `PROJECT_SPEC.md` o que foi incorporado e o que foi bloqueado.
+5. Isolamento por conta (REGRA-010): toda rota nova ou alterada em `server/api/routers` recebe `ctx` (`get_contexto`) e busca Cliente/Máquina por `obter_cliente`/`obter_maquina`/`filtrar_por_conta`; procurar `verify_admin_token` e `db.query(Customer|Machine|NVR|Backup)` sem filtro de conta nas linhas adicionadas: `git diff isaque...<ramo> -- server/api/routers | grep -nE '^\+.*(verify_admin_token|db\.query\((Customer|Machine|NVR|Backup)\))'`.
+6. Se algo violar uma REGRA ou o compose, resolver no merge (manter a versão de `isaque`) e registrar no changelog do `PROJECT_SPEC.md` o que foi incorporado e o que foi bloqueado.
 
 Lição: o merge de 06/10 (`538600f`) levou `datetime.now(timezone.utc)`, compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria.
