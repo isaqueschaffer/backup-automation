@@ -7,7 +7,7 @@ Cada ferramenta tem a sua pasta, com cópias separadas (não há link entre elas
 - **Antigravity (`agy`, o Gemini que executa os planos)**: skills em `.agents/skills/<nome>/SKILL.md`, subagentes em `.agents/agents/<nome>/agent.md` e regras em `.agents/rules/`. Desde 23/10/2026 o Gemini enxerga e usa skills e delega a subagentes especializados (`backend-fastapi`, `frontend-dashboard`, `agente-windows`, `revisor`, `depurador`); a regra `.agents/rules/subagentes.md` explica quando usar cada um.
 - As skills do Gemini ficam em português e já trazem as regras do projeto; skills externas só entram depois de lidas por inteiro (viram instrução) e com origem e commit anotados no frontmatter.
 
-Skills do Claude (mantidas aqui; atualizar quando a estrutura mudar): `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers`, `criar-widget-dashboard`.
+Skills do Claude (mantidas aqui; atualizar quando a estrutura mudar): `criar-endpoint-fastapi`, `criar-novo-agente`, `gerenciar-containers`, `criar-widget-dashboard`, `tirar-duvidas` (só do Claude: antes de executar um pedido não trivial, tira as dúvidas com o usuário via `AskUserQuestion`; não existe cópia para o Gemini).
 Skills do Gemini: as mesmas quatro, mais `fastapi`, `docker-compose-patterns`, `react-vite-boas-praticas` (versão enxuta da `vercel-react-best-practices`), `seguranca-e-endurecimento`, `revisao-de-codigo` e `depuracao-sistematica` (as três últimas adaptadas de `addyosmani/agent-skills`, MIT, commit `aeac41d`).
 
 Skills externas e como aplicá-las aqui (as regras do projeto sempre prevalecem):
