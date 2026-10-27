@@ -107,8 +107,8 @@ class Customer(Base):
     # Senha do ZIP do cliente (Fernet-encrypted); None = sem senha
     zip_password = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    # Conta dona do Cliente/Setor (nullable até a etapa 2b do multi-contas; preenchida no startup)
-    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="RESTRICT"), nullable=True, index=True)
+    # Conta dona do Cliente/Setor (obrigatória; preenchida no startup para dados antigos)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="RESTRICT"), nullable=False, index=True)
 
     machines = relationship("Machine", back_populates="customer", order_by="Machine.queue_order")
     runs = relationship(
@@ -182,8 +182,8 @@ class Machine(Base):
     # Cliente ao qual a máquina pertence (coluna 'group_id' mantida no BD)
     customer_id = Column("group_id", UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
     queue_order = Column(Integer, default=0, nullable=False)
-    # Conta dona da Máquina (mesma do Cliente quando houver; nullable até a etapa 2b do multi-contas)
-    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="RESTRICT"), nullable=True, index=True)
+    # Conta dona da Máquina (a mesma do Cliente quando houver)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="RESTRICT"), nullable=False, index=True)
 
     equipamentos = relationship("NVR", back_populates="machine", cascade="all, delete-orphan")
     backups = relationship("Backup", back_populates="machine")

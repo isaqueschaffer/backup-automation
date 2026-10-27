@@ -7,11 +7,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from auth import verify_admin_token, generate_api_key
+from auth import generate_api_key, Contexto, get_contexto
 from database import get_db
 from models import Machine, Customer, Backup, AgentLog
 from schemas import MachineCreate, MachineUpdate, MachineResponse, MachineWithKey, AgentLogResponse
 from services.crypto_service import encrypt
+from services.escopo import (
+    filtrar_por_conta,
+    obter_cliente,
+    obter_maquina,
+    conta_para_criacao,
+)
 from services.storage_service import move_machine_to_trash
 
 logger = logging.getLogger(__name__)
@@ -49,11 +55,8 @@ def machine_to_response(machine: Machine, schema=MachineResponse):
     return data
 
 
-def _get_machine_or_404(machine_id: UUID, db: Session) -> Machine:
-    machine = db.query(Machine).filter(Machine.id == machine_id).first()
-    if not machine:
-        raise HTTPException(status_code=404, detail="Máquina não encontrada")
-    return machine
+def _get_machine_or_404(machine_id: UUID, db: Session, ctx: Contexto) -> Machine:
+    return obter_maquina(db, ctx, machine_id)
 
 
 def next_queue_order(db: Session, customer_id: UUID, exclude_machine_id: Optional[UUID] = None) -> int:
@@ -65,11 +68,12 @@ def next_queue_order(db: Session, customer_id: UUID, exclude_machine_id: Optiona
     return 0 if current_max is None else current_max + 1
 
 
-@router.get("", response_model=List[MachineResponse], dependencies=[Depends(verify_admin_token)])
+@router.get("", response_model=List[MachineResponse])
 def list_machines(
     customer_id: Optional[UUID] = Query(None, description="Só máquinas deste Cliente"),
     unassigned: bool = Query(False, description="Só máquinas sem Cliente"),
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     # Carrega equipamentos e cliente em lote para evitar N+1 em machine_to_response
     q = db.query(Machine).options(selectinload(Machine.equipamentos), joinedload(Machine.customer))
@@ -77,26 +81,32 @@ def list_machines(
         q = q.filter(Machine.customer_id == customer_id)
     if unassigned:
         q = q.filter(Machine.customer_id.is_(None))
+    q = filtrar_por_conta(q, Machine.conta_id, ctx)
     machines = q.order_by(Machine.created_at.desc()).all()
     return [machine_to_response(m) for m in machines]
 
 
-@router.post("", response_model=MachineWithKey, status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(verify_admin_token)])
-def create_machine(body: MachineCreate, db: Session = Depends(get_db)):
+@router.post("", response_model=MachineWithKey, status_code=status.HTTP_201_CREATED)
+def create_machine(
+    body: MachineCreate,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
     backup_hour, backup_minute = body.backup_hour, body.backup_minute
     queue_order = 0
     customer = None
     if body.customer_id is not None:
-        customer = db.query(Customer).filter(Customer.id == body.customer_id).first()
-        if not customer:
-            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        customer = obter_cliente(db, ctx, body.customer_id)
         # Vinculada: herda o horário do Cliente e entra no fim da fila
         backup_hour, backup_minute = customer.backup_hour, customer.backup_minute
         queue_order = next_queue_order(db, customer.id)
+        conta_id = customer.conta_id
+    else:
+        conta_id = conta_para_criacao(db, ctx)
 
     raw_key, key_hash = generate_api_key()
     machine = Machine(
+        conta_id=conta_id,
         name=body.name,
         api_key_hash=key_hash,
         api_key_prefix=raw_key[:16],
@@ -117,14 +127,23 @@ def create_machine(body: MachineCreate, db: Session = Depends(get_db)):
     return machine_to_response(machine, MachineWithKey)
 
 
-@router.get("/{machine_id}", response_model=MachineResponse, dependencies=[Depends(verify_admin_token)])
-def get_machine(machine_id: UUID, db: Session = Depends(get_db)):
-    return machine_to_response(_get_machine_or_404(machine_id, db))
+@router.get("/{machine_id}", response_model=MachineResponse)
+def get_machine(
+    machine_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    return machine_to_response(_get_machine_or_404(machine_id, db, ctx))
 
 
-@router.put("/{machine_id}", response_model=MachineResponse, dependencies=[Depends(verify_admin_token)])
-def update_machine(machine_id: UUID, body: MachineUpdate, db: Session = Depends(get_db)):
-    machine = _get_machine_or_404(machine_id, db)
+@router.put("/{machine_id}", response_model=MachineResponse)
+def update_machine(
+    machine_id: UUID,
+    body: MachineUpdate,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    machine = _get_machine_or_404(machine_id, db, ctx)
     changes = body.model_dump(exclude_none=True)
 
     # Máquina vinculada: o horário é definido pelo Cliente
@@ -162,10 +181,13 @@ def update_machine(machine_id: UUID, body: MachineUpdate, db: Session = Depends(
     return machine_to_response(machine)
 
 
-@router.delete("/{machine_id}", status_code=status.HTTP_204_NO_CONTENT,
-               dependencies=[Depends(verify_admin_token)])
-def delete_machine(machine_id: UUID, db: Session = Depends(get_db)):
-    machine = _get_machine_or_404(machine_id, db)
+@router.delete("/{machine_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_machine(
+    machine_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    machine = _get_machine_or_404(machine_id, db, ctx)
 
     # Guarda os dados necessários antes do commit (o objeto fica inválido após o delete)
     machine_pk = machine.id
@@ -185,10 +207,13 @@ def delete_machine(machine_id: UUID, db: Session = Depends(get_db)):
         logger.exception("Máquina %s removida do banco, mas falhou ao mover os arquivos para a lixeira", machine_pk)
 
 
-@router.post("/{machine_id}/rotate-key", response_model=MachineWithKey,
-             dependencies=[Depends(verify_admin_token)])
-def rotate_api_key(machine_id: UUID, db: Session = Depends(get_db)):
-    machine = _get_machine_or_404(machine_id, db)
+@router.post("/{machine_id}/rotate-key", response_model=MachineWithKey)
+def rotate_api_key(
+    machine_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    machine = _get_machine_or_404(machine_id, db, ctx)
     raw_key, key_hash = generate_api_key()
     machine.api_key_hash = key_hash
     machine.api_key_prefix = raw_key[:16]
@@ -200,9 +225,9 @@ def rotate_api_key(machine_id: UUID, db: Session = Depends(get_db)):
     return machine_to_response(machine, MachineWithKey)
 
 
-def _flag_all_online(db: Session, flag: str) -> dict:
+def _flag_all_online(db: Session, flag: str, ctx: Contexto) -> dict:
     """Marca `flag` em todas as máquinas ativas e online; offline ficam de fora."""
-    machines = db.query(Machine).filter(Machine.active == True).all()
+    machines = filtrar_por_conta(db.query(Machine).filter(Machine.active == True), Machine.conta_id, ctx).all()
     queued = skipped = 0
     for m in machines:
         if check_machine_online(m):
@@ -214,38 +239,58 @@ def _flag_all_online(db: Session, flag: str) -> dict:
     return {"queued": queued, "skipped_offline": skipped}
 
 
-@router.post("/trigger-backup-all", dependencies=[Depends(verify_admin_token)])
-def trigger_backup_all(db: Session = Depends(get_db)):
+@router.post("/trigger-backup-all")
+def trigger_backup_all(
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
     """Solicita backup em todas as máquinas online."""
-    return _flag_all_online(db, "backup_requested")
+    return _flag_all_online(db, "backup_requested", ctx)
 
 
-@router.post("/restart-agent-all", dependencies=[Depends(verify_admin_token)])
-def restart_agent_all(db: Session = Depends(get_db)):
+@router.post("/restart-agent-all")
+def restart_agent_all(
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
     """Solicita reinício do agente em todas as máquinas online."""
-    return _flag_all_online(db, "restart_requested")
+    return _flag_all_online(db, "restart_requested", ctx)
 
 
-@router.post("/{machine_id}/trigger-backup", dependencies=[Depends(verify_admin_token)])
-def trigger_backup(machine_id: UUID, db: Session = Depends(get_db)):
-    machine = _get_machine_or_404(machine_id, db)
+@router.post("/{machine_id}/trigger-backup")
+def trigger_backup(
+    machine_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    machine = _get_machine_or_404(machine_id, db, ctx)
     machine.backup_requested = True
     db.commit()
     return {"status": "ok", "message": "Backup da máquina solicitado via dashboard"}
 
 
-@router.post("/{machine_id}/restart-agent", dependencies=[Depends(verify_admin_token)])
-def request_agent_restart(machine_id: UUID, db: Session = Depends(get_db)):
+@router.post("/{machine_id}/restart-agent")
+def request_agent_restart(
+    machine_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
     """Solicita o reinício do agente da máquina no próximo ping."""
-    machine = _get_machine_or_404(machine_id, db)
+    machine = _get_machine_or_404(machine_id, db, ctx)
     machine.restart_requested = True
     db.commit()
     return {"queued": True}
 
 
-@router.get("/{machine_id}/logs", response_model=List[AgentLogResponse], dependencies=[Depends(verify_admin_token)])
-def get_machine_logs(machine_id: UUID, db: Session = Depends(get_db), limit: int = 50, incluir_pings: bool = True):
-    _get_machine_or_404(machine_id, db)
+@router.get("/{machine_id}/logs", response_model=List[AgentLogResponse])
+def get_machine_logs(
+    machine_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+    limit: int = 50,
+    incluir_pings: bool = True,
+):
+    _get_machine_or_404(machine_id, db, ctx)
     q = db.query(AgentLog).filter(AgentLog.machine_id == machine_id)
     if not incluir_pings:
         q = q.filter(AgentLog.event_type != "ping")

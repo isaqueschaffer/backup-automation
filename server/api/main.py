@@ -9,7 +9,8 @@ from sqlalchemy import func, cast, Date, text, inspect
 from database import Base, engine, get_db, SessionLocal
 from models import Machine, Customer, Backup, Plano
 from schemas import StatsResponse
-from auth import verify_admin_token
+from auth import Contexto, get_contexto
+from services.escopo import filtrar_por_conta
 from config import settings
 from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
@@ -285,6 +286,21 @@ def _semear_multicontas() -> None:
 
 _semear_multicontas()
 
+
+def _conta_id_obrigatorio() -> None:
+    """Depois do backfill, torna conta_id NOT NULL em client_groups e clients (idempotente)."""
+    for tabela in ("client_groups", "clients"):
+        try:
+            coluna = next((c for c in inspect(engine).get_columns(tabela) if c["name"] == "conta_id"), None)
+        except Exception:
+            logger.exception("Falha ao inspecionar %s.conta_id", tabela)
+            continue
+        if coluna is not None and coluna.get("nullable", False):
+            _run_ddl(f"ALTER TABLE {tabela} ALTER COLUMN conta_id SET NOT NULL;", f"{tabela}.conta_id NOT NULL")
+
+
+_conta_id_obrigatorio()
+
 openapi_tags = [
     {"name": "auth", "description": "Autenticação administrativa"},
     {"name": "Contas", "description": "Contas (inquilinos), planos e super admins — só administrador da plataforma"},
@@ -377,21 +393,33 @@ async def _stop_run_closer() -> None:
 
 
 # ─── Stats endpoint ────────────────────────────────────────────────────────
-@app.get("/api/v1/stats", response_model=StatsResponse, dependencies=[Depends(verify_admin_token)])
-def get_stats(db: Session = Depends(get_db)):
+@app.get("/api/v1/stats", response_model=StatsResponse)
+def get_stats(db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     today = date.today()
     # Contagens agregadas em 3 queries
-    machines_total, machines_active = db.query(
+    q_machines = db.query(
         func.count(Machine.id),
         func.count(Machine.id).filter(Machine.active == True),
-    ).one()
-    customers_total = db.query(func.count(Customer.id)).scalar()
+    )
+    q_machines = filtrar_por_conta(q_machines, Machine.conta_id, ctx)
+    machines_total, machines_active = q_machines.one()
 
-    b_today, b_ok, b_err = db.query(
+    q_customers = db.query(func.count(Customer.id))
+    q_customers = filtrar_por_conta(q_customers, Customer.conta_id, ctx)
+    customers_total = q_customers.scalar()
+
+    q_backup = db.query(
         func.count(Backup.id),
         func.count(Backup.id).filter(Backup.status == "OK"),
         func.count(Backup.id).filter(Backup.status == "ERROR"),
-    ).filter(cast(Backup.started_at, Date) == today).one()
+    ).filter(cast(Backup.started_at, Date) == today)
+
+    if ctx.conta_id is not None:
+        q_backup = q_backup.filter(
+            Backup.machine_id.in_(filtrar_por_conta(db.query(Machine.id), Machine.conta_id, ctx))
+        )
+
+    b_today, b_ok, b_err = q_backup.one()
 
     return StatsResponse(
         machines_total=machines_total or 0,

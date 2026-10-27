@@ -197,3 +197,9 @@ def ajustar_validade(db: Session, conta: Conta, nova: datetime, feito_por: Optio
     conta.expira_em = nova
     conta.avisos_enviados = []
     return renovacao
+
+
+def maquina_bloqueada(machine) -> bool:
+    """A conta da máquina está vencida ou suspensa (backups parados)."""
+    return machine.conta is not None and conta_bloqueada(machine.conta)
+

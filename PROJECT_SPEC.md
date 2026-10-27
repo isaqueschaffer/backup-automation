@@ -1007,6 +1007,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-27] — Multi-contas (etapa 2b): isolamento por conta e bloqueio da conta vencida
+
+**Alteração:** as rotas do painel (Clientes, Máquinas, Equipamentos, Backups, Dashboards e `/stats`) recebem o `Contexto` e só enxergam a conta do usuário (helpers em `services/escopo.py`; recurso de outra conta = 404; super admin sem `X-Conta-ID` vê tudo e cria na conta da plataforma). Vincular máquina a Cliente de outra conta → 409. Conta vencida/suspensa: `/agent/config` devolve a lista de equipamentos vazia (o agente encerra o backup sem erro de rede), o ping não dispara backup nem recuperação, `report`/upload respondem 403 e o link público do dashboard responde 404. `conta_id` passa a NOT NULL em `client_groups` e `clients` depois do backfill. Contrato do agente sem mudança.
+**Arquivos:** server/api/{main.py,models.py}, server/api/routers/{customers.py,machines.py,equipamentos.py,backups.py,dashboards.py,agent.py}, server/api/services/{escopo.py,contas.py}, server/api/services/dashboards/compartilhamento.py, PROJECT_SPEC.md
+**Breaking Change:** Não para o agente nem para o super admin; usuários de conta só veem a própria conta.
+**Branch:** isaque
+
 ### [2026-10-27] — Multi-contas (etapa 2a): login por usuário e rotas de contas
 
 **Alteração:** login por e-mail e senha (bcrypt, `services/senhas.py`) com papéis SUPER_ADMIN, ADMIN e LEITURA; o login só com senha continua sendo o administrador da plataforma (JWT `sub=admin`). Dependência `get_contexto` (`auth.py`) com a conta do usuário, `X-Conta-ID` para o super admin escolher a conta e bloqueio de escrita (403) para conta vencida/suspensa ou usuário LEITURA. `verify_admin_token` passa a aceitar só o super admin até as rotas serem isoladas por conta (etapa 2b). Rotas novas: `GET /auth/me`, `POST /auth/trocar-senha`, `/admin/planos`, `/admin/contas` (criar, editar, renovar, suspender, reativar), `/admin/clientes/{id}/mover-conta`, `/admin/super-admins`, `/conta` e `/conta/usuarios`. Limite de 10 tentativas de login erradas por IP em 5 min (429). `bcrypt==4.2.1` nas dependências.

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import CustomerDashboard
+from services.contas import conta_bloqueada
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ def acesso_publico(
         and (dashboard.share_expires_at is None or dashboard.share_expires_at > agora)
         and dashboard.customer is not None
         and dashboard.customer.active
+        and not (dashboard.customer.conta is not None and conta_bloqueada(dashboard.customer.conta))
     )
     if not valido:
         limite_falhas.registrar(ip)
