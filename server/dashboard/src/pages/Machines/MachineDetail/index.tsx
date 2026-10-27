@@ -26,6 +26,7 @@ import RotatedKeyModal from "./components/RotatedKeyModal";
 import RecordingModal from "./components/RecordingModal";
 import NVRCamerasGalleryModal from "./components/NVRCamerasGalleryModal";
 import NVRTelemetryModal from "./components/NVRTelemetryModal";
+import ImportCamerasModal from "./components/ImportCamerasModal";
 
 export default function MachineDetail() {
   const { id } = useParams<{ id: string }>();
@@ -140,7 +141,10 @@ export default function MachineDetail() {
   const cameras = equipamentos.filter(e => e.tipo === "CAMERA");
   const otherEquipamentos = equipamentos.filter(e => e.tipo !== "CAMERA");
 
-  const { fileInputRef, importFile, deleteAll } = useCameraImport({
+  const {
+    fileInputRef, importFile, deleteAll,
+    modalImport, mudarOpcaoNome, cancelarImportacao, confirmarImportacao,
+  } = useCameraImport({
     machineId: id, cameras, setBusy: setLoading, reload: load, toast,
   });
   const { isTesting, testResults, hasImages, testAll, downloadImages } = useRtspTest({
@@ -404,6 +408,22 @@ export default function MachineDetail() {
           nvrName={showTelemetryModal.nvrName}
           telemetry={showTelemetryModal.telemetry}
           onClose={() => setShowTelemetryModal({ show: false, nvrName: "", telemetry: null })}
+        />
+      )}
+
+      {/* ── Modal: Importar Câmeras da Planilha (Teste RTSP) ── */}
+      {modalImport && (
+        <ImportCamerasModal
+          fileName={modalImport.fileName}
+          cameras={modalImport.cameras}
+          totalLinhas={modalImport.rows.length}
+          temOpcaoNomeDescricao={modalImport.temOpcaoNomeDescricao}
+          opcaoNome={modalImport.opcaoNome}
+          onMudarOpcaoNome={mudarOpcaoNome}
+          exemploNome={modalImport.exemploNome}
+          exemploDescricao={modalImport.exemploDescricao}
+          onConfirmar={confirmarImportacao}
+          onClose={cancelarImportacao}
         />
       )}
     </>

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { createEquipamento, deleteEquipamento } from "../../../../api/client";
 import { NVR } from "../../../../api/types";
@@ -38,6 +38,8 @@ export function parseCsv(text: string): string[][] {
   }
   return rows;
 }
+
+export type DigifortNameOption = "descricao" | "nome" | "auto";
 
 export interface CameraRow { name: string; ip: string; password: string; modelo: string }
 
@@ -93,8 +95,75 @@ export function linhaDoCabecalho(rows: unknown[][]): number {
   return 0;
 }
 
+// Verifica se a planilha possui colunas distintas de Nome e Descrição (padrão de exportação Digifort)
+export function planilhaTemNomeEDescricao(rows: unknown[][]): boolean {
+  if (!rows || rows.length === 0) return false;
+  let headerRowIdx = 0;
+  for (let r = 0; r < Math.min(rows.length, 5); r++) {
+    const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+    if (
+      rowStr.some(c =>
+        c.includes("ip camera address") ||
+        c.includes("ip do dispositivo") ||
+        c.includes("endere") ||
+        c.includes("descri")
+      )
+    ) {
+      headerRowIdx = r;
+      break;
+    }
+  }
+  const headers = (rows[headerRowIdx] || []).map(h => cleanCell(h).toLowerCase());
+  const idxDesc = headers.findIndex(h => h.includes("desc"));
+  const idxNome = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+  return idxDesc >= 0 && idxNome >= 0 && idxDesc !== idxNome;
+}
+
+// Extrai um exemplo de valor de 'Nome' e 'Descrição' da planilha para exibir ao usuário
+export function extrairExemplosNomeEDescricao(rows: unknown[][]): { nome: string; descricao: string } {
+  let headerRowIdx = 0;
+  for (let r = 0; r < Math.min(rows.length, 5); r++) {
+    const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+    if (
+      rowStr.some(c =>
+        c.includes("ip camera address") ||
+        c.includes("ip do dispositivo") ||
+        c.includes("endere") ||
+        c.includes("descri")
+      )
+    ) {
+      headerRowIdx = r;
+      break;
+    }
+  }
+  const headers = (rows[headerRowIdx] || []).map(h => cleanCell(h).toLowerCase());
+  const idxDesc = headers.findIndex(h => h.includes("desc"));
+  const idxNome = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+
+  let exemploNome = "";
+  let exemploDescricao = "";
+
+  for (let r = headerRowIdx + 1; r < rows.length; r++) {
+    const cols = rows[r];
+    if (!cols) continue;
+    const n = cleanCell(idxNome >= 0 ? cols[idxNome] : cols[0]);
+    const d = cleanCell(idxDesc >= 0 ? cols[idxDesc] : "");
+    if (n && !exemploNome) exemploNome = n;
+    if (d && !exemploDescricao) exemploDescricao = d;
+    if (n && d && n !== d) {
+      exemploNome = n;
+      exemploDescricao = d;
+      break;
+    }
+  }
+  return { nome: exemploNome, descricao: exemploDescricao };
+}
+
 // Converte linhas (CSV/XLSX) em câmeras a importar
-export function rowsToCameras(rows: unknown[][]): CameraRow[] {
+export function rowsToCameras(
+  rows: unknown[][],
+  digifortNameOption: DigifortNameOption = "descricao"
+): CameraRow[] {
   if (!rows || rows.length === 0) return [];
 
   // 1. Localiza a linha do cabeçalho real (linha 0 ou linhas subsequentes se houver metadados do NVR no topo)
@@ -202,9 +271,15 @@ export function rowsToCameras(rows: unknown[][]): CameraRow[] {
     if (idxDesc >= 0 || idxIp >= 0) {
       const colNome = cleanCell(idxNome >= 0 ? cols[idxNome] : cols[0]);
       const colDesc = cleanCell(idxDesc >= 0 ? cols[idxDesc] : "");
-      desc = colDesc || colNome;
-      if (colNome && colDesc && colNome.length > colDesc.length && !/^\d+$/.test(colNome)) {
-        desc = colNome;
+      if (digifortNameOption === "nome") {
+        desc = colNome || colDesc;
+      } else if (digifortNameOption === "descricao") {
+        desc = colDesc || colNome;
+      } else {
+        desc = colDesc || colNome;
+        if (colNome && colDesc && colNome.length > colDesc.length && !/^\d+$/.test(colNome)) {
+          desc = colNome;
+        }
       }
       ender = cleanCell(idxIp >= 0 ? cols[idxIp] : cols[1]);
       pass = cleanCell(idxPass >= 0 ? cols[idxPass] : "");
@@ -281,6 +356,16 @@ export function readRowsFromFile(file: File): Promise<unknown[][]> {
   });
 }
 
+export interface ModalImportCamerasState {
+  fileName: string;
+  rows: unknown[][];
+  temOpcaoNomeDescricao: boolean;
+  opcaoNome: DigifortNameOption;
+  cameras: CameraRow[];
+  exemploNome?: string;
+  exemploDescricao?: string;
+}
+
 // Importação (CSV/XLSX) e exclusão em massa de câmeras, sempre item a item
 export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: {
   machineId: string | undefined;
@@ -290,16 +375,58 @@ export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: 
   toast: ToastFn;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [modalImport, setModalImport] = useState<ModalImportCamerasState | null>(null);
 
   const importFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !machineId) return;
-    setBusy(true);
     try {
       const rows = await readRowsFromFile(file);
+      const temOpcao = planilhaTemNomeEDescricao(rows);
+      const cams = rowsToCameras(rows, "descricao");
+      if (cams.length === 0) {
+        toast("Nenhuma câmera encontrada na planilha.", "error");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+      const { nome: exNome, descricao: exDesc } = extrairExemplosNomeEDescricao(rows);
+      setModalImport({
+        fileName: file.name,
+        rows,
+        temOpcaoNomeDescricao: temOpcao,
+        opcaoNome: "descricao",
+        cameras: cams,
+        exemploNome: exNome,
+        exemploDescricao: exDesc,
+      });
+    } catch (err) {
+      console.error(err);
+      toast("Erro ao ler arquivo da planilha.", "error");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const mudarOpcaoNome = (novaOpcao: DigifortNameOption) => {
+    if (!modalImport) return;
+    setModalImport({
+      ...modalImport,
+      opcaoNome: novaOpcao,
+      cameras: rowsToCameras(modalImport.rows, novaOpcao),
+    });
+  };
+
+  const cancelarImportacao = () => {
+    setModalImport(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const confirmarImportacao = async () => {
+    if (!modalImport || !machineId) return;
+    setBusy(true);
+    try {
       let ok = 0;
       let fail = 0;
-      for (const cam of rowsToCameras(rows)) {
+      for (const cam of modalImport.cameras) {
         try {
           await createEquipamento(machineId, {
             tipo: "CAMERA",
@@ -317,6 +444,7 @@ export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: 
       }
       summarize(ok, fail, `Importadas ${ok} câmeras com sucesso!`, toast);
       reload();
+      setModalImport(null);
     } catch (err) {
       console.error(err);
       toast("Erro ao importar câmeras.", "error");
@@ -350,5 +478,13 @@ export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: 
     }
   };
 
-  return { fileInputRef, importFile, deleteAll };
+  return {
+    fileInputRef,
+    importFile,
+    deleteAll,
+    modalImport,
+    mudarOpcaoNome,
+    cancelarImportacao,
+    confirmarImportacao,
+  };
 }

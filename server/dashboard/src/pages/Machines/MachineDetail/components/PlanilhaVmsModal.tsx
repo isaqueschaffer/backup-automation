@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Modal from "../../../../components/Modal";
+import { DigifortNameOption } from "../hooks/useCameraImport";
 
 export interface CameraLidaPrevia {
   nome: string;
@@ -18,6 +19,11 @@ export interface PlanilhaVmsModalProps {
   onMostrarSenhas: (v: boolean) => void;
   info?: string;
   camerasLidas?: CameraLidaPrevia[];
+  temOpcaoNomeDescricao?: boolean;
+  opcaoNome?: DigifortNameOption;
+  onMudarOpcaoNome?: (opcao: DigifortNameOption) => void;
+  exemploNome?: string;
+  exemploDescricao?: string;
   onConfirmar?: () => void;
   confirmarLabel?: string;
   confirmando?: boolean;
@@ -35,6 +41,11 @@ export default function PlanilhaVmsModal({
   onMostrarSenhas,
   info,
   camerasLidas,
+  temOpcaoNomeDescricao,
+  opcaoNome,
+  onMudarOpcaoNome,
+  exemploNome,
+  exemploDescricao,
   onConfirmar,
   confirmarLabel,
   confirmando,
@@ -82,6 +93,62 @@ export default function PlanilhaVmsModal({
                 >
                   Planilha ({linhas.length} linhas)
                 </button>
+              </div>
+            )}
+            {temOpcaoNomeDescricao && onMudarOpcaoNome && (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: "var(--surface-2)",
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "1px solid var(--border)",
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ fontWeight: 600, color: "var(--text)" }}>Registrar como nome:</span>
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    fontWeight: opcaoNome === "descricao" ? 600 : 400,
+                    color: opcaoNome === "descricao" ? "var(--primary)" : "var(--text)",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="opcaoNomePreviaVms"
+                    value="descricao"
+                    checked={opcaoNome === "descricao"}
+                    onChange={() => onMudarOpcaoNome("descricao")}
+                  />
+                  <span>Descrição {exemploDescricao ? `(ex.: ${exemploDescricao})` : ""}</span>
+                </label>
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    fontWeight: opcaoNome === "nome" ? 600 : 400,
+                    color: opcaoNome === "nome" ? "var(--primary)" : "var(--text)",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="opcaoNomePreviaVms"
+                    value="nome"
+                    checked={opcaoNome === "nome"}
+                    onChange={() => onMudarOpcaoNome("nome")}
+                  />
+                  <span>Nome {exemploNome ? `(ex.: ${exemploNome})` : ""}</span>
+                </label>
               </div>
             )}
             {info && (

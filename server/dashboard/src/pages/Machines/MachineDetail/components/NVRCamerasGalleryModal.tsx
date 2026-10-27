@@ -5,7 +5,16 @@ import { NvrCamera, PlanilhaVms, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
 import { fmtDate } from "../../../../utils/date";
-import { colunasDeSenha, linhaDoCabecalho, linhasParaTexto, readRowsFromFile, rowsToCameras } from "../hooks/useCameraImport";
+import {
+  colunasDeSenha,
+  extrairExemplosNomeEDescricao,
+  linhaDoCabecalho,
+  linhasParaTexto,
+  planilhaTemNomeEDescricao,
+  readRowsFromFile,
+  rowsToCameras,
+  DigifortNameOption,
+} from "../hooks/useCameraImport";
 import CameraImagePanel from "./CameraImagePanel";
 import PlanilhaVmsModal from "./PlanilhaVmsModal";
 
@@ -82,8 +91,13 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
   interface PreviaVms {
     nomeArquivo: string;
     linhas: string[][];
+    linhasBrutas: unknown[][];
     linhaCabecalho: number;
     colunasSenha: number[];
+    temOpcaoNomeDescricao: boolean;
+    opcaoNome: DigifortNameOption;
+    exemploNome?: string;
+    exemploDescricao?: string;
     cams: Array<{
       nome: string;
       ip: string;
@@ -138,6 +152,36 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     }
   };
 
+  const mapearSituacaoCams = (camsLista: ReturnType<typeof rowsToCameras>, camerasExistentes: NvrCamera[]) => {
+    return camsLista.map(c => {
+      const nomeLimpo = (c.name || "").trim().toLowerCase();
+      const ipLimpo = (c.ip || "").trim();
+      const jaExiste = camerasExistentes.some(existente => {
+        const exNome = (existente.nome || "").trim().toLowerCase();
+        const exIp = (existente.ip || "").trim();
+        return (nomeLimpo !== "" && exNome === nomeLimpo) || (ipLimpo !== "" && exIp === ipLimpo);
+      });
+      return {
+        nome: c.name,
+        ip: c.ip,
+        modelo: c.modelo,
+        senha: c.password,
+        situacao: (jaExiste ? "atualiza" : "nova") as "nova" | "atualiza",
+      };
+    });
+  };
+
+  const mudarOpcaoNomePrevia = (novaOpcao: DigifortNameOption) => {
+    if (!previa) return;
+    const novosCams = rowsToCameras(previa.linhasBrutas, novaOpcao);
+    const camsComSituacao = mapearSituacaoCams(novosCams, cameras);
+    setPrevia({
+      ...previa,
+      opcaoNome: novaOpcao,
+      cams: camsComSituacao,
+    });
+  };
+
   // Lê CSV/XLSX exportado do Digifort/Defense/NVR e abre prévia antes de importar
   const importarArquivoVms = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -146,7 +190,8 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     setVmsBusy(true);
     try {
       const rows = await readRowsFromFile(file);
-      const cams = rowsToCameras(rows);
+      const temOpcao = planilhaTemNomeEDescricao(rows);
+      const cams = rowsToCameras(rows, "descricao");
       if (cams.length === 0) {
         toast("Nenhuma câmera encontrada no arquivo.", "error");
         return;
@@ -155,29 +200,20 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       const linhas = linhasParaTexto(rows);
       const cabecalhoIdx = linhaDoCabecalho(linhas);
       const colSenhas = colunasDeSenha(linhas, cabecalhoIdx);
+      const { nome: exNome, descricao: exDesc } = extrairExemplosNomeEDescricao(rows);
 
-      const camsComSituacao = cams.map(c => {
-        const nomeLimpo = (c.name || "").trim().toLowerCase();
-        const ipLimpo = (c.ip || "").trim();
-        const jaExiste = cameras.some(existente => {
-          const exNome = (existente.nome || "").trim().toLowerCase();
-          const exIp = (existente.ip || "").trim();
-          return (nomeLimpo !== "" && exNome === nomeLimpo) || (ipLimpo !== "" && exIp === ipLimpo);
-        });
-        return {
-          nome: c.name,
-          ip: c.ip,
-          modelo: c.modelo,
-          senha: c.password,
-          situacao: (jaExiste ? "atualiza" : "nova") as "nova" | "atualiza",
-        };
-      });
+      const camsComSituacao = mapearSituacaoCams(cams, cameras);
 
       setPrevia({
         nomeArquivo: file.name,
         linhas,
+        linhasBrutas: rows,
         linhaCabecalho: cabecalhoIdx,
         colunasSenha: colSenhas,
+        temOpcaoNomeDescricao: temOpcao,
+        opcaoNome: "descricao",
+        exemploNome: exNome,
+        exemploDescricao: exDesc,
         cams: camsComSituacao,
       });
       setPreviaMostrarSenhas(false);
@@ -780,6 +816,11 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
           confirmando={vmsBusy}
           onConfirmar={confirmarImportacaoPrevia}
           onClose={() => !vmsBusy && setPrevia(null)}
+          temOpcaoNomeDescricao={previa.temOpcaoNomeDescricao}
+          opcaoNome={previa.opcaoNome}
+          onMudarOpcaoNome={mudarOpcaoNomePrevia}
+          exemploNome={previa.exemploNome}
+          exemploDescricao={previa.exemploDescricao}
         />
       )}
 
