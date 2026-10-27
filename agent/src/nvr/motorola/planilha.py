@@ -16,7 +16,8 @@ TIMEOUT_SMART_S = 40   # queryDiskSmartInfo e lento em alguns firmwares
 PAUSA_S = 0.5          # pausa entre consultas, como na telemetria (o NVR atende melhor)
 LIMITE_TOTAL_S = 300   # NVR travado nao pode prender o backup: depois disso as consultas restantes sao puladas
 
-# Campos de ruido; usuario/senha das cameras (o queryDevList os devolve em texto puro) saem por eh_sensivel()
+# Campos de ruido. Usuario/senha de outros recursos saem por eh_sensivel(); so as credenciais das cameras
+# (queryDevList, que as devolve em texto puro) entram na aba Câmeras, lidas direto do XML
 _RUIDO = {"AndroidAppAddress", "IOSAppAddress", "PCUI"}
 _ATRIBUTOS_IGNORADOS = {"type", "note", "min", "max", "default"}
 
@@ -134,7 +135,8 @@ def _coletar_cameras(nvr):
             i.findtext("port") if tem_ip else "", modelo.text if modelo is not None else "",
             i.findtext("manufacturer") or "", i.findtext("protocolType") or "", i.findtext("addType") or "",
             "Sim" if cid in ids_online else "Não", valor("recStatus"), valor("motionStatus"),
-            valor("intelligentStatus"), "Sim" if cid in ids_gravacao else "Não", cid,
+            valor("intelligentStatus"), "Sim" if cid in ids_gravacao else "Não",
+            i.findtext("userName") or "", i.findtext("password") or "", cid,
         ])
     nomes = {i.get("id"): i.findtext("name") for i in _itens(dev)}
     ordem = {i.get("id"): i.findtext("chlNum") for i in _itens(dev)}
@@ -277,7 +279,7 @@ def _montar_planilha(nvr, nvr_ip):
         ("Discos", len(discos)),
         ("Nota", "Inventário da configuração: não é um arquivo de backup restaurável pelo NVR."),
         ("Nota", "Colunas an/ae do stream são os nomes do firmware; a leitura 'normal/evento' é uma interpretação."),
-        ("Nota", "userName/password das câmeras são descartados e não aparecem em nenhuma aba."),
+        ("Nota", "ATENÇÃO: a aba Câmeras tem usuário e senha de cada câmera (o NVR os informa em texto puro). Proteja este arquivo."),
     ))
     
 
@@ -287,7 +289,7 @@ def _montar_planilha(nvr, nvr_ip):
 
     aba(wb, "Câmeras", ["Canal", "Nome", "Tipo", "IP", "Porta", "Modelo", "Fabricante", "Protocolo", "Adição",
                          "Online", "Gravação agora", "Movimento agora", "Inteligente agora", "Tem gravação",
-                         "ID do canal"], cameras)
+                         "Usuário da câmera", "Senha da câmera", "ID do canal"], cameras)
     aba(wb, "Stream", ["Canal", "Nome", "Principal: codec", "Principal: GOP", "Principal: resoluções suportadas",
                         "Principal: codecs suportados", "Principal: tipos de bitrate", "Sub: resolução", "Sub: FPS",
                         "Sub: bitrate (kbps)", "Sub: codec", "Sub: tipo bitrate", "Sub: qualidade",

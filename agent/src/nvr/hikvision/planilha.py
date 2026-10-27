@@ -32,6 +32,7 @@ _EVENTOS_SISTEMA = {
     "ipconflict": "Conflito de IP", "illaccess": "Acesso ilegal (login inválido)",
     "recordingfailure": "Falha de gravação", "audioexception": "Exceção de áudio",
 }
+_SEM_SENHA = "(não exposta pelo NVR)"
 _STATUS_CONEXAO = {"connect": "Conectada", "netUnreachable": "Câmera inacessível na rede"}
 
 # Rotulo -> caminho dos recursos de configuracao do NVR que entram na aba 'Sistema (config)'
@@ -168,7 +169,8 @@ def _coletar_cameras(isapi):
                 _t(origem, "model"), _t(origem, "serialNumber"), _t(origem, "firmwareVersion"),
                 _sim_nao(_t(c, "enableAnr")), _sim_nao(_t(c, "enableTiming")),
                 _sim_nao(_t(st, "online")), _STATUS_CONEXAO.get(conexao, conexao),
-                _t(st, "SecurityStatus/PasswordStatus"), _t(c, "devIndex"),
+                _t(st, "SecurityStatus/PasswordStatus"), _t(origem, "userName"),
+                _SEM_SENHA if ip else "", _t(c, "devIndex"),
             ])
     if not linhas:  # DVR analogico: os canais vem das entradas de video
         entradas = isapi.obter("/ISAPI/System/Video/inputs/channels")
@@ -183,7 +185,7 @@ def _coletar_cameras(isapi):
                 if not sem_video:
                     online.append(int(cid))
                 linhas.append([int(cid), _t(c, "name"), "ANALÓGICO", "", "", cid, "", "", "", "", "", "", "",
-                               "Não" if sem_video else "Sim", _t(c, "resDesc"), "", ""])
+                               "Não" if sem_video else "Sim", _t(c, "resDesc"), "", "", "", ""])
     return linhas, nomes, configurados, online
 
 
@@ -446,7 +448,7 @@ def _montar_planilha(isapi, nvr_ip, info):
         ("Discos", len(discos)),
         ("Capacidade dos discos (GB)", round(capacidade_gb, 1) if capacidade_gb else ""),
         ("Nota", "Inventário da configuração: não é o arquivo de backup restaurável do NVR (esse vem do backup normal)."),
-        ("Nota", "Usuário e senha das câmeras são descartados e não aparecem em nenhuma aba."),
+        ("Nota", "ATENÇÃO: a aba Câmeras tem o usuário de cada câmera. O ISAPI não informa a senha (aparece '(não exposta pelo NVR)'). Proteja este arquivo."),
         ("Nota", "Recursos que o firmware não oferece ficam em branco; a aba Comandos mostra o resultado de cada consulta."),
     ))
 
@@ -457,7 +459,8 @@ def _montar_planilha(isapi, nvr_ip, info):
                        f"{rotulo}: áudio"]
     aba(wb, "Câmeras", ["Canal", "Nome", "Protocolo", "IP", "Porta de gestão", "Canal de origem", "Modo de conexão",
                         "Tipo de stream", "Modelo", "Série", "Firmware da câmera", "ANR", "Sincroniza hora",
-                        "Online", "Estado da conexão", "Força da senha da câmera", "ID do canal"], cameras)
+                        "Online", "Estado da conexão", "Força da senha da câmera", "Usuário da câmera",
+                        "Senha da câmera", "ID do canal"], cameras)
     aba(wb, "Stream", cab_stream, stream)
     aba(wb, "Gravação", ["Canal", "Nome", "Trilha habilitada (Enable)", "Modo padrão", "Modos na agenda",
                          "Agenda de gravação", "Descrição da trilha"], gravacao)

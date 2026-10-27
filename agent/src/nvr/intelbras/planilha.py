@@ -49,8 +49,9 @@ class _Dahua:
         self.comandos = []  # (recurso, resultado)
         self._limite = time.monotonic() + LIMITE_TOTAL_S
 
-    def obter(self, recurso, timeout=TIMEOUT_S):
-        """Retorna {chave: valor} (sem o prefixo 'table.' e sem campos sensiveis) ou None. Nunca levanta excecao."""
+    def obter(self, recurso, timeout=TIMEOUT_S, com_credenciais=False):
+        """Retorna {chave: valor} (sem o prefixo 'table.') ou None. Nunca levanta excecao.
+        Usuario e senha so ficam no resultado com `com_credenciais` (usado so no RemoteDevice, das cameras)."""
         if time.monotonic() > self._limite:
             self.comandos.append((recurso, "pulado: tempo total esgotado"))
             return None
@@ -69,7 +70,7 @@ class _Dahua:
             dados = {}
             for linha in resp.text.splitlines():
                 chave, igual, valor = linha.strip().partition("=")
-                if not igual or eh_sensivel(chave):
+                if not igual or (eh_sensivel(chave) and not com_credenciais):
                     continue
                 dados[chave[6:] if chave.startswith("table.") else chave] = valor.strip()
             self.comandos.append((recurso, "sucesso" if dados else "sucesso, sem conteúdo"))
@@ -80,8 +81,8 @@ class _Dahua:
         finally:
             time.sleep(PAUSA_S)
 
-    def config(self, nome):
-        return self.obter(f"configManager.cgi?action=getConfig&name={nome}")
+    def config(self, nome, com_credenciais=False):
+        return self.obter(f"configManager.cgi?action=getConfig&name={nome}", com_credenciais=com_credenciais)
 
 
 def _indexados(dados, raiz, padrao=None):
@@ -158,10 +159,15 @@ def _cobertura_regiao(sub, linhas, colunas):
         return ""
 
 
+def _senha_camera(senha):
+    """O NVR devolve a senha da camera mascarada ('******'); so repassa se vier algo diferente."""
+    return "(mascarada pelo NVR)" if senha and set(senha) == {"*"} else senha
+
+
 def _coletar_cameras(dahua):
     """Retorna (linhas da aba Câmeras, {canal: nome}, [canais com camera habilitada])."""
     titulos = _indexados(dahua.config("ChannelTitle"), "ChannelTitle")
-    remotos = _indexados(dahua.config("RemoteDevice"), "", r"^RemoteDevice\.uuid:System_CONFIG_NETCAMERA_INFO_(\d+)\.(.*)$")
+    remotos = _indexados(dahua.config("RemoteDevice", com_credenciais=True), "", r"^RemoteDevice\.uuid:System_CONFIG_NETCAMERA_INFO_(\d+)\.(.*)$")
     total = max(len(titulos), len(remotos))
     linhas, nomes, ativos = [], {}, []
     for i in range(total):
@@ -182,6 +188,7 @@ def _coletar_cameras(dahua):
             r.get("SerialNo", "") if ip else "", r.get("Version", "") if ip else "",
             r.get("VideoInputChannels", "") if ip else "", r.get("AudioInputChannels", "") if ip else "",
             r.get("AlarmInChannels", "") if ip else "", r.get("Encryption", "") if ip else "",
+            r.get("UserName", "") if ip else "", _senha_camera(r.get("Password", "")) if ip else "",
         ])
     return linhas, nomes, ativos
 
@@ -389,7 +396,8 @@ def _montar_planilha(dahua, nvr_ip):
                                         f"({_valor(geral, 'General.LockLoginTimes')} tentativas, "
                                         f"{_valor(geral, 'General.LoginFailLockTime')} s)"),
         ("Nota", "Inventário da configuração: não é o arquivo de backup restaurável do NVR (esse vem do backup normal)."),
-        ("Nota", "Usuário e senha das câmeras e dos serviços são descartados e não aparecem em nenhuma aba."),
+        ("Nota", "ATENÇÃO: a aba Câmeras tem o usuário de cada câmera. O CGI devolve a senha mascarada (aparece '(mascarada pelo NVR)'). Proteja este arquivo."),
+        ("Nota", "Usuário e senha de serviços (e-mail, DDNS etc.) continuam descartados."),
         ("Nota", "O CGI não informa se a câmera está online: 'habilitada' = cadastrada com IP e ativa no NVR."),
         ("Nota", "Máscara de agenda: contínua+movimento+alarme conforme os bits do NVR; a aba Comandos mostra cada consulta."),
     ))
@@ -401,7 +409,8 @@ def _montar_planilha(dahua, nvr_ip):
     cab_acoes = [rotulo for _, rotulo in _ACOES]
     aba(wb, "Câmeras", ["Canal", "Nome", "Habilitada", "IP", "Porta TCP", "Porta HTTP", "Porta RTSP", "Porta HTTPS",
                         "MAC", "Protocolo", "Modelo", "Nome na câmera", "Fabricante", "Série", "Firmware da câmera",
-                        "Entradas de vídeo", "Entradas de áudio", "Entradas de alarme", "Criptografia"], cameras)
+                        "Entradas de vídeo", "Entradas de áudio", "Entradas de alarme", "Criptografia", "Usuário da câmera",
+                        "Senha da câmera"], cameras)
     aba(wb, "Stream", cab_stream, stream)
     aba(wb, "Gravação", ["Canal", "Nome", "Modo de gravação", "Modo do sub-stream", "Agenda de gravação",
                          "Pré-gravação (s)", "Redundância", "Formato", "Tempo máx. de gravação (MaxRecordTime)",
