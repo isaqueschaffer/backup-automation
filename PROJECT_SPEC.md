@@ -238,6 +238,7 @@ trilan-nvr-backup-automation/
 | telemetry | JSON | dict | NULL | — (CPU/RAM/disco/rede/GPU enviados no ping) |
 | group_id | UUID | uuid.UUID (ORM: `customer_id`) | NULL | — (FK `client_groups.id` ON DELETE SET NULL; Cliente da máquina) |
 | queue_order | INTEGER | int | NOT NULL | 0 (posição na fila de backup do Cliente) |
+| conta_id | UUID | uuid.UUID | NULL | — (FK `contas.id` ON DELETE RESTRICT; conta dona; preenchida no startup) |
 
 #### `client_groups` (Clientes — empresas atendidas; model `Customer`, ADR-007)
 
@@ -253,6 +254,7 @@ trilan-nvr-backup-automation/
 | email_to | ARRAY(VARCHAR) | List[str] | NOT NULL | [] (destinatários do e-mail único por rodada) |
 | zip_password | TEXT | str | NULL | — (Fernet; NULL = ZIP do Cliente sem senha) |
 | created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+| conta_id | UUID | uuid.UUID | NULL | — (FK `contas.id` ON DELETE RESTRICT; conta dona do Cliente/Setor) |
 
 #### `nvrs` (tabela de equipamentos — nome mantido por compatibilidade)
 
@@ -381,6 +383,62 @@ A tabela nasce por `Base.metadata.create_all` (`main.py`), sem migração inline
 | share_allow_edit | BOOLEAN | bool | NOT NULL | O visitante do link pode salvar o layout |
 | share_created_at / last_viewed_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
 | created_at / updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
+#### `planos`
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
+| nome | VARCHAR(60) | str | NOT NULL UNIQUE | — |
+| duracao_dias | INTEGER | int | NOT NULL | — (CheckConstraint: `duracao_dias > 0`) |
+| ativo | BOOLEAN | bool | NOT NULL | TRUE |
+| criado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
+#### `contas` (inquilinos — model `Conta`)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
+| nome | VARCHAR(255) | str | NOT NULL | — |
+| tipo | VARCHAR(20) | str | NOT NULL | — (CheckConstraint: `tipo IN ('INTEGRADOR', 'CLIENTE_FINAL')`) |
+| documento | VARCHAR(20) | str | NULL | — (CNPJ/CPF, só dígitos) |
+| email_contato | VARCHAR(255) | str | NULL | — |
+| telefone | VARCHAR(30) | str | NULL | — |
+| plano_id | UUID | uuid.UUID | NULL | — (FK `planos.id` ON DELETE SET NULL) |
+| expira_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — (UTC; NULL = sem validade) |
+| ativo | BOOLEAN | bool | NOT NULL | TRUE (False = suspensa pela Trilan) |
+| avisos_enviados | JSON | list | NOT NULL | [] (marcos de e-mail já enviados; zera ao renovar) |
+| observacoes | TEXT | str | NULL | — |
+| criado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
+#### `conta_renovacoes`
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
+| conta_id | UUID | uuid.UUID | NOT NULL | — (FK `contas.id` ON DELETE CASCADE) |
+| plano_id | UUID | uuid.UUID | NULL | — (FK `planos.id` ON DELETE SET NULL) |
+| plano_nome | VARCHAR(60) | str | NOT NULL | — (cópia imutável do nome do plano) |
+| dias | INTEGER | int | NOT NULL | — (dias adicionados/redefinidos) |
+| expira_em_anterior | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
+| expira_em_nova | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | — |
+| feito_por | VARCHAR(255) | str | NULL | — (e-mail do usuário ou "admin") |
+| criado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
+#### `usuarios` (usuários do painel)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
+| conta_id | UUID | uuid.UUID | NULL | — (FK `contas.id` ON DELETE CASCADE; NULL ⇔ SUPER_ADMIN) |
+| nome | VARCHAR(255) | str | NOT NULL | — |
+| email | VARCHAR(255) | str | NOT NULL UNIQUE | — (sempre minúsculo) |
+| senha_hash | VARCHAR(255) | str | NOT NULL | — (bcrypt) |
+| papel | VARCHAR(20) | str | NOT NULL | — (CheckConstraint: `papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')`) |
+| ativo | BOOLEAN | bool | NOT NULL | TRUE |
+| token_versao | INTEGER | int | NOT NULL | 1 (incrementa ao trocar senha/papel) |
+| ultimo_login | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
+| criado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
 
 ### Estratégia de Migração
 
@@ -948,6 +1006,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-27] — Multi-contas (etapa 1): banco de contas, planos e usuários
+
+**Alteração:** primeira etapa do multi-contas (Integradores com Clientes e Clientes finais com Setores, cada conta com plano e validade). Novas tabelas `planos`, `contas`, `conta_renovacoes` e `usuarios`; colunas `conta_id` (nullable, com índice) em `client_groups` e `clients`. No startup: semente dos planos (Teste 15, Mensal 30, Trimestral 90, Semestral 180, Anual 365, só com a tabela vazia), conta da plataforma "Trilan" (INTEGRADOR, sem validade, id em `settings.conta_plataforma_id`) e backfill de `conta_id` dos Clientes e Máquinas sem conta (a Máquina herda a do Cliente). Regras de validade em `services/contas.py` (`status_da_conta`: OK, AVISO ≤ 15 dias, CRITICO ≤ 3, VENCIDA, SUSPENSA, VITALICIA). Nenhuma rota ou tela muda nesta etapa.
+**Arquivos:** server/api/models.py, server/api/main.py, server/api/services/contas.py, server/api/tests/test_contas_status.py, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-27] — Merge do ramo `helena` em `isaque` (auditado)
 
