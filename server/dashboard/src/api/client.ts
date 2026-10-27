@@ -5,6 +5,9 @@ import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
+// Conta escolhida pelo administrador da plataforma (enviada em X-Conta-ID)
+export const CONTA_KEY = "trilan_conta_id";
+
 const api = axios.create({
   baseURL: `${API_BASE}/api/v1`,
   headers: { "Content-Type": "application/json" },
@@ -14,6 +17,14 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("trilan_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  try {
+    const contaId = localStorage.getItem(CONTA_KEY);
+    if (contaId && !config.headers["X-Conta-ID"]) {
+      config.headers["X-Conta-ID"] = contaId;
+    }
+  } catch {
+    // localStorage indisponível
+  }
   return config;
 });
 
@@ -31,8 +42,9 @@ api.interceptors.response.use(
 );
 
 // ── Auth ──────────────────────────────────────────────────────
-export const login = (password: string) =>
-  api.post("/auth/login", { password }).then((r) => r.data);
+// Com e-mail: usuário de uma conta. Sem e-mail: administrador da plataforma (senha única).
+export const login = (email: string | null, password: string) =>
+  api.post("/auth/login", email ? { email, password } : { password }).then((r) => r.data);
 
 // ── Stats ─────────────────────────────────────────────────────
 export const fetchStats = () => api.get("/stats").then((r) => r.data);

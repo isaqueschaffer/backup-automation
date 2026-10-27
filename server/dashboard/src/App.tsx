@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ToastProvider } from "./components/Toast";
@@ -13,9 +14,32 @@ import Settings from "./pages/Settings";
 import PublicDashboardPage from "./pages/Dashboards/PublicDashboardPage";
 import DashboardAdminPage from "./pages/Dashboards/DashboardAdminPage";
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+function ProtectedRoute({ children }: { children: ReactNode }) {
+  const { isAuthenticated, me } = useAuth();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (me === null) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", padding: 80 }}>
+        <span className="spinner" />
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+function SuperAdminRoute({ children }: { children: ReactNode }) {
+  const { me } = useAuth();
+
+  if (me && me.usuario.papel !== "SUPER_ADMIN") {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
 }
 
 // Rotas antigas do painel: [caminho antigo sem barra, destino]
@@ -43,7 +67,18 @@ function AppRoutes() {
       <Route path="/maquinas" element={<ProtectedRoute><Layout><MachinesPage /></Layout></ProtectedRoute>} />
       <Route path="/maquinas/:id" element={<ProtectedRoute><Layout><MachineDetail /></Layout></ProtectedRoute>} />
       <Route path="/backups" element={<ProtectedRoute><Layout><Backups /></Layout></ProtectedRoute>} />
-      <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <SuperAdminRoute>
+              <Layout>
+                <Settings />
+              </Layout>
+            </SuperAdminRoute>
+          </ProtectedRoute>
+        }
+      />
       {/* Redirecionamentos das rotas antigas */}
       {LEGACY_REDIRECTS.map(([from, to]) => (
         <Route key={from} path={`/${from}`} element={<Navigate to={to} replace />} />
