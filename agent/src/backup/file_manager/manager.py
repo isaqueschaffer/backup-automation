@@ -116,7 +116,7 @@ class FileManager:
         if equipamento.get("tipo", "").upper() == "DIGIFORT":
             logging.info("  [DIGIFORT] Buscando status de gravacoes e CSV localmente...")
             try:
-                from src.application.webhook_digifort import get_detalhes_cameras, get_caminho_csv
+                from src.application.webhook_digifort import get_detalhes_cameras, get_status_cameras, get_caminho_csv
 
                 cfg_ext = equipamento.get("config_extra", {})
                 caminho_export = cfg_ext.get("caminho_csv", "")
@@ -124,6 +124,7 @@ class FileManager:
 
                 # Câmeras detectadas localmente (export_cameras.csv): canal 1..N, nome, ip, status.
                 # Câmeras configuradas na Galeria do servidor: ip/usuário/senha/modelo por nome.
+                status_dict = get_status_cameras(caminho_export, caminho_log)
                 detalhes_locais = get_detalhes_cameras(caminho_export, caminho_log)
                 cameras_servidor = equipamento.get("cameras_config") or []
                 por_nome_servidor = {(c.get("nome") or "").strip().lower(): c for c in cameras_servidor}
@@ -171,11 +172,28 @@ class FileManager:
                             "ip_compartilhado": bool((cam_srv or {}).get("ip_compartilhado")),
                         })
 
-                # Câmeras só configuradas no servidor (não detectadas no export local) também entram na captura
+                # Câmeras só configuradas no servidor (não detectadas no export local) também entram na captura e no status
                 nomes_vistos = {(c.get("nome") or "").strip().lower() for c in cameras_para_captura}
                 for cam_srv in cameras_servidor:
-                    if cam_srv.get("ip") and (cam_srv.get("nome") or "").strip().lower() not in nomes_vistos:
-                        cameras_para_captura.append(cam_srv)
+                    nome_srv = cam_srv.get("nome") or ""
+                    nome_srv_lower = nome_srv.strip().lower()
+                    if nome_srv_lower not in nomes_vistos:
+                        if cam_srv.get("ip"):
+                            cameras_para_captura.append(cam_srv)
+                        st_val = status_dict.get(nome_srv) or status_dict.get(nome_srv_lower) or "OK"
+                        is_ok = (st_val == "OK")
+                        total_dias, mapa_str, dias_gravados = _gerar_mapa_vms(is_ok)
+                        status_cameras.append({
+                            "canal": cam_srv.get("canal") or (len(status_cameras) + 1),
+                            "nome": nome_srv,
+                            "ip": cam_srv.get("ip") or "N/A",
+                            "online": is_ok,
+                            "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
+                            "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
+                            "total_dias": total_dias,
+                            "mapa": mapa_str,
+                            "dias_com_gravacao": dias_gravados,
+                        })
 
                 logging.info("  [DIGIFORT] Status das cameras obtido com sucesso.")
 

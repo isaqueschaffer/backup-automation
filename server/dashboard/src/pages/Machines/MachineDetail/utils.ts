@@ -44,7 +44,7 @@ export function eqToForm(eq: NVR): EqForm {
     ip: eq.tipo === "DIGIFORT" || (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000") ? "" : eq.ip,
     username: eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.username === "unm2000" ? "" : eq.username,
     password: "",
-    pasta_origem: cfg?.pasta_origem || (eq.tipo === "DIGIFORT" ? eq.ip : ""),
+    pasta_origem: cfg?.pasta_origem || (eq.tipo === "DIGIFORT" && eq.ip !== "127.0.0.1" ? eq.ip : (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.ip !== "127.0.0.1" ? eq.ip : "")),
     fabricante_olt: cfg?.fabricante_olt || "UNM2000",
     caminho_csv: cfg?.caminho_csv || "",
     caminho_log_csv: cfg?.caminho_log_csv || "",
@@ -78,7 +78,7 @@ export function buildEqPayload(
     }
   } else if (eqForm.tipo === "DIGIFORT") {
     if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
-    payload.ip = eqForm.pasta_origem.trim();
+    payload.ip = "127.0.0.1";
     payload.username = "digifort";
     payload.password = "digifort";
     payload.config_extra = {
@@ -92,7 +92,7 @@ export function buildEqPayload(
     payload.config_extra = cfg;
     if (eqForm.fabricante_olt === "UNM2000") {
       if (!eqForm.pasta_origem) return { error: "Para UNM2000, informe a pasta de origem dos backups." };
-      payload.ip = eqForm.pasta_origem.trim();
+      payload.ip = "127.0.0.1";
       cfg.pasta_origem = eqForm.pasta_origem.trim();
       const usuarioApi = eqForm.username.trim();
       if (!usuarioApi) {

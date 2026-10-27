@@ -215,14 +215,89 @@ def get_detalhes_cameras(caminho_export="", caminho_log=""):
 # =============== SNIFFER SNMP ===============
 sniffer_socket = None
 
+def extrair_textos_snmp(dados: bytes) -> list:
+    """Extrai strings legíveis do payload SNMP via ASN.1 OCTET STRING (0x04) e varredura ampla (UTF-8/Latin1)."""
+    textos = []
+    
+    # 1. Varredura ASN.1 BER para OCTET STRING (tag 0x04)
+    i = 0
+    n = len(dados)
+    while i < n - 1:
+        if dados[i] == 0x04:  # OCTET STRING tag
+            comp = dados[i + 1]
+            offset = i + 2
+            if comp & 0x80:
+                num_bytes = comp & 0x7F
+                if offset + num_bytes <= n:
+                    comp = int.from_bytes(dados[offset:offset + num_bytes], 'big')
+                    offset += num_bytes
+                else:
+                    i += 1
+                    continue
+            if offset + comp <= n and comp > 0:
+                pedaco = dados[offset:offset + comp]
+                for enc in ('utf-8', 'latin1', 'cp1252'):
+                    try:
+                        dec = pedaco.decode(enc).strip()
+                        if dec and any(c.isalnum() for c in dec) and dec not in textos:
+                            textos.append(dec)
+                        break
+                    except Exception:
+                        continue
+                i = offset + comp
+                continue
+        i += 1
+
+    # 2. Varredura ampla por Regex para pegar strings mesmo se ASN.1 não estiver alinhado
+    for pedaco in re.findall(b'[\x20-\x7e\xa0-\xff]{2,}', dados):
+        for enc in ('utf-8', 'latin1', 'cp1252'):
+            try:
+                dec = pedaco.decode(enc).strip()
+                if dec and any(c.isalnum() for c in dec) and dec not in textos:
+                    textos.append(dec)
+                break
+            except Exception:
+                continue
+
+    return textos
+
+def detectar_status_evento(dados: bytes, textos: list) -> str:
+    """Detecta se o evento é Falha de Comunicação ou Retorno (Online), via OID ou palavras-chave."""
+    # OIDs Digifort específicos
+    if b'\x06\x0d\x2b\x06\x01\x04\x01\x82\xf7\x04\x01\x01\x64\x02\x04' in dados:
+        return "Falha de Comunicacao"
+    if b'\x06\x0d\x2b\x06\x01\x04\x01\x82\xf7\x04\x01\x01\x64\x02\x05' in dados:
+        return "Camera Restaurada"
+
+    # Checagem por texto no payload
+    texto_geral = " ".join(textos).lower()
+    palavras_falha = ("falha", "failure", "perda", "loss", "offline", "desconectad", "down", "sem sinal", "queda")
+    palavras_restaurada = ("restaurad", "restored", "online", "conectad", "up", "normal", "recuperad")
+
+    for p in palavras_falha:
+        if p in texto_geral:
+            return "Falha de Comunicacao"
+    for p in palavras_restaurada:
+        if p in texto_geral:
+            return "Camera Restaurada"
+
+    return "Outro Evento"
+
 def rodar_sniffer_snmp():
     global sniffer_socket
     sniffer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
+        try:
+            sniffer_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except Exception:
+            pass
         sniffer_socket.bind(('0.0.0.0', PORTA_SNMP))
         logging.info(f"[OK] Sniffer SNMP rodando na porta {PORTA_SNMP}...")
     except Exception as e:
-        logging.error(f"[ERRO] ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}")
+        logging.error(
+            f"[ERRO] ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}. "
+            f"Verifique se a porta 162 UDP não está sendo usada por outro software (ex: Sniffer, Wireshark ou serviço 'SNMP Trap' do Windows)."
+        )
         return
 
     while True:
@@ -230,46 +305,49 @@ def rodar_sniffer_snmp():
             dados, endereco = sniffer_socket.recvfrom(4096)
         except Exception:
             break
-            
-        status_encontrado = None
-        
-        # OIDs Digifort
-        if b'\x06\x0d\x2b\x06\x01\x04\x01\x82\xf7\x04\x01\x01\x64\x02\x04' in dados:
-            status_encontrado = "Falha de Comunicacao"
-        elif b'\x06\x0d\x2b\x06\x01\x04\x01\x82\xf7\x04\x01\x01\x64\x02\x05' in dados:
-            status_encontrado = "Camera Restaurada"
+
+        logging.info(f"[SNMP] Pacote UDP de {len(dados)} bytes recebido de {endereco}")
+        textos = extrair_textos_snmp(dados)
+        status_encontrado = detectar_status_evento(dados, textos)
+
+        camera_identificada_nome = None
+
+        # 1. Tenta identificar contra o dicionário carregado da planilha
+        for texto_limpo in textos:
+            if texto_limpo.endswith('0') and len(texto_limpo) > 1 and texto_limpo[:-1] in DICIONARIO_CAMERAS_NOME:
+                texto_limpo = texto_limpo[:-1]
+
+            ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', texto_limpo)
+            if ip_match and ip_match.group(0) in DICIONARIO_CAMERAS_IP:
+                camera_identificada_nome = DICIONARIO_CAMERAS_IP[ip_match.group(0)]['Nome']
+                break
+
+            texto_norm = normalizar_texto(texto_limpo)
+            for nome, info in DICIONARIO_CAMERAS_NOME.items():
+                if not str(nome).isdigit() and (nome.lower() == texto_limpo.lower() or normalizar_texto(nome) == texto_norm):
+                    camera_identificada_nome = info['Nome']
+                    break
+            if camera_identificada_nome:
+                break
+
+        # 2. Se a câmera não foi pareada no dicionário (ex: sem planilha exportada ou nome divergente),
+        # extrai o nome diretamente dos textos contidos na trap SNMP
+        if not camera_identificada_nome:
+            palavras_ignorar = {'public', 'falha de comunicacao', 'camera restaurada', 'outro evento', 'digifort', 'enterprise'}
+            for t in textos:
+                tl = t.lower()
+                if len(t) >= 2 and tl not in palavras_ignorar and not any(k in tl for k in ('falha', 'restaurad', 'offline', 'online')):
+                    camera_identificada_nome = t
+                    break
+
+        if camera_identificada_nome and status_encontrado != "Outro Evento":
+            registrar_queda(camera_identificada_nome, status_encontrado)
+            logging.info(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] SNMP TRAP REGISTRADA: {camera_identificada_nome} | {status_encontrado}")
         else:
-            status_encontrado = "Outro Evento"
-
-        textos_encontrados = re.findall(b'[ -~]{4,}', dados)
-        camera_identificada = None
-        
-        for texto in textos_encontrados:
-            try:
-                texto_limpo = texto.decode('utf-8', errors='ignore').strip()
-                
-                if texto_limpo.endswith('0') and len(texto_limpo) > 1 and texto_limpo[:-1] in DICIONARIO_CAMERAS_NOME:
-                    texto_limpo = texto_limpo[:-1]
-                
-                texto_lower = texto_limpo.lower()
-                
-                ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', texto_limpo)
-                if ip_match:
-                    ip_achado = ip_match.group(0)
-                    if ip_achado in DICIONARIO_CAMERAS_IP:
-                        camera_identificada = DICIONARIO_CAMERAS_IP[ip_achado]
-
-                if not camera_identificada:
-                    for nome, info in DICIONARIO_CAMERAS_NOME.items():
-                        if not nome.isdigit() and (nome.lower() in texto_lower or normalizar_texto(nome) in normalizar_texto(texto_limpo)):
-                            camera_identificada = info
-                            break
-            except Exception:
-                logging.debug("Falha ao interpretar trap SNMP", exc_info=True)
-                
-        if camera_identificada and status_encontrado != "Outro Evento":
-            registrar_queda(camera_identificada['Nome'], status_encontrado)
-            logging.info(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] SNMP TRAP: {camera_identificada['Nome']} | {status_encontrado}")
+            logging.warning(
+                f"[SNMP] Trap recebida mas não gravada. Status: '{status_encontrado}', "
+                f"Camera: '{camera_identificada_nome}'. Textos encontrados: {textos}"
+            )
 
 snmp_thread = None
 
@@ -283,7 +361,8 @@ def start_webhook(caminho_csv_export: str, caminho_log: str):
         return 
     
     ARQUIVO_EXPORT_CAMERAS = caminho_csv_export
-    ARQUIVO_CSV = caminho_log
+    if caminho_log:
+        ARQUIVO_CSV = caminho_log
     
     DICIONARIO_CAMERAS_NOME.clear()
     DICIONARIO_CAMERAS_IP.clear()
