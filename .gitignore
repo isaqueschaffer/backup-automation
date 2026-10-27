@@ -42,3 +42,21 @@ node_modules/
 scratch/
 agent/scratch/
 Check_Status_gravacao/
+
+# Python (qualquer nível)
+__pycache__/
+
+# Artefatos locais / dados que nunca devem ser versionados
+*.timestamp-*.mjs
+*.sql
+*.dat
+scratch_test/
+agent/index.xml
+test*.jpg
+respostas_telemetria_*/
+teste backup motorola/respostas_telemetria_*/
+
+# Configuração local do Claude Code (permissões pessoais); só as skills entram no git
+.claude/*
+!.claude/skills/
+

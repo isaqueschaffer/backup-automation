@@ -1,7 +1,7 @@
 import time
 import requests
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from src.utils.xml_parser import parse_xml_seguro
 import urllib3
 
@@ -113,3 +113,74 @@ def buscar_datas_gravacao_motorola(nvr_ip, session, canal_id):
 
     logging.error(f"[Motorola {nvr_ip}] Falha definitiva ao buscar datas de gravação canal={canal_id} após {max_tentativas} tentativas")
     return [], False
+
+
+_TIPOS_GRAVACAO = "MANUAL SENSOR FACEDETECTION FACEMATCH VEHICLE TRIPWIRE INVADE AOIENTRY AOILEAVE FIREPOINT TEMPERATURE MOTION SCHEDULE".split()
+
+
+def buscar_trechos_motorola(nvr_ip, session, canal_num, inicio, fim, max_results=40):
+    """
+    Lista os trechos gravados de um canal Motorola entre `inicio` e `fim` (datetimes locais, naive),
+    via queryChlRecLog (o mesmo comando da tela de gravação do NVR).
+
+    Retorna lista de (inicio, fim) em horário local naive, ordenada, ou None se a consulta falhar.
+    O NVR responde em UTC; a conversão usa o fuso desta máquina (agente e NVR ficam no mesmo local).
+    """
+    fmt = "%Y-%m-%d %H:%M:%S"
+    utc = timezone.utc
+
+    def para_utc(dt):
+        return dt.astimezone(utc).strftime(fmt)
+
+    token_val = getattr(session, 'tvt_token', '')
+    token_xml = f"<token>{token_val}</token>" if token_val else ""
+    canal_guid = "{%08x-0000-0000-0000-000000000000}" % int(canal_num)
+    tipos = "".join(f"<enum>{t}</enum>" for t in _TIPOS_GRAVACAO + ["POS", "NORMALALL", "INTELLIGENT"])
+    eventos = "".join(f"<item>{t}</item>" for t in _TIPOS_GRAVACAO)
+
+    xml_req = (
+        '<?xml version="1.0" encoding="utf-8" ?>'
+        '<request version="1.0" systemType="NVMS-9000" clientType="WEB">'
+        f'{token_xml}'
+        f'<types><recType>{tipos}</recType></types>'
+        '<requireField><chl/><recList><item><recType/><startTime/><endTime/><size/></item></recList></requireField>'
+        '<condition><modeType>modeOne</modeType>'
+        f'<startTime>{inicio.strftime(fmt)}</startTime><endTime>{fim.strftime(fmt)}</endTime>'
+        f'<startTimeEx>{para_utc(inicio)}</startTimeEx><endTimeEx>{para_utc(fim)}</endTimeEx>'
+        f"<recType type='list'><itemType type='recType'/>{eventos}</recType>"
+        f"<chl id='{canal_guid}'></chl>"
+        '</condition></request>'
+    )
+
+    try:
+        response = session.post(
+            f"http://{nvr_ip}/queryChlRecLog",
+            data=xml_req.encode("utf-8"),
+            headers={"Content-Type": "application/xml"},
+            timeout=(10, 30),
+            verify=False,
+        )
+        if "noRecord" in response.text:
+            return []
+        if response.status_code != 200 or "success" not in response.text.lower():
+            logging.warning(f"[Motorola {nvr_ip}] queryChlRecLog falhou canal={canal_num}: {response.text[:200]}")
+            return None
+
+        root = parse_xml_seguro(response.content)
+        trechos = []
+        for item in root.findall(".//recList/item"):
+            st = item.findtext("startTime")
+            en = item.findtext("endTime")
+            if not st or not en:
+                continue
+            try:
+                st_dt = datetime.strptime(st.strip(), fmt).replace(tzinfo=utc).astimezone().replace(tzinfo=None)
+                en_dt = datetime.strptime(en.strip(), fmt).replace(tzinfo=utc).astimezone().replace(tzinfo=None)
+            except ValueError:
+                continue
+            trechos.append((st_dt, en_dt))
+        trechos.sort()
+        return trechos[:max_results] if max_results else trechos
+    except Exception as e:
+        logging.warning(f"[Motorola {nvr_ip}] Erro em queryChlRecLog canal={canal_num}: {e}")
+        return None
