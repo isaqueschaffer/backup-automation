@@ -35,12 +35,20 @@ export default function RecordingModal({ nvrName, cameras, lastBackupAt, onClose
                   const gravouHoje = cam.mapa ? cam.mapa.endsWith("█") : (cam.total_dias ?? 0) > 0;
                   gravacao = gravouHoje ? "COM_GRAVACAO" : "SEM_GRAVACAO";
                 }
+                let diasTexto: string;
+                if (typeof cam.dias_gravados === "number") {
+                  diasTexto = `Dias gravados: ${cam.dias_gravados >= 730 ? "730+" : cam.dias_gravados}`;
+                } else if (cam.dias_gravados === null) {
+                  diasTexto = "Dias gravados: —";
+                } else {
+                  diasTexto = `${cam.total_dias || 0}/15`;
+                }
                 return (
                   <tr key={i}>
                     <td>{cam.nome || `Canal ${cam.canal}`}</td>
                     <td><StatusBadge status={rede} /></td>
                     <td><StatusBadge status={gravacao} /></td>
-                    <td>{cam.total_dias || 0}/15</td>
+                    <td>{diasTexto}</td>
                     <td><MiniCalendar mapStr={cam.mapa || ""} referenceDate={lastBackupAt} /></td>
                   </tr>
                 );

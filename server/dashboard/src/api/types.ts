@@ -9,6 +9,7 @@ export interface CameraRecStatus {
   status_gravacao?: string;
   mapa?: string;
   total_dias?: number;
+  dias_gravados?: number | null;
 }
 
 // Disco reportado pela telemetria do NVR (NVR.last_telemetry_status)

@@ -1063,6 +1063,21 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-28] — "Dias gravados" reais por câmera (Hikvision, Motorola, Intelbras) e agente 1.1.29
+
+**Alteração:** a janela "Gravação" mostrava `N/15` (só olhava os últimos 15 dias). Cada câmera passa a informar há quantos dias grava de verdade: dias corridos desde a gravação mais antiga até hoje, contando o primeiro dia e hoje (primeira gravação há 59 dias ⇒ 60). Buracos no meio entram na conta.
+- Agente (`factory.py`): novo campo `dias_gravados` em cada item de `cameras` do relatório de NVR (`int >= 1`; `0` = consulta ok e sem gravação; `None` = não foi possível descobrir). Motorola usa a data mais antiga que `queryDatesExistRec` já devolve (sem consulta extra). Hikvision e Intelbras usam `descobrir_dias_gravados`: busca binária (≈10 consultas por câmera, em paralelo com as 15 do mapa) sobre o predicado monótono "há gravação entre o início da janela e o fim do dia X"; funciona com buracos e sem depender da ordem dos resultados do NVR. Janela máxima `DIAS_MAX_RETENCAO = 730` (valor 730 = "730 ou mais").
+- Agente (`hikvision/recordings.py`, `intelbras/recordings.py`): `tem_gravacao_entre`, tri-estado (True/False/None); na Intelbras o erro nunca vira "sem gravação".
+- Painel (`RecordingModal.tsx`, `types.ts`): célula `Dias gravados: 60` (`730+` no limite; `—` quando o agente não conseguiu). Relatório antigo e Digifort/Defense continuam com `N/15`. Sem legenda (decisão do usuário).
+- Servidor: sem mudança (`last_recording_status` é JSON e repassa o campo).
+**Fora desta entrega (decisão do usuário):** e-mail de relatório, widgets do Dashboard, Digifort/Defense.
+**Ponto de atenção:** a busca de 730 dias nunca foi exercitada em equipamento real nesta entrega; se algum firmware recusar intervalo tão largo, o campo vem `null` e o painel mostra `—` (o mapa de 15 dias não é afetado).
+**Breaking Change:** Não. **Requer:** nova build do agente (1.1.29 em `updater.py`, `installer.iss` e `package.json`).
+**Arquivos:** agent/src/nvr/factory.py, agent/src/nvr/hikvision/recordings.py, agent/src/nvr/intelbras/recordings.py, server/dashboard/src/api/types.ts, server/dashboard/src/pages/Machines/MachineDetail/components/RecordingModal.tsx, PROJECT_SPEC.md
+**Branch:** isaque
+
+---
+
 ### [2026-10-28] — Merge auditado do ramo `helena` (e841429) e agente 1.1.28
 
 **Tipo:** merge real (`git merge --no-ff`), sem conflitos; auditado pelo checklist do CLAUDE.md.

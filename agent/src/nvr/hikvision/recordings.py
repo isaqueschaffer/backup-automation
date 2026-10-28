@@ -103,3 +103,13 @@ def tem_gravacao_no_dia(nvr_ip, usuario, senha, canal_id, data):
         return None
     trechos, num_matches = r
     return len(trechos) > 0 or bool(num_matches and num_matches > 0)
+
+
+def tem_gravacao_entre(nvr_ip, usuario, senha, canal_id, inicio, fim):
+    """True/False se ha gravacao do canal entre `inicio` e `fim` (datetimes naive);
+    None se a consulta falhou ou foi inconclusiva."""
+    r = _buscar(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=1)
+    if r is None:
+        return None
+    trechos, num_matches = r
+    return len(trechos) > 0 or bool(num_matches and num_matches > 0)
