@@ -1063,6 +1063,25 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-28] — Merge auditado do ramo `helena` (e841429) e agente 1.1.28
+
+**Tipo:** merge real (`git merge --no-ff`), sem conflitos; auditado pelo checklist do CLAUDE.md.
+
+**Incorporado:**
+- Agente (`webhook_digifort.py`): leitura do SNMP do Digifort reescrita — extração de textos da trap por ASN.1 (OCTET STRING) e varredura ampla, detecção de falha/restauração por OID e por palavras-chave, `SO_REUSEADDR` no soquete da porta 162, mensagem de erro com a causa provável quando a porta está ocupada e o nome da câmera tirado direto da trap quando não está na planilha; `start_webhook` não sobrescreve o CSV de log com valor vazio.
+- Agente (`manager.py`): câmeras só configuradas no servidor (fora do export local) entram também no status e no mapa de gravação do Digifort.
+- Servidor: `nvrs.ip` e `nvr_cameras.ip` passam a `VARCHAR(255)` (modelo + `ALTER COLUMN` idempotente no `main.py`, mesmo padrão `_run_ddl` da REGRA-007).
+- Painel: para DIGIFORT e OLT UNM2000 o `ip` do equipamento grava `127.0.0.1` e a pasta fica só em `config_extra.pasta_origem`; cadastros antigos (pasta no `ip`) continuam abrindo no formulário.
+
+**Verificado e sem problema:** nenhuma rota nova (REGRA-010 não afetada), nenhum `compose`/`nginx`/`requirements`/`.env`/binário alterado, nenhum segredo, nenhum fuso horário (o único `datetime.now` é naive e só alimenta uma linha de log, REGRA-001).
+
+**Ponto de atenção (não bloqueado):** no sniffer SNMP, quando a câmera não é achada na planilha, qualquer texto da trap que não seja palavra reservada vira "nome de câmera" e gera um evento; um pacote UDP estranho na porta 162 pode registrar um nome lixo. Revisar se aparecerem eventos de câmeras inexistentes.
+
+**Breaking Change:** Não. **Requer:** nova build do agente (versão 1.1.28 em `updater.py`, `installer.iss` e `package.json`).
+**Branch:** isaque
+
+---
+
 ### [2026-10-27] — Multi-contas (etapa 5): telas de Contas, Planos e Minha conta
 
 **Alteração:** super admin ganha a tela "Contas" (`/contas`: lista com busca e filtros por situação e tipo, resumo, criação da conta com o primeiro administrador, modal de Planos e seção de administradores da plataforma) e o detalhe da conta (`/contas/:id`: renovar com prévia da nova validade, ajustar a validade à mão até o fim do dia escolhido em Brasília, suspender/reativar, usuários da conta e histórico de validade, "Entrar na conta"). Todos os usuários têm "Minha conta" (`/minha-conta`: plano, validade, histórico, usuários para o ADMIN e troca da própria senha). No detalhe do Cliente/Setor, o super admin pode movê-lo (com as máquinas) para outra conta. Menu: "Minha conta" para todos e seção "Plataforma" (Contas, Configurações) para o super admin. Revisão: o campo de validade passou a mostrar o dia local (`diaLocalDaValidade`), igual ao cartão; antes usava o dia em UTC e podia aparecer um dia depois. Validado no ambiente local: tsc, `vite build` e 23 verificações de ponta a ponta pela API (criar conta, renovar 30 + 365 = 395 dias, login do cliente com "Setores", usuário LEITURA, último admin protegido, suspender/reativar, ajuste para data passada = VENCIDA, conta da plataforma protegida).
