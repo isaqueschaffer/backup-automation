@@ -205,7 +205,7 @@ class NVR(Base):
     )
     tipo = Column(String(20), nullable=False, default="NVR")  # NVR, OLT, ONU, PABX
     name = Column(String(255), nullable=False)
-    ip = Column(String(50), nullable=False)
+    ip = Column(String(255), nullable=False)
     username = Column(String(100), nullable=False)
     password = Column(Text, nullable=False)  # Fernet-encrypted
     config_extra = Column(JSON, nullable=True)  # configurações específicas de cada tipo
@@ -227,7 +227,7 @@ class NVRCamera(Base):
     canal = Column(Integer, nullable=False)
     nome = Column(String(255), nullable=False)
     # Conexão RTSP individual da câmera — usada por DIGIFORT e DEFENSE (NULL em NVR comum)
-    ip = Column(String(50), nullable=True)
+    ip = Column(String(255), nullable=True)
     username = Column(String(100), nullable=True)
     password = Column(Text, nullable=True)  # Fernet-encrypted quando preenchido
     modelo = Column(String(50), nullable=True)  # Hikvision, Intelbras, Grandstream, ONVIF

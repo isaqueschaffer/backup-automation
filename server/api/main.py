@@ -223,6 +223,10 @@ for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
         if _run_ddl(_ddl, f"{_tabela}.{_coluna}"):
             _colunas_criadas.add((_tabela, _coluna))
 
+# Expansão de colunas existentes para acomodar hosts/caminhos longos
+_run_ddl("ALTER TABLE nvrs ALTER COLUMN ip TYPE VARCHAR(255);", "nvrs.ip VARCHAR(255)")
+_run_ddl("ALTER TABLE nvr_cameras ALTER COLUMN ip TYPE VARCHAR(255);", "nvr_cameras.ip VARCHAR(255)")
+
 
 def _popular_email_to_clientes() -> None:
     """Preenche client_groups.email_to com a UNIÃO (sem repetição, ordem estável) dos
