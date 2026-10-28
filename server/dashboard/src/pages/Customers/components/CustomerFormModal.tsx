@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Save, Eye, EyeOff } from "lucide-react";
 import Modal from "../../../components/Modal";
+import { useRotulos } from "../../../contexts/AuthContext";
 
 export interface CustomerForm {
   name: string;
@@ -31,13 +32,14 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
   onSave: (form: CustomerForm) => void;
   onClose: () => void;
 }) {
+  const { singularMin } = useRotulos();
   const [form, setForm] = useState<CustomerForm>(initial);
   const [showPassword, setShowPassword] = useState(false);
 
   return (
     <Modal title={title} onClose={onClose}>
       <div className="form-group">
-        <label className="form-label">Nome do cliente *</label>
+        <label className="form-label">Nome do {singularMin} *</label>
         <input className="form-input" placeholder="Ex: Supermercado Central" value={form.name}
           onChange={e => setForm({ ...form, name: e.target.value })} />
       </div>
@@ -51,11 +53,11 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
         <input className="form-input" placeholder="Ex: ti@cliente.com.br, gerente@cliente.com.br" value={form.email_to}
           onChange={e => setForm({ ...form, email_to: e.target.value })} />
         <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-          Um único e-mail por rodada com o relatório de todas as máquinas. Substitui os e-mails próprios das máquinas deste cliente.
+          Um único e-mail por rodada com o relatório de todas as máquinas. Substitui os e-mails próprios das máquinas deste {singularMin}.
         </div>
       </div>
       <div className="form-group">
-        <label className="form-label">Senha do ZIP do cliente</label>
+        <label className="form-label">Senha do ZIP do {singularMin}</label>
         <div style={{ display: "flex", gap: 20, marginTop: 6, marginBottom: 12 }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}>
             <input
@@ -83,7 +85,7 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
               <input
                 className="form-input"
                 type={showPassword ? "text" : "password"}
-                placeholder={isEdit && form.has_zip_password ? "•••••••• (senha já configurada — vazio para manter)" : "Digite a senha para o ZIP do cliente"}
+                placeholder={isEdit && form.has_zip_password ? "•••••••• (senha já configurada — vazio para manter)" : `Digite a senha para o ZIP do ${singularMin}`}
                 value={form.zip_password || ""}
                 onChange={e => setForm({ ...form, zip_password: e.target.value })}
                 style={{ paddingRight: 40 }}
@@ -111,13 +113,13 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
             </div>
             <div className="text-xs text-muted" style={{ marginTop: 6 }}>
               {isEdit && form.has_zip_password && !form.zip_password
-                ? "O cliente já possui senha personalizada. Deixe em branco para manter a senha atual ou digite uma nova para alterar."
-                : "Esta senha protegerá exclusivamente o ZIP consolidado do cliente. As máquinas mantêm suas senhas individuais separadas (dentro deste ZIP, as pastas internas das máquinas ficam acessíveis sem senha)."}
+                ? `O ${singularMin} já possui senha personalizada. Deixe em branco para manter a senha atual ou digite uma nova para alterar.`
+                : `Esta senha protegerá exclusivamente o ZIP consolidado do ${singularMin}. As máquinas mantêm suas senhas individuais separadas (dentro deste ZIP, as pastas internas das máquinas ficam acessíveis sem senha).`}
             </div>
           </div>
         ) : (
           <div className="text-xs text-muted" style={{ background: "var(--surface)", padding: "8px 12px", borderRadius: 4, border: "1px solid var(--border)" }}>
-            O ZIP deste cliente usará o padrão (sem senha personalizada no cliente).
+            O ZIP deste {singularMin} usará o padrão (sem senha personalizada no {singularMin}).
           </div>
         )}
       </div>
@@ -138,8 +140,8 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
         padding: "10px 14px", color: "var(--warn)", fontSize: 12,
       }}>
         {isEdit
-          ? "O horário vale para todas as máquinas deste cliente. Ao alterá-lo, o agente de cada máquina é reiniciado para aplicar o novo horário."
-          : "O horário vale para todas as máquinas que forem adicionadas a este cliente."}
+          ? `O horário vale para todas as máquinas deste ${singularMin}. Ao alterá-lo, o agente de cada máquina é reiniciado para aplicar o novo horário.`
+          : `O horário vale para todas as máquinas que forem adicionadas a este ${singularMin}.`}
       </div>
       <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>

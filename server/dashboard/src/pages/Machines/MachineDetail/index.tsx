@@ -7,7 +7,7 @@ import {
 import { AgentLog, Backup, CameraRecStatus, Machine, EqForm, NVR, NVRTelemetry, TipoEquipamento } from "../../../api/types";
 import { useToast } from "../../../components/Toast";
 import { apiErrorMessage } from "../../../utils/errors";
-import { Plus, Server } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Server } from "lucide-react";
 import {
   AGENT_PING_INTERVAL_MS, OVERDUE_FAST_POLL_MS, serverUtcMs,
   buildEqPayload, emptyEqForm, eqToForm, parseEmails
@@ -17,6 +17,7 @@ import { useRtspTest } from "./hooks/useRtspTest";
 import MachineHeader from "./components/MachineHeader";
 import MachineInfoCards from "./components/MachineInfoCards";
 import EqCard from "./components/EqCard";
+import { EQ_TIPO_ORDEM, eqCor, eqIcone, eqRotulo } from "./components/eqTipos";
 import BackupHistory from "./components/BackupHistory";
 import CamerasSection from "./components/CamerasSection";
 import AgentLogs from "./components/AgentLogs";
@@ -27,8 +28,10 @@ import RecordingModal from "./components/RecordingModal";
 import NVRCamerasGalleryModal from "./components/NVRCamerasGalleryModal";
 import NVRTelemetryModal from "./components/NVRTelemetryModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
+import { useSomenteLeitura } from "../../../contexts/AuthContext";
 
 export default function MachineDetail() {
+  const somenteLeitura = useSomenteLeitura();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -38,6 +41,7 @@ export default function MachineDetail() {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [gruposAbertos, setGruposAbertos] = useState<Set<string>>(new Set());
 
   const [mostrarPings, setMostrarPings] = useState(false);
   const mostrarPingsRef = useRef(false);
@@ -140,6 +144,25 @@ export default function MachineDetail() {
 
   const cameras = equipamentos.filter(e => e.tipo === "CAMERA");
   const otherEquipamentos = equipamentos.filter(e => e.tipo !== "CAMERA");
+
+  const gruposEquipamentos = (() => {
+    const porTipo = new Map<string, NVR[]>();
+    for (const eq of otherEquipamentos) {
+      const lista = porTipo.get(eq.tipo) ?? [];
+      lista.push(eq);
+      porTipo.set(eq.tipo, lista);
+    }
+    const posicao = (t: string) => { const i = EQ_TIPO_ORDEM.indexOf(t); return i === -1 ? EQ_TIPO_ORDEM.length : i; };
+    return [...porTipo.entries()]
+      .sort((a, b) => posicao(a[0]) - posicao(b[0]) || a[0].localeCompare(b[0]))
+      .map(([tipo, itens]) => ({ tipo, itens: [...itens].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })) }));
+  })();
+
+  const alternarGrupo = (tipo: string) => setGruposAbertos(prev => {
+    const prox = new Set(prev);
+    if (prox.has(tipo)) prox.delete(tipo); else prox.add(tipo);
+    return prox;
+  });
 
   const {
     fileInputRef, importFile, deleteAll,
@@ -299,9 +322,11 @@ export default function MachineDetail() {
               {otherEquipamentos.length}
             </span>
           </div>
-          <button className="btn btn-secondary" onClick={() => openEqModal(emptyEqForm(), null)}>
-            <Plus size={14} /> Adicionar
-          </button>
+          {!somenteLeitura && (
+            <button className="btn btn-secondary" onClick={() => openEqModal(emptyEqForm(), null)}>
+              <Plus size={14} /> Adicionar
+            </button>
+          )}
         </div>
 
         {otherEquipamentos.length === 0 ? (
@@ -310,17 +335,55 @@ export default function MachineDetail() {
             <div>Nenhum equipamento cadastrado.</div>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {otherEquipamentos.map(eq => (
-              <EqCard key={eq.id} eq={eq}
-                onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
-                onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
-                onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}
-                onViewTelemetry={() => setShowTelemetryModal({ show: true, nvrName: eq.name, telemetry: eq.last_telemetry_status })}
-                onEdit={() => openEqModal(eqToForm(eq), eq.id)}
-                onToggleActive={() => handleToggleEquipamento(eq)}
-              />
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {gruposEquipamentos.map(g => {
+              const aberto = gruposAbertos.has(g.tipo);
+              return (
+                <div key={g.tipo}>
+                  <button
+                    type="button"
+                    onClick={() => alternarGrupo(g.tipo)}
+                    aria-expanded={aberto}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: aberto ? 8 : 0,
+                      color: eqCor(g.tipo),
+                      fontSize: 12,
+                      fontWeight: 700,
+                      letterSpacing: "0.04em",
+                      textTransform: "uppercase",
+                      background: "none",
+                      border: "none",
+                      padding: "4px 0",
+                      cursor: "pointer",
+                      width: "100%",
+                      textAlign: "left",
+                    }}
+                  >
+                    {aberto ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {eqIcone(g.tipo, 14)} {eqRotulo(g.tipo)}
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>{g.itens.length}</span>
+                  </button>
+                  {aberto && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {g.itens.map(eq => (
+                        <EqCard key={eq.id} eq={eq}
+                          somenteLeitura={somenteLeitura}
+                          onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
+                          onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
+                          onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}
+                          onViewTelemetry={() => setShowTelemetryModal({ show: true, nvrName: eq.name, telemetry: eq.last_telemetry_status })}
+                          onEdit={() => openEqModal(eqToForm(eq), eq.id)}
+                          onToggleActive={() => handleToggleEquipamento(eq)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

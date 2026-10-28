@@ -14,9 +14,12 @@ import { apiErrorMessage } from "../../utils/errors";
 import { Compartilhamento, DadosDashboard, DashboardAdmin } from "./types";
 import DashboardWorkspace from "./DashboardWorkspace";
 import SharePanel from "./SharePanel";
+import { useRotulos, useSomenteLeitura } from "../../contexts/AuthContext";
 
 // Página administrativa de configuração do dashboard do cliente
 export default function DashboardAdminPage() {
+  const { singular, plural, singularMin } = useRotulos();
+  const somenteLeitura = useSomenteLeitura();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -56,12 +59,12 @@ export default function DashboardAdminPage() {
         setNotFound(true);
       } else {
         setErroCarga(true);
-        toast(apiErrorMessage(err, "Erro ao carregar dashboard do cliente."), "error");
+        toast(apiErrorMessage(err, `Erro ao carregar dashboard do ${singularMin}.`), "error");
       }
     } finally {
       setLoading(false);
     }
-  }, [id, carregarDados, toast]);
+  }, [id, carregarDados, singularMin, toast]);
 
   useEffect(() => {
     carregarTudo();
@@ -107,14 +110,14 @@ export default function DashboardAdminPage() {
     return (
       <div className="card" style={{ padding: 40, textAlign: "center" }}>
         <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
-          Cliente não encontrado
+          {singular} não encontrado
         </div>
         <button
           type="button"
           className="btn btn-secondary"
           onClick={() => navigate("/clientes")}
         >
-          Voltar para Clientes
+          Voltar para {plural}
         </button>
       </div>
     );
@@ -152,14 +155,14 @@ export default function DashboardAdminPage() {
             type="button"
             className="btn-icon"
             onClick={() => navigate(`/clientes/${id}`)}
-            title="Voltar ao cliente"
+            title={`Voltar ao ${singularMin}`}
           >
             <ArrowLeft size={16} />
           </button>
           <div>
             <h1 className="page-title">Dashboard — {dashboard.cliente_nome}</h1>
             <p className="page-subtitle">
-              Monte o painel deste cliente. O link de compartilhamento mostra exatamente este layout.
+              Monte o painel deste {singularMin}. O link de compartilhamento mostra exatamente este layout.
             </p>
           </div>
         </div>
@@ -173,7 +176,7 @@ export default function DashboardAdminPage() {
         layout={dashboard.layout}
         version={dashboard.version}
         dadosVivos={dados}
-        podeEditar
+        podeEditar={!somenteLeitura}
         carregarOpcoes={() => fetchDashboardOptions(id)}
         previa={(l) => fetchDashboardPreview(id, l)}
         salvar={(l, v) => saveDashboardLayout(id, l, v)}
@@ -183,17 +186,19 @@ export default function DashboardAdminPage() {
         }
         onConflito={carregarTudo}
         barraExtra={
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setCompartilhando(true)}
-          >
-            <Share2 size={14} style={{ flexShrink: 0 }} /> Compartilhar
-          </button>
+          !somenteLeitura ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setCompartilhando(true)}
+            >
+              <Share2 size={14} style={{ flexShrink: 0 }} /> Compartilhar
+            </button>
+          ) : undefined
         }
       />
 
-      {compartilhando && dashboard && (
+      {!somenteLeitura && compartilhando && dashboard && (
         <SharePanel
           customerId={dashboard.customer_id}
           compartilhamento={dashboard.compartilhamento}

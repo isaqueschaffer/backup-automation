@@ -37,6 +37,7 @@ from services.galeria_vms import (
 from services.storage_service import save_zip_stream, UploadTooLargeError, _sanitize_name
 from services.email_service import send_backup_report
 from services.backup_runs import attach_report_to_run, finish_queue_run
+from services.contas import maquina_bloqueada
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -94,18 +95,23 @@ def _build_cameras_config(machine: Machine, nvr: NVR):
 @router.get("/config", response_model=AgentConfigResponse)
 def get_agent_config(machine: Machine = Depends(get_current_machine), db: Session = Depends(get_db)):
     """Return full config needed by the Windows agent."""
-    equipamentos = [
-        AgentEquipamento(
-            tipo=nvr.tipo or "NVR",
-            name=nvr.name,
-            ip=nvr.ip,
-            username=nvr.username,
-            password=decrypt(nvr.password),
-            config_extra=nvr.config_extra,
-            cameras_config=_build_cameras_config(machine, nvr),
-        )
-        for nvr in machine.equipamentos if nvr.active
-    ]
+    bloqueada = maquina_bloqueada(machine)
+    if bloqueada:
+        # Conta vencida/suspensa: sem equipamentos o agente não faz backup (backup_job.py encerra com "Nenhum equipamento")
+        equipamentos = []
+    else:
+        equipamentos = [
+            AgentEquipamento(
+                tipo=nvr.tipo or "NVR",
+                name=nvr.name,
+                ip=nvr.ip,
+                username=nvr.username,
+                password=decrypt(nvr.password),
+                config_extra=nvr.config_extra,
+                cameras_config=_build_cameras_config(machine, nvr),
+            )
+            for nvr in machine.equipamentos if nvr.active
+        ]
     zip_pw = decrypt(machine.zip_password) if machine.zip_password else None
 
     # Usa horário do Cliente se a máquina pertencer a um Cliente
@@ -254,14 +260,18 @@ async def ping_agent(
     if machine is None:
         return PingResponse(status="ok", restart=False, backup=False)
 
+    bloqueada = maquina_bloqueada(machine)
     should_restart = bool(machine.restart_requested) and not em_backup
     should_backup = bool(machine.backup_requested)
-    
+    if bloqueada:
+        should_backup = False
+        machine.backup_requested = False
+
     # ── Auto-recovery de backup perdido ──
     # Não aciona se should_backup já for True
     # Não aciona se a máquina pertence a um Cliente com fila ativa (a fila comanda o sequenciamento)
     is_in_active_queue = bool(machine.customer is not None and machine.customer.queue_active)
-    if not should_backup and not is_in_active_queue and machine.backup_hour is not None and machine.backup_minute is not None:
+    if not bloqueada and not should_backup and not is_in_active_queue and machine.backup_hour is not None and machine.backup_minute is not None:
         brt_tz = timezone(timedelta(hours=-3))
         now_brt = datetime.now(brt_tz)
         scheduled_time_today = now_brt.replace(hour=machine.backup_hour, minute=machine.backup_minute, second=0, microsecond=0)
@@ -403,6 +413,9 @@ def receive_backup_report(
     db: Session = Depends(get_db),
 ):
     """Agent posts the backup result. Server creates a Backup record."""
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
     from datetime import datetime
     
     # Usa a hora real do servidor, ignorando o relógio da máquina
@@ -513,6 +526,9 @@ def upload_backup_zip(
     db: Session = Depends(get_db),
 ):
     """Agent uploads the ZIP file. Server stores it and sends email."""
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
     try:
         backup_uuid = UUID(backup_id)
     except (ValueError, AttributeError, TypeError):

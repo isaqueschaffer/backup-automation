@@ -11,7 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from auth import verify_admin_token
+from auth import Contexto, get_contexto
 from database import get_db
 from models import Machine, NVR, NVRCamera, NVRPlanilha
 from routers.agent import mascarar_credenciais, pending_rtsp_tasks
@@ -21,6 +21,7 @@ from schemas import (
     NVRPlanilhaEntrada, NVRPlanilhaResposta,
 )
 from services.crypto_service import encrypt, decrypt
+from services.escopo import obter_maquina
 from services.galeria_vms import (
     canal_int as _canal_int,
     ip_valido,
@@ -40,21 +41,19 @@ TIPOS_VMS = ("DIGIFORT", "DEFENSE")
 router = APIRouter(prefix="/api/v1/machines/{machine_id}/equipamentos", tags=["Equipamentos"])
 
 
-def _get_machine_or_404(machine_id: UUID, db: Session) -> Machine:
-    machine = db.query(Machine).filter(Machine.id == machine_id).first()
-    if not machine:
-        raise HTTPException(status_code=404, detail="Máquina não encontrada")
-    return machine
+def _get_machine_or_404(machine_id: UUID, db: Session, ctx: Contexto) -> Machine:
+    return obter_maquina(db, ctx, machine_id)
 
 
-@router.get("", response_model=List[NVRResponse], dependencies=[Depends(verify_admin_token)])
+@router.get("", response_model=List[NVRResponse])
 def list_equipamentos(
     machine_id: UUID,
     tipo: Optional[str] = Query(None, description="Filtrar por tipo: NVR, OLT, ONU, PABX"),
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Lista todos os equipamentos de uma máquina, com filtro opcional por tipo."""
-    _get_machine_or_404(machine_id, db)
+    _get_machine_or_404(machine_id, db, ctx)
     q = db.query(NVR).filter(NVR.machine_id == machine_id)
     if tipo:
         if tipo.upper() not in TIPOS_EQUIPAMENTO:
@@ -70,11 +69,15 @@ def list_equipamentos(
     "",
     response_model=NVRResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_admin_token)],
 )
-def create_equipamento(machine_id: UUID, body: NVRCreate, db: Session = Depends(get_db)):
+def create_equipamento(
+    machine_id: UUID,
+    body: NVRCreate,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
     """Cadastra um novo equipamento para uma máquina."""
-    _get_machine_or_404(machine_id, db)
+    _get_machine_or_404(machine_id, db, ctx)
 
     tipo = (body.tipo or "NVR").upper()
     if tipo not in TIPOS_EQUIPAMENTO:
@@ -102,15 +105,16 @@ def create_equipamento(machine_id: UUID, body: NVRCreate, db: Session = Depends(
 @router.put(
     "/{equipamento_id}",
     response_model=NVRResponse,
-    dependencies=[Depends(verify_admin_token)],
 )
 def update_equipamento(
     machine_id: UUID,
     equipamento_id: UUID,
     body: NVRUpdate,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Atualiza um equipamento existente."""
+    _get_machine_or_404(machine_id, db, ctx)
     eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
@@ -136,10 +140,15 @@ def update_equipamento(
 @router.delete(
     "/{equipamento_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(verify_admin_token)],
 )
-def delete_equipamento(machine_id: UUID, equipamento_id: UUID, db: Session = Depends(get_db)):
+def delete_equipamento(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
     """Remove um equipamento."""
+    _get_machine_or_404(machine_id, db, ctx)
     eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
@@ -150,7 +159,6 @@ def delete_equipamento(machine_id: UUID, equipamento_id: UUID, db: Session = Dep
 @router.post(
     "/{equipamento_id}/test-rtsp",
     response_model=RTSPTestResponse,
-    dependencies=[Depends(verify_admin_token)],
 )
 async def test_equipamento_rtsp(
     machine_id: UUID,
@@ -159,6 +167,7 @@ async def test_equipamento_rtsp(
     modo: str = Query("ao_vivo", pattern="^(ao_vivo|referencia|noite)$"),
     nome: Optional[str] = Query(None, max_length=200),
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Captura um frame delegando a tarefa ao agente local via long-polling.
 
@@ -166,6 +175,7 @@ async def test_equipamento_rtsp(
     modo "referencia": ao vivo; se a câmera estiver offline, o frame mais recente da gravação (agente >= 1.1.6).
     modo "noite": madrugada mais recente com gravação; o servidor já salva como imagem da noite do canal.
     """
+    _get_machine_or_404(machine_id, db, ctx)
     eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
@@ -353,9 +363,10 @@ def get_nvr_cameras(
     machine_id: UUID,
     id: UUID,
     db: Session = Depends(get_db),
-    admin: dict = Depends(verify_admin_token)
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Retorna todas as câmeras de um NVR específico (com suas imagens)."""
+    _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="NVR não encontrado")
@@ -476,12 +487,13 @@ def import_cameras(
     id: UUID,
     payload: NVRCameraBulkImport,
     db: Session = Depends(get_db),
-    admin: dict = Depends(verify_admin_token)
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Importa/sincroniza em lote as câmeras RTSP da Galeria de um equipamento DIGIFORT/DEFENSE.
 
     `sync_from_machine=True` copia as câmeras avulsas (tipo == "CAMERA") da máquina, em vez de usar `cameras`.
     `replace_existing=True` remove as câmeras da galeria que não vieram nesta importação."""
+    machine = _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
@@ -489,7 +501,6 @@ def import_cameras(
         raise HTTPException(status_code=400, detail="Importação de câmeras RTSP só é suportada para DIGIFORT e DEFENSE.")
 
     if payload.sync_from_machine:
-        machine = _get_machine_or_404(machine_id, db)
         machine_cams = [e for e in machine.equipamentos if (e.tipo or "").upper() == "CAMERA" and e.active and e.ip]
         if not machine_cams:
             raise HTTPException(status_code=400, detail="Nenhuma câmera (tipo CAMERA) cadastrada na máquina para sincronizar.")
@@ -568,9 +579,10 @@ def set_camera_rtsp(
     canal: int,
     payload: NVRCameraConfigItem,
     db: Session = Depends(get_db),
-    admin: dict = Depends(verify_admin_token)
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Cria ou atualiza a conexão RTSP (nome, ip, usuário, senha, modelo) de um canal da galeria."""
+    _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
@@ -601,9 +613,10 @@ def delete_camera(
     id: UUID,
     canal: int,
     db: Session = Depends(get_db),
-    admin: dict = Depends(verify_admin_token)
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Remove o canal da galeria (a conexão RTSP e as imagens salvas)."""
+    _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
@@ -620,9 +633,10 @@ def set_perfect_image(
     id: UUID,
     payload: NVRCameraSetPerfect,
     db: Session = Depends(get_db),
-    admin: dict = Depends(verify_admin_token)
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Salva a 'Imagem Perfeita' de um canal específico."""
+    _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="NVR não encontrado")
@@ -654,9 +668,10 @@ def salvar_planilha(
     id: UUID,
     payload: NVRPlanilhaEntrada,
     db: Session = Depends(get_db),
-    admin: dict = Depends(verify_admin_token),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Cria ou substitui a planilha importada de um equipamento VMS (DIGIFORT/DEFENSE)."""
+    _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
@@ -708,9 +723,10 @@ def obter_planilha(
     id: UUID,
     mostrar_senhas: bool = Query(False),
     db: Session = Depends(get_db),
-    admin: dict = Depends(verify_admin_token),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Devolve a última planilha importada no equipamento, mascarando senhas por padrão."""
+    _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
@@ -743,9 +759,10 @@ def remover_planilha(
     machine_id: UUID,
     id: UUID,
     db: Session = Depends(get_db),
-    admin: dict = Depends(verify_admin_token),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Remove a planilha guardada no equipamento."""
+    _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")

@@ -5,10 +5,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from auth import verify_admin_token
+from auth import Contexto, get_contexto
 from config import settings
 from database import get_db
 from models import Customer, CustomerDashboard
+from services.escopo import obter_cliente
 from services.dashboards.compartilhamento import gerar_token
 from services.dashboards.dados import listar_opcoes, montar_dados
 from services.dashboards.esquemas import (
@@ -31,14 +32,11 @@ from services.dashboards.layout import (
     validar_referencias,
 )
 
-router = APIRouter(tags=["Dashboards"], dependencies=[Depends(verify_admin_token)])
+router = APIRouter(tags=["Dashboards"])
 
 
-def _cliente_ou_404(db: Session, customer_id: UUID) -> Customer:
-    cliente = db.query(Customer).filter(Customer.id == customer_id).first()
-    if not cliente:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    return cliente
+def _cliente_ou_404(db: Session, ctx: Contexto, customer_id: UUID) -> Customer:
+    return obter_cliente(db, ctx, customer_id)
 
 
 def _obter_ou_criar(db: Session, customer: Customer) -> CustomerDashboard:
@@ -87,7 +85,7 @@ def _resposta_admin(d: CustomerDashboard) -> DashboardAdminResposta:
 
 
 @router.get("/api/v1/dashboards/widgets", response_model=List[dict])
-def get_catalogo_widgets():
+def get_catalogo_widgets(ctx: Contexto = Depends(get_contexto)):
     """Retorna os tipos de widgets disponíveis e seus schemas de configuração."""
     return catalogo()
 
@@ -97,10 +95,11 @@ def get_customer_dashboard(
     customer_id: UUID,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Carrega o layout e informações de compartilhamento do dashboard do cliente."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     dashboard = _obter_ou_criar(db, customer)
     return _resposta_admin(dashboard)
 
@@ -111,10 +110,11 @@ def save_customer_dashboard_layout(
     body: SalvarLayoutEntrada,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Salva o layout do dashboard com controle otimista de versão."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     dashboard = _obter_ou_criar(db, customer)
 
     if body.version != dashboard.version:
@@ -138,10 +138,11 @@ def restore_customer_dashboard_default(
     customer_id: UUID,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Restaura o layout padrão do dashboard."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     dashboard = _obter_ou_criar(db, customer)
 
     padrao = layout_padrao()
@@ -158,10 +159,11 @@ def get_customer_dashboard_data(
     customer_id: UUID,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Monta os dados de cada widget do layout atual para prévia no painel admin."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     dashboard = _obter_ou_criar(db, customer)
     dados = montar_dados(db, customer, layout_do_banco(dashboard))
     return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
@@ -173,10 +175,11 @@ def preview_customer_dashboard_layout(
     body: PreviaEntrada,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Monta os dados dos widgets de um layout em rascunho sem salvar."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     validar_referencias(db, customer_id, body.layout)
     dados = montar_dados(db, customer, body.layout)
     return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
@@ -187,10 +190,11 @@ def get_customer_dashboard_opcoes(
     customer_id: UUID,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Lista opções de máquinas e equipamentos disponíveis para configurar widgets."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     return listar_opcoes(db, customer)
 
 
@@ -200,10 +204,11 @@ def generate_customer_dashboard_share_link(
     body: GerarLinkEntrada,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Gera ou regenera o token de compartilhamento público por link."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     dashboard = _obter_ou_criar(db, customer)
 
     expira_em = para_utc_naive(body.expira_em)
@@ -239,10 +244,11 @@ def update_customer_dashboard_share_link(
     body: AtualizarLinkEntrada,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Atualiza as configurações do link de compartilhamento existente."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     dashboard = _obter_ou_criar(db, customer)
 
     if body.ativo is True and not dashboard.share_token_hash:
@@ -272,10 +278,11 @@ def revoke_customer_dashboard_share_link(
     customer_id: UUID,
     response: Response,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Revoga o link de compartilhamento atual."""
     response.headers["Cache-Control"] = "no-store"
-    customer = _cliente_ou_404(db, customer_id)
+    customer = _cliente_ou_404(db, ctx, customer_id)
     dashboard = _obter_ou_criar(db, customer)
 
     dashboard.share_token_hash = None

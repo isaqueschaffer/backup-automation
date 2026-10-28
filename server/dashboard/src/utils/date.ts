@@ -26,3 +26,9 @@ export function localDateStr(d: Date = new Date()): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
 }
+
+// Só a data (dd/mm/aaaa) de um datetime naive UTC do servidor.
+export function fmtDay(s: string | null | undefined, empty = "—"): string {
+  if (!s) return empty;
+  return new Date(s.endsWith("Z") ? s : s + "Z").toLocaleDateString("pt-BR");
+}

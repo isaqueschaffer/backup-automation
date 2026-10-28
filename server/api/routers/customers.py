@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 
-from auth import verify_admin_token
+from auth import Contexto, get_contexto
 from database import get_db
 from models import Machine, Customer, Backup, AgentLog, CustomerBackupRun
 from schemas import (
@@ -21,6 +21,12 @@ from schemas import (
     CustomerRunResponse,
 )
 from routers.machines import machine_to_response, check_machine_online, next_queue_order
+from services.escopo import (
+    filtrar_por_conta,
+    obter_cliente,
+    obter_maquina,
+    conta_para_criacao,
+)
 from services.storage_service import (
     reorganizar_maquina,
     renomear_pasta_do_cliente,
@@ -69,11 +75,8 @@ def _load_customers_query(db: Session):
     )
 
 
-def _get_customer_or_404(customer_id: UUID, db: Session) -> Customer:
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    return customer
+def _get_customer_or_404(customer_id: UUID, db: Session, ctx: Contexto) -> Customer:
+    return obter_cliente(db, ctx, customer_id)
 
 
 def _active_queue_machines(customer: Customer) -> list:
@@ -137,9 +140,9 @@ def _to_response(customer: Customer, db: Session, commit: bool = True) -> Custom
     )
 
 
-@router.get("", response_model=List[CustomerResponse], dependencies=[Depends(verify_admin_token)])
-def list_customers(db: Session = Depends(get_db)):
-    customers = _load_customers_query(db).order_by(Customer.name).all()
+@router.get("", response_model=List[CustomerResponse])
+def list_customers(db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
+    customers = filtrar_por_conta(_load_customers_query(db), Customer.conta_id, ctx).order_by(Customer.name).all()
     # Um único commit no final (um commit por cliente expiraria os objetos já carregados
     # e reintroduziria o N+1). Esta rota GET grava apenas no auto-destravamento da fila.
     result = [_to_response(c, db, commit=False) for c in customers]
@@ -147,11 +150,11 @@ def list_customers(db: Session = Depends(get_db)):
     return result
 
 
-@router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(verify_admin_token)])
-def create_customer(body: CustomerCreate, db: Session = Depends(get_db)):
+@router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
+def create_customer(body: CustomerCreate, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     encrypted_pw = crypto_encrypt(body.zip_password) if body.zip_password else None
     customer = Customer(
+        conta_id=conta_para_criacao(db, ctx),
         name=body.name,
         description=body.description or None,
         active=body.active,
@@ -166,17 +169,15 @@ def create_customer(body: CustomerCreate, db: Session = Depends(get_db)):
     return _to_response(customer, db)
 
 
-@router.get("/{customer_id}", response_model=CustomerResponse, dependencies=[Depends(verify_admin_token)])
-def get_customer(customer_id: UUID, db: Session = Depends(get_db)):
-    customer = _load_customers_query(db).filter(Customer.id == customer_id).first()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+@router.get("/{customer_id}", response_model=CustomerResponse)
+def get_customer(customer_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
+    customer = obter_cliente(db, ctx, customer_id, _load_customers_query(db))
     return _to_response(customer, db)
 
 
-@router.put("/{customer_id}", response_model=CustomerResponse, dependencies=[Depends(verify_admin_token)])
-def update_customer(customer_id: UUID, body: CustomerUpdate, db: Session = Depends(get_db)):
-    customer = _get_customer_or_404(customer_id, db)
+@router.put("/{customer_id}", response_model=CustomerResponse)
+def update_customer(customer_id: UUID, body: CustomerUpdate, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
+    customer = _get_customer_or_404(customer_id, db, ctx)
 
     name_changed = body.name is not None and body.name.strip() != customer.name
 
@@ -218,10 +219,9 @@ def update_customer(customer_id: UUID, body: CustomerUpdate, db: Session = Depen
     return _to_response(customer, db)
 
 
-@router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT,
-               dependencies=[Depends(verify_admin_token)])
-def delete_customer(customer_id: UUID, db: Session = Depends(get_db)):
-    customer = _get_customer_or_404(customer_id, db)
+@router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_customer(customer_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
+    customer = _get_customer_or_404(customer_id, db, ctx)
     machines = list(customer.machines)
     # Máquinas ficam sem cliente (mantêm o horário atual)
     for machine in machines:
@@ -243,14 +243,14 @@ def delete_customer(customer_id: UUID, db: Session = Depends(get_db)):
 
 # ─── Vínculo de máquinas e ordem da fila ───────────────────────────────────
 
-@router.post("/{customer_id}/machines/{machine_id}", response_model=CustomerResponse,
-             dependencies=[Depends(verify_admin_token)])
-def link_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(get_db)):
+@router.post("/{customer_id}/machines/{machine_id}", response_model=CustomerResponse)
+def link_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Vincula a máquina ao cliente (movendo de outro cliente, se for o caso) no fim da fila."""
-    customer = _get_customer_or_404(customer_id, db)
-    machine = db.query(Machine).filter(Machine.id == machine_id).first()
-    if not machine:
-        raise HTTPException(status_code=404, detail="Máquina não encontrada")
+    customer = _get_customer_or_404(customer_id, db, ctx)
+    machine = obter_maquina(db, ctx, machine_id)
+
+    if machine.conta_id != customer.conta_id:
+        raise HTTPException(status_code=409, detail="A máquina e o Cliente pertencem a contas diferentes.")
 
     if machine.customer_id == customer.id:
         # Já vinculada: nada a fazer (mantém a posição na fila)
@@ -281,11 +281,10 @@ def link_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(get_
     return _to_response(customer, db)
 
 
-@router.delete("/{customer_id}/machines/{machine_id}", response_model=CustomerResponse,
-               dependencies=[Depends(verify_admin_token)])
-def unlink_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(get_db)):
+@router.delete("/{customer_id}/machines/{machine_id}", response_model=CustomerResponse)
+def unlink_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Desvincula a máquina do cliente (ela mantém o horário atual)."""
-    customer = _get_customer_or_404(customer_id, db)
+    customer = _get_customer_or_404(customer_id, db, ctx)
     machine = db.query(Machine).filter(
         Machine.id == machine_id, Machine.customer_id == customer.id
     ).first()
@@ -312,11 +311,10 @@ def unlink_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(ge
     return _to_response(customer, db)
 
 
-@router.put("/{customer_id}/queue-order", response_model=CustomerResponse,
-            dependencies=[Depends(verify_admin_token)])
-def reorder_queue(customer_id: UUID, body: CustomerQueueOrder, db: Session = Depends(get_db)):
+@router.put("/{customer_id}/queue-order", response_model=CustomerResponse)
+def reorder_queue(customer_id: UUID, body: CustomerQueueOrder, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Grava a ordem da fila (queue_order 0..n-1) na sequência de `machine_ids`."""
-    customer = _get_customer_or_404(customer_id, db)
+    customer = _get_customer_or_404(customer_id, db, ctx)
     _ensure_queue_idle(customer, db)
 
     machines_by_id = {m.id: m for m in customer.machines}
@@ -336,10 +334,10 @@ def reorder_queue(customer_id: UUID, body: CustomerQueueOrder, db: Session = Dep
 
 # ─── Fila de backup e download ─────────────────────────────────────────────
 
-@router.post("/{customer_id}/trigger-backup", dependencies=[Depends(verify_admin_token)])
-def trigger_customer_backup(customer_id: UUID, db: Session = Depends(get_db)):
+@router.post("/{customer_id}/trigger-backup")
+def trigger_customer_backup(customer_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Dispara backup em fila para todas as máquinas do cliente (uma de cada vez, por ordem queue_order)."""
-    customer = _get_customer_or_404(customer_id, db)
+    customer = _get_customer_or_404(customer_id, db, ctx)
 
     queue = _active_queue_machines(customer)
     if not queue:
@@ -382,10 +380,10 @@ def trigger_customer_backup(customer_id: UUID, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/{customer_id}/cancel-queue", dependencies=[Depends(verify_admin_token)])
-def cancel_customer_queue(customer_id: UUID, db: Session = Depends(get_db)):
+@router.post("/{customer_id}/cancel-queue")
+def cancel_customer_queue(customer_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Cancela e destrava a fila de backup do cliente imediatamente."""
-    customer = _get_customer_or_404(customer_id, db)
+    customer = _get_customer_or_404(customer_id, db, ctx)
 
     customer.queue_active = False
     customer.queue_current_index = None
@@ -399,13 +397,13 @@ def cancel_customer_queue(customer_id: UUID, db: Session = Depends(get_db)):
     return {"status": "ok", "message": "Fila cancelada com sucesso"}
 
 
-@router.get("/{customer_id}/download-latest", dependencies=[Depends(verify_admin_token)])
-def download_customer_zip(customer_id: UUID, db: Session = Depends(get_db)):
+@router.get("/{customer_id}/download-latest")
+def download_customer_zip(customer_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Gera e retorna um ZIP agrupado com os backups mais recentes de cada máquina do cliente.
     Se o cliente possuir senha configurada, o ZIP do cliente é protegido com ela,
     e os arquivos internos de cada máquina ficam sem senha.
     """
-    customer = _get_customer_or_404(customer_id, db)
+    customer = _get_customer_or_404(customer_id, db, ctx)
     f = build_customer_latest_zip(db, customer)
     if f is None:
         raise HTTPException(status_code=404, detail="Nenhum backup disponível para as máquinas deste cliente")
@@ -432,11 +430,10 @@ def _get_run_or_404(customer_id: UUID, run_id: UUID, db: Session) -> CustomerBac
     return run
 
 
-@router.get("/{customer_id}/runs", response_model=List[CustomerRunResponse],
-            dependencies=[Depends(verify_admin_token)])
-def list_customer_runs(customer_id: UUID, limit: int = Query(20, ge=1, le=200), db: Session = Depends(get_db)):
+@router.get("/{customer_id}/runs", response_model=List[CustomerRunResponse])
+def list_customer_runs(customer_id: UUID, limit: int = Query(20, ge=1, le=200), db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Rodadas de backup do cliente (mais recentes primeiro)."""
-    _get_customer_or_404(customer_id, db)
+    _get_customer_or_404(customer_id, db, ctx)
     runs = (
         db.query(CustomerBackupRun)
         .options(selectinload(CustomerBackupRun.backups))
@@ -448,14 +445,15 @@ def list_customer_runs(customer_id: UUID, limit: int = Query(20, ge=1, le=200), 
     return [CustomerRunResponse(**run_to_dict(db, r)) for r in runs]
 
 
-@router.get("/{customer_id}/runs/{run_id}/download", dependencies=[Depends(verify_admin_token)])
-def download_customer_run_zip(customer_id: UUID, run_id: UUID, db: Session = Depends(get_db)):
+@router.get("/{customer_id}/runs/{run_id}/download")
+def download_customer_run_zip(customer_id: UUID, run_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """ZIP unificado da rodada.
 
     Se o cliente tiver senha configurada, gera ZIP com senha (desencriptando os ZIPs das máquinas —
     os arquivos internos ficam sem senha dentro do ZIP do cliente).
     Caso contrário, retorna o ZIP sem senha com os ZIPs das máquinas como estão.
     """
+    _get_customer_or_404(customer_id, db, ctx)
     run = _get_run_or_404(customer_id, run_id, db)
     customer = run.customer
 
@@ -483,9 +481,10 @@ def download_customer_run_zip(customer_id: UUID, run_id: UUID, db: Session = Dep
     )
 
 
-@router.post("/{customer_id}/runs/{run_id}/resend-email", dependencies=[Depends(verify_admin_token)])
-def resend_customer_run_email(customer_id: UUID, run_id: UUID, request: Request, db: Session = Depends(get_db)):
+@router.post("/{customer_id}/runs/{run_id}/resend-email")
+def resend_customer_run_email(customer_id: UUID, run_id: UUID, request: Request, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Reenvia o e-mail de uma rodada já fechada (409 se ainda aberta)."""
+    _get_customer_or_404(customer_id, db, ctx)
     run = _get_run_or_404(customer_id, run_id, db)
     if run.closed_at is None:
         raise HTTPException(status_code=409, detail="Rodada ainda em andamento. Aguarde o fechamento.")

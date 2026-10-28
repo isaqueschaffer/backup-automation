@@ -8,8 +8,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, cast, Date
 
-from auth import verify_admin_token
+from auth import Contexto, get_contexto
 from database import get_db
+from services.escopo import filtrar_por_conta
 from models import Backup, Machine
 from schemas import BackupResponse, PaginatedBackups
 from services.storage_service import get_zip_path, pasta_canonica_da_maquina
@@ -35,7 +36,7 @@ def _with_machine():
     return joinedload(Backup.machine).joinedload(Machine.customer)
 
 
-@router.get("", response_model=PaginatedBackups, dependencies=[Depends(verify_admin_token)])
+@router.get("", response_model=PaginatedBackups)
 def list_backups(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
@@ -45,6 +46,7 @@ def list_backups(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     q = db.query(Backup).options(_with_machine())
 
@@ -70,6 +72,9 @@ def list_backups(
         end_utc = datetime.combine(date_to, time.max) + timedelta(hours=3)
         q = q.filter(Backup.started_at <= end_utc)
 
+    if ctx.conta_id is not None:
+        q = q.filter(Backup.machine_id.in_(filtrar_por_conta(db.query(Machine.id), Machine.conta_id, ctx)))
+
     total = q.count()
     items = q.order_by(Backup.started_at.desc()).offset((page - 1) * size).limit(size).all()
     pages = (total + size - 1) // size or 1
@@ -82,19 +87,20 @@ def list_backups(
     )
 
 
-@router.get("/{backup_id}", response_model=BackupResponse, dependencies=[Depends(verify_admin_token)])
-def get_backup(backup_id: UUID, db: Session = Depends(get_db)):
+@router.get("/{backup_id}", response_model=BackupResponse)
+def get_backup(backup_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     b = db.query(Backup).options(_with_machine()).filter(Backup.id == backup_id).first()
-    if not b:
+    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)):
         raise HTTPException(status_code=404, detail="Backup not found")
     return _to_response(b)
 
 
-@router.get("/{backup_id}/download", dependencies=[Depends(verify_admin_token)])
+@router.get("/{backup_id}/download")
 def download_backup_zip(
     backup_id: UUID,
     direct_machine: bool = Query(True, description="Download direto do backup da máquina"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
 ):
     """Download do arquivo ZIP do backup individual da máquina.
     Entrega o arquivo original gravado em disco com a senha individual da máquina e o nome da máquina.
@@ -103,7 +109,7 @@ def download_backup_zip(
     from services.storage_service import _sanitize_name
 
     b = db.query(Backup).options(_with_machine()).filter(Backup.id == backup_id).first()
-    if not b:
+    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)):
         raise HTTPException(status_code=404, detail="Backup not found")
     if not b.zip_filename:
         raise HTTPException(status_code=404, detail="ZIP nao disponivel para este backup")
@@ -208,11 +214,16 @@ def public_download_run_zip(run_id: UUID, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/{backup_id}/resend-email", dependencies=[Depends(verify_admin_token)])
-def resend_backup_email(backup_id: UUID, request: Request, db: Session = Depends(get_db)):
+@router.post("/{backup_id}/resend-email")
+def resend_backup_email(
+    backup_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
     """Reenvia o relatório de e-mail de um backup já existente."""
     b = db.query(Backup).options(_with_machine()).filter(Backup.id == backup_id).first()
-    if not b:
+    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)):
         raise HTTPException(status_code=404, detail="Backup não encontrado")
     if not b.machine:
         raise HTTPException(status_code=400, detail="Máquina associada ao backup não encontrada")

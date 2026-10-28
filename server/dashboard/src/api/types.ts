@@ -263,3 +263,78 @@ export interface CustomerRun {
   has_zip: boolean;
   machines: CustomerRunMachine[];
 }
+
+// ── Multi-contas ──────────────────────────────────────────────
+export type Papel = "SUPER_ADMIN" | "ADMIN" | "LEITURA";
+export type TipoConta = "INTEGRADOR" | "CLIENTE_FINAL";
+export type StatusConta = "OK" | "AVISO" | "CRITICO" | "VENCIDA" | "SUSPENSA" | "VITALICIA";
+
+export interface ContaResumo {
+  id: string;
+  nome: string;
+  tipo: TipoConta;
+  plano_nome: string | null;
+  expira_em: string | null;
+  dias_restantes: number | null;
+  status: StatusConta;
+  bloqueada: boolean;
+  plataforma: boolean;
+}
+
+export interface Rotulos {
+  grupo_singular: string;
+  grupo_plural: string;
+}
+
+export interface Me {
+  usuario: { id: string | null; nome: string; email: string | null; papel: Papel };
+  conta: ContaResumo | null;
+  somente_leitura: boolean;
+  rotulos: Rotulos;
+}
+
+export interface Plano {
+  id: string;
+  nome: string;
+  duracao_dias: number;
+  ativo: boolean;
+  criado_em: string;
+}
+
+export interface Renovacao {
+  id: string;
+  plano_nome: string;
+  dias: number;
+  expira_em_anterior: string | null;
+  expira_em_nova: string;
+  feito_por: string | null;
+  criado_em: string;
+}
+
+export interface Conta extends ContaResumo {
+  documento: string | null;
+  email_contato: string | null;
+  telefone: string | null;
+  observacoes: string | null;
+  plano_id: string | null;
+  ativo: boolean;
+  criado_em: string;
+  total_clientes: number;
+  total_maquinas: number;
+  total_usuarios: number;
+}
+
+export interface ContaDetalhe extends Conta {
+  renovacoes: Renovacao[];
+}
+
+export interface Usuario {
+  id: string;
+  nome: string;
+  email: string;
+  papel: Papel;
+  ativo: boolean;
+  ultimo_login: string | null;
+  criado_em: string;
+}
+

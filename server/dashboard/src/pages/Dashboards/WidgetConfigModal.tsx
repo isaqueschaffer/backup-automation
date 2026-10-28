@@ -3,6 +3,7 @@ import Modal from "../../components/Modal";
 import TelemetriaConfigEditor from "./TelemetriaConfigEditor";
 import { OpcoesDashboard, WidgetInstancia } from "./types";
 import { CampoWidget, definicaoDe } from "./widgets/registry";
+import { useRotulos } from "../../contexts/AuthContext";
 
 interface Props {
   widget: WidgetInstancia;
@@ -18,6 +19,7 @@ export default function WidgetConfigModal({
   onSalvar,
   onClose,
 }: Props) {
+  const { singularMin } = useRotulos();
   const def = definicaoDe(widget.tipo);
   const rotulo = def?.rotulo || "Componente";
 
@@ -104,7 +106,7 @@ export default function WidgetConfigModal({
             )}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-            Nenhuma marcada = todas as máquinas do cliente.
+            Nenhuma marcada = todas as máquinas do {singularMin}.
           </div>
         </div>
       );
@@ -161,7 +163,7 @@ export default function WidgetConfigModal({
             {grupos.length === 0 ? (
               <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
                 {tiposFiltro
-                  ? "Nenhum equipamento deste tipo neste cliente."
+                  ? `Nenhum equipamento deste tipo neste ${singularMin}.`
                   : "Nenhum equipamento cadastrado."}
               </span>
             ) : (

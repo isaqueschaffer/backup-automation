@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, cast, Date, text, inspect
 
 from database import Base, engine, get_db, SessionLocal
-from models import Machine, Customer, Backup
+from models import Machine, Customer, Backup, Plano
 from schemas import StatsResponse
-from auth import verify_admin_token
+from auth import Contexto, get_contexto
+from services.escopo import filtrar_por_conta
 from config import settings
-from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -119,6 +120,68 @@ if not _tem_tabela('customer_dashboards'):
         );
     """, "criar tabela customer_dashboards")
 
+# Multi-contas: planos, contas (inquilinos), histórico de renovações e usuários do painel
+if not _tem_tabela('planos'):
+    _run_ddl("""
+        CREATE TABLE IF NOT EXISTS planos (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            nome VARCHAR(60) NOT NULL UNIQUE,
+            duracao_dias INTEGER NOT NULL CONSTRAINT ck_planos_duracao_positiva CHECK (duracao_dias > 0),
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            criado_em TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+        );
+    """, "criar tabela planos")
+
+if not _tem_tabela('contas'):
+    _run_ddl("""
+        CREATE TABLE IF NOT EXISTS contas (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            nome VARCHAR(255) NOT NULL,
+            tipo VARCHAR(20) NOT NULL CONSTRAINT ck_contas_tipo CHECK (tipo IN ('INTEGRADOR', 'CLIENTE_FINAL')),
+            documento VARCHAR(20),
+            email_contato VARCHAR(255),
+            telefone VARCHAR(30),
+            plano_id UUID REFERENCES planos(id) ON DELETE SET NULL,
+            expira_em TIMESTAMP WITHOUT TIME ZONE,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            avisos_enviados JSON NOT NULL DEFAULT '[]',
+            observacoes TEXT,
+            criado_em TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+        );
+    """, "criar tabela contas")
+
+if not _tem_tabela('conta_renovacoes'):
+    _run_ddl("""
+        CREATE TABLE IF NOT EXISTS conta_renovacoes (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            conta_id UUID NOT NULL REFERENCES contas(id) ON DELETE CASCADE,
+            plano_id UUID REFERENCES planos(id) ON DELETE SET NULL,
+            plano_nome VARCHAR(60) NOT NULL,
+            dias INTEGER NOT NULL,
+            expira_em_anterior TIMESTAMP WITHOUT TIME ZONE,
+            expira_em_nova TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+            feito_por VARCHAR(255),
+            criado_em TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+        );
+    """, "criar tabela conta_renovacoes")
+
+if not _tem_tabela('usuarios'):
+    _run_ddl("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            conta_id UUID REFERENCES contas(id) ON DELETE CASCADE,
+            nome VARCHAR(255) NOT NULL,
+            email VARCHAR(255) NOT NULL UNIQUE,
+            senha_hash VARCHAR(255) NOT NULL,
+            papel VARCHAR(20) NOT NULL CONSTRAINT ck_usuarios_papel CHECK (papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')),
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            token_versao INTEGER NOT NULL DEFAULT 1,
+            ultimo_login TIMESTAMP WITHOUT TIME ZONE,
+            criado_em TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+            CONSTRAINT ck_usuarios_super_admin_sem_conta CHECK ((papel = 'SUPER_ADMIN') = (conta_id IS NULL))
+        );
+    """, "criar tabela usuarios")
+
 # (tabela, coluna, DDL) — cada ALTER roda em transação separada
 _MIGRACOES_COLUNAS = [
     ("clients", "last_seen", "ALTER TABLE clients ADD COLUMN last_seen TIMESTAMP WITHOUT TIME ZONE;"),
@@ -145,6 +208,9 @@ _MIGRACOES_COLUNAS = [
     ("nvr_cameras", "password", "ALTER TABLE nvr_cameras ADD COLUMN password TEXT;"),
     ("nvr_cameras", "modelo", "ALTER TABLE nvr_cameras ADD COLUMN modelo VARCHAR(50);"),
     ("nvr_cameras", "canal_rtsp", "ALTER TABLE nvr_cameras ADD COLUMN canal_rtsp INTEGER;"),
+    # Multi-contas: conta dona do Cliente/Setor e da Máquina (nullable até a etapa 2b)
+    ("client_groups", "conta_id", "ALTER TABLE client_groups ADD COLUMN conta_id UUID REFERENCES contas(id) ON DELETE RESTRICT;"),
+    ("clients", "conta_id", "ALTER TABLE clients ADD COLUMN conta_id UUID REFERENCES contas(id) ON DELETE RESTRICT;"),
 ]
 
 _colunas_cache: dict = {}
@@ -184,8 +250,65 @@ def _popular_email_to_clientes() -> None:
 if ("client_groups", "email_to") in _colunas_criadas:
     _popular_email_to_clientes()
 
+# Índices das colunas de conta (o create_all só cria índices em tabelas novas)
+_INDICES = [
+    "CREATE INDEX IF NOT EXISTS ix_client_groups_conta_id ON client_groups (conta_id);",
+    "CREATE INDEX IF NOT EXISTS ix_clients_conta_id ON clients (conta_id);",
+    "CREATE INDEX IF NOT EXISTS ix_usuarios_conta_id ON usuarios (conta_id);",
+    "CREATE INDEX IF NOT EXISTS ix_conta_renovacoes_conta_id ON conta_renovacoes (conta_id);",
+]
+for _ddl in _INDICES:
+    _run_ddl(_ddl, _ddl.split(" ON ")[0])
+
+
+def _semear_multicontas() -> None:
+    """Idempotente, roda em todo startup: planos iniciais (só com a tabela vazia), conta da plataforma
+    e backfill de conta_id dos Clientes e Máquinas ainda sem conta (os criados pelo código antigo)."""
+    from services.contas import PLANOS_INICIAIS, garantir_conta_plataforma
+    try:
+        with SessionLocal() as db:
+            if db.query(Plano.id).first() is None:
+                for nome, dias in PLANOS_INICIAIS:
+                    db.add(Plano(nome=nome, duracao_dias=dias))
+                logger.info("Migração: planos iniciais criados")
+            conta_id = garantir_conta_plataforma(db)
+            clientes = db.execute(
+                text("UPDATE client_groups SET conta_id = :c WHERE conta_id IS NULL"), {"c": conta_id}
+            ).rowcount
+            # Máquina herda a conta do seu Cliente; sem Cliente, vai para a conta da plataforma
+            maquinas = db.execute(text(
+                "UPDATE clients SET conta_id = COALESCE("
+                "(SELECT g.conta_id FROM client_groups g WHERE g.id = clients.group_id), :c) "
+                "WHERE conta_id IS NULL"
+            ), {"c": conta_id}).rowcount
+            db.commit()
+            if clientes or maquinas:
+                logger.info("Migração: conta_id preenchido em %s clientes e %s máquinas", clientes, maquinas)
+    except Exception:
+        logger.exception("Falha na semente/backfill do multi-contas")
+
+
+_semear_multicontas()
+
+
+def _conta_id_obrigatorio() -> None:
+    """Depois do backfill, torna conta_id NOT NULL em client_groups e clients (idempotente)."""
+    for tabela in ("client_groups", "clients"):
+        try:
+            coluna = next((c for c in inspect(engine).get_columns(tabela) if c["name"] == "conta_id"), None)
+        except Exception:
+            logger.exception("Falha ao inspecionar %s.conta_id", tabela)
+            continue
+        if coluna is not None and coluna.get("nullable", False):
+            _run_ddl(f"ALTER TABLE {tabela} ALTER COLUMN conta_id SET NOT NULL;", f"{tabela}.conta_id NOT NULL")
+
+
+_conta_id_obrigatorio()
+
 openapi_tags = [
     {"name": "auth", "description": "Autenticação administrativa"},
+    {"name": "Contas", "description": "Contas (inquilinos), planos e super admins — só administrador da plataforma"},
+    {"name": "Conta", "description": "Minha conta: validade do plano e usuários"},
     {"name": "Clientes", "description": "Gestão de Clientes (empresas atendidas: máquinas vinculadas, fila de backup e download consolidado)"},
     {"name": "Máquinas", "description": "Gestão de Máquinas (computadores com o agente: configuração, status e chaves)"},
     {"name": "Equipamentos", "description": "Equipamentos vinculados às máquinas (NVR, OLT, ONU, PABX, etc.)"},
@@ -218,6 +341,8 @@ app.add_middleware(
 
 # ─── Routers ───────────────────────────────────────────────────────────────
 app.include_router(auth_router.router)
+app.include_router(contas_admin.router)  # Multi-contas (super admin): /api/v1/admin/contas, planos, super-admins
+app.include_router(conta.router)  # Multi-contas: /api/v1/conta (minha conta e usuários)
 app.include_router(customers.router)     # Clientes: /api/v1/clients
 app.include_router(machines.router)      # Máquinas: /api/v1/machines
 app.include_router(equipamentos.router)  # Equipamentos: /api/v1/machines/{machine_id}/equipamentos
@@ -271,22 +396,70 @@ async def _stop_run_closer() -> None:
         _run_closer_task.cancel()
 
 
+# ─── Tarefa de fundo: avisos de vencimento das Contas (multi-contas) ───────
+# A cada hora envia os e-mails de 7/3/1 dia e do vencimento (marcos em contas.avisos_enviados).
+# Mesma limitação de 1 worker uvicorn do laço acima; o marco gravado evita e-mail repetido.
+VENCIMENTOS_INTERVAL_SECONDS = 3600
+_vencimentos_task = None
+
+
+def _verificar_vencimentos_once() -> None:
+    from services.avisos_conta import verificar_vencimentos
+    with SessionLocal() as db:
+        verificar_vencimentos(db)
+
+
+async def _vencimentos_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(_verificar_vencimentos_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Falha na tarefa de avisos de vencimento das contas")
+        await asyncio.sleep(VENCIMENTOS_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_vencimentos() -> None:
+    global _vencimentos_task
+    _vencimentos_task = asyncio.create_task(_vencimentos_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_vencimentos() -> None:
+    if _vencimentos_task is not None:
+        _vencimentos_task.cancel()
+
+
 # ─── Stats endpoint ────────────────────────────────────────────────────────
-@app.get("/api/v1/stats", response_model=StatsResponse, dependencies=[Depends(verify_admin_token)])
-def get_stats(db: Session = Depends(get_db)):
+@app.get("/api/v1/stats", response_model=StatsResponse)
+def get_stats(db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     today = date.today()
     # Contagens agregadas em 3 queries
-    machines_total, machines_active = db.query(
+    q_machines = db.query(
         func.count(Machine.id),
         func.count(Machine.id).filter(Machine.active == True),
-    ).one()
-    customers_total = db.query(func.count(Customer.id)).scalar()
+    )
+    q_machines = filtrar_por_conta(q_machines, Machine.conta_id, ctx)
+    machines_total, machines_active = q_machines.one()
 
-    b_today, b_ok, b_err = db.query(
+    q_customers = db.query(func.count(Customer.id))
+    q_customers = filtrar_por_conta(q_customers, Customer.conta_id, ctx)
+    customers_total = q_customers.scalar()
+
+    q_backup = db.query(
         func.count(Backup.id),
         func.count(Backup.id).filter(Backup.status == "OK"),
         func.count(Backup.id).filter(Backup.status == "ERROR"),
-    ).filter(cast(Backup.started_at, Date) == today).one()
+    ).filter(cast(Backup.started_at, Date) == today)
+
+    if ctx.conta_id is not None:
+        q_backup = q_backup.filter(
+            Backup.machine_id.in_(filtrar_por_conta(db.query(Machine.id), Machine.conta_id, ctx))
+        )
+
+    b_today, b_ok, b_err = q_backup.one()
 
     return StatsResponse(
         machines_total=machines_total or 0,

@@ -8,9 +8,12 @@ import { apiErrorMessage } from "../../utils/errors";
 import { Plus, Trash2, Eye } from "lucide-react";
 import HealthBadge, { QueueBadge } from "./components/HealthBadge";
 import CustomerFormModal, { CustomerForm, emptyCustomerForm, parseEmailList } from "./components/CustomerFormModal";
+import { useRotulos, useSomenteLeitura } from "../../contexts/AuthContext";
 
 // Lista plana de Clientes: um clique abre o detalhe (/clientes/:id)
 export default function CustomersPage() {
+  const { singular, plural, singularMin, pluralMin } = useRotulos();
+  const somenteLeitura = useSomenteLeitura();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -22,9 +25,9 @@ export default function CustomersPage() {
   const load = useCallback(() =>
     fetchCustomers()
       .then((c) => { setCustomers(c); setLoadFailed(false); })
-      .catch(() => { setLoadFailed(true); toast("Erro ao carregar clientes.", "error"); })
+      .catch(() => { setLoadFailed(true); toast(`Erro ao carregar ${pluralMin}.`, "error"); })
       .finally(() => setLoading(false)),
-  [toast]);
+  [pluralMin, toast]);
 
   useEffect(() => {
     load();
@@ -48,56 +51,60 @@ export default function CustomersPage() {
         active: true,
         zip_password: form.password_mode === "custom" && form.zip_password?.trim() ? form.zip_password.trim() : undefined,
       });
-      toast("Cliente criado!", "success");
+      toast(`${singular} criado!`, "success");
       setShowCreate(false);
       navigate(`/clientes/${c.id}`);
-    } catch (e) { toast(apiErrorMessage(e, "Erro ao criar cliente."), "error"); }
+    } catch (e) { toast(apiErrorMessage(e, `Erro ao criar ${singularMin}.`), "error"); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async (c: Customer) => {
     const msg = c.machines_total > 0
-      ? `Excluir o cliente "${c.name}"?\nAs ${c.machines_total} máquina(s) dele continuam cadastradas, mas ficarão sem cliente.`
-      : `Excluir o cliente "${c.name}"?`;
+      ? `Excluir o ${singularMin} "${c.name}"?\nAs ${c.machines_total} máquina(s) dele continuam cadastradas, mas ficarão sem ${singularMin}.`
+      : `Excluir o ${singularMin} "${c.name}"?`;
     if (!confirm(msg)) return;
     try {
       await deleteCustomer(c.id);
-      toast("Cliente excluído.", "success");
+      toast(`${singular} excluído.`, "success");
       load();
-    } catch (e) { toast(apiErrorMessage(e, "Erro ao excluir cliente."), "error"); }
+    } catch (e) { toast(apiErrorMessage(e, `Erro ao excluir ${singularMin}.`), "error"); }
   };
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Clientes</h1>
-          <p className="page-subtitle">{customers.length} cliente(s) cadastrado(s)</p>
+          <h1 className="page-title">{plural}</h1>
+          <p className="page-subtitle">{customers.length} {singularMin}(s) cadastrado(s)</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={15} /> Novo Cliente
-        </button>
+        {!somenteLeitura && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+            <Plus size={15} /> Novo {singular}
+          </button>
+        )}
       </div>
 
       {loading ? (
         <div className="loading-state"><div className="spinner" /></div>
       ) : loadFailed && customers.length === 0 ? (
         <div className="empty-state">
-          <div>Não foi possível carregar os clientes.</div>
+          <div>Não foi possível carregar os {pluralMin}.</div>
           <button className="btn btn-secondary mt-2" onClick={() => { setLoading(true); load(); }}>Tentar novamente</button>
         </div>
       ) : customers.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">🏢</div>
-          <div>Nenhum cliente cadastrado.</div>
-          <button className="btn btn-primary mt-2" onClick={() => setShowCreate(true)}>Cadastrar agora</button>
+          <div>Nenhum {singularMin} cadastrado.</div>
+          {!somenteLeitura && (
+            <button className="btn btn-primary mt-2" onClick={() => setShowCreate(true)}>Cadastrar agora</button>
+          )}
         </div>
       ) : (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Cliente</th>
+                <th>{singular}</th>
                 <th>Saúde</th>
                 <th>Máquinas online</th>
                 <th>Horário diário</th>
@@ -125,12 +132,14 @@ export default function CustomersPage() {
                   <td className="text-secondary text-sm">{fmtDate(c.last_backup_at)}</td>
                   <td onClick={e => e.stopPropagation()}>
                     <div className="flex gap-2">
-                      <button className="btn-icon" title="Abrir cliente" onClick={() => navigate(`/clientes/${c.id}`)}>
+                      <button className="btn-icon" title={`Abrir ${singularMin}`} onClick={() => navigate(`/clientes/${c.id}`)}>
                         <Eye size={14} />
                       </button>
-                      <button className="btn-icon" title="Excluir cliente" style={{ color: "var(--err)" }} onClick={() => handleDelete(c)}>
-                        <Trash2 size={14} />
-                      </button>
+                      {!somenteLeitura && (
+                        <button className="btn-icon" title={`Excluir ${singularMin}`} style={{ color: "var(--err)" }} onClick={() => handleDelete(c)}>
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -142,7 +151,7 @@ export default function CustomersPage() {
 
       {showCreate && (
         <CustomerFormModal
-          title="Novo Cliente"
+          title={`Novo ${singular}`}
           initial={emptyCustomerForm()}
           saving={saving}
           onSave={handleCreate}

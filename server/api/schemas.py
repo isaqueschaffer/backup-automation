@@ -5,6 +5,9 @@ from uuid import UUID
 import re
 from pydantic import BaseModel, Field, field_validator
 
+from services.contas import TIPOS_CONTA
+from services.senhas import validar_senha_nova
+
 
 # ─────────────────────────────────────────────
 # Equipamento (antes chamado NVR)
@@ -310,6 +313,7 @@ class PingRequest(BaseModel):
 # Auth
 # ─────────────────────────────────────────────
 class LoginRequest(BaseModel):
+    email: Optional[str] = None
     password: str
 
 
@@ -588,3 +592,387 @@ class RTSPTestResponse(BaseModel):
     # Agente >= 1.1.6: horário exibido no NVR do frame da gravação e origem ("ao_vivo" | "gravacao")
     horario: Optional[str] = None
     origem: Optional[str] = None
+
+
+# ─────────────────────────────────────────────
+# Multi-contas
+# ─────────────────────────────────────────────
+_EMAIL_USUARIO_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validar_email_usuario(v: Optional[str], obrigatorio: bool = True) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("E-mail inválido.")
+        return None
+    s = v.strip().lower()
+    if not s:
+        if obrigatorio:
+            raise ValueError("E-mail inválido.")
+        return None
+    if len(s) > 255 or not _EMAIL_USUARIO_RE.match(s):
+        raise ValueError("E-mail inválido.")
+    return s
+
+
+def _validar_senha_schema(v: Optional[str], obrigatorio: bool = True) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("A senha é obrigatória.")
+        return None
+    validar_senha_nova(v)
+    return v
+
+
+def _validar_documento(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    digitos = "".join(c for c in str(v) if c.isdigit())
+    if not digitos:
+        return None
+    if len(digitos) not in (11, 14):
+        raise ValueError("CPF/CNPJ inválido.")
+    return digitos
+
+
+def _validar_nome(v: Optional[str], obrigatorio: bool = True, max_len: int = 255) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("Nome é obrigatório.")
+        return None
+    s = v.strip()
+    if not s:
+        if obrigatorio:
+            raise ValueError("Nome não pode ser vazio.")
+        return None
+    if len(s) > max_len:
+        raise ValueError(f"Nome pode ter no máximo {max_len} caracteres.")
+    return s
+
+
+def _validar_tipo_conta(v: Optional[str], obrigatorio: bool = True) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("Tipo de conta é obrigatório.")
+        return None
+    s = v.strip().upper()
+    if s not in TIPOS_CONTA:
+        raise ValueError(f"Tipo de conta inválido. Opções: {', '.join(TIPOS_CONTA)}.")
+    return s
+
+
+def _validar_papel_usuario(v: Optional[str], obrigatorio: bool = True) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("Papel é obrigatório.")
+        return None
+    s = v.strip().upper()
+    if s not in ("ADMIN", "LEITURA"):
+        raise ValueError("Papel inválido. Deve ser ADMIN ou LEITURA.")
+    return s
+
+
+class TrocarSenhaRequest(BaseModel):
+    senha_atual: str
+    senha_nova: str
+
+    @field_validator("senha_nova")
+    @classmethod
+    def _check_senha_nova(cls, v: str) -> str:
+        return _validar_senha_schema(v, obrigatorio=True)
+
+
+class UsuarioMe(BaseModel):
+    id: Optional[UUID] = None
+    nome: str
+    email: Optional[str] = None
+    papel: str
+
+    model_config = {"from_attributes": True}
+
+
+class ContaResumo(BaseModel):
+    id: UUID
+    nome: str
+    tipo: str
+    plano_nome: Optional[str] = None
+    expira_em: Optional[datetime] = None
+    dias_restantes: Optional[int] = None
+    status: str
+    bloqueada: bool
+    plataforma: bool
+
+    model_config = {"from_attributes": True}
+
+
+class Rotulos(BaseModel):
+    grupo_singular: str
+    grupo_plural: str
+
+
+class MeResponse(BaseModel):
+    usuario: UsuarioMe
+    conta: Optional[ContaResumo] = None
+    somente_leitura: bool
+    rotulos: Rotulos
+
+
+class PlanoCreate(BaseModel):
+    nome: str
+    duracao_dias: int = Field(..., ge=1, le=3650)
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=60)
+
+
+class PlanoUpdate(BaseModel):
+    nome: Optional[str] = None
+    duracao_dias: Optional[int] = Field(None, ge=1, le=3650)
+    ativo: Optional[bool] = None
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_nome(v, obrigatorio=False, max_len=60)
+
+
+class PlanoResponse(BaseModel):
+    id: UUID
+    nome: str
+    duracao_dias: int
+    ativo: bool
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UsuarioCreate(BaseModel):
+    nome: str
+    email: str
+    senha: str
+    papel: str
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=255)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _validar_email_usuario(v, obrigatorio=True)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: str) -> str:
+        return _validar_senha_schema(v, obrigatorio=True)
+
+    @field_validator("papel")
+    @classmethod
+    def _check_papel(cls, v: str) -> str:
+        return _validar_papel_usuario(v, obrigatorio=True)
+
+
+class UsuarioUpdate(BaseModel):
+    nome: Optional[str] = None
+    papel: Optional[str] = None
+    ativo: Optional[bool] = None
+    senha: Optional[str] = None
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_nome(v, obrigatorio=False, max_len=255)
+
+    @field_validator("papel")
+    @classmethod
+    def _check_papel(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_papel_usuario(v, obrigatorio=False)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_senha_schema(v, obrigatorio=False)
+
+
+class UsuarioResponse(BaseModel):
+    id: UUID
+    nome: str
+    email: str
+    papel: str
+    ativo: bool
+    ultimo_login: Optional[datetime] = None
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SuperAdminCreate(BaseModel):
+    nome: str
+    email: str
+    senha: str
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=255)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _validar_email_usuario(v, obrigatorio=True)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: str) -> str:
+        return _validar_senha_schema(v, obrigatorio=True)
+
+
+class SuperAdminUpdate(BaseModel):
+    nome: Optional[str] = None
+    ativo: Optional[bool] = None
+    senha: Optional[str] = None
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_nome(v, obrigatorio=False, max_len=255)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_senha_schema(v, obrigatorio=False)
+
+
+class AdminInicial(BaseModel):
+    nome: str
+    email: str
+    senha: str
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=255)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _validar_email_usuario(v, obrigatorio=True)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: str) -> str:
+        return _validar_senha_schema(v, obrigatorio=True)
+
+
+class ContaCreate(BaseModel):
+    nome: str
+    tipo: str
+    documento: Optional[str] = None
+    email_contato: Optional[str] = None
+    telefone: Optional[str] = None
+    observacoes: Optional[str] = None
+    plano_id: UUID
+    admin: AdminInicial
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=255)
+
+    @field_validator("tipo")
+    @classmethod
+    def _check_tipo(cls, v: str) -> str:
+        return _validar_tipo_conta(v, obrigatorio=True)
+
+    @field_validator("documento")
+    @classmethod
+    def _check_documento(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_documento(v)
+
+    @field_validator("email_contato")
+    @classmethod
+    def _check_email_contato(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_email_usuario(v, obrigatorio=False)
+
+
+class ContaUpdate(BaseModel):
+    nome: Optional[str] = None
+    tipo: Optional[str] = None
+    documento: Optional[str] = None
+    email_contato: Optional[str] = None
+    telefone: Optional[str] = None
+    observacoes: Optional[str] = None
+    expira_em: Optional[datetime] = None
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_nome(v, obrigatorio=False, max_len=255)
+
+    @field_validator("tipo")
+    @classmethod
+    def _check_tipo(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_tipo_conta(v, obrigatorio=False)
+
+    @field_validator("documento")
+    @classmethod
+    def _check_documento(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_documento(v)
+
+    @field_validator("email_contato")
+    @classmethod
+    def _check_email_contato(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_email_usuario(v, obrigatorio=False)
+
+    @field_validator("expira_em")
+    @classmethod
+    def _check_expira_em(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None and v.tzinfo is not None:
+            from datetime import timezone
+            return v.astimezone(timezone.utc).replace(tzinfo=None)
+        return v
+
+
+class RenovarRequest(BaseModel):
+    plano_id: UUID
+
+
+class MoverContaRequest(BaseModel):
+    conta_id: UUID
+
+
+class RenovacaoResponse(BaseModel):
+    id: UUID
+    plano_nome: str
+    dias: int
+    expira_em_anterior: Optional[datetime] = None
+    expira_em_nova: datetime
+    feito_por: Optional[str] = None
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ContaResponse(ContaResumo):
+    documento: Optional[str] = None
+    email_contato: Optional[str] = None
+    telefone: Optional[str] = None
+    observacoes: Optional[str] = None
+    plano_id: Optional[UUID] = None
+    ativo: bool = True
+    criado_em: datetime
+    total_clientes: int = 0
+    total_maquinas: int = 0
+    total_usuarios: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class ContaDetalheResponse(ContaResponse):
+    renovacoes: List[RenovacaoResponse] = []
+
+    model_config = {"from_attributes": True}
+

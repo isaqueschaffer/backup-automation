@@ -34,7 +34,7 @@
 
 **Nome:** Trilan NVR Backup Automation
 **Propósito:** Sistema de backup automatizado de configurações de equipamentos de rede instalados em clientes (NVRs, DVRs, OLTs, PABXs, Mikrotiks, etc.).
-**Modelo:** SaaS multi-tenant — um servidor central recebe dados de múltiplos agentes Windows instalados nos clientes.
+**Modelo:** SaaS multi-tenant — um servidor central recebe dados de múltiplos agentes Windows instalados nos clientes. Desde 27/10/2026 com **multi-contas** (ADR-009): Integradores (Clientes → Máquinas) e Clientes finais (Setores → Máquinas), cada conta com plano e validade, isoladas entre si (REGRA-010).
 
 ### Componentes Principais
 
@@ -238,6 +238,7 @@ trilan-nvr-backup-automation/
 | telemetry | JSON | dict | NULL | — (CPU/RAM/disco/rede/GPU enviados no ping) |
 | group_id | UUID | uuid.UUID (ORM: `customer_id`) | NULL | — (FK `client_groups.id` ON DELETE SET NULL; Cliente da máquina) |
 | queue_order | INTEGER | int | NOT NULL | 0 (posição na fila de backup do Cliente) |
+| conta_id | UUID | uuid.UUID | NULL | — (FK `contas.id` ON DELETE RESTRICT; conta dona; preenchida no startup) |
 
 #### `client_groups` (Clientes — empresas atendidas; model `Customer`, ADR-007)
 
@@ -253,6 +254,7 @@ trilan-nvr-backup-automation/
 | email_to | ARRAY(VARCHAR) | List[str] | NOT NULL | [] (destinatários do e-mail único por rodada) |
 | zip_password | TEXT | str | NULL | — (Fernet; NULL = ZIP do Cliente sem senha) |
 | created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+| conta_id | UUID | uuid.UUID | NULL | — (FK `contas.id` ON DELETE RESTRICT; conta dona do Cliente/Setor) |
 
 #### `nvrs` (tabela de equipamentos — nome mantido por compatibilidade)
 
@@ -382,6 +384,62 @@ A tabela nasce por `Base.metadata.create_all` (`main.py`), sem migração inline
 | share_created_at / last_viewed_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
 | created_at / updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
 
+#### `planos`
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
+| nome | VARCHAR(60) | str | NOT NULL UNIQUE | — |
+| duracao_dias | INTEGER | int | NOT NULL | — (CheckConstraint: `duracao_dias > 0`) |
+| ativo | BOOLEAN | bool | NOT NULL | TRUE |
+| criado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
+#### `contas` (inquilinos — model `Conta`)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
+| nome | VARCHAR(255) | str | NOT NULL | — |
+| tipo | VARCHAR(20) | str | NOT NULL | — (CheckConstraint: `tipo IN ('INTEGRADOR', 'CLIENTE_FINAL')`) |
+| documento | VARCHAR(20) | str | NULL | — (CNPJ/CPF, só dígitos) |
+| email_contato | VARCHAR(255) | str | NULL | — |
+| telefone | VARCHAR(30) | str | NULL | — |
+| plano_id | UUID | uuid.UUID | NULL | — (FK `planos.id` ON DELETE SET NULL) |
+| expira_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — (UTC; NULL = sem validade) |
+| ativo | BOOLEAN | bool | NOT NULL | TRUE (False = suspensa pela Trilan) |
+| avisos_enviados | JSON | list | NOT NULL | [] (marcos de e-mail já enviados; zera ao renovar) |
+| observacoes | TEXT | str | NULL | — |
+| criado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
+#### `conta_renovacoes`
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
+| conta_id | UUID | uuid.UUID | NOT NULL | — (FK `contas.id` ON DELETE CASCADE) |
+| plano_id | UUID | uuid.UUID | NULL | — (FK `planos.id` ON DELETE SET NULL) |
+| plano_nome | VARCHAR(60) | str | NOT NULL | — (cópia imutável do nome do plano) |
+| dias | INTEGER | int | NOT NULL | — (dias adicionados/redefinidos) |
+| expira_em_anterior | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
+| expira_em_nova | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | — |
+| feito_por | VARCHAR(255) | str | NULL | — (e-mail do usuário ou "admin") |
+| criado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
+#### `usuarios` (usuários do painel)
+
+| Coluna | Tipo SQL | Tipo Python | Nullable | Padrao |
+|---|---|---|---|---|
+| id | UUID | uuid.UUID | NOT NULL | gen_random_uuid() |
+| conta_id | UUID | uuid.UUID | NULL | — (FK `contas.id` ON DELETE CASCADE; NULL ⇔ SUPER_ADMIN) |
+| nome | VARCHAR(255) | str | NOT NULL | — |
+| email | VARCHAR(255) | str | NOT NULL UNIQUE | — (sempre minúsculo) |
+| senha_hash | VARCHAR(255) | str | NOT NULL | — (bcrypt) |
+| papel | VARCHAR(20) | str | NOT NULL | — (CheckConstraint: `papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')`) |
+| ativo | BOOLEAN | bool | NOT NULL | TRUE |
+| token_versao | INTEGER | int | NOT NULL | 1 (incrementa ao trocar senha/papel) |
+| ultimo_login | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
+| criado_em | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | utcnow() |
+
 ### Estratégia de Migração
 
 > **O projeto NAO usa Alembic.**
@@ -447,8 +505,10 @@ datetime.utcnow()            # naive em UTC — compativel com o banco
 
 **Admin Dashboard:** JWT Bearer Token
 - Header: `Authorization: Bearer <token>`
-- Gerado via `POST /api/v1/auth/login` com `ADMIN_PASSWORD`
+- Gerado via `POST /api/v1/auth/login`: com `{email, password}` para usuário (`usuarios`, senha bcrypt) → JWT `{sub: <uuid do usuário>, tv: <token_versao>}`; com só `{password}` (`ADMIN_PASSWORD` ou `settings.admin_password_hash`) → administrador da plataforma legado, JWT `{sub: "admin"}` (usado pelo `agent/publish_version.ps1`; não remover)
 - Expira em `ACCESS_TOKEN_EXPIRE_HOURS` (padrao 8h), algoritmo `HS256`
+- Cada requisição recarrega o usuário (`get_contexto`, `auth.py`): inativo ou `tv` diferente de `token_versao` → 401 (trocar senha, papel ou desativar derruba os tokens já emitidos)
+- Papéis: `SUPER_ADMIN` (plataforma, sem conta; escolhe a conta pelo header `X-Conta-ID`, sem ele vê todas), `ADMIN` e `LEITURA` (de uma conta; `X-Conta-ID` é ignorado). Isolamento por conta: REGRA-010
 
 **Agente Windows:** API Key + Client ID
 - Headers: `X-Client-ID: <uuid>` + `X-API-Key: sk_trilan_<token>`
@@ -518,17 +578,41 @@ Comparacao de versoes usa `tuple(int(x) for x in v.split("."))`.
 
 ---
 
+### REGRA-010 — Isolamento por Conta (multi-contas)
+
+**Decisao:** toda rota do painel enxerga só a conta de quem chama (ADR-009).
+
+**Como fazer (rota nova ou alterada):**
+- Receber `ctx: Contexto = Depends(get_contexto)` (`auth.py`). Rota só da plataforma: `Depends(exigir_super_admin)`; gestão de usuários da conta: `Depends(exigir_admin_conta)`.
+- Buscar Cliente/Setor e Máquina por `obter_cliente(db, ctx, id)` e `obter_maquina(db, ctx, id)`; listas com `filtrar_por_conta(consulta, Model.conta_id, ctx)` (`services/escopo.py`). Equipamento, backup, rodada e dashboard chegam pela máquina ou pelo Cliente já validados.
+- Recurso de outra conta = **404** com a mesma mensagem de "não encontrado" (nunca 403, para não revelar que existe).
+- Todo `Customer(...)` e `Machine(...)` novo recebe `conta_id` (`conta_para_criacao(db, ctx)`, ou a conta do Cliente da máquina). Máquina e Cliente vinculados são sempre da mesma conta (409 se não forem).
+- O bloqueio de escrita (conta vencida/suspensa ou usuário LEITURA → 403 em POST/PUT/PATCH/DELETE) já acontece dentro do `get_contexto`: não repetir nas rotas.
+- Rotas do agente continuam com `get_current_machine` (REGRA-003); a conta bloqueada é tratada por `maquina_bloqueada(machine)` (`services/contas.py`).
+
+**NAO FAZER:** `db.query(Customer|Machine|Backup|NVR)` sem filtro de conta em rota do painel; usar `verify_admin_token` em rota nova de dados de conta (ele aceita só o super admin e existe por compatibilidade).
+
+**Verificacao:** `server/api/tests/test_isolamento_contas.py` (Postgres local, `TRILAN_TESTE_ISOLAMENTO=1`). Acrescentar um caso a ele ao criar rota que exponha dados de conta.
+
+---
+
 ## 7. Autenticação e Segurança
 
 ### Fluxo JWT (Admin)
 
 ```
-POST /api/v1/auth/login { "password": "..." }
+POST /api/v1/auth/login { "email": "...", "password": "..." }   # usuário de conta ou super admin nomeado
+POST /api/v1/auth/login { "password": "..." }                   # administrador da plataforma (senha única)
     -> 200 { "access_token": "...", "token_type": "bearer" }
+    -> 401 "E-mail ou senha incorretos" | 429 depois de 10 erros por IP em 5 min
 
 Requisicoes protegidas:
     Authorization: Bearer <access_token>
+    X-Conta-ID: <uuid>      # opcional, só o super admin: conta em uso
+GET /api/v1/auth/me -> { usuario, conta (status, validade, dias_restantes), somente_leitura, rotulos }
 ```
+
+Senhas de usuários: bcrypt (`services/senhas.py`, `bcrypt==4.2.1` direto, sem `passlib`), de 10 a 72 bytes. Conta vencida pode entrar (fica somente leitura). Validade da conta e avisos: ADR-009.
 
 ### Fluxo API Key (Agente)
 
@@ -572,9 +656,21 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 
 ### Endpoints de Admin (Bearer Token)
 
+Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashboards, backups, `/stats`) são isoladas pela conta do usuário (REGRA-010); as marcadas **(plataforma)** aceitam só o super admin.
+
 | Metodo | Path | Descricao |
 |---|---|---|
-| POST | `/api/v1/auth/login` | Login — retorna JWT |
+| POST | `/api/v1/auth/login` | Login — retorna JWT (`{email, password}` ou só `{password}` para o administrador da plataforma) |
+| GET | `/api/v1/auth/me` | Usuário, conta (status, validade), `somente_leitura` e rótulos ("Cliente" ou "Setor") |
+| POST | `/api/v1/auth/trocar-senha` | Troca a própria senha (devolve token novo; vale com a conta bloqueada) |
+| GET | `/api/v1/conta` | Minha conta: plano, validade e histórico de renovações |
+| GET/POST/PUT | `/api/v1/conta/usuarios` · `/{id}` | Usuários da conta (só ADMIN da conta ou super admin com `X-Conta-ID`; 409 ao tirar o último ADMIN ativo) |
+| GET/POST/PUT | `/api/v1/admin/planos` · `/{id}` | **(plataforma)** Planos (nome + dias); sem DELETE, desativar com `ativo=false` |
+| GET/POST | `/api/v1/admin/contas` | **(plataforma)** Listar contas (com status e totais) / criar conta com o primeiro ADMIN (validade = hoje + dias do plano) |
+| GET/PUT | `/api/v1/admin/contas/{id}` | **(plataforma)** Detalhe com histórico / editar dados e ajustar `expira_em` à mão |
+| POST | `/api/v1/admin/contas/{id}/renovar` · `/suspender` · `/reativar` | **(plataforma)** Renovar (maior entre agora e a validade atual + dias do plano) / suspender / reativar; 409 na conta da plataforma |
+| POST | `/api/v1/admin/clientes/{id}/mover-conta` | **(plataforma)** Move o Cliente/Setor e as máquinas dele para outra conta (409 com fila ativa) |
+| GET/POST/PUT | `/api/v1/admin/super-admins` · `/{id}` | **(plataforma)** Administradores da plataforma com e-mail e senha |
 | GET/POST | `/api/v1/machines` | Listar (filtros `customer_id`, `unassigned`) / criar máquina (`customer_id` opcional) |
 | GET/PUT/DELETE | `/api/v1/machines/{id}` | Detalhar/atualizar/deletar máquina |
 | POST | `/api/v1/machines/{id}/rotate-key` | Rotacionar API key |
@@ -612,15 +708,15 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | GET | `/api/v1/backups/public-download/{id}` | Download público por link de e-mail (sem auth; ver riscos abertos) |
 | GET | `/api/v1/backups/public-run-download/{run_id}` | ZIP unificado da rodada pelo link do e-mail do Cliente (mesmo modelo do public-download) |
 | POST | `/api/v1/backups/{id}/resend-email` | Reenviar e-mail do backup |
-| GET/PUT | `/api/v1/settings` | Configuracoes do sistema |
-| POST | `/api/v1/admin/storage/reorganizar` | Move as pastas de backup para a estrutura Cliente > Maquina (admin; `aplicar=false` so simula, `true` executa; caminhos relativos ao armazenamento) |
+| GET/PUT | `/api/v1/settings` | **(plataforma)** Configuracoes do sistema |
+| POST | `/api/v1/admin/storage/reorganizar` | **(plataforma)** Move as pastas de backup para a estrutura Cliente > Maquina (admin; `aplicar=false` so simula, `true` executa; caminhos relativos ao armazenamento) |
 | POST | `/api/v1/admin/agent-version` | Registrar nova versao OTA (JWT do admin ou `X-Publish-Token`; ver REGRA-003) |
 | GET | `/api/v1/admin/agent-version` | Listar versoes OTA |
 | PUT | `/api/v1/admin/agent-version/{id}/toggle` | Ativar/desativar versao |
 | PUT | `/api/v1/admin/agent-version/{id}` | Editar versao |
 | DELETE | `/api/v1/admin/agent-version/{id}` | Deletar versao |
 | GET | `/api/v1/stats` | Estatisticas do dashboard |
-| GET/POST/PUT/DELETE | `/api/v1/clients/{machine_id}/nvrs` · `/{nvr_id}` | **Legado** (`routers/nvrs.py`): ativo e com JWT, oculto do OpenAPI/Swagger (`include_in_schema=False`) e sem chamador no painel nem no agente. Aqui `{machine_id}` é o id da **Máquina**, embora o prefixo seja `/clients` (ADR-007); não colide com nenhuma rota do Cliente |
+| GET/POST/PUT/DELETE | `/api/v1/clients/{machine_id}/nvrs` · `/{nvr_id}` | **Legado** (`routers/nvrs.py`): ativo e com JWT **(plataforma)**, oculto do OpenAPI/Swagger (`include_in_schema=False`) e sem chamador no painel nem no agente. Aqui `{machine_id}` é o id da **Máquina**, embora o prefixo seja `/clients` (ADR-007); não colide com nenhuma rota do Cliente |
 | GET | `/api/health` | Health check |
 
 ### Contrato do Response `GET /api/v1/agent/update-check`
@@ -924,6 +1020,24 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ---
 
+### ADR-009 — Multi-contas: Integrador e Cliente final, com plano e validade
+
+**Data:** 27/10/2026 | **Status:** VIGENTE
+
+**Decisao:** o sistema atende várias **Contas** (tabela `contas`, inquilinos) de dois tipos: **Integrador** (tem Clientes, e cada Cliente tem Máquinas) e **Cliente final** (organiza as Máquinas em **Setores**). Setor e Cliente são a mesma tabela `client_groups` (fila, rodadas, e-mail único, dashboard e armazenamento iguais); só o rótulo muda no painel (`/auth/me` → `rotulos`). Hierarquia: Conta → Cliente/Setor → Máquina → Equipamento; `client_groups.conta_id` e `clients.conta_id` são NOT NULL (RESTRICT).
+
+**Validade:** toda conta tem um plano (`planos`: nome + dias) e `expira_em` (UTC naive). A renovação é manual pela Trilan (super admin): nova validade = maior entre agora e a validade atual + dias do plano; cada renovação ou ajuste manual fica em `conta_renovacoes`. Status (`services/contas.py`): OK, AVISO (≤ 15 dias, faixa amarela no painel), CRITICO (≤ 3 dias, vermelha), VENCIDA, SUSPENSA (desativada pela Trilan) e VITALICIA (`expira_em` nulo, só a conta da plataforma). E-mail ao contato e aos ADMIN da conta a 7, 3 e 1 dia e no vencimento (`services/avisos_conta.py`, de hora em hora).
+
+**Conta vencida ou suspensa (bloqueio imediato, decisão do dono):** painel somente leitura (403 em escrita), `/agent/config` sem equipamentos (o agente encerra o backup sem erro de rede), ping sem backup nem recuperação, `report`/upload 403 e link público do dashboard 404. Nada é apagado; ao renovar volta tudo na hora. O agente instalado não precisa de versão nova.
+
+**Conta da plataforma:** "Trilan" (INTEGRADOR, sem validade; id em `settings.conta_plataforma_id`) recebeu todos os dados anteriores. O super admin sem conta escolhida vê todas as contas e cria Cliente/Máquina nela; não pode ser suspensa nem ganhar validade.
+
+**Fora do escopo (27/10/2026):** cobrança automática, limite de máquinas por plano, login para os clientes do integrador, exclusão de conta (só suspender) e RLS no Postgres (o isolamento é na aplicação, REGRA-010).
+
+**Motivo:** vender o sistema a integradores e a clientes finais com prazo de uso, sem mexer no agente instalado e reaproveitando toda a lógica de Cliente.
+
+---
+
 ## 15. Incompatibilidades Conhecidas
 
 | ID | Componente | Incompatibilidade | Status |
@@ -948,6 +1062,76 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-27] — Multi-contas (etapa 5): telas de Contas, Planos e Minha conta
+
+**Alteração:** super admin ganha a tela "Contas" (`/contas`: lista com busca e filtros por situação e tipo, resumo, criação da conta com o primeiro administrador, modal de Planos e seção de administradores da plataforma) e o detalhe da conta (`/contas/:id`: renovar com prévia da nova validade, ajustar a validade à mão até o fim do dia escolhido em Brasília, suspender/reativar, usuários da conta e histórico de validade, "Entrar na conta"). Todos os usuários têm "Minha conta" (`/minha-conta`: plano, validade, histórico, usuários para o ADMIN e troca da própria senha). No detalhe do Cliente/Setor, o super admin pode movê-lo (com as máquinas) para outra conta. Menu: "Minha conta" para todos e seção "Plataforma" (Contas, Configurações) para o super admin. Revisão: o campo de validade passou a mostrar o dia local (`diaLocalDaValidade`), igual ao cartão; antes usava o dia em UTC e podia aparecer um dia depois. Validado no ambiente local: tsc, `vite build` e 23 verificações de ponta a ponta pela API (criar conta, renovar 30 + 365 = 395 dias, login do cliente com "Setores", usuário LEITURA, último admin protegido, suspender/reativar, ajuste para data passada = VENCIDA, conta da plataforma protegida).
+**Arquivos:** server/dashboard/src/{App.tsx,components/Sidebar.tsx,pages/Contas/{ContasPage,ContaDetalhePage,ContaFormModal,PlanosModal,UsuariosSection,HistoricoValidade,contaUi}.tsx,pages/MinhaConta.tsx,pages/Customers/CustomerDetail/index.tsx,pages/Customers/CustomerDetail/components/CustomerHeader.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-27] — Multi-contas (etapa 6): documentação, regra de isolamento e skills
+
+**Alteração:** ADR-009 (multi-contas: tipos de conta, validade, bloqueio da conta vencida, conta da plataforma, fora do escopo), REGRA-010 (isolamento por conta nas rotas do painel), REGRA-003 atualizada (login por usuário com bcrypt e papéis; senha única do administrador da plataforma mantida), seção 7 (fluxo de login e `X-Conta-ID`) e seção 8 (rotas novas; rotas só da plataforma marcadas). Skills e subagentes do Claude e do Gemini passam a ensinar `get_contexto` + `services/escopo.py` no lugar de `verify_admin_token` (`criar-endpoint-fastapi` nas duas cópias, `revisao-de-codigo`, `seguranca-e-endurecimento`, `revisor`, `backend-fastapi`); o revisor trata violação da REGRA-010 como crítica. CLAUDE.md: checagem de isolamento no merge de ramos de colaboradores.
+**Arquivos:** PROJECT_SPEC.md, CLAUDE.md, .claude/skills/criar-endpoint-fastapi/SKILL.md, .agents/skills/{criar-endpoint-fastapi,revisao-de-codigo,seguranca-e-endurecimento}/SKILL.md, .agents/agents/{revisor,backend-fastapi}/agent.md
+**Breaking Change:** Não (só documentação e instruções).
+**Branch:** isaque
+
+### [2026-10-27] — Multi-contas (etapa 4b): rótulo Cliente/Setor nas telas e modo somente leitura
+
+**Alteração:** as telas de Clientes, Máquinas, Backups, Visão Geral e Dashboard usam o rótulo da conta (`useRotulos`): "Setor/Setores" na conta de cliente final e "Cliente/Clientes" no integrador e no super admin sem conta escolhida (rotas, nomes de campos e o dashboard público não mudam). Com conta vencida/suspensa ou usuário LEITURA (`useSomenteLeitura`), ficam ocultos: criar/excluir Cliente/Setor e Máquina, editar, backup em fila, parar fila, adicionar/remover máquina da fila e arrastar a ordem, editar máquina, girar chave, gerar backup, reiniciar agente, adicionar/editar/pausar/remover equipamento, editar o dashboard e o compartilhamento. Downloads, galeria, gravações, telemetria e consultas continuam. O servidor já recusa a escrita com 403. No compartilhamento do dashboard, "o cliente" virou "quem recebe o link".
+**Arquivos:** server/dashboard/src/pages/{Customers/CustomersPage.tsx,Customers/components/CustomerFormModal.tsx,Customers/CustomerDetail/index.tsx,Customers/CustomerDetail/components/{AddMachineModal,CustomerHeader,CustomerRuns,QueueSection}.tsx,Machines/MachinesPage.tsx,Machines/components/NewMachineModal.tsx,Machines/MachineDetail/index.tsx,Machines/MachineDetail/components/{EditMachineModal,EqCard,MachineHeader,MachineInfoCards}.tsx,Backups.tsx,Overview/{index,MachineHealthCard}.tsx,Dashboards/{DashboardAdminPage,WidgetConfigModal,SharePanel}.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-27] — Multi-contas (etapa 4a): painel com login por e-mail, faixa de vencimento e seletor de conta
+
+**Alteração:** login por e-mail e senha (o administrador da plataforma entra pelo botão "Entrar como administrador da plataforma", só com a senha). O painel carrega `GET /auth/me` (recarrega a cada 10 min e ao voltar à aba) e mostra no topo a faixa da validade (amarela a partir de 15 dias, vermelha a partir de 3 dias, vermelha fixa quando vencida/suspensa com aviso de somente leitura) e, para usuário LEITURA, "Seu acesso é somente leitura". O super admin escolhe a conta no menu lateral (enviada em `X-Conta-ID`, guardada em `localStorage`; uma requisição que já traga o header não é sobrescrita); "Configurações" só aparece para ele. O item do menu vira "Setores" em conta de cliente final.
+**Arquivos:** server/dashboard/src/{App.tsx,api/types.ts,api/client.ts,api/contas.ts,contexts/AuthContext.tsx,utils/date.ts,pages/Login.tsx,components/AvisoConta.tsx,components/Layout.tsx,components/Sidebar.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não (a tela de login muda: a senha única fica no botão "Entrar como administrador da plataforma").
+**Branch:** isaque
+
+### [2026-10-27] — Multi-contas (etapa 3): avisos de vencimento por e-mail e testes de isolamento
+
+**Alteração:** tarefa de fundo de hora em hora (`main.py`, `services/avisos_conta.py`) envia e-mail ao contato e aos administradores da conta a 7, 3 e 1 dia do vencimento e no dia em que vence (marcos gravados em `contas.avisos_enviados`, zerados ao renovar; só o marco mais urgente é enviado; SMTP fora do ar tenta de novo na hora seguinte). Testes: `test_avisos_conta.py` (marcos) e `test_isolamento_contas.py` (integração contra o PostgreSQL local, só com `TRILAN_TESTE_ISOLAMENTO=1` e `httpx` no container de teste). Executado em 27/10/2026 no ambiente local: isolamento 10/10 aprovado (conta A não vê nem vincula dados da B, LEITURA e conta vencida recebem 403, super admin filtra por `X-Conta-ID`, agente da conta vencida recebe config vazia e 403 no relatório, troca de senha derruba o token antigo). Rodar o de integração num processo separado dos testes unitários (estes trocam `DATABASE_URL` para SQLite ao serem importados). Os 4 testes que falham em `test_storage.py`/`test_planilha_vms.py` já falhavam antes do multi-contas (mesmo resultado no commit `688b9ed`; a do `test_planilha_vms.py` é a chave Fernet de teste com 31 bytes).
+**Arquivos:** server/api/main.py, server/api/services/avisos_conta.py, server/api/tests/{test_avisos_conta.py,test_isolamento_contas.py}, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-27] — Multi-contas (etapa 2b): isolamento por conta e bloqueio da conta vencida
+
+**Alteração:** as rotas do painel (Clientes, Máquinas, Equipamentos, Backups, Dashboards e `/stats`) recebem o `Contexto` e só enxergam a conta do usuário (helpers em `services/escopo.py`; recurso de outra conta = 404; super admin sem `X-Conta-ID` vê tudo e cria na conta da plataforma). Vincular máquina a Cliente de outra conta → 409. Conta vencida/suspensa: `/agent/config` devolve a lista de equipamentos vazia (o agente encerra o backup sem erro de rede), o ping não dispara backup nem recuperação, `report`/upload respondem 403 e o link público do dashboard responde 404. `conta_id` passa a NOT NULL em `client_groups` e `clients` depois do backfill. Contrato do agente sem mudança.
+**Arquivos:** server/api/{main.py,models.py}, server/api/routers/{customers.py,machines.py,equipamentos.py,backups.py,dashboards.py,agent.py}, server/api/services/{escopo.py,contas.py}, server/api/services/dashboards/compartilhamento.py, PROJECT_SPEC.md
+**Breaking Change:** Não para o agente nem para o super admin; usuários de conta só veem a própria conta.
+**Branch:** isaque
+
+### [2026-10-27] — Multi-contas (etapa 2a): login por usuário e rotas de contas
+
+**Alteração:** login por e-mail e senha (bcrypt, `services/senhas.py`) com papéis SUPER_ADMIN, ADMIN e LEITURA; o login só com senha continua sendo o administrador da plataforma (JWT `sub=admin`). Dependência `get_contexto` (`auth.py`) com a conta do usuário, `X-Conta-ID` para o super admin escolher a conta e bloqueio de escrita (403) para conta vencida/suspensa ou usuário LEITURA. `verify_admin_token` passa a aceitar só o super admin até as rotas serem isoladas por conta (etapa 2b). Rotas novas: `GET /auth/me`, `POST /auth/trocar-senha`, `/admin/planos`, `/admin/contas` (criar, editar, renovar, suspender, reativar), `/admin/clientes/{id}/mover-conta`, `/admin/super-admins`, `/conta` e `/conta/usuarios`. Limite de 10 tentativas de login erradas por IP em 5 min (429). `bcrypt==4.2.1` nas dependências.
+**Arquivos:** server/api/{auth.py,schemas.py,main.py,requirements.txt}, server/api/routers/{auth_router.py,contas_admin.py,conta.py}, server/api/services/{senhas.py,contas.py}, PROJECT_SPEC.md
+**Breaking Change:** Não (login só com senha mantido).
+**Branch:** isaque
+
+### [2026-10-27] — Multi-contas (etapa 1): banco de contas, planos e usuários
+
+**Alteração:** primeira etapa do multi-contas (Integradores com Clientes e Clientes finais com Setores, cada conta com plano e validade). Novas tabelas `planos`, `contas`, `conta_renovacoes` e `usuarios`; colunas `conta_id` (nullable, com índice) em `client_groups` e `clients`. No startup: semente dos planos (Teste 15, Mensal 30, Trimestral 90, Semestral 180, Anual 365, só com a tabela vazia), conta da plataforma "Trilan" (INTEGRADOR, sem validade, id em `settings.conta_plataforma_id`) e backfill de `conta_id` dos Clientes e Máquinas sem conta (a Máquina herda a do Cliente). Regras de validade em `services/contas.py` (`status_da_conta`: OK, AVISO ≤ 15 dias, CRITICO ≤ 3, VENCIDA, SUSPENSA, VITALICIA). Nenhuma rota ou tela muda nesta etapa.
+**Arquivos:** server/api/models.py, server/api/main.py, server/api/services/contas.py, server/api/tests/test_contas_status.py, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-27] — Merge do ramo `helena` em `isaque` (auditado)
+
+**Alteração:** incorporados 3 commits de `helena` (`d0e682e`, `236459c`, `004a025`): planilha do Defense carrega só dispositivos que são câmeras, modal de importação de câmeras com escolha Nome/Descrição (Digifort, Teste RTSP e Galeria) e colunas de usuário/senha de câmera nas planilhas dos NVR Motorola, Hikvision e Intelbras (entradas abaixo). Auditoria: sem arquivos sensíveis (compose, nginx, models, main, requirements, build, installer), sem `datetime.now`/`timezone` nas linhas adicionadas, sem segredos (`_SEM_SENHA` é só texto de substituição). Conflitos em `PROJECT_SPEC.md` e `MachineDetail/index.tsx` (agrupamento por tipo de `isaque` com o `useCameraImport` ampliado de `helena`) resolvidos mantendo as duas versões. Nada bloqueado. Atenção: as planilhas dos NVR agora levam o usuário (e, na Motorola, a senha em texto puro) das câmeras; a planilha vai na pasta do pacote final, que o agente compacta em zip AES com a senha da máquina; se a máquina estiver sem senha de zip, o zip sai sem proteção (`archiver.criar_zip`) e essas credenciais ficam legíveis.
+**Arquivos:** PROJECT_SPEC.md, server/dashboard/src/pages/Machines/MachineDetail/index.tsx (resolução), agent/src/nvr/{motorola,hikvision,intelbras}/planilha.py, ImportCamerasModal.tsx, PlanilhaVmsModal.tsx, NVRCamerasGalleryModal.tsx, hooks/useCameraImport.ts
+**Breaking Change:** Não.
+**Branch:** isaque
+
+### [2026-10-27] — Painel: equipamentos da Máquina agrupados por tipo
+
+**Alteração:** na tela da Máquina, a seção "Equipamentos" deixa de ser uma fila única e passa a ser dividida por tipo (NVR/DVR, Digifort, Defense IA, OLT, ONU, Mikrotik, PABX, Misto), cada grupo com cabeçalho (ícone, nome e contagem) e os equipamentos em ordem alfabética. Ícone, cor e rótulo dos tipos foram centralizados em `components/eqTipos.tsx` (antes duplicados no `EqCard`). Só visual; sem mudança de API. Os grupos são recolhíveis (cabeçalho clicável com seta) e começam todos recolhidos ao abrir a tela; o estado fica só na memória da página.
+**Arquivos:** server/dashboard/src/pages/Machines/MachineDetail/{index.tsx,components/EqCard.tsx,components/eqTipos.tsx}, PROJECT_SPEC.md
+**Breaking Change:** Não.
+**Branch:** isaque
 
 ### [2026-10-27] — Planilhas dos NVR passam a incluir usuário e senha de cada câmera
 

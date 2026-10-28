@@ -2,11 +2,91 @@ import uuid
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Integer, Boolean, DateTime,
-    BigInteger, Text, JSON, ForeignKey
+    BigInteger, Text, JSON, ForeignKey, CheckConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from database import Base
+
+
+class Plano(Base):
+    """Plano de uma Conta: define só a duração da validade (renovação manual pela Trilan)."""
+    __tablename__ = "planos"
+    __table_args__ = (CheckConstraint("duracao_dias > 0", name="ck_planos_duracao_positiva"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nome = Column(String(60), nullable=False, unique=True)
+    duracao_dias = Column(Integer, nullable=False)
+    ativo = Column(Boolean, default=True, nullable=False)
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Conta(Base):
+    """Conta (inquilino): quem assina um plano com a Trilan. INTEGRADOR tem Clientes e CLIENTE_FINAL tem
+    Setores (os dois ficam em client_groups). expira_em NULL = sem validade (conta da plataforma)."""
+    __tablename__ = "contas"
+    __table_args__ = (CheckConstraint("tipo IN ('INTEGRADOR', 'CLIENTE_FINAL')", name="ck_contas_tipo"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nome = Column(String(255), nullable=False)
+    tipo = Column(String(20), nullable=False)  # INTEGRADOR | CLIENTE_FINAL
+    documento = Column(String(20), nullable=True)  # CNPJ/CPF, só dígitos
+    email_contato = Column(String(255), nullable=True)
+    telefone = Column(String(30), nullable=True)
+    plano_id = Column(UUID(as_uuid=True), ForeignKey("planos.id", ondelete="SET NULL"), nullable=True)
+    expira_em = Column(DateTime, nullable=True)  # UTC naive; NULL = sem validade
+    ativo = Column(Boolean, default=True, nullable=False)  # False = suspensa pela Trilan
+    # Marcos de aviso por e-mail já enviados para o expira_em atual (ex.: [7, 3]); zera ao renovar
+    avisos_enviados = Column(JSON, default=list, nullable=False)
+    observacoes = Column(Text, nullable=True)
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    plano = relationship("Plano")
+    usuarios = relationship("Usuario", back_populates="conta")
+    renovacoes = relationship(
+        "ContaRenovacao", back_populates="conta",
+        cascade="all, delete-orphan", order_by="desc(ContaRenovacao.criado_em)",
+    )
+
+
+class ContaRenovacao(Base):
+    """Histórico de renovações e ajustes da validade de uma Conta."""
+    __tablename__ = "conta_renovacoes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="CASCADE"), nullable=False, index=True)
+    plano_id = Column(UUID(as_uuid=True), ForeignKey("planos.id", ondelete="SET NULL"), nullable=True)
+    plano_nome = Column(String(60), nullable=False)  # cópia: o histórico não muda se o plano for renomeado
+    dias = Column(Integer, nullable=False)
+    expira_em_anterior = Column(DateTime, nullable=True)
+    expira_em_nova = Column(DateTime, nullable=False)
+    feito_por = Column(String(255), nullable=True)  # e-mail do usuário ou "admin"
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    conta = relationship("Conta", back_populates="renovacoes")
+
+
+class Usuario(Base):
+    """Usuário do painel. SUPER_ADMIN é da plataforma (sem conta); ADMIN e LEITURA pertencem a uma Conta."""
+    __tablename__ = "usuarios"
+    __table_args__ = (
+        CheckConstraint("papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')", name="ck_usuarios_papel"),
+        CheckConstraint("(papel = 'SUPER_ADMIN') = (conta_id IS NULL)", name="ck_usuarios_super_admin_sem_conta"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="CASCADE"), nullable=True, index=True)
+    nome = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False, unique=True)  # sempre minúsculo
+    senha_hash = Column(String(255), nullable=False)  # bcrypt
+    papel = Column(String(20), nullable=False)  # SUPER_ADMIN | ADMIN | LEITURA
+    ativo = Column(Boolean, default=True, nullable=False)
+    # Incrementa ao trocar senha, papel ou desativar: derruba os tokens JWT já emitidos
+    token_versao = Column(Integer, default=1, nullable=False)
+    ultimo_login = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    conta = relationship("Conta", back_populates="usuarios")
 
 
 class Customer(Base):
@@ -27,12 +107,15 @@ class Customer(Base):
     # Senha do ZIP do cliente (Fernet-encrypted); None = sem senha
     zip_password = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Conta dona do Cliente/Setor (obrigatória; preenchida no startup para dados antigos)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="RESTRICT"), nullable=False, index=True)
 
     machines = relationship("Machine", back_populates="customer", order_by="Machine.queue_order")
     runs = relationship(
         "CustomerBackupRun", back_populates="customer",
         cascade="all, delete-orphan", order_by="desc(CustomerBackupRun.started_at)",
     )
+    conta = relationship("Conta")
 
 
 class CustomerBackupRun(Base):
@@ -99,11 +182,14 @@ class Machine(Base):
     # Cliente ao qual a máquina pertence (coluna 'group_id' mantida no BD)
     customer_id = Column("group_id", UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
     queue_order = Column(Integer, default=0, nullable=False)
+    # Conta dona da Máquina (a mesma do Cliente quando houver)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="RESTRICT"), nullable=False, index=True)
 
     equipamentos = relationship("NVR", back_populates="machine", cascade="all, delete-orphan")
     backups = relationship("Backup", back_populates="machine")
     logs = relationship("AgentLog", back_populates="machine", cascade="all, delete-orphan", order_by="desc(AgentLog.created_at)")
     customer = relationship("Customer", back_populates="machines")
+    conta = relationship("Conta")
 
 
 class NVR(Base):

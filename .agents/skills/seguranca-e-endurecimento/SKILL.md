@@ -13,7 +13,7 @@ Trate toda entrada externa como hostil, todo segredo como sagrado e toda checage
 ## Sempre
 - **Validar na borda** com schema Pydantic (`extra="forbid"` em configs, tamanhos máximos, enums). Código abaixo usa só o valor já validado.
 - **Consultas parametrizadas** (SQLAlchemy). Nunca montar SQL, comando de shell ou caminho de arquivo por concatenação de entrada. Nomes usados em caminhos/comandos passam por `nome_seguro()` (agente).
-- **Autorização, não só autenticação**: rota nova tem `Depends(verify_admin_token)` (painel) ou a chave do agente (REGRA-003). Todo recurso é conferido contra o **cliente dono**: ids vindos do corpo/consulta que não pertencem ao cliente são ignorados ou geram 422.
+- **Autorização, não só autenticação**: rota nova do painel tem `ctx: Contexto = Depends(get_contexto)` (ou `exigir_super_admin` se for só da plataforma) e a do agente usa a chave da máquina (REGRA-003). Todo recurso é conferido contra a **conta dona** (REGRA-010, `services/escopo.py`: outra conta = 404) e, dentro dela, contra o **cliente dono**: ids vindos do corpo/consulta que não pertencem ao cliente são ignorados ou geram 422.
 - **Dashboard por Cliente / link público**: a resposta vale para o público. Devolver só lista branca (nada de IP, usuário, senha, `config_extra`, chaves de API, caminhos internos).
 - **Senhas de equipamento e de ZIP** só com Fernet (`encrypt`/`decrypt`, REGRA-004). Só o agente recebe a senha aberta (`/agent/config`); respostas do painel nunca trazem senha.
 - **Erros genéricos** para o cliente; detalhes só no log do servidor. Nunca registrar senha, token, chave de API ou `Authorization` em log.

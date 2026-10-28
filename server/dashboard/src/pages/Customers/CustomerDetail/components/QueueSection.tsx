@@ -8,6 +8,7 @@ import StatusDots, { StatusLegend } from "../../../../components/StatusDots";
 import { fmtDate } from "../../../../utils/date";
 import { statusTone } from "../../../../utils/statusTone";
 import { historicoDaMaquina } from "../runUtils";
+import { useRotulos, useSomenteLeitura } from "../../../../contexts/AuthContext";
 
 // Quantas rodadas recentes aparecem como pontinhos (e entram no contador "N/M OK")
 const PONTOS_HISTORICO = 10;
@@ -42,9 +43,11 @@ export default function QueueSection({
   onAdd: () => void;
 }) {
   const navigate = useNavigate();
+  const { singularMin } = useRotulos();
+  const somenteLeitura = useSomenteLeitura();
   const machines = customer.machines;
   const locked = customer.queue_active;
-  const canDrag = !locked && !saving && machines.length > 1;
+  const canDrag = !locked && !somenteLeitura && !saving && machines.length > 1;
 
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [insertAt, setInsertAt] = useState<number | null>(null);
@@ -91,17 +94,19 @@ export default function QueueSection({
             {machines.length} máquina(s)
           </span>
         </div>
-        <button className="btn btn-secondary" onClick={onAdd} disabled={locked}
-          title={locked ? "Aguarde a fila terminar para alterar as máquinas" : "Adicionar uma máquina sem cliente"}>
-          <Plus size={14} style={{ flexShrink: 0 }} /> Adicionar máquina
-        </button>
+        {!somenteLeitura && (
+          <button className="btn btn-secondary" onClick={onAdd} disabled={locked}
+            title={locked ? "Aguarde a fila terminar para alterar as máquinas" : `Adicionar uma máquina sem ${singularMin}`}>
+            <Plus size={14} style={{ flexShrink: 0 }} /> Adicionar máquina
+          </button>
+        )}
       </div>
 
       {locked ? (
         <div className="text-sm" style={{ color: "var(--warn)", marginBottom: 10 }}>
           Fila em andamento: a ordem e as máquinas não podem ser alteradas até ela terminar (ou ser parada).
         </div>
-      ) : machines.length > 1 && (
+      ) : !somenteLeitura && machines.length > 1 && (
         <div className="text-sm text-muted" style={{ marginBottom: 10 }}>
           Arraste pela alça <GripVertical size={12} style={{ verticalAlign: "middle", flexShrink: 0 }} /> para mudar a ordem. As máquinas fazem backup uma por vez, de cima para baixo.
         </div>
@@ -116,8 +121,10 @@ export default function QueueSection({
       {machines.length === 0 ? (
         <div className="empty-state" style={{ padding: 32 }}>
           <div className="empty-icon">🖥️</div>
-          <div>Nenhuma máquina neste cliente.</div>
-          <button className="btn btn-primary mt-2" onClick={onAdd}>Adicionar máquina</button>
+          <div>Nenhuma máquina neste {singularMin}.</div>
+          {!somenteLeitura && (
+            <button className="btn btn-primary mt-2" onClick={onAdd}>Adicionar máquina</button>
+          )}
         </div>
       ) : (
         <div className="card" style={{ padding: 0, overflow: "hidden" }} onDragLeave={e => {
@@ -151,11 +158,13 @@ export default function QueueSection({
                 {insertAt === idx && <div style={{ ...dropLine, top: -2 }} />}
                 {insertAt === idx + 1 && idx === machines.length - 1 && <div style={{ ...dropLine, bottom: -2 }} />}
 
-                <span data-drag-handle
-                  title={canDrag ? "Arraste para reordenar" : locked ? "Fila em andamento" : ""}
-                  style={{ display: "flex", color: "var(--text-muted)", cursor: canDrag ? "grab" : "not-allowed", opacity: canDrag ? 1 : 0.35 }}>
-                  <GripVertical size={16} style={{ flexShrink: 0 }} />
-                </span>
+                {!somenteLeitura && (
+                  <span data-drag-handle
+                    title={canDrag ? "Arraste para reordenar" : locked ? "Fila em andamento" : ""}
+                    style={{ display: "flex", color: "var(--text-muted)", cursor: canDrag ? "grab" : "not-allowed", opacity: canDrag ? 1 : 0.35 }}>
+                    <GripVertical size={16} style={{ flexShrink: 0 }} />
+                  </span>
+                )}
                 <div style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "var(--text-muted)", flexShrink: 0 }}>
                   {idx + 1}
                 </div>
@@ -188,11 +197,13 @@ export default function QueueSection({
                   style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   Abrir <ChevronRight size={13} style={{ flexShrink: 0 }} />
                 </Link>
-                <button className="btn btn-secondary btn-sm" disabled={locked || saving} onClick={() => onDetach(m)}
-                  title={locked ? "Aguarde a fila terminar" : "Tirar esta máquina do cliente (ela continua cadastrada)"}
-                  style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--err)" }}>
-                  <UserMinus size={13} style={{ flexShrink: 0 }} /> Remover do cliente
-                </button>
+                {!somenteLeitura && (
+                  <button className="btn btn-secondary btn-sm" disabled={locked || saving} onClick={() => onDetach(m)}
+                    title={locked ? "Aguarde a fila terminar" : `Tirar esta máquina do ${singularMin} (ela continua cadastrada)`}
+                    style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--err)" }}>
+                    <UserMinus size={13} style={{ flexShrink: 0 }} /> Remover do {singularMin}
+                  </button>
+                )}
               </div>
             );
           })}

@@ -21,7 +21,8 @@ Aprove a mudança quando ela melhora a saúde do código e segue as convenções
    - Desempenho: consulta N+1, laço sem limite, lista sem paginação, re-render desnecessário.
 4. **Regras do projeto** (PROJECT_SPEC.md, seção 6; CLAUDE.md): confira as que o diff toca.
    - REGRA-001: datas do banco sem fuso (`datetime.utcnow()`); nunca `datetime.now(timezone.utc)`.
-   - REGRA-003: autenticação admin (`verify_admin_token`) x agente (`X-API-Key`); rotas novas precisam de uma das duas.
+   - REGRA-003: autenticação do painel (`get_contexto`, `exigir_super_admin`, `exigir_admin_conta`) x agente (`X-API-Key`); rotas novas precisam de uma das duas (`verify_admin_token` só por compatibilidade, aceita só o super admin).
+   - REGRA-010: isolamento por conta — Cliente/Máquina por `obter_cliente`/`obter_maquina`, listas por `filtrar_por_conta` (`services/escopo.py`); outra conta = 404; registro novo com `conta_id`. Violação é `Crítico:`.
    - REGRA-004: senhas de equipamento/ZIP com Fernet (`encrypt`/`decrypt`); respostas do admin nunca trazem senha.
    - REGRA-007: migrações inline em `main.py` (sem Alembic), idempotentes.
    - Dashboard por Cliente: tudo filtrado pelo cliente; resposta pública só com lista branca (sem IP, usuário, senha, `config_extra`).
