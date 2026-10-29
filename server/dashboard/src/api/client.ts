@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { Customer, CustomerRun, Machine, PaginatedBackups } from "./types";
+import { AgentLog, Customer, CustomerRun, Machine, PaginatedBackups } from "./types";
 import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -69,8 +69,25 @@ export const triggerBackupAll = () =>
   api.post("/machines/trigger-backup-all").then((r) => r.data);
 export const restartAgentAll = () =>
   api.post("/machines/restart-agent-all").then((r) => r.data);
-export const fetchMachineLogs = (id: string, incluirPings = true) =>
-  api.get(`/machines/${id}/logs`, { params: { incluir_pings: incluirPings } }).then((r) => r.data);
+export interface FiltrosLogs {
+  incluirPings?: boolean;
+  nivel?: string;
+  q?: string;
+  equipamento?: string;
+  limit?: number;
+}
+
+export const fetchMachineLogs = (
+  id: string,
+  { incluirPings = true, nivel, q, equipamento, limit }: FiltrosLogs = {}
+): Promise<AgentLog[]> => {
+  const params: Record<string, unknown> = { incluir_pings: incluirPings };
+  if (nivel) params.nivel = nivel;
+  if (q && q.trim()) params.q = q.trim();
+  if (equipamento && equipamento.trim()) params.equipamento = equipamento.trim();
+  if (limit !== undefined && limit !== null) params.limit = limit;
+  return api.get(`/machines/${id}/logs`, { params }).then((r) => r.data);
+};
 
 // ── Equipamentos ──────────────────────────────────────────────
 export const fetchEquipamentos = (machineId: string) =>

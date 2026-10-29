@@ -279,8 +279,10 @@ class AgentLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     machine_id = Column("client_id", UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
-    event_type = Column(String(50), nullable=False)  # ex: ping, backup_trigger, restart_trigger
+    event_type = Column(String(50), nullable=False)  # ex: ping, backup_trigger, restart_trigger, agent_log
     message = Column(Text, nullable=False)
+    nivel = Column(String(10), nullable=False, default="INFO", server_default="INFO")
+    equipamento = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     machine = relationship("Machine", back_populates="logs")

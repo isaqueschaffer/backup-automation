@@ -13,6 +13,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from src.core.config import load_conf, parse_config_extra, DIR_AGENT
 from src.application.api_client import fetch_server_config, post_report, upload_zip
+from src.application import log_remoto
 from src.nvr.factory import verificar_gravacao_nvr, coletar_telemetria_nvr
 from src.nvr.intelbras.backup import baixar_configuracao_intelbras
 try:
@@ -361,7 +362,8 @@ def run_backup(trigger: str = "scheduled"):
         pasta_trabalho = TEMP_DIR_WORK / f"{tipo}_{nome_safe}"
         pasta_trabalho.mkdir(parents=True, exist_ok=True)
 
-        res = processar_equipamento(eq, zip_password, pasta_trabalho, conf, trigger)
+        with log_remoto.equipamento_atual(nome):
+            res = processar_equipamento(eq, zip_password, pasta_trabalho, conf, trigger)
         res["tipo"] = tipo
         planilha = res.pop("_planilha", None)
         resultados.append(res)
@@ -393,7 +395,11 @@ def run_backup(trigger: str = "scheduled"):
             "BACKUP_INCONSISTENTE": "INCONSISTENTE", "BACKUP_NAO_ENCONTRADO": "NAO_ENCONTRADO",
             "BACKUP_EM_PROCESSAMENTO": "ESPERA", "BACKUP_CORROMPIDO": "CORROMPIDO"
         }.get(r["status"], r["status"])
-        logging.info(f"  {icone} [{r.get('tipo', 'NVR')}] {r['nome']}")
+        msg_resumo = f"  {icone} [{r.get('tipo', 'NVR')}] {r['nome']}"
+        if r["status"] in ("OK", "JA_PROCESSADO"):
+            logging.info(msg_resumo, extra={"enviar_servidor": True, "equipamento": r["nome"]})
+        else:
+            logging.warning(msg_resumo, extra={"equipamento": r["nome"]})
 
     backup_id = post_report(conf, started_at, finished_at, resultados, trigger)
     if backup_id:
@@ -409,4 +415,4 @@ def run_backup(trigger: str = "scheduled"):
 
     shutil.rmtree(TEMP_DIR_WORK, ignore_errors=True)
     shutil.rmtree(TEMP_DIR_FINAL, ignore_errors=True)
-    logging.info(f"\nBackup concluido em {(finished_at - started_at).total_seconds():.1f}s")
+    logging.info(f"\nBackup concluido em {(finished_at - started_at).total_seconds():.1f}s", extra={"enviar_servidor": True})

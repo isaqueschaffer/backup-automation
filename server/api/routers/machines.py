@@ -304,16 +304,41 @@ def request_agent_restart(
     return {"queued": True}
 
 
+def _escapar_like(texto: str) -> str:
+    """Escapa caracteres especiais do LIKE SQL (\\, %, _)."""
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @router.get("/{machine_id}/logs", response_model=List[AgentLogResponse])
 def get_machine_logs(
     machine_id: UUID,
     db: Session = Depends(get_db),
     ctx: Contexto = Depends(get_contexto),
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=500),
     incluir_pings: bool = True,
+    nivel: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, max_length=100),
+    equipamento: Optional[str] = Query(None, max_length=255),
 ):
     _get_machine_or_404(machine_id, db, ctx)
-    q = db.query(AgentLog).filter(AgentLog.machine_id == machine_id)
+    query_logs = db.query(AgentLog).filter(AgentLog.machine_id == machine_id)
     if not incluir_pings:
-        q = q.filter(AgentLog.event_type != "ping")
-    return q.order_by(AgentLog.created_at.desc()).limit(limit).all()
+        query_logs = query_logs.filter(AgentLog.event_type != "ping")
+
+    if nivel is not None:
+        partes = [p.strip().upper() for p in nivel.split(",")]
+        partes = [p for p in partes if p]
+        if partes:
+            validos = {"INFO", "WARNING", "ERROR"}
+            if any(p not in validos for p in partes):
+                raise HTTPException(status_code=422, detail="Nível inválido")
+            query_logs = query_logs.filter(AgentLog.nivel.in_(partes))
+
+    if q:
+        q_escapado = _escapar_like(q)
+        query_logs = query_logs.filter(AgentLog.message.ilike(f"%{q_escapado}%", escape="\\"))
+
+    if equipamento is not None:
+        query_logs = query_logs.filter(AgentLog.equipamento == equipamento)
+
+    return query_logs.order_by(AgentLog.created_at.desc()).limit(limit).all()

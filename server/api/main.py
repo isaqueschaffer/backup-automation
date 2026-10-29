@@ -211,6 +211,9 @@ _MIGRACOES_COLUNAS = [
     # Multi-contas: conta dona do Cliente/Setor e da Máquina (nullable até a etapa 2b)
     ("client_groups", "conta_id", "ALTER TABLE client_groups ADD COLUMN conta_id UUID REFERENCES contas(id) ON DELETE RESTRICT;"),
     ("clients", "conta_id", "ALTER TABLE clients ADD COLUMN conta_id UUID REFERENCES contas(id) ON DELETE RESTRICT;"),
+    # Logs do agente no painel: nível e equipamento
+    ("agent_logs", "nivel", "ALTER TABLE agent_logs ADD COLUMN nivel VARCHAR(10) NOT NULL DEFAULT 'INFO';"),
+    ("agent_logs", "equipamento", "ALTER TABLE agent_logs ADD COLUMN equipamento VARCHAR(255);"),
 ]
 
 _colunas_cache: dict = {}
@@ -256,6 +259,7 @@ _INDICES = [
     "CREATE INDEX IF NOT EXISTS ix_clients_conta_id ON clients (conta_id);",
     "CREATE INDEX IF NOT EXISTS ix_usuarios_conta_id ON usuarios (conta_id);",
     "CREATE INDEX IF NOT EXISTS ix_conta_renovacoes_conta_id ON conta_renovacoes (conta_id);",
+    "CREATE INDEX IF NOT EXISTS ix_agent_logs_client_created ON agent_logs (client_id, created_at);",
 ]
 for _ddl in _INDICES:
     _run_ddl(_ddl, _ddl.split(" ON ")[0])

@@ -143,6 +143,8 @@ export interface AgentLog {
   id: string;
   event_type: string;
   message: string;
+  nivel: "INFO" | "WARNING" | "ERROR";
+  equipamento: string | null;
   created_at: string | null;
 }
 

@@ -342,9 +342,11 @@ A tabela nasce por `Base.metadata.create_all` (`main.py`), sem migração inline
 |---|---|---|---|---|
 | id | UUID | uuid.UUID | NOT NULL | PK |
 | client_id | UUID | uuid.UUID | NOT NULL | FK clients.id CASCADE DELETE |
-| event_type | VARCHAR(50) | str | NOT NULL | ping, backup_trigger, ping_recovery... |
+| event_type | VARCHAR(50) | str | NOT NULL | ping, backup_trigger, ping_recovery, agent_log... |
 | message | TEXT | str | NOT NULL | — |
-| created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | Max 50 logs por cliente |
+| nivel | VARCHAR(10) | str | NOT NULL | `INFO` (padrão), `WARNING` ou `ERROR` |
+| equipamento | VARCHAR(255) | str | NULL | Nome do equipamento a que o log se refere (null = log geral da máquina) |
+| created_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NOT NULL | Retenção: ver REGRA-006. Índice `(client_id, created_at)` |
 
 #### `settings`
 
@@ -547,10 +549,13 @@ server_started_at = server_finished_at - duration
 
 ---
 
-### REGRA-006 — Limite de 50 Logs por Cliente
+### REGRA-006 — Retenção dos Logs do Agente (alterada em 29/10/2026)
 
-O sistema mantem no maximo 50 logs por cliente na tabela `agent_logs`.
-Ao inserir novo log, os mais antigos sao deletados automaticamente se count > 50.
+A tabela `agent_logs` e podada por maquina (`services/agent_logs.py`, `podar_logs`), no ping e ao receber logs do agente:
+- **Pings:** no maximo os 50 mais recentes (o ping nao conta no limite dos demais eventos).
+- **Demais eventos** (`agent_log`, `ping_recovery`, filas, e-mails...): 30 dias, e no maximo 5000 por maquina.
+
+Antes, o limite era de 50 logs por maquina incluindo ping, e um erro sumia em ~12 minutos (ping a cada 15 s).
 
 ---
 
@@ -648,6 +653,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 |---|---|---|
 | GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente (`client_name` = nome da máquina; `customer_name` = nome do Cliente da máquina, opcional) |
 | POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup` |
+| POST | `/api/v1/agent/logs` | Agente envia lote (até 100) de avisos/erros e marcos do backup: `{"logs": [{"nivel": "INFO\|WARNING\|ERROR", "mensagem", "equipamento", "segundos_atras"}]}`; o servidor calcula `created_at` (REGRA-005); aceita também conta bloqueada |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
 | GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa) |
@@ -677,7 +683,7 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 | POST | `/api/v1/machines/{id}/trigger-backup` | Solicitar backup manual |
 | POST | `/api/v1/machines/{id}/restart-agent` | Solicitar reinicio do agente |
 | POST | `/api/v1/machines/trigger-backup-all` · `/restart-agent-all` | Ação em massa nas máquinas online (`{queued, skipped_offline}`) |
-| GET | `/api/v1/machines/{id}/logs` | Listar logs do agente (`incluir_pings=false` oculta os eventos `ping`; limite 50) |
+| GET | `/api/v1/machines/{id}/logs` | Listar logs do agente (`incluir_pings=false` oculta os eventos `ping`; `nivel` = lista de `INFO,WARNING,ERROR`; `q` = busca no texto; `equipamento` = nome exato; `limit` 1 a 500, padrão 50) |
 | GET/POST | `/api/v1/machines/{id}/equipamentos` | Listar/criar equipamentos da máquina |
 | GET/PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{eq_id}` | Gerenciar equipamento |
 | POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/test-rtsp` | Tarefa RTSP via agente (409 se já houver uma pendente) |
@@ -1062,6 +1068,17 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-29] — Agente 1.1.32: log do agente visível no painel, por máquina
+
+**Alteração:** o log do agente deixa de existir só no cliente (`C:\ProgramData\Trilan NVR Backup Agent\logs\servico.log`). Um handler no logger raiz (`agent/src/application/log_remoto.py`, instalado pela thread `_logs_loop` em `service.py`) enfileira os avisos e erros (WARNING/ERROR, com traceback) e os marcos do backup (início, fim, resultado de cada equipamento, marcados com `extra={"enviar_servidor": True}`) e os envia em lote a cada 20 s para `POST /api/v1/agent/logs`. Fila local de 500 itens (servidor fora do ar não perde o recente), deduplicação de 10 min para o mesmo aviso, equipamento atribuído por contexto de thread (`equipamento_atual`) ou por `extra`. Segredos são ocultados antes do envio (senha em URL, `password=`/`senha`/`token`/`api_key`..., e a `api_key` do agente). O envio nunca chama `logging.error` (evita laço).
+**Servidor:** `agent_logs` ganha `nivel` e `equipamento` (migração inline e índice `(client_id, created_at)`). Nova rota `POST /api/v1/agent/logs` (autenticada como máquina, só grava na própria máquina; o horário vem de `segundos_atras`, REGRA-005; aceita conta bloqueada). `GET /machines/{id}/logs` ganha filtros `nivel`, `q`, `equipamento` e `limit` até 500 (isolamento por conta inalterado, REGRA-010). `email_error` passa a nível `ERROR`.
+**Retenção (REGRA-006 alterada, a pedido do usuário):** 30 dias por máquina e o ping não conta no limite (ping: 50 mais recentes; demais eventos: 30 dias e no máximo 5000). Antes eram 50 logs incluindo ping, e um erro sumia em ~12 min. Nova função `podar_logs` em `services/agent_logs.py`.
+**Painel:** o card "Eventos do Agente" da Máquina ganha filtro por nível (todos / só erros / avisos e erros), por equipamento e busca por texto (debounce de 400 ms), badge de nível, chip do equipamento, "Ver mais" (de 100 até 500), e a linha expande para mostrar a mensagem completa com botão Copiar.
+**Fora do escopo:** tela geral de erros de todas as máquinas e alerta por e-mail.
+**Arquivos:** server/api/{models.py,main.py,schemas.py}, server/api/services/agent_logs.py (novo), server/api/routers/{agent.py,machines.py,backups.py}, server/api/services/backup_runs.py, server/dashboard/src/api/{client.ts,types.ts}, server/dashboard/src/pages/Machines/MachineDetail/{index.tsx,components/AgentLogs.tsx}, agent/src/application/{log_remoto.py (novo),api_client.py,backup_job.py,presenca_cameras.py}, agent/service.py, updater.py, installer.iss, server/dashboard/package.json, PROJECT_SPEC.md
+
+**Breaking Change:** Não (colunas novas com padrão; agentes antigos continuam funcionando, só não enviam log). **Requer:** deploy do servidor/painel e a versão 1.1.32 do agente cadastrada no painel para os logs começarem a chegar.
 
 ### [2026-10-29] — Agente 1.1.31: tempo que cada câmera está offline ("offline há 3h", "offline há 5 dias")
 

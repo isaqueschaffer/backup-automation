@@ -30,6 +30,7 @@ def _pyinstaller_hidden_imports():
     import src.camera.rtsp_client  # noqa: F401
     import src.application.api_client  # noqa: F401
     import src.application.presenca_cameras  # noqa: F401
+    import src.application.log_remoto  # noqa: F401
 
 
 DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -60,10 +61,12 @@ def _garantir_logging():
         pass
 
 
-def log(msg, is_error=False):
+def log(msg, is_error=False, enviar=False):
     _garantir_logging()
     if is_error:
         logging.error(msg)
+    elif enviar:
+        logging.info(msg, extra={"enviar_servidor": True})
     else:
         logging.info(msg)
     try:
@@ -444,6 +447,33 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_PRESENCA_S * 1000) == win32event.WAIT_OBJECT_0:
                 return
 
+    def _logs_loop(self, conf: dict):
+        """Envia periodicamente os logs acumulados do agente ao servidor."""
+        from src.application import log_remoto
+
+        try:
+            log_remoto.instalar(conf)
+        except Exception:
+            pass
+
+        while not self.stop_requested:
+            try:
+                while not self.stop_requested:
+                    enviados = log_remoto.enviar_pendentes(conf)
+                    if enviados < log_remoto.MAX_POR_ENVIO:
+                        break
+            except Exception:
+                pass
+
+            if win32event.WaitForSingleObject(self.hWaitStop, log_remoto.INTERVALO_ENVIO_S * 1000) == win32event.WAIT_OBJECT_0:
+                break
+
+        # Ao sair do laço (parada do serviço), faz uma última tentativa de envio
+        try:
+            log_remoto.enviar_pendentes(conf)
+        except Exception:
+            pass
+
     def _disparar_rtsp(self, ping_resp: dict, conf: dict):
         """Dispara em thread o teste RTSP pedido pelo dashboard, se houver."""
         task = ping_resp.get("rtsp_task")
@@ -535,6 +565,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
         threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
         threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
+        threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:
             agora = datetime.now()
@@ -576,12 +607,12 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             return
 
         from src.application import estado
-        log(f"INICIANDO BACKUP — {trigger.upper()}")
+        log(f"INICIANDO BACKUP — {trigger.upper()}", enviar=True)
         estado.backup_em_andamento = True
         try:
             agent_mod.run_backup(trigger)
             self.last_backup_finished_at = time.monotonic()
-            log("BACKUP FINALIZADO.")
+            log("BACKUP FINALIZADO.", enviar=True)
         except Exception:
             self.last_backup_finished_at = time.monotonic()
             log(f"ERRO NO BACKUP:\n{traceback.format_exc()}", is_error=True)

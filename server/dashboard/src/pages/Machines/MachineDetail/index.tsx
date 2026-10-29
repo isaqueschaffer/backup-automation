@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   fetchCustomer, fetchMachine, fetchMachineLogs, fetchEquipamentos, createEquipamento, updateEquipamento,
@@ -21,7 +21,7 @@ import EqCard from "./components/EqCard";
 import { EQ_TIPO_ORDEM, eqCor, eqIcone, eqRotulo } from "./components/eqTipos";
 import BackupHistory from "./components/BackupHistory";
 import CamerasSection from "./components/CamerasSection";
-import AgentLogs from "./components/AgentLogs";
+import AgentLogs, { FiltrosLogsState } from "./components/AgentLogs";
 import EquipamentoFormModal from "./components/EquipamentoFormModal";
 import EditMachineModal, { EditMachineForm } from "./components/EditMachineModal";
 import RotatedKeyModal from "./components/RotatedKeyModal";
@@ -44,8 +44,22 @@ export default function MachineDetail() {
   const [loading, setLoading] = useState(true);
   const [gruposAbertos, setGruposAbertos] = useState<Set<string>>(new Set());
 
-  const [mostrarPings, setMostrarPings] = useState(false);
-  const mostrarPingsRef = useRef(false);
+  // Filtros de logs com refs espelho para o polling contínuo
+  const [filtrosLogs, setFiltrosLogs] = useState<FiltrosLogsState>({
+    mostrarPings: false,
+    nivel: "todos",
+    busca: "",
+    equipamentoLog: "",
+  });
+  const filtrosLogsRef = useRef<FiltrosLogsState>({
+    mostrarPings: false,
+    nivel: "todos",
+    busca: "",
+    equipamentoLog: "",
+  });
+
+  const [limiteLogs, setLimiteLogs] = useState(100);
+  const limiteLogsRef = useRef(100);
 
   const [showEqModal, setShowEqModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -73,11 +87,25 @@ export default function MachineDetail() {
     const isCurrent = () => activeIdRef.current === reqId;
     if (!silent) setLoading(true);
     try {
+      const f = filtrosLogsRef.current;
+      const apiNivel =
+        f.nivel === "erro"
+          ? "ERROR"
+          : f.nivel === "aviso"
+          ? "WARNING,ERROR"
+          : undefined;
+
       const [m, eqs, b, lg] = await Promise.all([
         fetchMachine(reqId),
         fetchEquipamentos(reqId),
         fetchBackups({ machine_id: reqId, size: 10 }),
-        fetchMachineLogs(reqId, mostrarPingsRef.current),
+        fetchMachineLogs(reqId, {
+          incluirPings: f.mostrarPings,
+          nivel: apiNivel,
+          q: f.busca || undefined,
+          equipamento: f.equipamentoLog || undefined,
+          limit: limiteLogsRef.current,
+        }),
       ]);
       if (!isCurrent()) return;
       setMachine(m); setEquipamentos(eqs); setBackups(b.items); setLogs(lg);
@@ -93,11 +121,20 @@ export default function MachineDetail() {
     }
   }, [id, toast]);
 
-  const handleTogglePings = (v: boolean) => {
-    mostrarPingsRef.current = v;
-    setMostrarPings(v);
+  // O ref é atualizado antes do load: o updater do setState pode rodar só no próximo render
+  const handleFiltrosLogsChange = useCallback((novos: Partial<FiltrosLogsState>) => {
+    const prox = { ...filtrosLogsRef.current, ...novos };
+    filtrosLogsRef.current = prox;
+    setFiltrosLogs(prox);
     load(true);
-  };
+  }, [load]);
+
+  const handleVerMaisLogs = useCallback(() => {
+    const prox = Math.min(limiteLogsRef.current + 100, 500);
+    limiteLogsRef.current = prox;
+    setLimiteLogs(prox);
+    load(true);
+  }, [load]);
 
   useEffect(() => {
     activeIdRef.current = id;
@@ -145,6 +182,16 @@ export default function MachineDetail() {
 
   const cameras = equipamentos.filter(e => e.tipo === "CAMERA");
   const otherEquipamentos = equipamentos.filter(e => e.tipo !== "CAMERA");
+
+  const nomesEquipamentos = useMemo(() => {
+    const nomes = new Set<string>();
+    for (const eq of equipamentos) {
+      if (eq.name && eq.name.trim()) nomes.add(eq.name.trim());
+    }
+    return Array.from(nomes).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  }, [equipamentos]);
+
+  const podeVerMaisLogs = logs.length >= limiteLogs && limiteLogs < 500;
 
   const gruposEquipamentos = (() => {
     const porTipo = new Map<string, NVR[]>();
@@ -428,8 +475,11 @@ export default function MachineDetail() {
       {/* ── Histórico de Eventos do Agente ── */}
       <AgentLogs
         logs={logs}
-        mostrarPings={mostrarPings}
-        onTogglePings={handleTogglePings}
+        filtros={filtrosLogs}
+        onFiltrosChange={handleFiltrosLogsChange}
+        nomesEquipamentos={nomesEquipamentos}
+        podeVerMais={podeVerMaisLogs}
+        onVerMais={handleVerMaisLogs}
         lastSeen={machine?.last_seen ?? null}
         online={machine?.is_online}
       />

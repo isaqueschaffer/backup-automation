@@ -21,6 +21,7 @@ from schemas import (
     AgentEquipamento,
     BackupReportCreate,
     BackupReportResponse,
+    LogsAgenteReport,
     NVRCameraNightImage,
     PingResponse,
     PingRequest,
@@ -29,6 +30,7 @@ from schemas import (
     TIPOS_EQUIPAMENTO,
 )
 from routers.machines import check_machine_online
+from services.agent_logs import podar_logs
 from services.crypto_service import decrypt
 from services.galeria_vms import (
     parear_cameras,
@@ -316,15 +318,8 @@ async def ping_agent(
     log_msg = f"Ping recebido. Instruções pendentes: restart={should_restart}, backup={should_backup}"
     db.add(AgentLog(machine_id=machine.id, event_type="ping", message=log_msg))
     
-    # Poda dos logs: mantém apenas os 50 mais recentes por máquina, com um único DELETE
-    db.flush()
-    ids_antigos = (
-        select(AgentLog.id)
-        .where(AgentLog.machine_id == machine.id)
-        .order_by(AgentLog.created_at.desc())
-        .offset(50)
-    )
-    db.execute(delete(AgentLog).where(AgentLog.id.in_(ids_antigos)))
+    # Poda dos logs: política de retenção (pings e eventos da máquina)
+    podar_logs(db, machine.id, datetime.utcnow())
 
     db.commit()
     return PingResponse(status="ok", restart=should_restart, backup=should_backup)
@@ -658,9 +653,32 @@ def upload_backup_zip(
         db.add(AgentLog(
             machine_id=machine.id,
             event_type="email_error",
+            nivel="ERROR",
             message=f"Falha no envio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
         ))
 
     db.commit()
 
     return {"status": "ok", "zip_size": zip_size, "email_sent": email_sent}
+
+
+@router.post("/logs")
+def receive_agent_logs(
+    body: LogsAgenteReport,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Recebe lote de logs de aviso/erro ou marcos de backup emitidos pelo agente Windows."""
+    agora = datetime.utcnow()
+    for item in body.logs:
+        db.add(AgentLog(
+            machine_id=machine.id,
+            event_type="agent_log",
+            nivel=item.nivel,
+            equipamento=item.equipamento,
+            message=item.mensagem,
+            created_at=agora - timedelta(seconds=item.segundos_atras),
+        ))
+    podar_logs(db, machine.id, agora)
+    db.commit()
+    return {"status": "ok", "gravados": len(body.logs)}

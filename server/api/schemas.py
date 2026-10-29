@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Any, Dict, Union
+from typing import List, Optional, Any, Dict, Union, Literal
 from datetime import datetime
 from uuid import UUID
 import re
@@ -368,11 +368,43 @@ class StatsResponse(BaseModel):
 # ─────────────────────────────────────────────
 # Agent Logs
 # ─────────────────────────────────────────────
+class LogAgenteItem(BaseModel):
+    nivel: Literal["INFO", "WARNING", "ERROR"]
+    mensagem: str
+    equipamento: Optional[str] = None
+    segundos_atras: int = Field(0, ge=0, le=86400)
+
+    @field_validator("mensagem", mode="before")
+    @classmethod
+    def _truncar_mensagem(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v[:4000]
+        return v
+
+    @field_validator("equipamento", mode="before")
+    @classmethod
+    def _limpar_equipamento(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v_limpo = v.strip()
+            if not v_limpo:
+                return None
+            return v_limpo[:255]
+        return v
+
+
+class LogsAgenteReport(BaseModel):
+    logs: List[LogAgenteItem] = Field(default_factory=list, max_length=100)
+
+
 class AgentLogResponse(BaseModel):
     id: UUID
     machine_id: UUID
     event_type: str
     message: str
+    nivel: str = "INFO"
+    equipamento: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

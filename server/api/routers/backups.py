@@ -265,6 +265,7 @@ def resend_backup_email(
         db.add(AgentLog(
             machine_id=b.machine.id,
             event_type="email_error",
+            nivel="ERROR",
             message=f"Falha no reenvio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
         ))
 

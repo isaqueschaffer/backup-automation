@@ -311,7 +311,12 @@ def send_run_email(db: Session, run: CustomerBackupRun, base_url: Optional[str] 
         else:
             dest = ", ".join(recipients) if recipients else "nenhum destinatário cadastrado no cliente"
             msg = f"Falha no {prefixo.lower()} da rodada do cliente '{customer.name if customer else '?'}' ({dest}). Verifique configurações SMTP e destinatários."
-        db.add(AgentLog(machine_id=first_machine.id, event_type="email_sent" if sent else "email_error", message=msg))
+        db.add(AgentLog(
+            machine_id=first_machine.id,
+            event_type="email_sent" if sent else "email_error",
+            nivel="INFO" if sent else "ERROR",
+            message=msg,
+        ))
     db.commit()
     return bool(sent)
 

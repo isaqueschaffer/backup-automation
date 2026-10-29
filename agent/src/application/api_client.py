@@ -282,3 +282,21 @@ def upload_zip(conf: dict, backup_id: str, zip_path: Path, device_type: str = "N
     except Exception as e:
         logging.error(f"  Erro ao enviar ZIP ({device_type}): {e}")
         return False
+
+
+def send_logs(conf: dict, logs: list) -> bool:
+    """Envia lote de logs do agente para a API do servidor."""
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/logs",
+            json={"logs": logs},
+            headers=headers,
+            timeout=30,
+            verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception:
+        # Crucial: NUNCA chamar logging.error aqui para evitar laço de log infinito
+        return False
