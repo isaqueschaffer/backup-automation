@@ -68,8 +68,20 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     eh_grandstream = "GRANDSTREAM" in mod_upper or "GRANDSTREAM" in marca_upper or mod_upper.startswith("GXV")
     eh_intelbras = "INTELBRAS" in mod_upper or "INTELBRAS" in marca_upper or mod_upper.startswith("VIP")
 
+    # Canal não numérico não pode derrubar o teste
+    try:
+        canal_num = int(canal) if canal not in (None, "") else None
+    except (TypeError, ValueError):
+        canal_num = None
+
     urls_candidatas = []
-    if eh_motorola and not direct_cam and canal and int(canal) > 1:
+    # Canal de NVR Motorola: a tarefa do painel não manda stream_principal (inclusive no canal 1);
+    # a captura noturna de VMS (capturar_imagens_noite_vms) manda, e lá só canal > 1 é canal de gravador.
+    eh_canal_nvr_motorola = (
+        eh_motorola and not direct_cam and canal
+        and (not task.get("stream_principal") or (canal_num is not None and canal_num > 1))
+    )
+    if eh_canal_nvr_motorola:
         # NVR tradicional Motorola (NVMS-9000) com canais de hardware
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal}&streamType=main")
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/?chID={canal}&streamType=main")
@@ -78,6 +90,9 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
         # Câmera IP Motorola (ex: MTIDM022603) ou ONVIF Profile S padrão
         ch = canal if canal else 1
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile1")
+        if canal:
+            # Com canal informado, o formato NVMS entra entre as 4 primeiras (o limite de 4 URLs o cortava)
+            urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={ch}&streamType=main")
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile2")
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/live/ch0")
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/live/ch1")

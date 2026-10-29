@@ -58,9 +58,11 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
     ip = equipamento.get("ip")
     username = equipamento.get("username")
     password = equipamento.get("password")
-    nome = equipamento.get("name", "Huawei").replace(" ", "_")
-    
-    res = {"nome": nome, "status": "ERRO", "cameras": None}
+    nome_original = equipamento.get("name") or "Huawei"
+    # Nome sanitizado só para os arquivos: o "nome" do resultado é o original (o servidor acha o equipamento por ele)
+    nome = nome_original.replace(" ", "_")
+
+    res = {"nome": nome_original, "status": "ERRO", "cameras": None}
     
     if not ip or not username or not password:
         logging.error(f"[HUAWEI] {nome} — Faltam credenciais (ip/usuario/senha). Abortando.")

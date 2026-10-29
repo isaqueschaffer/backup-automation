@@ -9,9 +9,11 @@ def realizar_backup_mikrotik(equipamento: dict, pasta_destino: Path) -> dict:
     ip = equipamento.get("ip")
     username = equipamento.get("username")
     password = equipamento.get("password")
-    nome = re.sub(r"[^\w.-]", "_", equipamento.get("name") or "Mikrotik")
-    
-    res = {"nome": nome, "status": "ERRO", "cameras": None}
+    nome_original = equipamento.get("name") or "Mikrotik"
+    # Nome sanitizado só para os arquivos: o "nome" do resultado é o original (o servidor acha o equipamento por ele)
+    nome = re.sub(r"[^\w.-]", "_", nome_original)
+
+    res = {"nome": nome_original, "status": "ERRO", "cameras": None}
     
     if not ip or not username or not password:
         logging.error(f"[MIKROTIK] {nome} - Faltam credenciais ou IP.")

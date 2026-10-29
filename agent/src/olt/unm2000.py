@@ -41,8 +41,10 @@ def realizar_backup_olt(equipamento: dict, pasta_destino: Path, conf: dict = Non
             
     tipo_parser = "HUAWEI" if "huawei" in fabricante else "UNM2000"
     
+    # "manual" = bandeja; "manual_dashboard" = "backup agora" do painel e "Iniciar fila" do Cliente.
+    # O agendado ("scheduled") não pede exportação: usa a do backup diário do próprio UNM2000.
     if (
-        trigger == "manual"
+        trigger in ("manual", "manual_dashboard")
         and tipo_parser == "UNM2000"
         and (equipamento.get("tipo") or "").upper() == "OLT"
     ):
