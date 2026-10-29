@@ -358,31 +358,38 @@ def run_backup(trigger: str = "scheduled"):
         nome = eq.get("name", "equipamento")
         nome_safe = nome_seguro(nome)
 
-        # Diretório temporário de trabalho
-        pasta_trabalho = TEMP_DIR_WORK / f"{tipo}_{nome_safe}"
-        pasta_trabalho.mkdir(parents=True, exist_ok=True)
+        # Erro inesperado num equipamento vira ERRO dele e o backup segue para o próximo
+        # (antes a exceção derrubava o backup da máquina inteira, sem relatório)
+        try:
+            # Diretório temporário de trabalho
+            pasta_trabalho = TEMP_DIR_WORK / f"{tipo}_{nome_safe}"
+            pasta_trabalho.mkdir(parents=True, exist_ok=True)
 
-        with log_remoto.equipamento_atual(nome):
-            res = processar_equipamento(eq, zip_password, pasta_trabalho, conf, trigger)
-        res["tipo"] = tipo
-        planilha = res.pop("_planilha", None)
+            with log_remoto.equipamento_atual(nome):
+                res = processar_equipamento(eq, zip_password, pasta_trabalho, conf, trigger)
+            res["tipo"] = tipo
+            planilha = res.pop("_planilha", None)
+
+            if planilha is not None:
+                try:
+                    destino = _guardar_planilha(planilha, TEMP_DIR_FINAL, customer_name, client_name, nome, planilhas)
+                    logging.info(f"  Planilha do NVR salva em NVR/PLANILHA/{destino.name}")
+                except Exception:
+                    logging.warning(f"  Nao foi possivel guardar a planilha do NVR {nome}.", exc_info=True)
+
+            # Monta a estrutura final
+            pasta_final_eq = TEMP_DIR_FINAL / tipo / f"backup_{tipo.lower()}_{nome_safe}"
+            pasta_final_eq.mkdir(parents=True, exist_ok=True)
+
+            # Cria o ZIP interno sem senha
+            zip_interno_path = pasta_final_eq / "backup.zip"
+            if any(pasta_trabalho.iterdir()):
+                criar_zip(pasta_trabalho, zip_interno_path, senha=None)
+        except Exception:
+            logging.error(f"  Falha inesperada no backup do equipamento {nome}. Seguindo para o proximo.",
+                          exc_info=True, extra={"equipamento": nome})
+            res = {"nome": nome, "status": "ERRO", "cameras": None, "tipo": tipo}
         resultados.append(res)
-
-        if planilha is not None:
-            try:
-                destino = _guardar_planilha(planilha, TEMP_DIR_FINAL, customer_name, client_name, nome, planilhas)
-                logging.info(f"  Planilha do NVR salva em NVR/PLANILHA/{destino.name}")
-            except Exception:
-                logging.warning(f"  Nao foi possivel guardar a planilha do NVR {nome}.", exc_info=True)
-
-        # Monta a estrutura final
-        pasta_final_eq = TEMP_DIR_FINAL / tipo / f"backup_{tipo.lower()}_{nome_safe}"
-        pasta_final_eq.mkdir(parents=True, exist_ok=True)
-
-        # Cria o ZIP interno sem senha
-        zip_interno_path = pasta_final_eq / "backup.zip"
-        if any(pasta_trabalho.iterdir()):
-            criar_zip(pasta_trabalho, zip_interno_path, senha=None)
 
     finished_at = datetime.utcnow()
 
