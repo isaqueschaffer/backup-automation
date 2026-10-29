@@ -1,8 +1,9 @@
 Write-Host "Criando ambiente virtual e instalando dependencias..."
-python -m venv venv
+# Python fixo (o build atual usa o 3.14.8), não o que estiver no PATH
+py -3.14 -m venv venv
 
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
-.\venv\Scripts\python.exe -m pip install pyinstaller pywin32
+.\venv\Scripts\python.exe -m pip install pyinstaller==6.22.3 pywin32==312
 
 Write-Host "Compilando serviço em background (service.exe)..."
 # O serviço Windows no PyInstaller precisa ser Console (não windowed) para o pywin32 funcionar

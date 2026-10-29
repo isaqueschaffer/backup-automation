@@ -21,7 +21,7 @@ import requests
 
 logger = logging.getLogger("trilan.updater")
 
-CURRENT_VERSION = "1.1.33"   # <-- Atualizar manualmente a cada build
+CURRENT_VERSION = "1.1.34"   # <-- Atualizar manualmente a cada build
 _UPDATE_CHECK_INTERVAL = 3600  # segundos entre verificações de update (1h)
 _last_update_check: float = 0.0
 
@@ -87,6 +87,14 @@ def check_and_apply_update(conf: dict) -> bool:
         )
         resp.raise_for_status()
         data = resp.json()
+    except requests.exceptions.SSLError as e:
+        # A verificação do certificado continua ligada (é ela que protege a URL e o hash do executável);
+        # como erro, o aviso chega aos logs do painel
+        logger.error(
+            f"[OTA] Certificado inválido na URL do servidor ({server_url}): atualização automática desativada "
+            f"até corrigir a URL em agent.conf. Detalhe: {e}"
+        )
+        return False
     except Exception as e:
         logger.warning(f"[OTA] Falha ao verificar atualização: {e}")
         return False
@@ -201,7 +209,8 @@ def check_and_apply_update(conf: dict) -> bool:
         bat_content += f'echo [%date% %time%] Atualizacao concluida. >> "{log_ota}"\n'
         bat_content += 'del "%~f0"\n'
         bat_path = os.path.join(tmp_dir, "apply_update.bat")
-        with open(bat_path, "w") as f:
+        # O cmd lê o .bat na página de código OEM (caminhos com acento precisam dela)
+        with open(bat_path, "w", encoding="oem", errors="replace") as f:
             f.write(bat_content)
 
         logger.info("[OTA] Aplicando atualização via script batch. Serviço reiniciará em instantes...")

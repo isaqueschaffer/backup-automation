@@ -13,6 +13,39 @@ from src.application import log_remoto
 
 INTERVALO_PRESENCA_S = 300
 
+# Espera crescente por equipamento sem resposta (senha errada ou fora do ar): tentar login a cada 5 min mantém
+# a conta (Intelbras/Dahua) ou o IP (Hikvision) bloqueado no NVR. A espera dobra a cada falha seguida
+# (5 -> 10 -> 20 -> 40 -> 60 min, no máximo 60) e zera na primeira leitura com sucesso.
+ESPERA_INICIAL_MIN = 5
+ESPERA_MAXIMA_MIN = 60
+# (nome, ip) -> {"falhas": falhas seguidas, "pular": ciclos que ainda faltam pular}. Só a thread de presença usa.
+_espera_por_equipamento: Dict[tuple, Dict[str, int]] = {}
+
+
+def _deve_pular(chave: tuple) -> bool:
+    """True se o equipamento ainda está em espera (e consome um ciclo dela)."""
+    estado = _espera_por_equipamento.get(chave)
+    if estado and estado["pular"] > 0:
+        estado["pular"] -= 1
+        return True
+    return False
+
+
+def _registrar_falha(chave: tuple, nome: str) -> None:
+    estado = _espera_por_equipamento.setdefault(chave, {"falhas": 0, "pular": 0})
+    estado["falhas"] += 1
+    espera_min = min(ESPERA_INICIAL_MIN * 2 ** (estado["falhas"] - 1), ESPERA_MAXIMA_MIN)
+    # Em ciclos inteiros de presença: a espera de 5 min pula o próximo ciclo (sem tentar por 5 min)
+    estado["pular"] = max(1, (espera_min * 60) // INTERVALO_PRESENCA_S)
+    logging.warning(
+        f"Presença de câmeras: {nome} sem resposta ({estado['falhas']} falha(s) seguida(s)). "
+        f"Nova tentativa em {espera_min} min."
+    )
+
+
+def _registrar_sucesso(chave: tuple) -> None:
+    _espera_por_equipamento.pop(chave, None)
+
 
 def coletar_presenca(equipamentos: list) -> List[Dict[str, Any]]:
     """
@@ -29,15 +62,20 @@ def coletar_presenca(equipamentos: list) -> List[Dict[str, Any]]:
 
                 tipo_eq = (eq.get("tipo") or "NVR").upper()
                 nome_eq = eq.get("name")
+                chave = (nome_eq or "", (eq.get("ip") or "").strip())
                 lista_cams = []
 
                 if tipo_eq == "NVR":
+                    if _deve_pular(chave):
+                        continue
                     cfg = parse_config_extra(eq)
                     cameras, tipo, _ = buscar_cameras(
                         eq["ip"], eq["username"], eq["password"], cfg.get("marca")
                     )
                     if not cameras:
+                        _registrar_falha(chave, nome_eq)
                         continue
+                    _registrar_sucesso(chave)
 
                     for canal_id, cam in cameras.items():
                         online = cam.get("online")
@@ -62,17 +100,17 @@ def coletar_presenca(equipamentos: list) -> List[Dict[str, Any]]:
                         })
 
                 elif tipo_eq == "DEFENSE":
-                    from src.application.webhook_defense import get_status_cameras_defense
-                    cfg = parse_config_extra(eq)
-                    st_cameras = get_status_cameras_defense(cfg.get("pasta_origem", ""))
-                    if not st_cameras:
+                    # Estado pela API do Defense IA (sem gravações e sem RTSP), com os mesmos nomes do backup.
+                    # Sem senha da API não há o que consultar; API sem resposta não envia nada.
+                    if not eq.get("password") or _deve_pular(chave):
                         continue
-                    for nome, evento in st_cameras.items():
-                        lista_cams.append({
-                            "canal": None,
-                            "nome": nome,
-                            "online": (evento == "OK"),
-                        })
+                    from src.vms.defense import coletar_presenca_defense
+                    leituras = coletar_presenca_defense(eq)
+                    if leituras is None:
+                        _registrar_falha(chave, nome_eq)
+                        continue
+                    _registrar_sucesso(chave)
+                    lista_cams = leituras
 
                 else:
                     continue

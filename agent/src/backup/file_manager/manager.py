@@ -9,6 +9,7 @@ from src.backup.file_manager.utils import get_agent_date, sanitize_name
 from src.backup.file_manager.parsers import BaseParser, UNM2000Parser, HuaweiParser
 from src.backup.file_manager.validators import Validator
 from src.backup.file_manager.copier import SafeCopier
+from src.core.config import parse_config_extra
 
 def _gerar_mapa_vms(is_ok: bool) -> tuple:
     """Retorna (total_dias, mapa_15, dias_com_gravacao) para equipamentos VMS (Digifort/Defense)."""
@@ -81,8 +82,8 @@ class FileManager:
         """
         nome_original = equipamento.get("name", "Equipamento_Desconhecido")
         nome_safe = sanitize_name(nome_original)
-        
-        config_extra = equipamento.get("config_extra", {})
+
+        config_extra = parse_config_extra(equipamento)
         pasta_origem_str = config_extra.get("pasta_origem", "")
         
         logging.info(f"\n{'='*50}\n{nome_original} [{tipo_parser}]\n{'='*50}")
@@ -165,39 +166,10 @@ class FileManager:
                 return {"nome": nome_original, "status": status_copia.value, "cameras": None}
             arquivos_copiados.append(destino.name)
 
+        # O DEFENSE não passa por aqui (src/vms/defense.py): só o Digifort monta o status das câmeras
         status_cameras = None
-        if equipamento.get("tipo", "").upper() == "DIGIFORT":
+        if (equipamento.get("tipo") or "").upper() == "DIGIFORT":
             status_cameras = self._status_cameras_digifort(equipamento, pasta_eq, conf, arquivos_copiados)
-        elif equipamento.get("tipo", "").upper() == "DEFENSE":
-            logging.info("  [DEFENSE] Buscando status de gravacoes via Webhook CSV...")
-            try:
-                from src.application.webhook_defense import get_status_cameras_defense
-                
-                cfg_ext = equipamento.get("config_extra", {})
-                caminho_log = cfg_ext.get("pasta_origem", "")
-                
-                status_dict = get_status_cameras_defense(caminho_log)
-                if status_dict:
-                    status_cameras = []
-                    for nome_cam, st in status_dict.items():
-                        is_ok = (st == "OK")
-                        total_dias, mapa_str, dias_gravados = _gerar_mapa_vms(is_ok)
-                        status_cameras.append({
-                            "canal": "N/A",
-                            "nome": nome_cam,
-                            "ip": "N/A",
-                            "online": is_ok,
-                            "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
-                            "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
-                            "total_dias": total_dias,
-                            "mapa": mapa_str,
-                            "dias_com_gravacao": dias_gravados,
-                        })
-                    logging.info("  [DEFENSE] Status das cameras obtido com sucesso via Webhook.")
-                else:
-                    logging.info("  [DEFENSE] Nenhum status de camera encontrado no arquivo do Webhook.")
-            except Exception as e:
-                logging.warning(f"  [DEFENSE] Falha ao processar status do Webhook: {e}")
 
         logging.info(f"  Backup processado com sucesso. Arquivos: {', '.join(arquivos_copiados)}")
 
@@ -221,7 +193,7 @@ class FileManager:
         try:
             from src.application.webhook_digifort import get_detalhes_cameras, get_status_cameras, get_caminho_csv, ping_camera
 
-            cfg_ext = equipamento.get("config_extra", {})
+            cfg_ext = parse_config_extra(equipamento)
             caminho_export = cfg_ext.get("caminho_csv", "")
             caminho_log = cfg_ext.get("caminho_log_csv", "")
 

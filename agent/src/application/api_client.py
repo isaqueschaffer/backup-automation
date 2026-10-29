@@ -1,5 +1,6 @@
 import logging
 import math
+import time
 import requests
 from pathlib import Path
 from datetime import datetime
@@ -140,6 +141,13 @@ def _get_telemetry() -> dict:
     except Exception as e:
         pass # Ignora se nao tiver GPUtil ou GPU
         
+    # Fuso local em minutos em relação ao UTC (ex.: -180 em Brasília): o servidor usa na recuperação de
+    # backup perdido, que compara com o horário agendado na hora local da máquina
+    try:
+        telemetry["utc_offset_min"] = time.localtime().tm_gmtoff // 60
+    except Exception:
+        pass
+
     # O servidor não fecha a rodada do Cliente enquanto a máquina ainda está fazendo o backup
     from src.application import estado
     telemetry["backup_em_andamento"] = estado.backup_em_andamento
@@ -218,6 +226,11 @@ def send_presenca_cameras(conf: dict, equipamentos: list) -> bool:
         return False
 
 
+# Mesmo conjunto de _OK_STATUSES (server/api/services/backup_runs.py): NVR Motorola sai SEM_ARQUIVOS
+# (sem backup de configuração) e não deve deixar o backup geral como PARTIAL
+_STATUS_OK = {"OK", "SEM_ARQUIVOS"}
+
+
 def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 resultados: list, trigger: str) -> str | None:
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
@@ -225,7 +238,7 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
         "started_at": started_at.isoformat(),
         "finished_at": finished_at.isoformat(),
         "status": (
-            "OK" if all(r["status"] == "OK" for r in resultados) else
+            "OK" if all(r["status"] in _STATUS_OK for r in resultados) else
             "ERROR" if all(r["status"] == "ERRO" for r in resultados) else "PARTIAL"
         ),
         # campo nvr_results mantido por compatibilidade com o servidor; inclui tipo do equipamento
@@ -234,7 +247,8 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 "nome": r["nome"],
                 "tipo": r.get("tipo") or "NVR",
                 "status": r["status"],
-                "cameras": r.get("cameras") or [],
+                # None = o equipamento não informou câmeras (ex.: inacessível): o servidor mantém a lista anterior
+                "cameras": r.get("cameras"),
                 "telemetria": r.get("telemetria"),
             }
             for r in resultados

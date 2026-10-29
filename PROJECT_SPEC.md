@@ -83,19 +83,22 @@
 
 | Dependência | Versão | Uso |
 |---|---|---|
-| Python | 3.11+ via PyInstaller | Runtime compilado |
-| requests | >=2.31.0 | HTTP para API |
-| pyzipper | >=0.3.6 | ZIP com senha AES-256 |
-| pycryptodome | >=3.20.0 | Criptografia local |
-| pypiwin32 | >=223 | Win32 API (serviço Windows) |
-| pystray | >=0.19.5 | Ícone na bandeja do Windows |
-| Pillow | >=10.3.0 | Renderização de ícone |
-| paramiko | >=3.4.0,<4.0.0 | SSH (para OLTs/Mikrotiks) |
-| pyftpdlib | >=1.5.8 | FTP (para equipamentos que usam FTP) |
-| imageio-ffmpeg | — | ffmpeg embarcado (captura RTSP / imagem noturna) |
-| psutil | >=5.9.0 | Telemetria (CPU, RAM, disco, rede) |
-| GPUtil | >=1.4.0 | Telemetria de GPU (opcional, falha silenciosa) |
-| pysnmp | >=7.1,<8.0.0 | SNMPv2c: telemetria de NVR Intelbras (a faixa `<7` não tem `get_cmd`/`walk_cmd`) |
+| Python | 3.14 (`py -3.14` no `build.ps1`; build atual com 3.14.8) via PyInstaller 6.22.3 | Runtime compilado |
+| requests | ==2.34.2 | HTTP para API |
+| pyzipper | ==0.4.0 | ZIP com senha AES-256 |
+| pycryptodome | ==3.24.0 | Criptografia local |
+| pywin32 | ==312 | Win32 API (serviço Windows); substitui o `pypiwin32`, que era só um invólucro antigo |
+| pystray | ==0.19.5 | Ícone na bandeja do Windows |
+| Pillow | ==12.3.0 | Renderização de ícone |
+| paramiko | ==3.5.1 | SSH (para OLTs/Mikrotiks) |
+| pyftpdlib | ==2.2.0 | FTP (para equipamentos que usam FTP) |
+| imageio-ffmpeg | ==0.6.0 | ffmpeg embarcado (captura RTSP / imagem noturna) |
+| psutil | ==7.2.2 | Telemetria (CPU, RAM, disco, rede) |
+| GPUtil | ==1.4.0 | Telemetria de GPU (opcional, falha silenciosa) |
+| pysnmp | ==7.1.30 | SNMPv2c: telemetria de NVR Intelbras (a faixa `<7` não tem `get_cmd`/`walk_cmd`) |
+| openpyxl | ==3.1.5 | Planilhas da configuração dos NVR |
+
+Desde a 1.1.34 todas as versões do `agent/requirements.txt` são fixas (`==`); atualizar uma dependência é trocar o número aqui e no arquivo.
 
 ---
 
@@ -200,7 +203,7 @@ trilan-nvr-backup-automation/
 ### Fluxo do Agente
 
 1. Ao iniciar: lê `agent.conf`, chama `GET /api/v1/agent/config` para obter configuração
-2. A cada 15 segundos: `POST /api/v1/agent/ping` — heartbeat + recebe flags de controle (long-polling de ate 5s no servidor; `last_seen` e commitado no inicio do ping). Agente considerado online se `last_seen` < 180s
+2. A cada 15 segundos: `POST /api/v1/agent/ping` — heartbeat + recebe flags de controle (long-polling de ate 5s no servidor; `last_seen` e commitado no inicio do ping). Agente considerado online se `last_seen` < 180s. A tarefa RTSP do painel (`rtsp_task`) e disparada na propria thread de ping (agente >= 1.1.34), para responder mesmo durante um backup. O `servico.log` so registra pings com instrucao, a volta do servidor e as falhas (a primeira e depois no maximo uma linha a cada 10 min)
 3. No horário agendado (ou quando flag `backup=true` no ping): executa backup completo
 4. Após backup: `POST /api/v1/agent/backup/report` + `POST /api/v1/agent/backup/upload/{id}`
 5. A cada hora (dentro do ciclo de ping): `GET /api/v1/agent/update-check` — verifica OTA
@@ -487,7 +490,7 @@ datetime.utcnow()            # naive em UTC — compativel com o banco
 
 **Excecoes documentadas e permitidas:**
 - `auth.py`: JWT usa `datetime.now(timezone.utc)` — nao e persistido no banco; exigido pelo `python-jose`
-- `routers/agent.py` (ping_agent): comparacao de horario BRT em memoria apenas, nao persistida diretamente
+- (Removida em 29/10/2026, agente 1.1.34) `routers/agent.py` (ping_agent) usava `timezone(timedelta(hours=-3))` na recuperacao de backup perdido; agora e tudo naive: `datetime.utcnow()` + `utc_offset_min` da maquina
 
 **Impacto se violado:** Erro de tipo Python↔PostgreSQL ao persistir `datetime` aware em coluna `TIMESTAMP WITHOUT TIME ZONE`.
 
@@ -652,9 +655,9 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | Metodo | Path | Descricao |
 |---|---|---|
 | GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente (`client_name` = nome da máquina; `customer_name` = nome do Cliente da máquina, opcional) |
-| POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup` |
+| POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup`. A telemetria do agente >= 1.1.34 traz `utc_offset_min` (fuso local em minutos, ex.: -180), usado na recuperação de backup perdido (inteiro de -720 a 840; ausente ou inválido = -180) |
 | POST | `/api/v1/agent/logs` | Agente envia lote (até 100) de avisos/erros e marcos do backup: `{"logs": [{"nivel": "INFO\|WARNING\|ERROR", "mensagem", "equipamento", "segundos_atras"}]}`; o servidor calcula `created_at` (REGRA-005); aceita também conta bloqueada |
-| POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup |
+| POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup. Equipamento com `status` ERRO e `cameras` nulo ou vazio (agente >= 1.1.34 manda `null` quando o equipamento não informou câmeras; os antigos mandam `[]`) não apaga `last_recording_status`: as câmeras conhecidas ficam com `status_comunicacao`/`status_gravacao` = `NAO_VERIFICADO` e `online` nulo |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
 | GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa) |
 | POST | `/api/v1/agent/rtsp-result` | Agente devolve o resultado da tarefa RTSP do dashboard |
@@ -760,8 +763,10 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 - **Nome:** `TrilanAgentNVR`
 - **Display name:** `Trilan — Agente Backup`
 - **Diretorio de instalacao:** `C:\Program Files (x86)\Trilan NVR Backup Agent\`
-- **Diretorio de logs:** `C:\ProgramData\Trilan NVR Backup Agent\logs\servico.log`
+- **Diretorio de logs:** `C:\ProgramData\Trilan NVR Backup Agent\logs\servico.log` (cp1252, lido pela bandeja com `Get-Content`). Na inicializacao, acima de 10 MB vira `servico.1.log` (substitui o anterior); sem `RotatingFileHandler`, porque a bandeja mantem o arquivo aberto. No Log de Eventos do Windows so vao os erros e as marcas de inicio/parada do servico (agente >= 1.1.34)
 - **Config file:** `agent.conf` (mesmo diretorio do exe)
+- **Threads:** ping (15 s), presenca das cameras (5 min) e envio de logs (20 s) sao iniciadas uma unica vez por processo; o laco de resiliencia do `SvcDoRun` so reinicia o laco principal. O horario de backup recebido do servidor e validado (hora 0-23, minuto 0-59; invalido = erro no log e 02:00)
+- **Presenca das cameras** (`src/application/presenca_cameras.py`, a cada 5 min, pulada com backup em andamento): NVR por `buscar_cameras` (so cameras com online True/False); DIGIFORT pelo ping ICMP em memoria; DEFENSE pela API do Defense IA (so handshake, login e arvore de dispositivos, com os mesmos nomes do backup; nao le mais o CSV). Equipamento NVR/DEFENSE sem resposta entra em espera crescente por (nome, ip): pula 5, 10, 20, 40 e depois 60 min a cada falha seguida (evita manter a conta ou o IP bloqueado no NVR com senha errada) e zera na primeira leitura com sucesso
 
 ### Formato de `agent.conf`
 
@@ -782,7 +787,11 @@ O Tray dispara backup manual via Win32 Named Event:
 
 ### NVR Factory — Ordem de Detecao de Tipo
 
-Quando `config_extra.marca` está definida, ela decide primeiro: `Motorola` vai direto ao passo 6; `Hikvision` e `Intelbras` usam só a sonda Hikvision (passos 1 a 5; o NVR Intelbras fala o mesmo ISAPI para câmeras e gravações). Sem `marca`, vale a ordem abaixo. A telemetria de NVR `Intelbras` é lida por SNMP (`src/nvr/intelbras/`); a dos demais, por ISAPI.
+Quando `config_extra.marca` está definida, ela decide primeiro: `Motorola` vai direto ao passo 6; `Hikvision` usa só a sonda Hikvision (passos 1 a 5); `Intelbras` usa o CGI Dahua (`src/nvr/intelbras/cameras.py`) e, se ele não achar câmeras, a sonda Hikvision (modelos antigos com ISAPI). Sem `marca`, vale a ordem abaixo. A telemetria de NVR `Intelbras` é lida por SNMP (`src/nvr/intelbras/`); a dos demais, por ISAPI.
+
+**NVR fora do ar ou senha errada nunca sai como OK (agente >= 1.1.34):** Motorola com login falho → `DESCONHECIDO` (logou e não achou câmeras → `MOTOROLA` sem câmeras); Intelbras sem resposta HTTP 200 em nenhuma das consultas CGI (ChannelTitle e RemoteDevice) e sem câmeras pelo ISAPI → `DESCONHECIDO` (respondeu sem câmeras → `INTELBRAS` sem câmeras). `DESCONHECIDO` sem câmeras faz o `processar_nvr` devolver ERRO ("NVR INACESSIVEL ou falha no login") sem tentar telemetria nem planilha, e o relatório leva `cameras: null` (o servidor mantém a lista anterior como `NAO_VERIFICADO`).
+
+**Estado online das câmeras Intelbras:** `GET /cgi-bin/LogicDeviceManager.cgi?action=getCameraState&uniqueChannels[0]=-1` (Digest), linhas `states[N].channel` (base 0) e `states[N].connectionState`: `Connected` = online, `Disconnected` = offline, outro valor, canal ausente ou erro = desconhecido (`None`; o `factory.py` usa as gravações e a presença não envia). Canal analógico (fallback ChannelTitle) = desconhecido. **Não validado em equipamento Intelbras real.**
 
 ```
 1. buscar_cameras_nvr (Hikvision IP)
@@ -908,14 +917,14 @@ Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose 
 | NVR IP (Hikvision) | NVR | src/nvr/hikvision/ | HTTP ISAPI |
 | DVR Analogico (Hikvision) | NVR (o agente o detecta como `DVR`) | src/nvr/hikvision/ | HTTP ISAPI |
 | NVR Hibrido (Hikvision) | NVR | src/nvr/factory.py | HTTP ISAPI |
-| NVR Intelbras | NVR com `config_extra.marca = "Intelbras"` | src/nvr/intelbras/ (telemetria) + src/nvr/hikvision/ (câmeras e gravações) | SNMPv2c (porta 161) e HTTP ISAPI |
+| NVR Intelbras | NVR com `config_extra.marca = "Intelbras"` | src/nvr/intelbras/ (câmeras e estado online pelo CGI Dahua, gravações, planilha, telemetria) + src/nvr/hikvision/ (fallback ISAPI) | HTTP CGI Dahua, SNMPv2c (porta 161) e HTTP ISAPI |
 | Motorola (NVMS-9000) | NVR com `config_extra.marca = "Motorola"` (o agente o detecta como `MOTOROLA`) | src/nvr/motorola/ + camera/rtsp_client.py | HTTP + RTSP (`chID=N`); imagem da noite via `queryChlRecLog` |
-| OLT (Huawei, UNM2000, V-SOL) | OLT | src/olt/ (huawei_active, unm2000, vsol) | SSH Paramiko |
+| OLT (Huawei, UNM2000, V-SOL) | OLT | src/olt/ (huawei_active, unm2000, vsol) | SSH Paramiko; UNM2000: cópia da pasta de exportação e, no backup manual (`manual` da bandeja ou `manual_dashboard` do painel/fila do Cliente), uma exportação nova pela API local antes de copiar |
 | ONU | ONU | — | — |
 | PABX | PABX | src/pabx/ | — |
 | Mikrotik | MIKROTIK | src/mikrotik/routeros.py | SSH/SFTP |
 | Digifort | DIGIFORT | src/application/webhook_digifort.py (ping ICMP) + src/vms/digifort_gravacoes.py (tempo gravado pelos índices `.dix`) | Ping + leitura dos arquivos de gravação |
-| Intelbras Defense | DEFENSE | src/vms/defense.py | API / HTTP |
+| Intelbras Defense | DEFENSE | src/vms/defense.py (+ src/application/webhook_defense.py, plano B) | API REST do Defense IA (HTTPS, porta `config_extra.porta_api`, padrão 4433): estado das câmeras e gravações no backup; só o estado (sem gravações e sem RTSP) na presença a cada 5 min. Gravação `COM_GRAVACAO` só se gravou hoje (como no NVR); sem dado da API = `NAO_VERIFICADO`. API sem resposta: estado pelo CSV do webhook (`config_extra.caminho_log_csv` ou o padrão), câmera sem informação = `ERRO_COMUNICACAO`. O webhook escuta só em `127.0.0.1:8181` |
 | Misto / Custom | MIXED | — | — |
 | Câmera IP (Teste RTSP)| CAMERA | server/api/routers/equipamentos.py + agent.py (`/rtsp-result`), agent/src/camera/rtsp_client.py | RTSP (TCP) |
 
@@ -1068,6 +1077,35 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-29] — Agente 1.1.34: correções da auditoria do agente 1.1.33 (19 itens)
+
+**Alteração:** correções dos 19 problemas encontrados na auditoria do agente 1.1.33.
+1. **NVR fora do ar/senha errada não aparece mais como OK.** `motorola/cameras.py`: login falho = `(None, None)`; logou e não achou câmeras = `({}, sessão)`. `intelbras/cameras.py`: `None` quando nenhuma das consultas CGI (ChannelTitle, RemoteDevice) respondeu HTTP 200; `{}` quando respondeu sem câmeras. `factory.py`: Motorola sem sessão e Intelbras sem CGI nem ISAPI viram `DESCONHECIDO`, e o `processar_nvr` devolve ERRO "NVR INACESSIVEL ou falha no login" (antes: Motorola `SEM_ARQUIVOS`, verde no painel; Intelbras `PARCIAL`). `api_client.post_report` manda `cameras: null` quando o equipamento não informou câmeras (antes `[]`, que apagava a lista no servidor). Servidor (`routers/agent.py`, `receive_backup_report`): ERRO com `cameras` nulo ou vazio (cobre agentes antigos) e lista anterior não vazia grava uma cópia com `status_comunicacao`/`status_gravacao` = `NAO_VERIFICADO` e `online` nulo, mantendo os demais campos (`offline_desde`, `offline_desde_aprox`, `imagem_noite`, `mapa`...); o `nvr_results` do backup (base do e-mail) não muda e segue sem câmeras para esse equipamento. `camera_offline.py` trata `NAO_VERIFICADO` como estado incerto (mantém a marca `offline_desde`; a presença seguinte volta a ONLINE/OFFLINE) e os widgets do dashboard o contam como "não online", como já faziam com `ERRO_COMUNICACAO`; o `StatusBadge` já o mostra como "Não Verificado".
+2. **Um equipamento com erro não derruba mais o backup da máquina.** `backup_job.run_backup`: exceção no processamento de um equipamento (inclusive pasta final e ZIP interno) vira `{"status": "ERRO", "cameras": None}` com o traceback no log, e o backup segue. `copier.copy_file`: a limpeza do temporário funciona para pasta (Digifort) e arquivo e nunca levanta exceção. `file_manager/manager.py`: `parse_config_extra` no lugar de `equipamento.get("config_extra", {})` (quebrava com `None`) e saiu o ramo morto do DEFENSE, que lia a `pasta_origem` como CSV. `vms/defense.py`: leitura da pasta de origem (`exists`/`iterdir`/`stat`) protegida (erro = ERRO com as câmeras já montadas).
+3. e 11. **Defense IA: status real, gravação com o significado do NVR e presença pela API.** Com a API sem resposta, o plano B lê o CSV do webhook (`config_extra.caminho_log_csv` ou o padrão `C:\Relatorios_Defense\status_cameras.csv`), nunca a `pasta_origem` (pasta dos backups); câmera sem informação fica `online: null`, `ERRO_COMUNICACAO` (antes todas viravam online com 15 dias de gravação inventados). Sem dado de gravação da API, a câmera fica `NAO_VERIFICADO` (total 0, mapa vazio), nada é deduzido do estado online. `consultar_gravacoes_defense_api`: HTTP diferente de 200, JSON inválido, resposta sem `data`, erro de rede ou canal sem código = `NAO_VERIFICADO`; resposta válida sem registros = `SEM_GRAVACAO`; `COM_GRAVACAO` só se HOJE tem gravação (como no `factory.py`), com mapa, total e dias cobrindo os 15 dias. Se a página de 1000 registros vier cheia e sem hoje, consulta só o dia de hoje (falha nessa consulta = `NAO_VERIFICADO`). Presença: nova `coletar_presenca_defense` (só handshake, login e árvore de dispositivos, `incluir_gravacoes=False`, sem RTSP), com o mesmo casamento de nomes do backup (`_casar_cameras_defense`: Galeria primeiro, senão as câmeras da API), só câmeras com online True/False; API sem resposta não envia nada; a presença não lê mais o CSV.
+4. **UNM2000:** a exportação na hora aceita `trigger` `manual` (bandeja) e `manual_dashboard` ("backup agora" do painel e "Iniciar fila" do Cliente); o agendado continua sem exportação.
+5. **Mikrotik e OLT Huawei** devolvem o nome original do equipamento no resultado (o sanitizado fica só nos arquivos); antes o servidor não achava o equipamento e gravava tipo "NVR".
+6. **Status geral do backup:** `SEM_ARQUIVOS` conta como OK (mesmo `_OK_STATUSES` de `backup_runs.py`); máquina só com OK e Motorola deixa de sair PARTIAL. ERROR continua sendo "todos ERRO".
+7. **Threads únicas:** ping, presença e envio de logs são iniciadas uma vez por processo (o laço de resiliência do `SvcDoRun` criava mais três a cada erro). O horário recebido do servidor é validado (hora 0-23, minuto 0-59) na leitura inicial e na ressincronização; inválido = erro no log e 02:00.
+8. **Teste RTSP durante o backup:** a `rtsp_task` é disparada direto na thread de ping (`_ping_loop`), ao receber a resposta; saíram os disparos do `_process_ping_responses` (inclusive o da drenagem), que só rodavam com o laço principal livre (o servidor desiste em 55 s).
+9. **RTSP ao vivo do canal 1 de NVR Motorola** (`rtsp_client.test_rtsp_camera`): o ramo de NVR (`/chID={canal}&streamType=main` primeiro) vale para Motorola sem `direct_camera`, com canal e (sem `stream_principal` OU canal > 1); antes o canal 1 caía no ramo de câmera avulsa e o limite de 4 URLs cortava o `chID=1`. No ramo de câmera avulsa, com canal, `/chID={ch}&streamType=main` entra logo após `/profile1`. Canal não numérico não levanta exceção.
+10. **Intelbras: estado real das câmeras** pela CGI `LogicDeviceManager.cgi?action=getCameraState&uniqueChannels[0]=-1` (Digest; `Connected` = online, `Disconnected` = offline, outro valor/erro/canal ausente = desconhecido); antes toda câmera habilitada era "online". Canal analógico (ChannelTitle) = desconhecido. A consulta só é feita quando há câmeras IP. **Precisa de validação num NVR Intelbras real** (formato da resposta não conferido em equipamento). Nota da planilha ajustada ("A configuração lida pelo CGI não informa...").
+12. **Log:** ping sem instrução não é mais registrado (só com restart/backup/rtsp_task, pelo `_resumo_ping`, e a volta do servidor); falhas seguidas de ping registram a primeira e depois no máximo uma linha a cada 10 min com a contagem. `log()` só manda ao Log de Eventos do Windows os erros e as marcas de início/parada do serviço. Rotação simples na inicialização: `servico.log` acima de 10 MB vira `servico.1.log`.
+13. **OTA:** falha de certificado (SSL) no `update-check` vira `logger.error` com mensagem clara (certificado inválido na URL do servidor; atualização automática desativada até corrigir a URL em `agent.conf`), que chega aos logs do painel; a verificação do certificado continua ligada. As outras falhas seguem como aviso.
+14. **Instalador:** URL padrão `https://server.suportetrilan.com.br` (antes `http://publico.suportetrilan.com.br:7001`).
+15. **Webhook do Defense:** escuta só em `127.0.0.1:8181` (antes `0.0.0.0`, sem autenticação) e interpreta o `status` por comparação exata, sem maiúsculas/minúsculas (`ok`, `online`, `normal`, `restaurada`, `restaurado`, `restore`, `restored` ou começando com `restaura`); antes "broken" virava OK por conter "ok". **Atenção:** o Defense IA precisa chamar o webhook na mesma máquina do agente.
+16. **Senha errada não mantém o NVR bloqueado:** a presença põe em espera crescente (por nome + IP) o NVR/DEFENSE sem resposta: pula 5, 10, 20, 40 e depois 60 min a cada falha seguida e zera na primeira leitura com sucesso. DEFENSE sem senha da API não é consultado.
+17. **Fuso da recuperação de backup:** o agente manda `utc_offset_min` na telemetria (`time.localtime().tm_gmtoff // 60`); o servidor usa o do ping ou, se ausente, o de `machine.telemetry` (inteiro de -720 a 840; senão -180) e calcula tudo naive (`datetime.utcnow()` + deslocamento) para "agora", o horário agendado de hoje e a data do `last_backup_at`. Saiu o `timezone(timedelta(hours=-3))` (REGRA-001: a exceção documentada do `ping_agent` foi removida). Máquina em outro fuso deixa de receber dois backups por noite.
+18. **Codificação explícita** (Python 3.15 muda o padrão): `servico.log` em `cp1252` com `errors="replace"` (formato que a bandeja lê); saída do `sc.exe` na bandeja e o `apply_update.bat` do OTA em `oem` com `errors="replace"`.
+19. **Dependências fixas:** `agent/requirements.txt` com `==` (requests 2.34.2, pyzipper 0.4.0, pycryptodome 3.24.0, pywin32 312 no lugar de `pypiwin32>=223`, pystray 0.19.5, Pillow 12.3.0, paramiko 3.5.1, pyftpdlib 2.2.0, imageio-ffmpeg 0.6.0, psutil 7.2.2, GPUtil 1.4.0, pysnmp 7.1.30, openpyxl 3.1.5); `build.ps1` cria o venv com `py -3.14` e instala `pyinstaller==6.22.3` e `pywin32==312`.
+
+Testes do Defense ajustados ao comportamento novo (`agent/tests/test_defense_api.py`: gravou ontem e não hoje = `SEM_GRAVACAO`; câmera sem dado de gravação = `NAO_VERIFICADO`). Nenhuma suíte foi executada nesta entrega (só `py_compile` dos arquivos alterados).
+**Precisa de teste em equipamento real:** item 9 (canal 1 de NVR Motorola ao vivo pelo painel), item 10 (`getCameraState` num Intelbras), presença do Defense pela API (itens 3 e 11) e o plano B pelo CSV, a espera crescente da presença com senha errada (item 16) e a recuperação de backup com `utc_offset_min` (item 17).
+**Arquivos:** agent/service.py, agent/tray.py, agent/build.ps1, agent/installer.iss, agent/requirements.txt, agent/src/application/{api_client.py,backup_job.py,presenca_cameras.py,updater.py,webhook_defense.py}, agent/src/backup/file_manager/{copier.py,manager.py}, agent/src/camera/rtsp_client.py, agent/src/mikrotik/routeros.py, agent/src/nvr/{factory.py,intelbras/cameras.py,intelbras/planilha.py,motorola/cameras.py}, agent/src/olt/{huawei_active.py,unm2000.py}, agent/src/vms/defense.py, agent/tests/test_defense_api.py, server/api/routers/agent.py, server/dashboard/package.json, PROJECT_SPEC.md
+
+**Breaking Change:** Não. Os campos novos são opcionais: o servidor aceita `cameras: null` e `[]` e, sem `utc_offset_min`, usa -180 como antes; agentes < 1.1.34 seguem funcionando (e passam a ter a lista de câmeras preservada no ERRO). **Atenção:** webhook do Defense só local (item 15). **Requer:** deploy do servidor e a versão 1.1.34 do agente (build, release e cadastro no painel, fora desta entrega).
+**Branch:** claude/auditoria-agente-1.1.34
 
 ### [2026-10-29] — Agente 1.1.33: merge com a Helena (Intelbras Defense IA via API REST)
 

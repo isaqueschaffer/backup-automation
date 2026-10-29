@@ -2,7 +2,7 @@
 
 [Setup]
 AppName=Trilan NVR Backup Agent
-AppVersion=1.1.33
+AppVersion=1.1.34
 DefaultDirName={pf}\Trilan NVR Backup Agent
 DefaultGroupName=Trilan NVR
 OutputBaseFilename=TrilanAgentSetup
@@ -55,7 +55,7 @@ begin
   ConfigPage.Add('Client ID:', False);
   ConfigPage.Add('API Key:', False);
 
-  ConfigPage.Values[0] := 'http://publico.suportetrilan.com.br:7001';
+  ConfigPage.Values[0] := 'https://server.suportetrilan.com.br';
   ConfigPage.Values[1] := '';
   ConfigPage.Values[2] := '';
 end;

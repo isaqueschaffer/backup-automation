@@ -41,15 +41,21 @@ def buscar_cameras(nvr_ip, usuario, senha, marca=None):
         marca = marca.upper()
         if marca == "MOTOROLA":
             cameras, sessao = buscar_cameras_motorola(nvr_ip, usuario, senha)
-            return cameras, "MOTOROLA", sessao
+            if sessao is None:
+                # Login falhou ou NVR inacessível: não é um Motorola "sem câmeras" (o backup sai ERRO)
+                return {}, "DESCONHECIDO", None
+            return cameras or {}, "MOTOROLA", sessao
         elif marca == "INTELBRAS":
-            cameras = buscar_cameras_intelbras(nvr_ip, usuario, senha)
-            if cameras:
-                return cameras, "INTELBRAS", None
+            cameras_cgi = buscar_cameras_intelbras(nvr_ip, usuario, senha)
+            if cameras_cgi:
+                return cameras_cgi, "INTELBRAS", None
             # Fallback para ISAPI caso seja um modelo Intelbras antigo/rebranded Hikvision
             cameras, tipo = _probe_hikvision(nvr_ip, usuario, senha)
             if cameras:
                 return cameras, tipo, None
+            if cameras_cgi is None:
+                # Nenhuma consulta CGI respondeu (inacessível ou senha errada) e o ISAPI também não
+                return {}, "DESCONHECIDO", None
             return {}, "INTELBRAS", None
         elif marca == "HIKVISION":
             cameras, tipo = _probe_hikvision(nvr_ip, usuario, senha)

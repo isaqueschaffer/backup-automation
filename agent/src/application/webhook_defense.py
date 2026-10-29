@@ -10,7 +10,19 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # CONFIGURAÇÃO
 # ==========================================
 PORTA_WEBHOOK = 8181
+# Só escuta na própria máquina: o webhook não tem autenticação (o Defense IA roda junto do agente)
+HOST_WEBHOOK = "127.0.0.1"
 ARQUIVO_CSV_DEFENSE = r"C:\Relatorios_Defense\status_cameras.csv"
+
+# Valores de `status` que significam câmera restabelecida (comparação exata, sem maiúsculas/minúsculas,
+# mais o que começa com "restaura"). Qualquer outro valor é falha: "broken" não vira OK por conter "ok".
+STATUS_RESTABELECIDO = {"ok", "online", "normal", "restaurada", "restaurado", "restore", "restored"}
+
+
+def interpretar_status_defense(status_bruto: str) -> str:
+    """Devolve OK se o status recebido do Defense indica câmera restabelecida, senão FALHA."""
+    valor = (status_bruto or "").strip().lower()
+    return "OK" if valor in STATUS_RESTABELECIDO or valor.startswith("restaura") else "FALHA"
 
 def registrar_evento_defense(nome_camera, status_evento):
     """
@@ -41,17 +53,17 @@ class DefenseWebhookHandler(BaseHTTPRequestHandler):
     Servidor HTTP leve para receber chamadas de URL do Defense IA.
     """
     def do_GET(self):
-        # Exemplo de URL que o Defense deve chamar:
-        # http://127.0.0.1:8181/evento?camera=Cam_Recepcao&status=falha
-        
+        # Exemplo de URL que o Defense (na mesma máquina do agente) deve chamar:
+        # http://127.0.0.1:8181/evento?camera=Cam_Recepcao&status=falha   (restabelecida: status=ok)
+
         parsed_path = urllib.parse.urlparse(self.path)
         if parsed_path.path == '/evento':
             query = urllib.parse.parse_qs(parsed_path.query)
-            
+
             nome_camera = query.get('camera', ['Desconhecida'])[0]
-            status_bruto = query.get('status', ['falha'])[0].lower()
-            
-            status_evento = "OK" if "restaura" in status_bruto or "online" in status_bruto or "ok" in status_bruto else "FALHA"
+            status_bruto = query.get('status', ['falha'])[0]
+
+            status_evento = interpretar_status_defense(status_bruto)
             
             registrar_evento_defense(nome_camera, status_evento)
             
@@ -77,11 +89,11 @@ webhook_thread = None
 def rodar_servidor_http():
     global servidor_http
     try:
-        servidor_http = HTTPServer(('0.0.0.0', PORTA_WEBHOOK), DefenseWebhookHandler)
-        logging.info(f"[OK] Webhook Defense IA rodando na porta {PORTA_WEBHOOK}...")
+        servidor_http = HTTPServer((HOST_WEBHOOK, PORTA_WEBHOOK), DefenseWebhookHandler)
+        logging.info(f"[OK] Webhook Defense IA rodando em {HOST_WEBHOOK}:{PORTA_WEBHOOK}...")
         servidor_http.serve_forever()
     except Exception as e:
-        logging.error(f"[ERRO] ao iniciar Webhook Defense IA na porta {PORTA_WEBHOOK}: {e}")
+        logging.error(f"[ERRO] ao iniciar Webhook Defense IA em {HOST_WEBHOOK}:{PORTA_WEBHOOK}: {e}")
 
 def start_webhook_defense(caminho_log: str = ""):
     global ARQUIVO_CSV_DEFENSE, webhook_thread
