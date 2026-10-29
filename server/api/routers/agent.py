@@ -432,6 +432,17 @@ def receive_cameras_status(
     return {"status": "ok", "atualizadas": total}
 
 
+def _cameras_nao_verificadas(anteriores):
+    """Cópia da lista anterior de câmeras com comunicação e gravação NAO_VERIFICADO e `online` None;
+    os demais campos (offline_desde, offline_desde_aprox, imagem_noite, mapa...) ficam como estavam."""
+    saida = []
+    for st in anteriores or []:
+        if isinstance(st, dict):
+            st = {**st, "status_comunicacao": "NAO_VERIFICADO", "status_gravacao": "NAO_VERIFICADO", "online": None}
+        saida.append(st)
+    return saida
+
+
 @router.post("/backup/report", response_model=BackupReportResponse, status_code=201)
 def receive_backup_report(
     body: BackupReportCreate,
@@ -456,7 +467,12 @@ def receive_backup_report(
         nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == r.nome).first()
         if nvr:
             r_dict["tipo"] = nvr.tipo
-            if r.cameras is not None:
+            anteriores_validas = isinstance(nvr.last_recording_status, list) and bool(nvr.last_recording_status)
+            if r.status == "ERRO" and not r.cameras and anteriores_validas:
+                # Equipamento com ERRO sem câmeras (inacessível/senha errada; agentes < 1.1.34 mandam []):
+                # não apaga a lista conhecida, só marca o estado de cada câmera como não verificado
+                nvr.last_recording_status = _cameras_nao_verificadas(nvr.last_recording_status)
+            elif r.cameras is not None:
                 vms = (nvr.tipo or "NVR").upper() in ("DIGIFORT", "DEFENSE")
                 anteriores = nvr.last_recording_status
                 novas = _manter_imagem_noite(

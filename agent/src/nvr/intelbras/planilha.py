@@ -398,7 +398,7 @@ def _montar_planilha(dahua, nvr_ip):
         ("Nota", "Inventário da configuração: não é o arquivo de backup restaurável do NVR (esse vem do backup normal)."),
         ("Nota", "ATENÇÃO: a aba Câmeras tem o usuário de cada câmera. O CGI devolve a senha mascarada (aparece '(mascarada pelo NVR)'). Proteja este arquivo."),
         ("Nota", "Usuário e senha de serviços (e-mail, DDNS etc.) continuam descartados."),
-        ("Nota", "O CGI não informa se a câmera está online: 'habilitada' = cadastrada com IP e ativa no NVR."),
+        ("Nota", "A configuração lida pelo CGI não informa se a câmera está online: 'habilitada' = cadastrada com IP e ativa no NVR."),
         ("Nota", "Máscara de agenda: contínua+movimento+alarme conforme os bits do NVR; a aba Comandos mostra cada consulta."),
     ))
 
