@@ -63,4 +63,16 @@ O merge em `isaque` é o único portão da produção (cada push dispara o deplo
 5. Isolamento por conta (REGRA-010): toda rota nova ou alterada em `server/api/routers` recebe `ctx` (`get_contexto`) e busca Cliente/Máquina por `obter_cliente`/`obter_maquina`/`filtrar_por_conta`; procurar `verify_admin_token` e `db.query(Customer|Machine|NVR|Backup)` sem filtro de conta nas linhas adicionadas: `git diff isaque...<ramo> -- server/api/routers | grep -nE '^\+.*(verify_admin_token|db\.query\((Customer|Machine|NVR|Backup)\))'`.
 6. Se algo violar uma REGRA ou o compose, resolver no merge (manter a versão de `isaque`) e registrar no changelog do `PROJECT_SPEC.md` o que foi incorporado e o que foi bloqueado.
 
+### Pedido "faça um merge com a Helena" = merge + versão + build + release + cadastro (regra permanente, desde 29/10/2026)
+
+O usuário não quer pedir cada etapa de novo. Quando ele pedir o merge com a Helena (ou com outro colaborador) e o ramo trouxer mudança no agente, fazer a sequência inteira, sem perguntar entre as etapas:
+
+1. Auditar e fazer o merge (`git merge --no-ff isaque_repo/helena`, depois da auditoria acima), resolver conflitos mantendo os dois lados quando forem só texto/campos, e registrar o merge no changelog do `PROJECT_SPEC.md`.
+2. Se o ramo mexeu em `agent/`, subir a versão (três lugares) e seguir o "Checklist de uma nova versão do agente": commit e push duplo, `agent/build.ps1` + `ISCC.exe installer.iss`, SHA-256, release em `isaqueschaffer/backup-automation` com Service e Tray, conferência dos `digest`.
+3. **Cadastrar a versão no painel na mesma rodada** (`agent/publish_version.ps1`), sem esperar o "publique": neste fluxo o pedido de merge com a Helena já é a autorização. Depois conferir via `GET /api/v1/admin/agent-version` (login em `/api/v1/auth/login` com `{"password": ...}`) que links e hashes batem.
+4. Se o ramo só mexeu em servidor/painel (sem `agent/`), não gerar executável nem cadastrar versão: só merge, changelog e push.
+5. A senha do painel NÃO fica no repositório (este repositório é espelhado em um público). Usar a senha que o usuário passar no pedido; se ele não passar, pedir só ela, no momento do passo 3, e seguir.
+6. No fim, informar o resumo: o que entrou, o que foi bloqueado, links e hashes, e lembrar que o cadastro libera a versão a todos os agentes (atualizam em até 1 h) e que a senha do painel deve ser forte.
+
+
 Lição: o merge de 06/10 (`538600f`) levou `datetime.now(timezone.utc)`, compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria.
