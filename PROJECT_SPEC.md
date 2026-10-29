@@ -1069,6 +1069,15 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-29] — Agente 1.1.33: merge com a Helena (Intelbras Defense IA via API REST)
+
+**Incorporado (commit `42271ff` do ramo `helena`):** o status e o histórico de gravações das câmeras do DEFENSE passam a vir da API REST do Defense IA (`agent/src/vms/defense.py`: login com assinatura MD5 em duas etapas, `X-Subject-Token`, árvore de câmeras e gravações dos últimos 15 dias; porta em `config_extra.porta_api`, padrão 4433), com o CSV do webhook como plano B quando a API não responde. O backup em si segue igual (copia o arquivo mais recente de `pasta_origem`; sem pasta, cai no dump MySQL). Testes novos em `agent/tests/test_defense_api.py`. No painel, o formulário do DEFENSE pede IP/host, usuário (padrão `system`), senha da API e porta (`EquipamentoFormModal.tsx`, `utils.ts`, `types.ts`); na edição, senha em branco é descartada (a salva é mantida).
+**Atenção:** o usuário e a senha do equipamento DEFENSE passam a ser os da API; no modo 2 (dump MySQL, sem `pasta_origem`) o agente reaproveita esse mesmo usuário/senha como credencial do MySQL, que antes era o par fixo `defense`/`defense`. Quem usar o dump precisa de `pasta_origem` ou de ajuste.
+**Auditoria:** sem alteração em compose, nginx, models, migrações, requirements, build.ps1, installer.iss ou `.env`; sem rotas de servidor (REGRA-010 não se aplica); só `datetime.now()` sem fuso (REGRA-001 ok); sem segredos (senha e IPs fictícios só nos testes). Nada foi bloqueado. Merge automático, sem conflito.
+**Arquivos:** agent/src/vms/defense.py, agent/tests/test_defense_api.py, server/dashboard/src/{api/types.ts,pages/Machines/MachineDetail/utils.ts,pages/Machines/MachineDetail/components/EquipamentoFormModal.tsx}, updater.py, installer.iss, server/dashboard/package.json
+
+**Breaking Change:** Não para DEFENSE com `pasta_origem` (a maioria); equipamentos antigos sem senha de API continuam só com o CSV. **Requer:** a versão 1.1.33 cadastrada no painel; DEFENSE novo precisa de IP, usuário e senha da API.
+
 ### [2026-10-29] — Agente 1.1.32: log do agente visível no painel, por máquina
 
 **Alteração:** o log do agente deixa de existir só no cliente (`C:\ProgramData\Trilan NVR Backup Agent\logs\servico.log`). Um handler no logger raiz (`agent/src/application/log_remoto.py`, instalado pela thread `_logs_loop` em `service.py`) enfileira os avisos e erros (WARNING/ERROR, com traceback) e os marcos do backup (início, fim, resultado de cada equipamento, marcados com `extra={"enviar_servidor": True}`) e os envia em lote a cada 20 s para `POST /api/v1/agent/logs`. Fila local de 500 itens (servidor fora do ar não perde o recente), deduplicação de 10 min para o mesmo aviso, equipamento atribuído por contexto de thread (`equipamento_atual`) ou por `extra`. Segredos são ocultados antes do envio (senha em URL, `password=`/`senha`/`token`/`api_key`..., e a `api_key` do agente). O envio nunca chama `logging.error` (evita laço).
