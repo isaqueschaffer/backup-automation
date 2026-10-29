@@ -18,7 +18,12 @@ from services.escopo import (
     obter_maquina,
     conta_para_criacao,
 )
-from services.storage_service import move_machine_to_trash
+from services.storage_service import (
+    move_machine_to_trash,
+    mover_pasta_imagens,
+    mover_imagens_para_lixeira,
+    pasta_imagens_da_maquina,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +168,7 @@ def update_machine(
             detail=f"E-mails definidos pelo cliente {machine.customer.name}. Altere no cliente.",
         )
 
+    nome_antigo = machine.name
     time_changed = False
     for field, value in changes.items():
         if field in ("backup_hour", "backup_minute") and getattr(machine, field) != value:
@@ -178,6 +184,16 @@ def update_machine(
 
     db.commit()
     db.refresh(machine)
+
+    if machine.name != nome_antigo:
+        try:
+            mover_pasta_imagens(
+                pasta_imagens_da_maquina(machine.customer, nome_antigo),
+                pasta_imagens_da_maquina(machine.customer, machine.name),
+            )
+        except Exception:
+            logger.exception("Falha ao mover pasta de imagens da máquina %s após renomear", machine.id)
+
     return machine_to_response(machine)
 
 
@@ -192,6 +208,7 @@ def delete_machine(
     # Guarda os dados necessários antes do commit (o objeto fica inválido após o delete)
     machine_pk = machine.id
     machine_name = machine.name
+    customer_ref = machine.customer
 
     # Remove os backups associados no banco para evitar erro de Foreign Key
     db.query(Backup).filter(Backup.machine_id == machine_id).delete(synchronize_session=False)
@@ -205,6 +222,11 @@ def delete_machine(
         move_machine_to_trash(machine_pk, machine_name)
     except Exception:
         logger.exception("Máquina %s removida do banco, mas falhou ao mover os arquivos para a lixeira", machine_pk)
+
+    try:
+        mover_imagens_para_lixeira(customer_ref, machine_name)
+    except Exception:
+        logger.exception("Falha ao mover imagens da máquina %s para a lixeira", machine_name)
 
 
 @router.post("/{machine_id}/rotate-key", response_model=MachineWithKey)

@@ -31,6 +31,8 @@ from services.storage_service import (
     reorganizar_maquina,
     renomear_pasta_do_cliente,
     remover_pasta_vazia_do_cliente,
+    mover_pasta_imagens,
+    pasta_imagens_da_maquina,
 )
 from services.backup_runs import (
     build_run_zip,
@@ -223,6 +225,13 @@ def update_customer(customer_id: UUID, body: CustomerUpdate, db: Session = Depen
 def delete_customer(customer_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     customer = _get_customer_or_404(customer_id, db, ctx)
     machines = list(customer.machines)
+
+    # Guarda as origens das imagens antes de desvincular e excluir o cliente
+    imagens_para_mover = [
+        (pasta_imagens_da_maquina(customer, m.name), m.name)
+        for m in machines
+    ]
+
     # Máquinas ficam sem cliente (mantêm o horário atual)
     for machine in machines:
         machine.customer_id = None
@@ -236,6 +245,13 @@ def delete_customer(customer_id: UUID, db: Session = Depends(get_db), ctx: Conte
                 reorganizar_maquina(m.id, m.name, None)
             except Exception:
                 logger.exception("Falha ao reorganizar pastas da máquina %s ao excluir cliente %s", m.id, customer_id)
+
+        for origem_imgs, nome_m in imagens_para_mover:
+            try:
+                mover_pasta_imagens(origem_imgs, pasta_imagens_da_maquina(None, nome_m))
+            except Exception:
+                logger.exception("Falha ao mover imagens da máquina %s ao excluir cliente %s", nome_m, customer_id)
+
         remover_pasta_vazia_do_cliente(customer_id)
     except Exception:
         logger.exception("Falha ao limpar pasta do cliente excluído %s", customer_id)
@@ -258,6 +274,7 @@ def link_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(get_
 
     _ensure_queue_idle(customer, db)
     origin = machine.customer
+    nome = machine.name
     if origin is not None:
         _ensure_queue_idle(origin, db)
 
@@ -277,6 +294,14 @@ def link_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(get_
         reorganizar_maquina(machine.id, machine.name, customer)
     except Exception:
         logger.exception("Falha ao reorganizar pastas ao vincular máquina %s ao cliente %s", machine.id, customer.id)
+
+    try:
+        mover_pasta_imagens(
+            pasta_imagens_da_maquina(origin, nome),
+            pasta_imagens_da_maquina(customer, nome),
+        )
+    except Exception:
+        logger.exception("Falha ao mover imagens ao vincular máquina %s ao cliente %s", machine.id, customer.id)
 
     return _to_response(customer, db)
 
@@ -307,6 +332,14 @@ def unlink_machine(customer_id: UUID, machine_id: UUID, db: Session = Depends(ge
         reorganizar_maquina(machine.id, machine.name, None)
     except Exception:
         logger.exception("Falha ao reorganizar pastas ao desvincular máquina %s do cliente %s", machine.id, customer.id)
+
+    try:
+        mover_pasta_imagens(
+            pasta_imagens_da_maquina(customer, machine.name),
+            pasta_imagens_da_maquina(None, machine.name),
+        )
+    except Exception:
+        logger.exception("Falha ao mover imagens ao desvincular máquina %s do cliente %s", machine.id, customer.id)
 
     return _to_response(customer, db)
 

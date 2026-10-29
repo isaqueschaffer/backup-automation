@@ -1063,6 +1063,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-29] — Imagens de referência das câmeras também em arquivo, na pasta de backup do Cliente
+
+**Alteração:** a imagem de referência (`nvr_cameras.perfect_image_base64`) passa a ser gravada também em arquivo, FORA da pasta das máquinas: `BACKUP_STORAGE_PATH/<CLIENTE>_<uuid>/imagens das câmeras/<MÁQUINA>/<NVR>/<CÂMERA>.jpg` (Máquina sem Cliente: `_sem_cliente/imagens das câmeras/...`). Nomes legíveis, sem UUID (`_nome_legivel` mantém espaços e acentos); duas câmeras com o mesmo nome no NVR viram `<nome> (canal N)`; extensão pela assinatura dos bytes (`.jpg`, `.png`, `.webp`).
+**Regras:** só a referência vai para arquivo (a imagem da noite não); o banco continua com o base64, então e-mail de câmera offline, galeria e API não mudam. Na subida do servidor, `sincronizar_imagens_existentes` grava as imagens que já estão no banco (em segundo plano, em lotes, sem regravar arquivo idêntico). Gravação atômica (`.part` + `replace`).
+**Acompanham renomeação/troca:** renomear a Máquina, o NVR ou a câmera move a pasta/arquivo; vincular/desvincular a Máquina de um Cliente e excluir o Cliente movem a pasta de imagens da Máquina para a pasta do novo Cliente (ou `_sem_cliente`); excluir a Máquina move as imagens para `lixeira/imagens das câmeras/`. Excluir câmera ou NVR NÃO apaga os arquivos (ficam como cópia de backup). Renomear o Cliente já renomeia a pasta inteira.
+**Limites conhecidos:** a câmera de NVR comum renomeada só pelo relatório do agente (`routers/agent.py`) reflete o nome novo no arquivo na próxima gravação da referência ou na próxima subida do servidor; a sincronização do OneDrive (`robocopy /XO`) não apaga na nuvem o que foi renomeado aqui.
+**Arquivos:** server/api/services/storage_service.py, main.py, routers/equipamentos.py, routers/machines.py, routers/customers.py, PROJECT_SPEC.md
+
+**Breaking Change:** Não. **Requer:** só o deploy do servidor (sem nova versão do agente nem do painel).
+
 ### [2026-10-27] — Infraestrutura: limpeza, Samba e sincronização dos backups com o OneDrive (registro, sem código)
 
 **Tipo:** operação de infraestrutura feita fora do repositório (servidor Linux do Dokploy e máquinas Windows); registrada aqui para referência. Nenhum arquivo de código foi alterado.

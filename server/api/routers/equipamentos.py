@@ -4,6 +4,7 @@ Substitui o antigo router de NVRs, agora suportando múltiplos tipos:
 NVR, OLT, ONU, PABX (e futuros).
 """
 import asyncio
+import logging
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
@@ -35,6 +36,13 @@ from services.planilha_vms import (
     empacotar,
     desempacotar,
 )
+from services.storage_service import (
+    salvar_imagem_referencia,
+    pasta_imagens_do_nvr,
+    mover_pasta_imagens,
+)
+
+logger = logging.getLogger(__name__)
 
 TIPOS_VMS = ("DIGIFORT", "DEFENSE")
 
@@ -119,6 +127,8 @@ def update_equipamento(
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
 
+    nome_antigo = eq.name
+
     for field, value in body.model_dump(exclude_none=True).items():
         if field == "password" and value:
             eq.password = encrypt(value)
@@ -134,6 +144,17 @@ def update_equipamento(
 
     db.commit()
     db.refresh(eq)
+
+    if eq.name != nome_antigo:
+        try:
+            customer = eq.machine.customer if eq.machine else None
+            mover_pasta_imagens(
+                pasta_imagens_do_nvr(customer, eq.machine.name, nome_antigo),
+                pasta_imagens_do_nvr(customer, eq.machine.name, eq.name),
+            )
+        except Exception:
+            logger.exception("Falha ao mover pasta de imagens do NVR %s após renomear", eq.id)
+
     return eq
 
 
@@ -526,6 +547,7 @@ def import_cameras(
 
     usados = set()
     atualizadas = []
+    cams_renomeadas = []
     for idx, item in enumerate(itens, start=1):
         nome_key = (item.nome or "").strip().lower()
         ip_key = (item.ip or "").strip()
@@ -548,6 +570,8 @@ def import_cameras(
             camera = NVRCamera(nvr_id=id, canal=canal, nome=item.nome)
             db.add(camera)
         else:
+            if camera.nome != item.nome:
+                cams_renomeadas.append((camera, camera.nome))
             camera.canal = canal
             camera.nome = item.nome
         if item.canal_rtsp is not None:
@@ -569,6 +593,14 @@ def import_cameras(
     db.commit()
     for c in atualizadas:
         db.refresh(c)
+
+    for cam, antigo in cams_renomeadas:
+        if cam.perfect_image_base64:
+            try:
+                salvar_imagem_referencia(cam, antigo)
+            except Exception:
+                logger.exception("Falha ao renomear imagem de referência na importação para câmera %s", cam.id)
+
     return [_camera_response_dict(c) for c in sorted(atualizadas, key=lambda c: c.canal)]
 
 
@@ -588,6 +620,7 @@ def set_camera_rtsp(
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
 
     camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == canal).first()
+    nome_antigo = camera.nome if camera else None
     if not camera:
         camera = NVRCamera(nvr_id=id, canal=canal, nome=payload.nome)
         db.add(camera)
@@ -604,6 +637,13 @@ def set_camera_rtsp(
 
     db.commit()
     db.refresh(camera)
+
+    if camera.perfect_image_base64 and camera.nome != nome_antigo:
+        try:
+            salvar_imagem_referencia(camera, nome_antigo)
+        except Exception:
+            logger.exception("Falha ao renomear imagem de referência em disco para a câmera %s", camera.id)
+
     return _camera_response_dict(camera)
 
 
@@ -642,6 +682,7 @@ def set_perfect_image(
         raise HTTPException(status_code=404, detail="NVR não encontrado")
 
     camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == payload.canal).first()
+    nome_antigo = camera.nome if camera else None
     if not camera:
         camera = NVRCamera(
             nvr_id=id,
@@ -656,6 +697,12 @@ def set_perfect_image(
 
     db.commit()
     db.refresh(camera)
+
+    try:
+        salvar_imagem_referencia(camera, nome_antigo)
+    except Exception:
+        logger.exception("Falha ao salvar imagem de referência em disco para a câmera %s", camera.id)
+
     return camera
 
 

@@ -432,6 +432,16 @@ async def _stop_vencimentos() -> None:
         _vencimentos_task.cancel()
 
 
+@app.on_event("startup")
+async def _sincronizar_imagens_cameras() -> None:
+    from services.storage_service import sincronizar_imagens_existentes
+    try:
+        res = await asyncio.to_thread(sincronizar_imagens_existentes, SessionLocal)
+        logger.info("Imagens das câmeras gravadas em pasta: %s", res)
+    except Exception:
+        logger.exception("Falha ao gravar as imagens das câmeras existentes em pasta")
+
+
 # ─── Stats endpoint ────────────────────────────────────────────────────────
 @app.get("/api/v1/stats", response_model=StatsResponse)
 def get_stats(db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):

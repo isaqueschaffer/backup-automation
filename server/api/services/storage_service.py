@@ -1,3 +1,5 @@
+import base64
+import logging
 import re
 import shutil
 from datetime import datetime, timedelta
@@ -5,6 +7,8 @@ from pathlib import Path
 from uuid import UUID
 
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 SEM_CLIENTE_DIR = "_sem_cliente"
 
@@ -448,3 +452,280 @@ def remover_pasta_vazia_do_cliente(customer_id: UUID) -> bool:
         return True
     except Exception:
         return False
+
+
+# ==============================================================================
+# Imagens das câmeras na pasta do cliente
+# Estrutura: <CLIENTE>/imagens das câmeras/<MAQUINA>/<NVR>/<CAMERA>.<ext>
+# ==============================================================================
+
+PASTA_IMAGENS_CAMERAS = "imagens das câmeras"
+
+
+def _nome_legivel(nome: str | None, padrao: str) -> str:
+    """Higieniza o nome para pastas/arquivos mantendo legibilidade, espaços e acentos."""
+    if not nome:
+        return padrao
+    # Substitui caracteres proibidos em sistemas de arquivos e controles (< 32) por '_'
+    chars = [
+        "_" if (ord(c) < 32 or c in '\\/*?:"<>|') else c
+        for c in str(nome)
+    ]
+    texto = "".join(chars)
+    texto = re.sub(r"\s+", " ", texto).strip().rstrip(". ")
+    if len(texto) > 120:
+        texto = texto[:120].rstrip(". ")
+    if not texto or texto in (".", ".."):
+        return padrao
+    return texto
+
+
+def pasta_imagens_da_maquina(customer, machine_name: str) -> Path:
+    """Pasta onde ficam as imagens das câmeras da máquina: <CLIENTE>/imagens das câmeras/<MAQUINA>. Não cria."""
+    return _pasta_do_cliente(customer) / PASTA_IMAGENS_CAMERAS / _nome_legivel(machine_name, "maquina")
+
+
+def pasta_imagens_do_nvr(customer, machine_name: str, nvr_name: str) -> Path:
+    """Pasta onde ficam as imagens das câmeras do NVR: <CLIENTE>/imagens das câmeras/<MAQUINA>/<NVR>. Não cria."""
+    return pasta_imagens_da_maquina(customer, machine_name) / _nome_legivel(nvr_name, "equipamento")
+
+
+def extensao_da_imagem(dados: bytes) -> str:
+    """Determina a extensão (.png, .webp ou .jpg) a partir da assinatura dos bytes."""
+    if dados.startswith(b"\x89PNG"):
+        return ".png"
+    if dados.startswith(b"RIFF") and len(dados) >= 12 and dados[8:12] == b"WEBP":
+        return ".webp"
+    return ".jpg"
+
+
+def nome_arquivo_camera(camera, irmas=None) -> str:
+    """Retorna o nome base do arquivo da câmera (sem extensão).
+
+    Se outra câmera do mesmo NVR tiver o mesmo nome legível (case-insensitive),
+    adiciona o sufixo '(canal X)'.
+    """
+    canal = getattr(camera, "canal", 0)
+    nome_atual = getattr(camera, "nome", None)
+    base = _nome_legivel(nome_atual, f"Canal {canal}")
+    if not irmas:
+        return base
+
+    cam_id = getattr(camera, "id", None)
+    base_lower = base.lower()
+
+    tem_conflito = False
+    for c in irmas:
+        if c is camera:
+            continue
+        c_id = getattr(c, "id", None)
+        if cam_id is not None and c_id is not None:
+            if cam_id == c_id:
+                continue
+        else:
+            c_canal = getattr(c, "canal", None)
+            if c_canal == canal:
+                continue
+
+        c_canal_val = getattr(c, "canal", 0)
+        c_nome = getattr(c, "nome", None)
+        c_base = _nome_legivel(c_nome, f"Canal {c_canal_val}")
+        if c_base.lower() == base_lower:
+            tem_conflito = True
+            break
+
+    if tem_conflito:
+        return f"{base} (canal {canal})"
+    return base
+
+
+def salvar_imagem_referencia(camera, nome_antigo: str | None = None) -> Path | None:
+    """Salva a imagem de referência (perfect_image_base64) na pasta de imagens do NVR.
+
+    Grava de forma atômica (.part -> replace) e remove arquivos com nome_antigo se fornecido.
+    Devolve o Path final ou None se não houver imagem ou se faltar equipamento/máquina.
+    """
+    nvr = getattr(camera, "nvr", None)
+    if not nvr:
+        return None
+    machine = getattr(nvr, "machine", None)
+    if not machine:
+        return None
+
+    customer = getattr(machine, "customer", None)
+    irmas = getattr(nvr, "cameras_status", None) or []
+
+    b64 = getattr(camera, "perfect_image_base64", None)
+    if not b64:
+        return None
+
+    if "," in b64:
+        b64 = b64.split(",", 1)[1]
+    try:
+        dados = base64.b64decode(b64)
+    except Exception:
+        return None
+
+    pasta_nvr = pasta_imagens_do_nvr(customer, machine.name, nvr.name)
+    pasta_nvr.mkdir(parents=True, exist_ok=True)
+
+    nome_base = nome_arquivo_camera(camera, irmas)
+    ext = extensao_da_imagem(dados)
+    caminho_final = pasta_nvr / f"{nome_base}{ext}"
+
+    # Procura arquivos antigos para apagar se o nome mudou
+    arquivos_antigos: list[Path] = []
+    nome_atual_camera = getattr(camera, "nome", None)
+    if nome_antigo and nome_antigo != nome_atual_camera:
+        class _CameraAntiga:
+            def __init__(self, cid, canal, nome):
+                self.id = cid
+                self.canal = canal
+                self.nome = nome
+
+        cam_antiga = _CameraAntiga(getattr(camera, "id", None), getattr(camera, "canal", 0), nome_antigo)
+        nome_antigo_base = nome_arquivo_camera(cam_antiga, irmas)
+        for ext_teste in (".jpg", ".png", ".webp"):
+            antigo_path = pasta_nvr / f"{nome_antigo_base}{ext_teste}"
+            if antigo_path.is_file():
+                arquivos_antigos.append(antigo_path)
+
+    # Se já existir exatamente o mesmo conteúdo, evita reescrever
+    if caminho_final.is_file():
+        try:
+            if caminho_final.read_bytes() == dados:
+                for a in arquivos_antigos:
+                    try:
+                        if a.resolve() != caminho_final.resolve():
+                            a.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                return caminho_final
+        except Exception:
+            pass
+
+    tmp_file = caminho_final.with_name(f"{caminho_final.name}.part")
+    try:
+        tmp_file.write_bytes(dados)
+        tmp_file.replace(caminho_final)
+    except BaseException:
+        try:
+            tmp_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+    for a in arquivos_antigos:
+        try:
+            if a.resolve() != caminho_final.resolve():
+                a.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return caminho_final
+
+
+def _limpar_pastas_vazias_imagens(pasta_inicial: Path) -> None:
+    """Remove pastas vazias subindo a partir de pasta_inicial até PASTA_IMAGENS_CAMERAS inclusive."""
+    curr = pasta_inicial
+    while curr and curr.name:
+        try:
+            if curr.is_dir() and not any(curr.iterdir()):
+                curr.rmdir()
+            else:
+                break
+        except OSError:
+            break
+        if curr.name == PASTA_IMAGENS_CAMERAS:
+            break
+        curr = curr.parent
+
+
+def mover_pasta_imagens(origem: Path, destino: Path) -> bool:
+    """Move a pasta de imagens de origem para destino mesclando se o destino já existir.
+
+    Remove pastas vazias na origem subindo até imagens das câmeras (inclusive).
+    """
+    if not (origem.exists() and origem.is_dir()):
+        return False
+
+    try:
+        if origem.resolve() == destino.resolve():
+            return False
+    except Exception:
+        if str(origem) == str(destino):
+            return False
+
+    pai_origem = origem.parent
+
+    if not destino.exists():
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(origem), str(destino))
+    else:
+        _mesclar_pastas(origem, destino, [])
+
+    _limpar_pastas_vazias_imagens(pai_origem)
+    return True
+
+
+def mover_imagens_para_lixeira(customer, machine_name: str) -> bool:
+    """Move a pasta de imagens da máquina para a lixeira."""
+    pasta_maquina = pasta_imagens_da_maquina(customer, machine_name)
+    if not (pasta_maquina.exists() and pasta_maquina.is_dir()):
+        return False
+
+    lixeira_imagens = Path(settings.BACKUP_STORAGE_PATH) / "lixeira" / PASTA_IMAGENS_CAMERAS
+    lixeira_imagens.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    nome_sanitizado = _nome_legivel(machine_name, "maquina")
+    destino = lixeira_imagens / f"{nome_sanitizado}_{timestamp}"
+    c = 1
+    while destino.exists():
+        destino = lixeira_imagens / f"{nome_sanitizado}_{timestamp}_{c}"
+        c += 1
+
+    pai_origem = pasta_maquina.parent
+    shutil.move(str(pasta_maquina), str(destino))
+    _limpar_pastas_vazias_imagens(pai_origem)
+    return True
+
+
+def sincronizar_imagens_existentes(session_factory) -> dict:
+    """Varre as câmeras com perfect_image_base64 no banco e grava em disco na subida do servidor."""
+    from models import NVRCamera
+
+    gravadas = 0
+    falhas = 0
+
+    with session_factory() as db:
+        registros = (
+            db.query(NVRCamera.id)
+            .filter(
+                NVRCamera.perfect_image_base64.isnot(None),
+                NVRCamera.perfect_image_base64 != "",
+            )
+            .order_by(NVRCamera.id)
+            .all()
+        )
+        ids = [r[0] for r in registros]
+
+        lote_tam = 50
+        for i in range(0, len(ids), lote_tam):
+            lote = ids[i : i + lote_tam]
+            for cid in lote:
+                try:
+                    camera = db.get(NVRCamera, cid)
+                    if camera:
+                        res = salvar_imagem_referencia(camera)
+                        if res:
+                            gravadas += 1
+                        else:
+                            falhas += 1
+                except Exception:
+                    falhas += 1
+                    logger.exception("Falha ao salvar imagem de referência da câmera id=%s em disco", cid)
+            db.expunge_all()
+
+    return {"gravadas": gravadas, "falhas": falhas}
+
