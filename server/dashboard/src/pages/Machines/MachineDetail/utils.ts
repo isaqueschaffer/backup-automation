@@ -48,6 +48,7 @@ export function eqToForm(eq: NVR): EqForm {
     fabricante_olt: cfg?.fabricante_olt || "UNM2000",
     caminho_csv: cfg?.caminho_csv || "",
     caminho_log_csv: cfg?.caminho_log_csv || "",
+    pasta_gravacoes: cfg?.pasta_gravacoes || "",
     marca: cfg?.marca || "Hikvision",
   };
 }
@@ -77,7 +78,8 @@ export function buildEqPayload(
       payload.config_extra = { marca: eqForm.marca || "Hikvision" };
     }
   } else if (eqForm.tipo === "DIGIFORT") {
-    if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de origem." };
+    if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de backup." };
+    if (!eqForm.planilhaNova && !eqForm.planilhaSalva) return { error: "Para DIGIFORT, carregue a planilha das câmeras." };
     payload.ip = "127.0.0.1";
     payload.username = "digifort";
     payload.password = "digifort";
@@ -85,6 +87,7 @@ export function buildEqPayload(
       pasta_origem: eqForm.pasta_origem.trim(),
       caminho_csv: eqForm.caminho_csv?.trim() || "",
       caminho_log_csv: eqForm.caminho_log_csv?.trim() || "",
+      pasta_gravacoes: eqForm.pasta_gravacoes?.trim() || "",
     };
   } else if (eqForm.tipo === "OLT") {
     if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };

@@ -60,3 +60,5 @@ teste backup motorola/respostas_telemetria_*/
 .claude/*
 !.claude/skills/
 
+# Cache de leitura das gravacoes do Digifort (gerado pelo agente)
+agent/cache_gravacoes_digifort_*.json

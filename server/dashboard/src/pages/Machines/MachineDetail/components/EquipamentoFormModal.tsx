@@ -1,20 +1,26 @@
+import { useState } from "react";
 import { Plus } from "lucide-react";
 import { EqForm, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { TIPOS, TIPO_ICONE_EMOJI } from "../utils";
+import PlanilhaCamerasCampo from "./PlanilhaCamerasCampo";
 
-export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, saving, onSave, onClose }: {
+export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, editingEqId, saving, onSave, onClose, onErro }: {
+  machineId: string;
   eqForm: EqForm;
   setEqForm: React.Dispatch<React.SetStateAction<EqForm>>;
   editingEqId: string | null;
   saving: boolean;
   onSave: () => void;
   onClose: () => void;
+  onErro: (mensagem: string) => void;
 }) {
   const isSshOlt = eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI";
+  // Enquanto a prévia da planilha está aberta por cima, o Esc fecha só a prévia (não o formulário)
+  const [previaAberta, setPreviaAberta] = useState(false);
 
   return (
-    <Modal title={editingEqId ? "Editar Equipamento" : "Adicionar Equipamento"} onClose={onClose}>
+    <Modal title={editingEqId ? "Editar Equipamento" : "Adicionar Equipamento"} onClose={() => { if (!previaAberta) onClose(); }}>
       <div className="form-group">
         <label className="form-label">Tipo de Equipamento *</label>
         {eqForm.tipo === "CAMERA" ? (
@@ -180,29 +186,27 @@ export default function EquipamentoFormModal({ eqForm, setEqForm, editingEqId, s
       {eqForm.tipo === "DIGIFORT" && (
         <>
           <div className="form-group">
-            <label className="form-label">Pasta de Origem do Digifort *</label>
+            <label className="form-label">Local de backup do Digifort *</label>
             <input className="form-input" type="text"
               placeholder="C:\Digifort\Backup"
               value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Caminho do CSV Exportado (Opcional)</label>
-            <input className="form-input" type="text"
-              placeholder="export_cameras.csv"
-              value={eqForm.caminho_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_csv: e.target.value })} />
             <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-              Arquivo CSV com a descrição das câmeras gerado pelo Digifort.
+              Pasta onde o Digifort salva os backups da configuração.
             </span>
           </div>
           <div className="form-group">
-            <label className="form-label">Caminho do LOG de Gravações (Opcional)</label>
+            <label className="form-label">Local de gravação das câmeras</label>
             <input className="form-input" type="text"
-              placeholder="C:\...\quedas_cameras.csv"
-              value={eqForm.caminho_log_csv || ""} onChange={e => setEqForm({ ...eqForm, caminho_log_csv: e.target.value })} />
+              placeholder="C:\Digifort\Gravacoes"
+              value={eqForm.pasta_gravacoes || ""} onChange={e => setEqForm({ ...eqForm, pasta_gravacoes: e.target.value })} />
             <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-              Arquivo CSV onde o Agente Webhook salva/lê o histórico (quedas_cameras.csv).
+              Pasta com uma subpasta por câmera (nome igual ao da planilha), cada uma com Dados e Indices.
+              O tempo gravado e os dias sem gravação saem desses arquivos. Sem esta pasta, o agente só testa se a câmera responde ao ping.
             </span>
           </div>
+          <PlanilhaCamerasCampo
+            machineId={machineId} nvrId={editingEqId} eqForm={eqForm} setEqForm={setEqForm}
+            onPreviaAberta={setPreviaAberta} onErro={onErro} />
         </>
       )}
       {eqForm.tipo === "DEFENSE" && (

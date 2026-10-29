@@ -10,6 +10,8 @@ export interface CameraRecStatus {
   mapa?: string;
   total_dias?: number;
   dias_gravados?: number | null;
+  // Digifort: pasta de gravação usada pelo agente para a câmera (null = nenhuma pasta com o nome da câmera)
+  pasta_gravacao?: string | null;
 }
 
 // Disco reportado pela telemetria do NVR (NVR.last_telemetry_status)
@@ -50,6 +52,7 @@ export interface EquipamentoConfig {
   exportar_no_manual?: boolean;
   caminho_csv?: string;
   caminho_log_csv?: string;
+  pasta_gravacoes?: string;
   marca?: string;
   modelo?: string;
   [key: string]: unknown;
@@ -68,6 +71,40 @@ export interface EqForm {
   marca?: string;
   caminho_csv?: string;
   caminho_log_csv?: string;
+  pasta_gravacoes?: string;
+  // Planilha das câmeras do Digifort lida no formulário (enviada à Galeria ao salvar)
+  planilhaNova?: PlanilhaPendente | null;
+  // Digifort já cadastrado: o que a Galeria do equipamento já tem (exigência satisfeita sem nova planilha)
+  planilhaSalva?: PlanilhaSalvaInfo | null;
+}
+
+export interface CameraLidaPlanilha {
+  nome: string;
+  ip: string;
+  modelo: string;
+  senha: string;
+  situacao: "nova" | "atualiza";
+}
+
+// Planilha CSV/XLSX já lida e interpretada, à espera de ser enviada ao equipamento
+export interface PlanilhaPendente {
+  nomeArquivo: string;
+  linhas: string[][];
+  linhasBrutas: unknown[][];
+  linhaCabecalho: number;
+  colunasSenha: number[];
+  temOpcaoNomeDescricao: boolean;
+  opcaoNome: "descricao" | "nome" | "auto";
+  exemploNome?: string;
+  exemploDescricao?: string;
+  cams: CameraLidaPlanilha[];
+}
+
+export interface PlanilhaSalvaInfo {
+  nome_arquivo?: string;
+  total_linhas?: number;
+  importado_em?: string;
+  total_cameras: number;
 }
 
 // Câmera sincronizada de um NVR (galeria)

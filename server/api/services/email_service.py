@@ -82,7 +82,7 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
             if not status_gravacao:
                 total_dias = cam.get("total_dias", 0)
                 mapa = cam.get("mapa", "")
-                gravou_hoje = (mapa[-1] == "█") if mapa else (total_dias > 0)
+                gravou_hoje = (mapa[-1] in ("█", "▒")) if mapa else (total_dias > 0)
                 status_gravacao = "COM_GRAVACAO" if gravou_hoje else "SEM_GRAVACAO"
 
             if status_comunicacao == "ONLINE":
@@ -154,7 +154,7 @@ def _build_result_section(nvr_results: List[dict]) -> str:
                 status_gravacao = cam.get("status_gravacao")
                 if not status_gravacao:
                     mapa = cam.get("mapa", "")
-                    gravou_hoje = (mapa[-1] == "█") if mapa else (cam.get("total_dias", 0) > 0)
+                    gravou_hoje = (mapa[-1] in ("█", "▒")) if mapa else (cam.get("total_dias", 0) > 0)
                     status_gravacao = "COM_GRAVACAO" if gravou_hoje else "SEM_GRAVACAO"
                     
                 if status_gravacao in ("SEM_GRAVACAO", "NAO_VERIFICADO"):

@@ -3,21 +3,27 @@ import datetime
 import csv
 import io
 import os
-import socket
 import re
+import sys
 import threading
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ==========================================
 # CONFIGURAÇÃO
 # ==========================================
-PORTA_SNMP = 162
 ARQUIVO_CSV = r"C:\Relatorios_Digifort\quedas_cameras.csv"
-
 ARQUIVO_EXPORT_CAMERAS = ""
 DICIONARIO_CAMERAS_NOME = {} # Nome / Descricao / Normalizado -> info
 DICIONARIO_CAMERAS_IP = {}   # IP -> info
 LISTA_CAMERAS_UNICAS = []    # Lista canônica de câmeras
 ULTIMO_CAMINHO_EXPORT = ""
+
+_cameras_lock = threading.Lock()
+INTERVALO_MONITORAMENTO_PING_S = 60
+monitor_ping_thread = None
+monitor_stop_event = threading.Event()
+_ultimo_status_cameras = {}
 
 def normalizar_texto(texto):
     """Normaliza texto removendo caracteres especiais e espaços extras."""
@@ -70,7 +76,7 @@ def carregar_dicionario_cameras(caminho_arquivo):
     dicionario_ip = {}
     lista_unicas = []
     
-    if os.path.isfile(caminho_arquivo):
+    if caminho_arquivo and os.path.isfile(caminho_arquivo):
         try:
             linhas, colunas = ler_linhas_csv(caminho_arquivo)
             is_novo_formato = any(k in [c.lower() for c in colunas] for k in ['endereço', 'endereco', 'nome', 'ip'])
@@ -85,9 +91,6 @@ def carregar_dicionario_cameras(caminho_arquivo):
                     nome = f"{index:02d}"
                     descricao = obter_valor_coluna(row, 'descrição', 'descricao')
                 
-                # Nome de exibição principal:
-                # Se 'nome' for apenas número (ex: '01', '44') e tiver descrição, usa a descrição.
-                # Se descrição for mais detalhada, prioriza a descrição pois é o que vem nos alarmes do Digifort.
                 if nome.isdigit() and descricao:
                     nome_exibicao = descricao
                 elif descricao and len(descricao) > len(nome):
@@ -103,7 +106,6 @@ def carregar_dicionario_cameras(caminho_arquivo):
                 }
                 lista_unicas.append(info)
                 
-                # Mapeia todas as formas de busca para o mesmo objeto info
                 if nome:
                     dicionario_nome[nome] = info
                     dicionario_nome[nome.lower()] = info
@@ -124,9 +126,29 @@ def carregar_dicionario_cameras(caminho_arquivo):
         except Exception as e:
             logging.error(f"[ERRO] ao ler {caminho_arquivo}: {e}")
     else:
-        logging.warning(f"[AVISO] Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
+        if caminho_arquivo:
+            logging.warning(f"[AVISO] Arquivo de exportacao '{caminho_arquivo}' nao encontrado.")
         
     return dicionario_nome, dicionario_ip, lista_unicas
+
+def carregar_cameras_servidor(cameras_config):
+    """Mesmas estruturas de carregar_dicionario_cameras, a partir das cameras da Galeria do servidor
+    (`cameras_config`, vindas da planilha importada): so as que tem IP, que e o que o ping precisa."""
+    dicionario_nome, dicionario_ip, lista_unicas = {}, {}, []
+    for cam in cameras_config or []:
+        nome = (cam.get("nome") or "").strip()
+        ip = (cam.get("ip") or "").strip()
+        if not nome or not ip:
+            continue
+        info = {'Nome': nome, 'NomeCurto': nome, 'Descricao': '', 'IP': ip}
+        lista_unicas.append(info)
+        for chave in (nome, nome.lower(), normalizar_texto(nome)):
+            dicionario_nome[chave] = info
+        dicionario_ip[ip] = info
+    if lista_unicas:
+        logging.info(f"[OK] {len(lista_unicas)} cameras carregadas da Galeria do servidor")
+    return dicionario_nome, dicionario_ip, lista_unicas
+
 
 def registrar_queda(nome_camera, nome_evento):
     agora = datetime.datetime.now()
@@ -135,44 +157,187 @@ def registrar_queda(nome_camera, nome_evento):
     
     pasta = os.path.dirname(ARQUIVO_CSV)
     if pasta and not os.path.exists(pasta):
-        os.makedirs(pasta)
+        try:
+            os.makedirs(pasta, exist_ok=True)
+        except Exception:
+            pass
         
     arquivo_existe = os.path.isfile(ARQUIVO_CSV)
     
-    with open(ARQUIVO_CSV, mode='a', newline='', encoding='utf-8-sig') as file:
-        writer = csv.writer(file, delimiter=';')
-        if not arquivo_existe:
-            writer.writerow(['Data', 'Hora', 'Camera', 'Evento'])
+    try:
+        with open(ARQUIVO_CSV, mode='a', newline='', encoding='utf-8-sig') as file:
+            writer = csv.writer(file, delimiter=';')
+            if not arquivo_existe:
+                writer.writerow(['Data', 'Hora', 'Camera', 'Evento'])
+                
+            writer.writerow([data, hora, nome_camera, nome_evento])
+    except Exception as e:
+        logging.error(f"[DIGIFORT] Erro ao gravar log de queda no CSV '{ARQUIVO_CSV}': {e}")
+
+
+# ==========================================
+# TESTES DE STATUS VIA PING ICMP
+# ==========================================
+
+def ping_camera(ip: str, timeout_ms: int = 1000) -> bool:
+    """
+    Executa ping ICMP seguro na câmera usando o utilitário nativo do sistema operacional.
+    Retorna True se responder com sucesso (TTL), False em caso de timeout, host inacessível ou IP inválido.
+    """
+    if not ip or not isinstance(ip, str):
+        return False
+    
+    ip_limpo = ip.strip()
+    if not ip_limpo or ip_limpo.upper() in ("N/A", "NONE", "NULL", "0.0.0.0"):
+        return False
+    
+    # Sanitização rígida: primeiro caractere deve ser alfanumérico (evita CLI Argument Injection como '-t')
+    if ip_limpo.startswith("-") or not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9.\-_:]*$', ip_limpo):
+        return False
+
+    timeout_ms = max(200, int(timeout_ms))
+    
+    if sys.platform == "win32":
+        cmd = ["ping", "-n", "1", "-w", str(timeout_ms), ip_limpo]
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    else:
+        timeout_s = max(1, timeout_ms // 1000)
+        cmd = ["ping", "-c", "1", "-W", str(timeout_s), ip_limpo]
+        creation_flags = 0
+
+    try:
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",  # a saida do ping no Windows pt-BR e CP850; so o 'TTL=' (ASCII) importa
+            timeout=(timeout_ms / 1000.0) + 1.5,
+            creationflags=creation_flags
+        )
+        if res.returncode != 0:
+            return False
             
-        writer.writerow([data, hora, nome_camera, nome_evento])
+        saida = (res.stdout or "").lower()
+        
+        # Rejeita respostas de erro (host inacessível, esgotado o tempo, perda total)
+        termos_erro = ("inacess", "unreachable", "esgotado", "timed out", "100% loss", "100% de perda")
+        if any(termo in saida for termo in termos_erro):
+            return False
+            
+        # Sucesso é confirmado pela presença de TTL na resposta
+        if "ttl=" in saida:
+            return True
+            
+        return False
+    except Exception as e:
+        logging.debug(f"[PING] Erro ao disparar ping para {ip_limpo}: {e}")
+        return False
 
 
-def get_status_cameras(caminho_export="", caminho_log=""):
-    """Lê o histórico do CSV e retorna o dicionário com o status de cada câmera"""
+def testar_cameras_por_ping(cameras: list, timeout_ms: int = 1000, max_workers: int = 20) -> dict:
+    """
+    Testa uma lista de câmeras via Ping ICMP em paralelo.
+    'cameras' pode ser uma lista de dicts (contendo 'Nome'/'IP' ou 'nome'/'ip') ou lista de strings de IP.
+    Retorna dicionário mapeando identificador (Nome e/ou IP) -> bool (True=OK/Online, False=FALHA/Offline).
+    """
+    resultados = {}
+    if not cameras:
+        return resultados
+
+    tarefas = {}
+    workers = min(max_workers, max(1, len(cameras)))
+    
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        for cam in cameras:
+            if isinstance(cam, dict):
+                nome = cam.get("Nome") or cam.get("nome") or ""
+                ip = (cam.get("IP") or cam.get("ip") or "").strip()
+                chave = nome or ip
+            else:
+                chave = str(cam).strip()
+                ip = chave
+                nome = chave
+                
+            if not ip or ip.upper() in ("N/A", "NONE"):
+                resultados[chave] = False
+                if nome:
+                    resultados[nome] = False
+                continue
+                
+            futuro = executor.submit(ping_camera, ip, timeout_ms)
+            tarefas[futuro] = (chave, ip, nome)
+            
+        for futuro in as_completed(tarefas):
+            chave, ip, nome = tarefas[futuro]
+            try:
+                ok = futuro.result()
+            except Exception:
+                ok = False
+            resultados[chave] = ok
+            if nome:
+                resultados[nome] = ok
+            if ip:
+                resultados[ip] = ok
+                
+    return resultados
+
+
+def get_status_cameras(caminho_export="", caminho_log="", realizar_ping=True):
+    """
+    Retorna dicionário {nome_camera: "OK" | "FALHA"}.
+    Se realizar_ping=True, executa ping concorrente nas câmeras.
+    Se realizar_ping=False, consulta o histórico do CSV de quedas.
+    """
     global ULTIMO_CAMINHO_EXPORT
     
-    # Recarrega se o caminho mudou ou se o dicionário estiver vazio
-    if caminho_export and (caminho_export != ULTIMO_CAMINHO_EXPORT or not DICIONARIO_CAMERAS_NOME):
-        nomes, ips, unicas = carregar_dicionario_cameras(caminho_export)
-        DICIONARIO_CAMERAS_NOME.clear()
-        DICIONARIO_CAMERAS_IP.clear()
-        LISTA_CAMERAS_UNICAS.clear()
-        DICIONARIO_CAMERAS_NOME.update(nomes)
-        DICIONARIO_CAMERAS_IP.update(ips)
-        LISTA_CAMERAS_UNICAS.extend(unicas)
-        ULTIMO_CAMINHO_EXPORT = caminho_export
+    with _cameras_lock:
+        if caminho_export and (caminho_export != ULTIMO_CAMINHO_EXPORT or not DICIONARIO_CAMERAS_NOME):
+            nomes, ips, unicas = carregar_dicionario_cameras(caminho_export)
+            DICIONARIO_CAMERAS_NOME.clear()
+            DICIONARIO_CAMERAS_IP.clear()
+            LISTA_CAMERAS_UNICAS.clear()
+            DICIONARIO_CAMERAS_NOME.update(nomes)
+            DICIONARIO_CAMERAS_IP.update(ips)
+            LISTA_CAMERAS_UNICAS.extend(unicas)
+            ULTIMO_CAMINHO_EXPORT = caminho_export
+
+        cameras_snapshot = list(LISTA_CAMERAS_UNICAS)
+        dicionario_nome_snapshot = dict(DICIONARIO_CAMERAS_NOME)
         
     status_cameras = {}
-    if LISTA_CAMERAS_UNICAS:
-        for cam in LISTA_CAMERAS_UNICAS:
+
+    if realizar_ping:
+        cameras_para_testar = []
+        if cameras_snapshot:
+            for cam in cameras_snapshot:
+                cameras_para_testar.append(cam)
+        else:
+            vistos = set()
+            for _, info in dicionario_nome_snapshot.items():
+                if info['Nome'] not in vistos:
+                    vistos.add(info['Nome'])
+                    cameras_para_testar.append(info)
+
+        if cameras_para_testar:
+            res_ping = testar_cameras_por_ping(cameras_para_testar, timeout_ms=1000)
+            for cam in cameras_para_testar:
+                nome = cam['Nome']
+                ip = cam.get('IP') or ''
+                is_ok = bool(res_ping.get(nome, False) or (ip and res_ping.get(ip, False)))
+                status_cameras[nome] = "OK" if is_ok else "FALHA"
+        return status_cameras
+
+    # Modo histórico (realizar_ping=False)
+    if cameras_snapshot:
+        for cam in cameras_snapshot:
             status_cameras[cam['Nome']] = "OK"
     else:
-        for nome in DICIONARIO_CAMERAS_NOME.keys():
-            if not nome.isdigit():
+        for nome in dicionario_nome_snapshot.keys():
+            if not str(nome).isdigit():
                 status_cameras[nome] = "OK"
             
     arquivo_alvo = caminho_log if caminho_log else ARQUIVO_CSV
-        
     if os.path.isfile(arquivo_alvo):
         linhas_log, _ = ler_linhas_csv(arquivo_alvo)
         for row in linhas_log:
@@ -181,235 +346,152 @@ def get_status_cameras(caminho_export="", caminho_log=""):
             if not camera_raw or not evento:
                 continue
                 
-            info = (DICIONARIO_CAMERAS_NOME.get(camera_raw) or 
-                    DICIONARIO_CAMERAS_NOME.get(camera_raw.lower()) or 
-                    DICIONARIO_CAMERAS_NOME.get(normalizar_texto(camera_raw)))
+            info = (dicionario_nome_snapshot.get(camera_raw) or 
+                    dicionario_nome_snapshot.get(camera_raw.lower()) or 
+                    dicionario_nome_snapshot.get(normalizar_texto(camera_raw)))
                     
             nome_alvo = info['Nome'] if info else camera_raw
             is_ok = ('restaurada' in evento.lower() or 'online' in evento.lower() or evento.lower() == 'ok')
             status_cameras[nome_alvo] = "OK" if is_ok else "FALHA"
-                        
+
     return status_cameras
+
 
 def get_caminho_csv(caminho_log=""):
     """Retorna o caminho do arquivo de quedas"""
     return caminho_log if caminho_log else ARQUIVO_CSV
 
 
-def get_detalhes_cameras(caminho_export="", caminho_log=""):
-    """Retorna a lista ordenada de câmeras do export_cameras.csv, com canal sequencial (1..N),
-    nome, ip e status ("OK"/"FALHA"). Usada pelo backup para capturar a imagem da noite via RTSP."""
-    status_dict = get_status_cameras(caminho_export, caminho_log)  # garante LISTA_CAMERAS_UNICAS carregada
+def get_detalhes_cameras(caminho_export="", caminho_log="", realizar_ping=True, status_dict=None):
+    """
+    Retorna a lista ordenada de câmeras do export_cameras.csv, com canal sequencial (1..N),
+    nome, ip e status ("OK"/"FALHA"). Usada pelo backup para capturar a imagem da noite via RTSP.
+    Permite passar 'status_dict' pré-calculado para evitar testes duplicados de ping.
+    """
+    if status_dict is None:
+        status_dict = get_status_cameras(caminho_export, caminho_log, realizar_ping=realizar_ping)
+    
+    with _cameras_lock:
+        cameras_snapshot = list(LISTA_CAMERAS_UNICAS)
+
     detalhes = []
-    for idx, cam in enumerate(LISTA_CAMERAS_UNICAS, start=1):
+    for idx, cam in enumerate(cameras_snapshot, start=1):
         nome = cam.get("Nome")
         detalhes.append({
             "canal": idx,
             "nome": nome,
             "ip": cam.get("IP") or "",
-            "status": status_dict.get(nome, "OK"),
+            "status": status_dict.get(nome, "FALHA" if realizar_ping else "OK"),
         })
     return detalhes
 
 
-# =============== SNIFFER SNMP ===============
-sniffer_socket = None
+# ==========================================
+# MONITOR EM BACKGROUND (SUBSTITUI O SNIFFER SNMP)
+# ==========================================
 
-def extrair_textos_snmp(dados: bytes) -> list:
-    """Extrai strings legíveis do payload SNMP via ASN.1 OCTET STRING (0x04) e varredura ampla (UTF-8/Latin1)."""
-    textos = []
+def rodar_monitor_ping():
+    """
+    Thread de monitoramento periódico via Ping ICMP.
+    A cada intervalo pré-definido, testa as câmeras e registra transições de status
+    (queda / retorno) no CSV de histórico.
+    """
+    global _ultimo_status_cameras
+    logging.info(f"[OK] Monitor de Ping Digifort rodando (intervalo: {INTERVALO_MONITORAMENTO_PING_S}s)...")
     
-    # 1. Varredura ASN.1 BER para OCTET STRING (tag 0x04)
-    i = 0
-    n = len(dados)
-    while i < n - 1:
-        if dados[i] == 0x04:  # OCTET STRING tag
-            comp = dados[i + 1]
-            offset = i + 2
-            if comp & 0x80:
-                num_bytes = comp & 0x7F
-                if offset + num_bytes <= n:
-                    comp = int.from_bytes(dados[offset:offset + num_bytes], 'big')
-                    offset += num_bytes
-                else:
-                    i += 1
-                    continue
-            if offset + comp <= n and comp > 0:
-                pedaco = dados[offset:offset + comp]
-                for enc in ('utf-8', 'latin1', 'cp1252'):
-                    try:
-                        dec = pedaco.decode(enc).strip()
-                        if dec and any(c.isalnum() for c in dec) and dec not in textos:
-                            textos.append(dec)
-                        break
-                    except Exception:
-                        continue
-                i = offset + comp
-                continue
-        i += 1
-
-    # 2. Varredura ampla por Regex para pegar strings mesmo se ASN.1 não estiver alinhado
-    for pedaco in re.findall(b'[\x20-\x7e\xa0-\xff]{2,}', dados):
-        for enc in ('utf-8', 'latin1', 'cp1252'):
-            try:
-                dec = pedaco.decode(enc).strip()
-                if dec and any(c.isalnum() for c in dec) and dec not in textos:
-                    textos.append(dec)
-                break
-            except Exception:
-                continue
-
-    return textos
-
-def detectar_status_evento(dados: bytes, textos: list) -> str:
-    """Detecta se o evento é Falha de Comunicação ou Retorno (Online), via OID ou palavras-chave."""
-    # OIDs Digifort específicos
-    if b'\x06\x0d\x2b\x06\x01\x04\x01\x82\xf7\x04\x01\x01\x64\x02\x04' in dados:
-        return "Falha de Comunicacao"
-    if b'\x06\x0d\x2b\x06\x01\x04\x01\x82\xf7\x04\x01\x01\x64\x02\x05' in dados:
-        return "Camera Restaurada"
-
-    # Checagem por texto no payload
-    texto_geral = " ".join(textos).lower()
-    palavras_falha = ("falha", "failure", "perda", "loss", "offline", "desconectad", "down", "sem sinal", "queda")
-    palavras_restaurada = ("restaurad", "restored", "online", "conectad", "up", "normal", "recuperad")
-
-    for p in palavras_falha:
-        if p in texto_geral:
-            return "Falha de Comunicacao"
-    for p in palavras_restaurada:
-        if p in texto_geral:
-            return "Camera Restaurada"
-
-    return "Outro Evento"
-
-def rodar_sniffer_snmp():
-    global sniffer_socket
-    sniffer_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
+    while not monitor_stop_event.is_set():
         try:
-            sniffer_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        except Exception:
-            pass
-        sniffer_socket.bind(('0.0.0.0', PORTA_SNMP))
-        logging.info(f"[OK] Sniffer SNMP rodando na porta {PORTA_SNMP}...")
-    except Exception as e:
-        logging.error(
-            f"[ERRO] ao iniciar Sniffer SNMP na porta {PORTA_SNMP}: {e}. "
-            f"Verifique se a porta 162 UDP não está sendo usada por outro software (ex: Sniffer, Wireshark ou serviço 'SNMP Trap' do Windows)."
-        )
-        return
+            with _cameras_lock:
+                cameras_snapshot = list(LISTA_CAMERAS_UNICAS)
 
-    while True:
-        try:
-            dados, endereco = sniffer_socket.recvfrom(4096)
-        except Exception:
-            break
+            if cameras_snapshot:
+                res = testar_cameras_por_ping(cameras_snapshot, timeout_ms=1000)
+                for cam in cameras_snapshot:
+                    nome = cam['Nome']
+                    ip = (cam.get('IP') or '').strip()
+                    is_ok = bool(res.get(nome, False) or (ip and res.get(ip, False)))
+                    status_atual = "OK" if is_ok else "FALHA"
+                    
+                    status_anterior = _ultimo_status_cameras.get(nome)
+                    if status_anterior is not None and status_anterior != status_atual:
+                        if status_atual == "FALHA":
+                            registrar_queda(nome, "Falha de Comunicacao (Ping Timeout)")
+                            logging.info(f"[DIGIFORT PING] Queda detectada: {nome} ({ip})")
+                        else:
+                            registrar_queda(nome, "Camera Restaurada (Ping OK)")
+                            logging.info(f"[DIGIFORT PING] Câmera restaurada: {nome} ({ip})")
+                            
+                    _ultimo_status_cameras[nome] = status_atual
+        except Exception as e:
+            logging.error(f"[DIGIFORT PING] Erro no ciclo de monitoramento: {e}")
+            
+        monitor_stop_event.wait(timeout=INTERVALO_MONITORAMENTO_PING_S)
 
-        logging.info(f"[SNMP] Pacote UDP de {len(dados)} bytes recebido de {endereco}")
-        textos = extrair_textos_snmp(dados)
-        status_encontrado = detectar_status_evento(dados, textos)
 
-        camera_identificada_nome = None
-
-        # 1. Tenta identificar contra o dicionário carregado da planilha
-        for texto_limpo in textos:
-            if texto_limpo.endswith('0') and len(texto_limpo) > 1 and texto_limpo[:-1] in DICIONARIO_CAMERAS_NOME:
-                texto_limpo = texto_limpo[:-1]
-
-            ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', texto_limpo)
-            if ip_match and ip_match.group(0) in DICIONARIO_CAMERAS_IP:
-                camera_identificada_nome = DICIONARIO_CAMERAS_IP[ip_match.group(0)]['Nome']
-                break
-
-            texto_norm = normalizar_texto(texto_limpo)
-            for nome, info in DICIONARIO_CAMERAS_NOME.items():
-                if not str(nome).isdigit() and (nome.lower() == texto_limpo.lower() or normalizar_texto(nome) == texto_norm):
-                    camera_identificada_nome = info['Nome']
-                    break
-            if camera_identificada_nome:
-                break
-
-        # 2. Se a câmera não foi pareada no dicionário (ex: sem planilha exportada ou nome divergente),
-        # extrai o nome diretamente dos textos contidos na trap SNMP
-        if not camera_identificada_nome:
-            palavras_ignorar = {'public', 'falha de comunicacao', 'camera restaurada', 'outro evento', 'digifort', 'enterprise'}
-            for t in textos:
-                tl = t.lower()
-                if len(t) >= 2 and tl not in palavras_ignorar and not any(k in tl for k in ('falha', 'restaurad', 'offline', 'online')):
-                    camera_identificada_nome = t
-                    break
-
-        if camera_identificada_nome and status_encontrado != "Outro Evento":
-            registrar_queda(camera_identificada_nome, status_encontrado)
-            logging.info(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] SNMP TRAP REGISTRADA: {camera_identificada_nome} | {status_encontrado}")
-        else:
-            logging.warning(
-                f"[SNMP] Trap recebida mas não gravada. Status: '{status_encontrado}', "
-                f"Camera: '{camera_identificada_nome}'. Textos encontrados: {textos}"
-            )
-
-snmp_thread = None
-
-def start_webhook(caminho_csv_export: str, caminho_log: str):
+def start_webhook(caminho_csv_export: str = "", caminho_log: str = "", cameras_servidor: list = None):
     """
-    Mantido o nome original 'start_webhook' para não quebrar o service.py,
-    mas agora inicia apenas o sniffer SNMP e não mais um servidor HTTP.
+    Mantido o nome original 'start_webhook' para compatibilidade com o service.py.
+    Inicia a thread de monitoramento periódico das câmeras via Ping ICMP.
+    As câmeras vêm do CSV exportado (equipamentos antigos) ou, sem CSV, da Galeria do servidor (`cameras_servidor`).
     """
-    global ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV, snmp_thread, LISTA_CAMERAS_UNICAS, ULTIMO_CAMINHO_EXPORT
-    if snmp_thread is not None:
+    global ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV, monitor_ping_thread, ULTIMO_CAMINHO_EXPORT
+    if monitor_ping_thread is not None and monitor_ping_thread.is_alive():
         return 
     
-    ARQUIVO_EXPORT_CAMERAS = caminho_csv_export
+    if caminho_csv_export:
+        ARQUIVO_EXPORT_CAMERAS = caminho_csv_export
     if caminho_log:
         ARQUIVO_CSV = caminho_log
     
-    DICIONARIO_CAMERAS_NOME.clear()
-    DICIONARIO_CAMERAS_IP.clear()
-    LISTA_CAMERAS_UNICAS.clear()
-    nomes, ips, unicas = carregar_dicionario_cameras(ARQUIVO_EXPORT_CAMERAS)
-    DICIONARIO_CAMERAS_NOME.update(nomes)
-    DICIONARIO_CAMERAS_IP.update(ips)
-    LISTA_CAMERAS_UNICAS.extend(unicas)
-    ULTIMO_CAMINHO_EXPORT = ARQUIVO_EXPORT_CAMERAS
+    with _cameras_lock:
+        DICIONARIO_CAMERAS_NOME.clear()
+        DICIONARIO_CAMERAS_IP.clear()
+        LISTA_CAMERAS_UNICAS.clear()
+        nomes, ips, unicas = carregar_dicionario_cameras(ARQUIVO_EXPORT_CAMERAS)
+        if not unicas and cameras_servidor:
+            nomes, ips, unicas = carregar_cameras_servidor(cameras_servidor)
+        DICIONARIO_CAMERAS_NOME.update(nomes)
+        DICIONARIO_CAMERAS_IP.update(ips)
+        LISTA_CAMERAS_UNICAS.extend(unicas)
+        ULTIMO_CAMINHO_EXPORT = ARQUIVO_EXPORT_CAMERAS
     
-    # Inicia o Sniffer SNMP na 162
-    snmp_thread = threading.Thread(target=rodar_sniffer_snmp, daemon=True)
-    snmp_thread.start()
+    monitor_stop_event.clear()
+    monitor_ping_thread = threading.Thread(target=rodar_monitor_ping, daemon=True)
+    monitor_ping_thread.start()
     
-    logging.info(f"[OK] Agente Digifort iniciado (Modo SNMP na {PORTA_SNMP}).")
+    logging.info("[OK] Agente Digifort iniciado (Monitoramento via Ping ICMP).")
+
 
 def stop_webhook():
-    global snmp_thread, sniffer_socket
-    if sniffer_socket:
-        sniffer_socket.close()
-        sniffer_socket = None
-    snmp_thread = None
-    logging.info("[PARADO] Agente Digifort SNMP parado.")
+    """Para a thread de monitoramento periódico por Ping."""
+    global monitor_ping_thread
+    monitor_stop_event.set()
+    if monitor_ping_thread and monitor_ping_thread.is_alive():
+        monitor_ping_thread.join(timeout=2.0)
+    monitor_ping_thread = None
+    logging.info("[PARADO] Agente Digifort (Monitoramento Ping) parado.")
+
 
 def rodar_servidor():
     start_webhook(ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV)
     try:
+        import time
         while True:
-            import time
             time.sleep(1)
     except KeyboardInterrupt:
         stop_webhook()
 
+
 if __name__ == '__main__':
-    import sys
     print("="*60)
-    print("  AGENTE DIGIFORT (SNMP ONLY) - TRILAN NVR BACKUP")
+    print("  AGENTE DIGIFORT (PING ICMP) - TRILAN NVR BACKUP")
     print("="*60)
     
     if len(sys.argv) > 1:
         ARQUIVO_EXPORT_CAMERAS = sys.argv[1]
     else:
         caminho = input(r"Digite o caminho do arquivo CSV exportado do Digifort (ou Enter para 'export_cameras.csv'): ").strip()
-        if caminho:
-            ARQUIVO_EXPORT_CAMERAS = caminho
-        else:
-            ARQUIVO_EXPORT_CAMERAS = "export_cameras.csv"
+        ARQUIVO_EXPORT_CAMERAS = caminho if caminho else "export_cameras.csv"
             
     if len(sys.argv) > 2:
         ARQUIVO_CSV = sys.argv[2]
