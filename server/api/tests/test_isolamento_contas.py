@@ -275,11 +275,15 @@ def test_isolamento_contas():
         rotulos_b = r.json().get("rotulos", {})
         assert rotulos_b.get("grupo_plural") == "Setores", f"Esperado grupo_plural 'Setores', obteve {rotulos_b.get('grupo_plural')}"
 
-        # 7. Super admin GET /api/v1/clients -> cA e cB; com X-Conta-ID: contaA -> cA e não cB
+        # 7. Super admin sem X-Conta-ID fica na conta da plataforma (não vê cA nem cB); com X-Conta-ID vê só a conta escolhida
         r = client.get("/api/v1/clients", headers=headers_super)
         assert r.status_code == 200, f"super admin GET /clients falhou: {r.status_code}"
         ids_super = [c["id"] for c in r.json()]
-        assert str(cA_id) in ids_super and str(cB_id) in ids_super, "Super admin global deve ver clientes cA e cB"
+        assert str(cA_id) not in ids_super and str(cB_id) not in ids_super, "Super admin sem conta escolhida fica na conta da plataforma e NÃO deve ver cA nem cB"
+
+        r = client.get("/api/v1/auth/me", headers=headers_super)
+        assert r.status_code == 200, f"super admin GET /auth/me falhou: {r.status_code}"
+        assert (r.json().get("conta") or {}).get("plataforma") is True, "Super admin sem conta escolhida deve estar na conta da plataforma"
 
         headers_super_A = {**headers_super, "X-Conta-ID": str(contaA_id)}
         r = client.get("/api/v1/clients", headers=headers_super_A)
@@ -287,6 +291,12 @@ def test_isolamento_contas():
         ids_super_A = [c["id"] for c in r.json()]
         assert str(cA_id) in ids_super_A, "Super admin filtrado para A deve ver cA"
         assert str(cB_id) not in ids_super_A, "Super admin filtrado para A NÃO deve ver cB"
+
+        headers_super_B = {**headers_super, "X-Conta-ID": str(contaB_id)}
+        r = client.get("/api/v1/clients", headers=headers_super_B)
+        assert r.status_code == 200, f"super admin filtrado para B GET /clients falhou: {r.status_code}"
+        ids_super_B = [c["id"] for c in r.json()]
+        assert str(cB_id) in ids_super_B and str(cA_id) not in ids_super_B, "Super admin filtrado para B deve ver só cB"
 
         # 8. adminA GET /api/v1/admin/contas -> 403
         r = client.get("/api/v1/admin/contas", headers=headers_A)

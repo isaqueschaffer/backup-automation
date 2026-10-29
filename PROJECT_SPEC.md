@@ -508,7 +508,7 @@ datetime.utcnow()            # naive em UTC — compativel com o banco
 - Gerado via `POST /api/v1/auth/login`: com `{email, password}` para usuário (`usuarios`, senha bcrypt) → JWT `{sub: <uuid do usuário>, tv: <token_versao>}`; com só `{password}` (`ADMIN_PASSWORD` ou `settings.admin_password_hash`) → administrador da plataforma legado, JWT `{sub: "admin"}` (usado pelo `agent/publish_version.ps1`; não remover)
 - Expira em `ACCESS_TOKEN_EXPIRE_HOURS` (padrao 8h), algoritmo `HS256`
 - Cada requisição recarrega o usuário (`get_contexto`, `auth.py`): inativo ou `tv` diferente de `token_versao` → 401 (trocar senha, papel ou desativar derruba os tokens já emitidos)
-- Papéis: `SUPER_ADMIN` (plataforma, sem conta; escolhe a conta pelo header `X-Conta-ID`, sem ele vê todas), `ADMIN` e `LEITURA` (de uma conta; `X-Conta-ID` é ignorado). Isolamento por conta: REGRA-010
+- Papéis: `SUPER_ADMIN` (plataforma, sem conta própria; escolhe a conta pelo header `X-Conta-ID`, sem ele fica na conta da plataforma — não existe visão "todas as contas" desde 29/10/2026), `ADMIN` e `LEITURA` (de uma conta; `X-Conta-ID` é ignorado). Isolamento por conta: REGRA-010
 
 **Agente Windows:** API Key + Client ID
 - Headers: `X-Client-ID: <uuid>` + `X-API-Key: sk_trilan_<token>`
@@ -1030,7 +1030,7 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 **Conta vencida ou suspensa (bloqueio imediato, decisão do dono):** painel somente leitura (403 em escrita), `/agent/config` sem equipamentos (o agente encerra o backup sem erro de rede), ping sem backup nem recuperação, `report`/upload 403 e link público do dashboard 404. Nada é apagado; ao renovar volta tudo na hora. O agente instalado não precisa de versão nova.
 
-**Conta da plataforma:** "Trilan" (INTEGRADOR, sem validade; id em `settings.conta_plataforma_id`) recebeu todos os dados anteriores. O super admin sem conta escolhida vê todas as contas e cria Cliente/Máquina nela; não pode ser suspensa nem ganhar validade.
+**Conta da plataforma:** "Trilan" (INTEGRADOR, sem validade; id em `settings.conta_plataforma_id`) recebeu todos os dados anteriores. O super admin sem conta escolhida fica nela (vê e cria só os itens dela; para ver outra conta escolhe no seletor); não pode ser suspensa nem ganhar validade.
 
 **Fora do escopo (27/10/2026):** cobrança automática, limite de máquinas por plano, login para os clientes do integrador, exclusão de conta (só suspender) e RLS no Postgres (o isolamento é na aplicação, REGRA-010).
 
@@ -1062,6 +1062,18 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-10-29] — Administrador da plataforma deixa de ver as contas misturadas
+
+**Problema:** o login só com senha (SUPER_ADMIN) sem `X-Conta-ID` tinha `conta_id = None`, que `filtrar_por_conta` trata como "ver tudo". O setor criado numa conta de Cliente final aparecia na tela do administrador misturado com os Clientes dos integradores, com o rótulo padrão "Cliente". Não era vazamento entre contas de usuário (o teste de isolamento já cobria), e sim a visão global do super admin.
+**Alteração (decisão do usuário):** o super admin sem `X-Conta-ID` passa a ficar na **conta da plataforma** (Trilan): `_montar_contexto` em `auth.py` carrega essa conta quando não há header. Para ver outra conta ele a escolhe no seletor (`X-Conta-ID`) e o painel usa os rótulos dela ("Setor" na CLIENTE_FINAL). Não existe mais visão "todas as contas"; se a conta da plataforma não existir, o contexto cai no comportamento antigo (`conta_id` None) como último recurso. Painel: `Sidebar.tsx` sem a opção "Todas as contas"; o seletor mostra a conta atual e escolher a conta da plataforma volta ao padrão. Usuários ADMIN/LEITURA continuam presos à própria conta (REGRA-010 inalterada). Rotas só da plataforma (`verify_admin_token`/`exigir_super_admin`) não mudam.
+**Teste:** `test_isolamento_contas.py` (passo 7) agora exige que o super admin sem conta NÃO veja cA nem cB, que `/auth/me` mostre a conta da plataforma, e que com `X-Conta-ID` veja só a conta escolhida (A e B).
+**Verificado em Docker local:** isolamento aprovado, 27 testes unitários aprovados (as mesmas 4 falhas antigas de `test_storage`/`test_planilha_vms`), `tsc` do painel sem erro e roteiro de ponta a ponta com 23/23.
+**Breaking Change:** Não para o agente nem para usuários de conta; o super admin deixa de ver as contas juntas (muda o que ele vê ao entrar).
+**Arquivos:** server/api/auth.py, server/api/tests/test_isolamento_contas.py, server/dashboard/src/components/Sidebar.tsx, PROJECT_SPEC.md
+**Branch:** isaque
+
+---
 
 ### [2026-10-28] — "Dias gravados" reais por câmera (Hikvision, Motorola, Intelbras) e agente 1.1.29
 

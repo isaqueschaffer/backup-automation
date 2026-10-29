@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import get_db
 from models import Conta, Machine, Usuario
-from services.contas import conta_bloqueada
+from services.contas import conta_bloqueada, obter_conta_plataforma_id
 
 # ──────────────────────────────────────────────────────────────
 # JWT (Admin dashboard authentication)
@@ -38,7 +38,7 @@ def create_access_token_usuario(usuario: Usuario) -> str:
 
 @dataclass
 class Contexto:
-    """Quem está usando o painel e em qual conta. conta_id None só para super admin sem conta escolhida (vê tudo)."""
+    """Quem está usando o painel e em qual conta. conta_id None só se a conta da plataforma ainda não existe; super admin sem conta escolhida fica na conta da plataforma."""
     usuario_id: Optional[UUID]  # None = admin legado (login só com senha)
     nome: str
     email: Optional[str]
@@ -123,6 +123,11 @@ def _montar_contexto(token: str, x_conta_id: Optional[str], db: Session) -> Cont
                     detail="Conta não encontrada",
                 )
             conta_id = conta.id
+        else:
+            plataforma_id = obter_conta_plataforma_id(db)
+            if plataforma_id is not None:
+                conta = db.query(Conta).filter(Conta.id == plataforma_id).first()
+                conta_id = conta.id if conta else None
 
         return Contexto(
             usuario_id=usuario_id,

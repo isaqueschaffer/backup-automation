@@ -98,10 +98,12 @@ export default function Sidebar() {
             style={{ width: "100%" }}
             aria-label="Conta"
             title="Conta em visualização"
-            value={contaSelecionadaId ?? ""}
-            onChange={(e) => escolherConta(e.target.value || null)}
+            value={contaSelecionadaId ?? me?.conta?.id ?? ""}
+            onChange={(e) => {
+              const escolhida = contas.find((c) => c.id === e.target.value);
+              escolherConta(!escolhida || escolhida.plataforma ? null : escolhida.id);
+            }}
           >
-            <option value="">Todas as contas</option>
             {contas.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.nome}
