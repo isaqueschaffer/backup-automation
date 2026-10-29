@@ -1063,6 +1063,18 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-10-27] — Infraestrutura: limpeza, Samba e sincronização dos backups com o OneDrive (registro, sem código)
+
+**Tipo:** operação de infraestrutura feita fora do repositório (servidor Linux do Dokploy e máquinas Windows); registrada aqui para referência. Nenhum arquivo de código foi alterado.
+
+- **Limpeza:** 7 pastas órfãs de teste (`Teste_*`, UUIDs sem registro em `clients`) removidas de `/opt/trilan/backups` (bind-mount de `/data/backups` da API), com confirmação do usuário; as pastas dos clientes reais foram mantidas.
+- **Samba:** a seção `[backups]` do `/etc/samba/smb.conf` passou a usar `force user = root`, `force group = root`, `create mask = 0777` e `directory mask = 0777`, e a pasta recebeu `chmod -R 777`. Causa: a API roda como `root` no container e grava `root:root` (755), o que impedia o usuário `trilan` do compartilhamento de apagar pelo Windows. Backup do arquivo original em `smb.conf.bak`.
+- **OneDrive:** o `rclone` direto no Linux foi descartado (o Entra ID da Trilan exige consentimento de administrador para apps de terceiros); foi revertido por completo. A sincronização roda no Windows: tarefa agendada `Trilan_Sync_Backups_OneDrive` (de hora em hora) executa `C:\TrilanSync\sync_backups_onedrive.ps1`, que copia `\\<servidor>\backups` com `robocopy /E /XO /R:3 /W:5` para a pasta `Arquivos de Admin - Backups Clientes` do OneDrive da Trilan; o cliente oficial do OneDrive envia para a nuvem. Carga inicial: 447 arquivos, 4,835 GB, 0 falhas.
+- **Servidor Windows 24h:** o erro 1219 do `net use` (conexão anterior ao mesmo IP com outro usuário) foi resolvido com `net use * /delete /y` antes de reconectar.
+- **Pendências conhecidas (decisão do dono: manter como está):** os scripts `sync_backups_onedrive.ps1` e `instalar_no_outro_servidor.ps1` citados no relatório não estão em `tools/` do repositório; a credencial do compartilhamento aparece em texto puro nesses scripts; o Samba com `force user = root` e `777` dá escrita total a quem autentica. O relatório completo (`RELATORIO_SINCRONIZACAO_BACKUPS.md`) fica só na máquina local, fora do git, por conter essa credencial e o repositório ser espelhado em um público.
+
+**Breaking Change:** Não. **Requer:** nada no código; nova build do agente não é necessária.
+
 ### [2026-10-29] — Merge auditado do ramo `helena` (4198296) e agente 1.1.30
 
 **Tipo:** merge real (`git merge --no-ff`), com 3 conflitos de texto resolvidos mantendo os dois lados; auditado pelo checklist do CLAUDE.md.
