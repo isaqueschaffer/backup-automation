@@ -5,7 +5,7 @@ Windows agent authenticates with X-Client-ID + X-API-Key headers.
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict
 from uuid import UUID
 
@@ -217,6 +217,26 @@ def _manter_imagem_noite(anterior, novo, por_nome=False):
     return saida
 
 
+OFFSET_UTC_PADRAO_MIN = -180  # Brasília (UTC-3): agentes < 1.1.34 não informam o fuso
+
+
+def _offset_utc_min(telemetria_ping, telemetria_maquina) -> int:
+    """Fuso local da máquina em minutos em relação ao UTC (`utc_offset_min` da telemetria, agente >= 1.1.34):
+    o do corpo do ping ou, se ausente, o último gravado na máquina. Fora de -720..840 ou inválido: -180."""
+    valor = None
+    for tel in (telemetria_ping, telemetria_maquina):
+        if isinstance(tel, dict) and tel.get("utc_offset_min") is not None:
+            valor = tel.get("utc_offset_min")
+            break
+    if isinstance(valor, bool):
+        return OFFSET_UTC_PADRAO_MIN
+    try:
+        offset = int(valor)
+    except (TypeError, ValueError):
+        return OFFSET_UTC_PADRAO_MIN
+    return offset if -720 <= offset <= 840 else OFFSET_UTC_PADRAO_MIN
+
+
 @router.post("/ping", response_model=PingResponse)
 async def ping_agent(
     body: PingRequest | None = None,
@@ -276,16 +296,17 @@ async def ping_agent(
     # Não aciona se a máquina pertence a um Cliente com fila ativa (a fila comanda o sequenciamento)
     is_in_active_queue = bool(machine.customer is not None and machine.customer.queue_active)
     if not bloqueada and not should_backup and not is_in_active_queue and machine.backup_hour is not None and machine.backup_minute is not None:
-        brt_tz = timezone(timedelta(hours=-3))
-        now_brt = datetime.now(brt_tz)
-        scheduled_time_today = now_brt.replace(hour=machine.backup_hour, minute=machine.backup_minute, second=0, microsecond=0)
-        
-        if now_brt > scheduled_time_today + timedelta(minutes=30):
-            # 1. Verifica se já concluiu backup hoje
+        # Tudo naive (REGRA-001): UTC do servidor + fuso local da máquina (o agente agenda pela hora local)
+        offset_min = _offset_utc_min(body.telemetry if body else None, machine.telemetry)
+        agora_local = datetime.utcnow() + timedelta(minutes=offset_min)
+        scheduled_time_today = agora_local.replace(hour=machine.backup_hour, minute=machine.backup_minute, second=0, microsecond=0)
+
+        if agora_local > scheduled_time_today + timedelta(minutes=30):
+            # 1. Verifica se já concluiu backup hoje (data local da máquina)
             made_backup_today = False
             if machine.last_backup_at:
-                last_backup_brt = machine.last_backup_at.replace(tzinfo=timezone.utc).astimezone(brt_tz)
-                if last_backup_brt.date() == now_brt.date():
+                last_backup_local = machine.last_backup_at + timedelta(minutes=offset_min)
+                if last_backup_local.date() == agora_local.date():
                     made_backup_today = True
 
             # 2. Verifica se houve backup recente (últimas 2 horas) para evitar disparos duplicados

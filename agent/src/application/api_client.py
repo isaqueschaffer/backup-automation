@@ -1,5 +1,6 @@
 import logging
 import math
+import time
 import requests
 from pathlib import Path
 from datetime import datetime
@@ -140,6 +141,13 @@ def _get_telemetry() -> dict:
     except Exception as e:
         pass # Ignora se nao tiver GPUtil ou GPU
         
+    # Fuso local em minutos em relação ao UTC (ex.: -180 em Brasília): o servidor usa na recuperação de
+    # backup perdido, que compara com o horário agendado na hora local da máquina
+    try:
+        telemetry["utc_offset_min"] = time.localtime().tm_gmtoff // 60
+    except Exception:
+        pass
+
     # O servidor não fecha a rodada do Cliente enquanto a máquina ainda está fazendo o backup
     from src.application import estado
     telemetry["backup_em_andamento"] = estado.backup_em_andamento
