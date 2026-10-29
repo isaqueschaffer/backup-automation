@@ -71,7 +71,7 @@ O usuário não quer pedir cada etapa de novo. Quando ele pedir o merge com a He
 2. Se o ramo mexeu em `agent/`, subir a versão (três lugares) e seguir o "Checklist de uma nova versão do agente": commit e push duplo, `agent/build.ps1` + `ISCC.exe installer.iss`, SHA-256, release em `isaqueschaffer/backup-automation` com Service e Tray, conferência dos `digest`.
 3. **Cadastrar a versão no painel na mesma rodada** (`agent/publish_version.ps1`), sem esperar o "publique": neste fluxo o pedido de merge com a Helena já é a autorização. Depois conferir via `GET /api/v1/admin/agent-version` (login em `/api/v1/auth/login` com `{"password": ...}`) que links e hashes batem.
 4. Se o ramo só mexeu em servidor/painel (sem `agent/`), não gerar executável nem cadastrar versão: só merge, changelog e push.
-5. A senha do painel NÃO fica no repositório (este repositório é espelhado em um público). Usar a senha que o usuário passar no pedido; se ele não passar, pedir só ela, no momento do passo 3, e seguir.
+5. A senha do painel NÃO fica neste arquivo nem em nada versionado (o repositório é espelhado em um público). Ela está em `CLAUDE.local.md`, só nesta máquina, e o usuário autorizou usá-la neste fluxo sem perguntar. Se esse arquivo não existir (outra máquina), pedir a senha só no momento do passo 3. Nunca passá-la ao Gemini.
 6. No fim, informar o resumo: o que entrou, o que foi bloqueado, links e hashes, e lembrar que o cadastro libera a versão a todos os agentes (atualizam em até 1 h) e que a senha do painel deve ser forte.
 
 
