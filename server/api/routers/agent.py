@@ -24,6 +24,7 @@ from schemas import (
     NVRCameraNightImage,
     PingResponse,
     PingRequest,
+    PresencaCamerasReport,
     RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
 )
@@ -38,6 +39,7 @@ from services.storage_service import save_zip_stream, UploadTooLargeError, _sani
 from services.email_service import send_backup_report
 from services.backup_runs import attach_report_to_run, finish_queue_run
 from services.contas import maquina_bloqueada
+from services.camera_offline import aplicar_presenca, atualizar_presenca
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -406,6 +408,35 @@ def receive_night_image(
     db.commit()
     return {"status": "ok"}
 
+@router.post("/cameras/status")
+def receive_cameras_status(
+    body: PresencaCamerasReport,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Heartbeat periódico de status de presença online/offline das câmeras."""
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
+    agora = datetime.utcnow()
+    total = 0
+
+    for item in body.equipamentos:
+        nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == item.nome).first()
+        if not nvr or not nvr.active or not isinstance(nvr.last_recording_status, list) or not nvr.last_recording_status:
+            continue
+
+        vms = (nvr.tipo or "NVR").upper() in ("DIGIFORT", "DEFENSE")
+        leituras = [c.model_dump() for c in item.cameras]
+        nova_lista, qtd = atualizar_presenca(nvr.last_recording_status, leituras, agora, por_nome=vms)
+        if qtd > 0:
+            nvr.last_recording_status = nova_lista
+            total += qtd
+
+    db.commit()
+    return {"status": "ok", "atualizadas": total}
+
+
 @router.post("/backup/report", response_model=BackupReportResponse, status_code=201)
 def receive_backup_report(
     body: BackupReportCreate,
@@ -432,8 +463,18 @@ def receive_backup_report(
             r_dict["tipo"] = nvr.tipo
             if r.cameras is not None:
                 vms = (nvr.tipo or "NVR").upper() in ("DIGIFORT", "DEFENSE")
-                nvr.last_recording_status = _manter_imagem_noite(
-                    nvr.last_recording_status, _limpar_motivos(r.cameras), por_nome=vms)
+                anteriores = nvr.last_recording_status
+                novas = _manter_imagem_noite(
+                    anteriores, _limpar_motivos(r.cameras), por_nome=vms
+                )
+                novas = aplicar_presenca(anteriores, novas, server_finished_at, por_nome=vms)
+                nvr.last_recording_status = novas
+                if isinstance(r_dict.get("cameras"), list):
+                    r_dict["cameras"] = [
+                        {**orig, **{k: nova[k] for k in ("offline_desde", "offline_desde_aprox") if k in nova}}
+                        if isinstance(orig, dict) and isinstance(nova, dict) else orig
+                        for orig, nova in zip(r_dict["cameras"], novas)
+                    ]
             if r.telemetria is not None:
                 nvr.last_telemetry_status = r.telemetria
         else:

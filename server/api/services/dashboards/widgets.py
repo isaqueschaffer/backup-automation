@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from models import Backup, Customer, Machine, NVR
 from routers.machines import check_machine_online
 from schemas import TIPOS_EQUIPAMENTO
+from services.camera_offline import segundos_offline
 from .registro import TipoWidget, registrar
 
 
@@ -494,6 +495,7 @@ class ConfigCameras(BaseModel):
 
 
 def construir_cameras(ctx: ContextoDados, config: ConfigCameras) -> Dict[str, Any]:
+    agora = datetime.utcnow()
     filtro_ids = set(config.equipamentos) if config.equipamentos else None
     itens = []
 
@@ -520,10 +522,13 @@ def construir_cameras(ctx: ContextoDados, config: ConfigCameras) -> Dict[str, An
                     tem_problema = True
                 if config.apenas_problemas and not problema:
                     continue
+                seg, aprox = segundos_offline(cam, agora)
                 cameras_lista.append({
                     "nome": cam.get("nome") or "Câmera",
                     "comunicacao": comunicacao,
                     "gravacao": gravacao,
+                    "offline_segundos": seg,
+                    "offline_aprox": aprox,
                 })
 
             if config.apenas_problemas and not tem_problema:

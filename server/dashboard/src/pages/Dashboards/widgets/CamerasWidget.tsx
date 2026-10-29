@@ -1,4 +1,5 @@
 import StatusBadge from "../../../components/StatusBadge";
+import { fmtOfflineHa } from "../../../utils/date";
 import { DadosCameras, WidgetInstancia } from "../types";
 
 interface Props {
@@ -165,42 +166,67 @@ export default function CamerasWidget({ dados }: Props) {
                   marginTop: 2,
                 }}
               >
-                {problemas.map((cam, idx) => (
-                  <div
-                    key={`${cam.nome}-${idx}`}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      fontSize: 11,
-                      padding: "2px 0",
-                    }}
-                  >
-                    <span
+                {problemas.map((cam, idx) => {
+                  const tempoOffline =
+                    cam.comunicacao !== "ONLINE" && cam.offline_segundos != null
+                      ? fmtOfflineHa(cam.offline_segundos, cam.offline_aprox)
+                      : null;
+
+                  return (
+                    <div
+                      key={`${cam.nome}-${idx}`}
                       style={{
-                        color: "var(--text-secondary)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        minWidth: 0,
-                        flex: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        fontSize: 11,
+                        padding: "2px 0",
                       }}
-                      title={cam.nome}
                     >
-                      {cam.nome}
-                    </span>
-                    <div style={{ flexShrink: 0 }}>
-                      <StatusBadge
-                        status={
-                          cam.comunicacao !== "ONLINE"
-                            ? "OFFLINE"
-                            : "SEM_GRAVACAO"
-                        }
-                      />
+                      <span
+                        style={{
+                          color: "var(--text-secondary)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          minWidth: 0,
+                          flex: 1,
+                        }}
+                        title={cam.nome}
+                      >
+                        {cam.nome}
+                      </span>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {tempoOffline && (
+                          <span
+                            style={{
+                              color: "var(--err)",
+                              fontSize: 11,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {tempoOffline}
+                          </span>
+                        )}
+                        <StatusBadge
+                          status={
+                            cam.comunicacao !== "ONLINE"
+                              ? "OFFLINE"
+                              : "SEM_GRAVACAO"
+                          }
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

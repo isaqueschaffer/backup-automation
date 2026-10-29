@@ -125,6 +125,8 @@ export interface NvrCamera {
   night_image_date?: string | null;
   perfect_image_base64?: string | null;
   night_image_base64?: string | null;
+  offline_segundos?: number | null;
+  offline_aprox?: boolean;
 }
 
 export interface PlanilhaVms {

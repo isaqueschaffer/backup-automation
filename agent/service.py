@@ -29,6 +29,7 @@ def _pyinstaller_hidden_imports():
     """Mantém imports explícitos visíveis ao bytecode do PyInstaller sem atrasar o StartServiceCtrlDispatcher no boot."""
     import src.camera.rtsp_client  # noqa: F401
     import src.application.api_client  # noqa: F401
+    import src.application.presenca_cameras  # noqa: F401
 
 
 DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -417,6 +418,32 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             if win32event.WaitForSingleObject(self.hWaitStop, int(espera * 1000)) == win32event.WAIT_OBJECT_0:
                 return
 
+    def _presenca_loop(self, conf: dict):
+        """Coleta periodicamente o status de presença das câmeras e envia ao servidor."""
+        from src.application import estado
+        from src.application.api_client import fetch_server_config, send_presenca_cameras
+        from src.application.presenca_cameras import coletar_presenca, INTERVALO_PRESENCA_S
+
+        # Espera inicial para não sobrecarregar a inicialização do serviço
+        if win32event.WaitForSingleObject(self.hWaitStop, 90 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                if estado.backup_em_andamento:
+                    log("Presença de câmeras ignorada: backup em andamento.")
+                else:
+                    server_cfg = fetch_server_config(conf)
+                    equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                    lista = coletar_presenca(equipamentos)
+                    if lista:
+                        send_presenca_cameras(conf, lista)
+            except Exception as e:
+                log(f"Falha no ciclo de presença de câmeras: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_PRESENCA_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
     def _disparar_rtsp(self, ping_resp: dict, conf: dict):
         """Dispara em thread o teste RTSP pedido pelo dashboard, se houver."""
         task = ping_resp.get("rtsp_task")
@@ -507,6 +534,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         import agent as agent_mod
 
         threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
+        threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:
             agora = datetime.now()

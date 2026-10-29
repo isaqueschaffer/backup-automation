@@ -200,6 +200,8 @@ export interface DadosCameras {
       nome: string;
       comunicacao: string;
       gravacao: string | null;
+      offline_segundos?: number | null;
+      offline_aprox?: boolean;
     }[];
   }[];
 }

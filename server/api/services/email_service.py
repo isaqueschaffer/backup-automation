@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from models import NVR, NVRCamera, Setting
+from services.camera_offline import formatar_offline_ha, segundos_offline
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,12 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
                     problemas.append(f"  ⚠️ {cam_nome}: Online, mas falhou ao verificar histórico de gravação")
             else:
                 cameras_offline += 1
-                problemas.append(f"  ❌ {cam_nome}: Offline ({status_comunicacao})")
+                linha_offline = f"  ❌ {cam_nome}: Offline ({status_comunicacao})"
+                if cam.get("offline_desde"):
+                    seg, aprox = segundos_offline(cam, datetime.utcnow())
+                    if seg is not None:
+                        linha_offline += f" — offline {formatar_offline_ha(seg, aprox)}"
+                problemas.append(linha_offline)
 
         if problemas:
             problemas_por_nvr[nvr_nome] = problemas

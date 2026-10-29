@@ -32,3 +32,25 @@ export function fmtDay(s: string | null | undefined, empty = "—"): string {
   if (!s) return empty;
   return new Date(s.endsWith("Z") ? s : s + "Z").toLocaleDateString("pt-BR");
 }
+
+// Formata o tempo que a câmera está offline (Regra D).
+export function fmtOfflineHa(segundos: number | null | undefined, aprox = false): string {
+  if (segundos == null || isNaN(segundos)) return "";
+  const s = Math.max(0, Math.floor(segundos));
+  let texto: string;
+  if (s < 60) {
+    texto = "há menos de 1 min";
+  } else if (s < 3600) {
+    texto = `há ${Math.floor(s / 60)} min`;
+  } else if (s < 86400) {
+    texto = `há ${Math.floor(s / 3600)}h`;
+  } else {
+    const d = Math.floor(s / 86400);
+    texto = d === 1 ? "há 1 dia" : `há ${d} dias`;
+  }
+
+  if (aprox && texto.startsWith("há ")) {
+    return "há mais de " + texto.slice(3);
+  }
+  return texto;
+}

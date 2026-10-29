@@ -4,7 +4,7 @@ import api from "../../../../api/client";
 import { NvrCamera, PlanilhaVms, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
-import { fmtDate } from "../../../../utils/date";
+import { fmtDate, fmtOfflineHa } from "../../../../utils/date";
 import {
   colunasDeSenha,
   extrairExemplosNomeEDescricao,
@@ -629,7 +629,14 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
                             <Chip ok={temImagem(cam, "ref")} label="REF" title={temImagem(cam, "ref") ? "Tem imagem de referência" : "Sem imagem de referência: não é anexada no e-mail se a câmera ficar offline"} />
                             <Chip ok={temImagem(cam, "noite")} label="NOITE" title={temImagem(cam, "noite") ? `Imagem da noite de ${fmtDate(cam.night_image_date)}` : (cam.captura_motivo || "Sem imagem da noite")} />
                             {cam.status_comunicacao === "OFFLINE" && (
-                              <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--err-bg)", color: "var(--err)" }}>OFFLINE</span>
+                              <>
+                                <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "var(--err-bg)", color: "var(--err)" }}>OFFLINE</span>
+                                {cam.offline_segundos != null && (
+                                  <span style={{ fontSize: 10, color: "var(--err)" }}>
+                                    {fmtOfflineHa(cam.offline_segundos, cam.offline_aprox)}
+                                  </span>
+                                )}
+                              </>
                             )}
                             {capturando && <span style={{ fontSize: 10, color: "var(--primary)" }}>capturando…</span>}
                           </div>
@@ -664,7 +671,16 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
                       {selectedCam.ip_compartilhado && selectedCam.canal_rtsp && (
                         <span className="text-xs text-muted">canal {selectedCam.canal_rtsp} do equipamento</span>
                       )}
-                      {selectedCam.status_comunicacao === "OFFLINE" && <span className="badge err">OFFLINE</span>}
+                      {selectedCam.status_comunicacao === "OFFLINE" && (
+                        <>
+                          <span className="badge err">OFFLINE</span>
+                          {selectedCam.offline_segundos != null && (
+                            <span style={{ fontSize: 12, color: "var(--err)" }}>
+                              {fmtOfflineHa(selectedCam.offline_segundos, selectedCam.offline_aprox)}
+                            </span>
+                          )}
+                        </>
+                      )}
                       {isVms && (
                         <button className="btn btn-secondary btn-sm" onClick={() => abrirEdicaoRtsp(selectedCam)}
                           style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>

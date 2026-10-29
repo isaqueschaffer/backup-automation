@@ -21,6 +21,7 @@ from schemas import (
     NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
     NVRPlanilhaEntrada, NVRPlanilhaResposta,
 )
+from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
 from services.escopo import obter_maquina
 from services.galeria_vms import (
@@ -393,6 +394,7 @@ def get_nvr_cameras(
         raise HTTPException(status_code=404, detail="NVR não encontrado")
 
     cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).order_by(NVRCamera.canal).all()
+    agora = datetime.utcnow()
     report_status = nvr.last_recording_status or []
     is_vms = (nvr.tipo or "NVR").upper() in TIPOS_VMS
 
@@ -403,6 +405,7 @@ def get_nvr_cameras(
         for _, st, c_db, ch in parear_cameras(cameras_db, report_status):
             st = st or {}
             ip_item = (c_db.ip if c_db and c_db.ip else None) or ip_valido(st.get("ip")) or None
+            seg, aprox = segundos_offline(st, agora)
             obj = {
                 "id": c_db.id if c_db else None,
                 "nvr_id": id,
@@ -423,6 +426,8 @@ def get_nvr_cameras(
                 "captura_status": None,
                 "captura_motivo": None,
                 "captura_horario": None,
+                "offline_segundos": seg,
+                "offline_aprox": aprox,
             }
             if "imagem_noite" in st:
                 obj["captura_status"] = st["imagem_noite"].get("status")
@@ -447,6 +452,7 @@ def get_nvr_cameras(
     for ch in sorted(canais_set):
         c_db = db_dict.get(ch)
         c_report = report_by_ch.get(ch)
+        seg, aprox = segundos_offline(c_report or {}, agora)
 
         obj = {
             "id": c_db.id if c_db else None,
@@ -468,6 +474,8 @@ def get_nvr_cameras(
             "captura_status": None,
             "captura_motivo": None,
             "captura_horario": None,
+            "offline_segundos": seg,
+            "offline_aprox": aprox,
         }
 
         if c_report and "imagem_noite" in c_report:

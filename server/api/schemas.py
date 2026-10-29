@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Union
 from datetime import datetime
 from uuid import UUID
 import re
@@ -70,6 +70,8 @@ class NVRCameraResponse(BaseModel):
     captura_status: Optional[str] = None
     captura_motivo: Optional[str] = None
     captura_horario: Optional[datetime] = None
+    offline_segundos: Optional[int] = None
+    offline_aprox: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -307,6 +309,21 @@ class PingResponse(BaseModel):
 
 class PingRequest(BaseModel):
     telemetry: Optional[Dict[str, Any]] = None
+
+
+class CameraPresenca(BaseModel):
+    canal: Optional[Union[int, str]] = None
+    nome: Optional[str] = Field(None, max_length=255)
+    online: bool
+
+
+class EquipamentoPresenca(BaseModel):
+    nome: str = Field(max_length=255)
+    cameras: List[CameraPresenca] = Field(default_factory=list, max_length=1000)
+
+
+class PresencaCamerasReport(BaseModel):
+    equipamentos: List[EquipamentoPresenca] = Field(default_factory=list, max_length=200)
 
 
 # ─────────────────────────────────────────────
@@ -975,4 +992,3 @@ class ContaDetalheResponse(ContaResponse):
     renovacoes: List[RenovacaoResponse] = []
 
     model_config = {"from_attributes": True}
-
