@@ -210,15 +210,74 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
         </>
       )}
       {eqForm.tipo === "DEFENSE" && (
-        <div className="form-group">
-          <label className="form-label">Pasta de Origem do Backup *</label>
-          <input className="form-input" type="text"
-            placeholder="C:\Intelbras Defense IA\...\db_backup"
-            value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
-          <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-            Pasta onde o Defense IA salva os arquivos gerados no backup automático.
-          </span>
-        </div>
+        <>
+          <div className="form-group">
+            <label className="form-label">Endereço IP / Host do Defense IA *</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="192.168.75.41"
+              value={eqForm.ip}
+              onChange={e => setEqForm({ ...eqForm, ip: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Porta da API HTTPS</label>
+              <input
+                className="form-input"
+                type="number"
+                placeholder="4433"
+                value={eqForm.porta_api ?? ""}
+                onChange={e => setEqForm({ ...eqForm, porta_api: e.target.value })}
+              />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Usuário da API *</label>
+              <input
+                className="form-input"
+                type="text"
+                placeholder="system"
+                value={eqForm.username}
+                onChange={e => setEqForm({ ...eqForm, username: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">
+              Senha da API {editingEqId ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(vazio = manter atual)</span> : '*'}
+            </label>
+            <input
+              className="form-input"
+              type="password"
+              autoComplete="new-password"
+              placeholder="••••••••"
+              value={eqForm.password}
+              onChange={e => setEqForm({ ...eqForm, password: e.target.value })}
+            />
+            {editingEqId && (
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                Preencha apenas se quiser alterar a senha atual.
+              </span>
+            )}
+          </div>
+
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">Pasta de Origem do Backup</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="C:\Intelbras Defense IA\...\db_backup"
+              value={eqForm.pasta_origem}
+              onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })}
+            />
+            <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+              Pasta onde o Defense IA salva os arquivos gerados no backup automático de banco de dados (opcional).
+            </span>
+          </div>
+        </>
       )}
       <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>

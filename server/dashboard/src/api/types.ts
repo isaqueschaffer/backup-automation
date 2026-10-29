@@ -55,6 +55,7 @@ export interface EquipamentoConfig {
   pasta_gravacoes?: string;
   marca?: string;
   modelo?: string;
+  porta_api?: number;
   [key: string]: unknown;
 }
 
@@ -72,6 +73,7 @@ export interface EqForm {
   caminho_csv?: string;
   caminho_log_csv?: string;
   pasta_gravacoes?: string;
+  porta_api?: number | string;
   // Planilha das câmeras do Digifort lida no formulário (enviada à Galeria ao salvar)
   planilhaNova?: PlanilhaPendente | null;
   // Digifort já cadastrado: o que a Galeria do equipamento já tem (exigência satisfeita sem nova planilha)

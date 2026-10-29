@@ -31,6 +31,7 @@ export function emptyEqForm(overrides: Partial<EqForm> = {}): EqForm {
   return {
     tipo: "NVR", name: "", ip: "", username: "", password: "",
     pasta_origem: "", fabricante_olt: "UNM2000",
+    porta_api: 4433,
     ...overrides,
   };
 }
@@ -42,7 +43,7 @@ export function eqToForm(eq: NVR): EqForm {
     tipo: eq.tipo,
     name: eq.name,
     ip: eq.tipo === "DIGIFORT" || (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000") ? "" : eq.ip,
-    username: eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.username === "unm2000" ? "" : eq.username,
+    username: eq.tipo === "DEFENSE" ? (eq.username || "system") : (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.username === "unm2000" ? "" : eq.username),
     password: "",
     pasta_origem: cfg?.pasta_origem || (eq.tipo === "DIGIFORT" && eq.ip !== "127.0.0.1" ? eq.ip : (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.ip !== "127.0.0.1" ? eq.ip : "")),
     fabricante_olt: cfg?.fabricante_olt || "UNM2000",
@@ -50,6 +51,7 @@ export function eqToForm(eq: NVR): EqForm {
     caminho_log_csv: cfg?.caminho_log_csv || "",
     pasta_gravacoes: cfg?.pasta_gravacoes || "",
     marca: cfg?.marca || "Hikvision",
+    porta_api: cfg?.porta_api ?? 4433,
   };
 }
 
@@ -115,12 +117,14 @@ export function buildEqPayload(
       if (eqForm.fabricante_olt === "HUAWEI") cfg.pasta_origem = eqForm.pasta_origem.trim();
     }
   } else if (eqForm.tipo === "DEFENSE") {
-    if (!eqForm.pasta_origem) return { error: "Para DEFENSE, informe a pasta de origem." };
-    payload.ip = "127.0.0.1";
-    payload.username = "defense";
-    payload.password = "defense";
+    if (!eqForm.ip.trim()) return { error: "Para DEFENSE, informe o endereço IP ou host do servidor." };
+    if (!editingEqId && !eqForm.password) return { error: "Para DEFENSE, informe a senha da API." };
+    payload.ip = eqForm.ip.trim();
+    payload.username = eqForm.username.trim() || "system";
+    payload.password = eqForm.password;
     payload.config_extra = {
       pasta_origem: eqForm.pasta_origem.trim(),
+      porta_api: Number(eqForm.porta_api) || 4433,
     };
   }
   // Remove blank passwords in edit mode so backend ignores them
