@@ -10,6 +10,8 @@ export default function RecordingModal({ nvrName, cameras, lastBackupAt, onClose
   lastBackupAt: string | null;
   onClose: () => void;
 }) {
+  // Digifort com pasta de gravações configurada: o agente informa a pasta usada por cada câmera (ou nenhuma)
+  const mostrarPasta = cameras.some(c => c.pasta_gravacao !== undefined);
   return (
     <Modal wide={true} title={`Gravação — ${nvrName} (${fmtDate(lastBackupAt)})`} onClose={onClose}>
       {cameras.length === 0 ? (
@@ -22,6 +24,7 @@ export default function RecordingModal({ nvrName, cameras, lastBackupAt, onClose
                 <th>Câmera</th>
                 <th>Rede</th>
                 <th>Gravação</th>
+                {mostrarPasta && <th>Pasta de gravação</th>}
                 <th>Dias Gravados</th>
                 <th>Mapa (15 dias)</th>
               </tr>
@@ -32,7 +35,7 @@ export default function RecordingModal({ nvrName, cameras, lastBackupAt, onClose
                 if (!rede) rede = cam.online ? "ONLINE" : (cam.online === false ? "OFFLINE" : "DESCONHECIDO");
                 let gravacao = cam.status_gravacao;
                 if (!gravacao) {
-                  const gravouHoje = cam.mapa ? cam.mapa.endsWith("█") : (cam.total_dias ?? 0) > 0;
+                  const gravouHoje = cam.mapa ? /[█▒]$/.test(cam.mapa) : (cam.total_dias ?? 0) > 0;
                   gravacao = gravouHoje ? "COM_GRAVACAO" : "SEM_GRAVACAO";
                 }
                 return (
@@ -40,6 +43,11 @@ export default function RecordingModal({ nvrName, cameras, lastBackupAt, onClose
                     <td>{cam.nome || `Canal ${cam.canal}`}</td>
                     <td><StatusBadge status={rede} /></td>
                     <td><StatusBadge status={gravacao} /></td>
+                    {mostrarPasta && (
+                      <td style={{ fontSize: 12, fontFamily: "monospace", color: cam.pasta_gravacao ? "inherit" : "var(--warn)" }}>
+                        {cam.pasta_gravacao || "Sem pasta"}
+                      </td>
+                    )}
                     <td>{cam.total_dias || 0}/15</td>
                     <td><MiniCalendar mapStr={cam.mapa || ""} referenceDate={lastBackupAt} /></td>
                   </tr>

@@ -13,6 +13,7 @@ import {
   buildEqPayload, emptyEqForm, eqToForm, parseEmails
 } from "./utils";
 import { useCameraImport } from "./hooks/useCameraImport";
+import { enviarPlanilhaVms, mensagemDeErro } from "./planilhaVms";
 import { useRtspTest } from "./hooks/useRtspTest";
 import MachineHeader from "./components/MachineHeader";
 import MachineInfoCards from "./components/MachineInfoCards";
@@ -185,13 +186,25 @@ export default function MachineDetail() {
     if (error || !payload) { toast(error || "Dados inválidos.", "error"); return; }
 
     setSaving(true);
+    let salvo: NVR | undefined;
     try {
       if (editingEqId) {
         await updateEquipamento(id!, editingEqId, { ...payload });
         toast("Equipamento atualizado!", "success");
       } else {
-        await createEquipamento(id!, { ...payload });
+        salvo = await createEquipamento(id!, { ...payload });
         toast("Equipamento adicionado!", "success");
+      }
+      // Digifort: a planilha lida no formulário vai para a Galeria do equipamento já salvo
+      if (eqForm.tipo === "DIGIFORT" && eqForm.planilhaNova) {
+        const nvrId = editingEqId || salvo?.id;
+        try {
+          if (!nvrId) throw new Error("equipamento sem id");
+          await enviarPlanilhaVms(id!, nvrId, eqForm.planilhaNova);
+          toast(`Planilha importada: ${eqForm.planilhaNova.cams.length} câmera(s).`, "success");
+        } catch (err) {
+          toast(`Equipamento salvo, mas a planilha não foi importada (${mensagemDeErro(err, "erro ao importar")}). Importe pela Galeria.`, "error");
+        }
       }
       setShowEqModal(false);
       setEqForm(emptyEqForm());
@@ -424,8 +437,9 @@ export default function MachineDetail() {
       {/* ── Modal: Adicionar/Editar Equipamento ── */}
       {showEqModal && (
         <EquipamentoFormModal
-          eqForm={eqForm} setEqForm={setEqForm} editingEqId={editingEqId}
+          machineId={id!} eqForm={eqForm} setEqForm={setEqForm} editingEqId={editingEqId}
           saving={saving} onSave={handleSaveEquipamento} onClose={() => setShowEqModal(false)}
+          onErro={mensagem => toast(mensagem, "error")}
         />
       )}
 

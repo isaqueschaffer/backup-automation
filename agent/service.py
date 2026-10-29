@@ -297,7 +297,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 caminho_log = cfg_ext.get("caminho_log_csv", "")
                 try:
                     from src.application.webhook_digifort import start_webhook
-                    start_webhook(caminho_csv, caminho_log)
+                    start_webhook(caminho_csv, caminho_log, eq.get("cameras_config"))
                     log("Monitoramento Digifort por Ping ICMP iniciado com sucesso.")
                 except Exception as e:
                     log(f"Falha ao iniciar monitoramento Digifort por Ping: {e}", is_error=True)

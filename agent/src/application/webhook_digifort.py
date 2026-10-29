@@ -131,6 +131,25 @@ def carregar_dicionario_cameras(caminho_arquivo):
         
     return dicionario_nome, dicionario_ip, lista_unicas
 
+def carregar_cameras_servidor(cameras_config):
+    """Mesmas estruturas de carregar_dicionario_cameras, a partir das cameras da Galeria do servidor
+    (`cameras_config`, vindas da planilha importada): so as que tem IP, que e o que o ping precisa."""
+    dicionario_nome, dicionario_ip, lista_unicas = {}, {}, []
+    for cam in cameras_config or []:
+        nome = (cam.get("nome") or "").strip()
+        ip = (cam.get("ip") or "").strip()
+        if not nome or not ip:
+            continue
+        info = {'Nome': nome, 'NomeCurto': nome, 'Descricao': '', 'IP': ip}
+        lista_unicas.append(info)
+        for chave in (nome, nome.lower(), normalizar_texto(nome)):
+            dicionario_nome[chave] = info
+        dicionario_ip[ip] = info
+    if lista_unicas:
+        logging.info(f"[OK] {len(lista_unicas)} cameras carregadas da Galeria do servidor")
+    return dicionario_nome, dicionario_ip, lista_unicas
+
+
 def registrar_queda(nome_camera, nome_evento):
     agora = datetime.datetime.now()
     data = agora.strftime("%Y-%m-%d")
@@ -192,6 +211,7 @@ def ping_camera(ip: str, timeout_ms: int = 1000) -> bool:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            errors="replace",  # a saida do ping no Windows pt-BR e CP850; so o 'TTL=' (ASCII) importa
             timeout=(timeout_ms / 1000.0) + 1.5,
             creationflags=creation_flags
         )
@@ -408,10 +428,11 @@ def rodar_monitor_ping():
         monitor_stop_event.wait(timeout=INTERVALO_MONITORAMENTO_PING_S)
 
 
-def start_webhook(caminho_csv_export: str = "", caminho_log: str = ""):
+def start_webhook(caminho_csv_export: str = "", caminho_log: str = "", cameras_servidor: list = None):
     """
     Mantido o nome original 'start_webhook' para compatibilidade com o service.py.
     Inicia a thread de monitoramento periódico das câmeras via Ping ICMP.
+    As câmeras vêm do CSV exportado (equipamentos antigos) ou, sem CSV, da Galeria do servidor (`cameras_servidor`).
     """
     global ARQUIVO_EXPORT_CAMERAS, ARQUIVO_CSV, monitor_ping_thread, ULTIMO_CAMINHO_EXPORT
     if monitor_ping_thread is not None and monitor_ping_thread.is_alive():
@@ -427,6 +448,8 @@ def start_webhook(caminho_csv_export: str = "", caminho_log: str = ""):
         DICIONARIO_CAMERAS_IP.clear()
         LISTA_CAMERAS_UNICAS.clear()
         nomes, ips, unicas = carregar_dicionario_cameras(ARQUIVO_EXPORT_CAMERAS)
+        if not unicas and cameras_servidor:
+            nomes, ips, unicas = carregar_cameras_servidor(cameras_servidor)
         DICIONARIO_CAMERAS_NOME.update(nomes)
         DICIONARIO_CAMERAS_IP.update(ips)
         LISTA_CAMERAS_UNICAS.extend(unicas)
