@@ -58,7 +58,8 @@ def check_for_update(
     """
     O agente envia sua versão atual como query param e recebe instruções de atualização.
     Exemplo: GET /api/v1/agent/update-check?current_version=1.0.0
-    Cada máquina recebe a oferta no máximo 1 vez por hora; durante o piloto, só as máquinas do piloto.
+    Cada máquina recebe a oferta no máximo 1 vez por hora. Com `OTA_PILOTO_MAQUINAS` preenchido, só as
+    máquinas do piloto recebem (piloto de 1.1.35 concluído e esvaziado em 30/10/2026).
     """
     # Compara versões semânticas X.Y.Z como tuplas numéricas
     def _parse(v: str):
