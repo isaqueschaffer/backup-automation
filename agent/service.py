@@ -263,6 +263,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.threads_iniciadas = False
         # Reinício pedido pelo painel: o processo termina com erro para a recuperação do Windows religar
         self.reiniciar_pelo_windows = False
+        # Atualização OTA baixada: o processo sai na hora para o script de troca copiar o executável novo
+        self.sair_apos_atualizacao = False
 
         sec_desc = win32security.SECURITY_DESCRIPTOR()
         sec_desc.SetSecurityDescriptorDacl(1, None, 0)
@@ -325,6 +327,13 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             # script de reinício (SCRIPT_REINICIO) não consiga.
             logging.shutdown()
             os._exit(1)
+        if self.sair_apos_atualizacao:
+            # Saindo normalmente, o Python espera threads e pools pendentes antes de terminar; o processo
+            # antigo seguia vivo, travava o TrilanAgentService.exe e a cópia falhava (a 1.1.32 voltava em laço).
+            # Avisa "parado" antes de sair: sem isso a recuperação do Windows religaria a versão antiga.
+            self.ReportServiceStatus(win32service.SERVICE_STOPPED)
+            logging.shutdown()
+            os._exit(0)
 
     def _init_webhooks(self, server_cfg: dict):
         """Inicializa integrações locais de webhook (Digifort / Defense) de forma segura."""
@@ -610,6 +619,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 atualizou = False
             if atualizou:
                 log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
+                self.sair_apos_atualizacao = True
                 self.stop_requested = True
                 win32event.SetEvent(self.hWaitStop)
                 return True

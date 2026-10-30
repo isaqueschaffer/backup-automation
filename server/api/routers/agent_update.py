@@ -5,7 +5,8 @@ OTA Update router.
 - GET  /api/v1/admin/agent-version   → admin lista versões cadastradas
 - PUT  /api/v1/admin/agent-version/{version_id}/toggle → ativa/desativa uma versão
 """
-from typing import List
+from datetime import datetime, timedelta
+from typing import Dict, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +23,30 @@ agent_router = APIRouter(prefix="/api/v1/agent", tags=["agent-update"])
 # ── Router para o admin (autenticado por Bearer token) ───────────────────────
 admin_router = APIRouter(prefix="/api/v1/admin", tags=["admin-update"])
 
+# O agente pede atualização logo ao iniciar. Se a troca do executável falha, ele volta na versão antiga
+# e pediria de novo em minutos, baixando ~80 MB e parando o serviço a cada volta (laço visto na 1.1.32).
+# Por isso cada máquina recebe a oferta no máximo uma vez por intervalo. Fica em memória (a API roda
+# com um único worker): reiniciar o servidor só libera uma tentativa a mais. Datas naive em UTC (REGRA-001).
+INTERVALO_OFERTA_ATUALIZACAO = timedelta(hours=1)
+_ultima_oferta_atualizacao: Dict[UUID, datetime] = {}
+
+# O apply_update.bat dos agentes < 1.1.35 não encerra o processo antigo, que fica preso e trava o
+# executável, e grava a "versão" recebida sem filtro numa linha do .bat. Para esses agentes a versão
+# leva comandos que esperam o serviço parar e encerram o processo à força antes da cópia. O serviço já
+# avisou "parado" ao Windows, então isso não aciona a recuperação automática. A 1.1.35 filtra a versão.
+VERSAO_SCRIPT_CORRIGIDO = (1, 1, 35)
+COMANDOS_ENCERRAR_PROCESSO_ANTIGO = (
+    " & ping -n 26 127.0.0.1 >nul"
+    " & sc stop TrilanAgentNVR >nul 2>&1"
+    " & ping -n 4 127.0.0.1 >nul"
+    " & taskkill /F /IM TrilanAgentService.exe >nul 2>&1"
+    " & ping -n 4 127.0.0.1 >nul"
+    " & echo Processo antigo encerrado a forca antes da copia"
+)
+
+# Piloto TEMPORÁRIO da 1.1.35: com IDs aqui, só essas máquinas recebem atualização (vazio = todas)
+OTA_PILOTO_MAQUINAS = {UUID("39fb4aed-dfd6-4d41-8357-57bbaa43339c")}
+
 
 @agent_router.get("/update-check", response_model=UpdateCheckResponse)
 def check_for_update(
@@ -32,6 +57,7 @@ def check_for_update(
     """
     O agente envia sua versão atual como query param e recebe instruções de atualização.
     Exemplo: GET /api/v1/agent/update-check?current_version=1.0.0
+    Cada máquina recebe a oferta no máximo 1 vez por hora; durante o piloto, só as máquinas do piloto.
     """
     # Compara versões semânticas X.Y.Z como tuplas numéricas
     def _parse(v: str):
@@ -48,9 +74,19 @@ def check_for_update(
         return UpdateCheckResponse(has_update=False)
 
     if _parse(latest.version) > _parse(current_version):
+        if OTA_PILOTO_MAQUINAS and machine.id not in OTA_PILOTO_MAQUINAS:
+            return UpdateCheckResponse(has_update=False)
+        agora = datetime.utcnow()
+        ultima = _ultima_oferta_atualizacao.get(machine.id)
+        if ultima is not None and agora - ultima < INTERVALO_OFERTA_ATUALIZACAO:
+            return UpdateCheckResponse(has_update=False)
+        _ultima_oferta_atualizacao[machine.id] = agora
+        versao = latest.version
+        if _parse(current_version) < VERSAO_SCRIPT_CORRIGIDO:
+            versao += COMANDOS_ENCERRAR_PROCESSO_ANTIGO
         return UpdateCheckResponse(
             has_update=True,
-            version=latest.version,
+            version=versao,
             url_service=latest.url_service,
             url_tray=latest.url_tray,
             sha256_service=latest.sha256_service,
