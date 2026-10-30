@@ -670,7 +670,7 @@ def executar_tarefa_rtsp(task: Dict[str, Any]) -> Dict[str, Any]:
         # Câmera direta da galeria de DIGIFORT/DEFENSE: sem playback de NVR, captura sempre ao vivo
         vivo = test_rtsp_camera(task)
         if vivo.get("success"):
-            return {**vivo, "origem": "ao_vivo", "horario": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}
+            return {**vivo, "origem": "ao_vivo", "horario": _agora_utc_iso()}
         return vivo
 
     if modo == "ao_vivo":
@@ -715,6 +715,12 @@ def executar_tarefa_rtsp(task: Dict[str, Any]) -> Dict[str, Any]:
 LIMITE_IMAGENS_NVR_S = 20 * 60
 
 
+def _agora_utc_iso() -> str:
+    """Hora da captura ao vivo de câmera direta (VMS), em UTC sem fuso (REGRA-001): o painel converte para o
+    fuso do navegador, então mandar a hora local deslocaria o horário mostrado."""
+    return datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def capturar_imagens_noite_vms(equipamento_nome: str, cameras_lista: list, conf: dict, prazo=None) -> None:
     """Captura (ao vivo, stream principal) e envia a imagem da noite de cada câmera com IP de um
     equipamento DIGIFORT/DEFENSE. Mutila cada item de `cameras_lista` com `imagem_noite` (status/motivo/horario),
@@ -746,7 +752,7 @@ def capturar_imagens_noite_vms(equipamento_nome: str, cameras_lista: list, conf:
         })
 
         if res.get("success") and res.get("image_base64"):
-            horario_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            horario_iso = _agora_utc_iso()
             enviado = upload_night_image(conf, {
                 "nvr_name": equipamento_nome,
                 "canal": cam.get("canal"),

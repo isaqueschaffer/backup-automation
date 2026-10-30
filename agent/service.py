@@ -30,6 +30,7 @@ def _pyinstaller_hidden_imports():
     import src.camera.rtsp_client  # noqa: F401
     import src.application.api_client  # noqa: F401
     import src.application.presenca_cameras  # noqa: F401
+    import src.application.captura_noite_vms  # noqa: F401
     import src.application.log_remoto  # noqa: F401
 
 
@@ -511,6 +512,27 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_PRESENCA_S * 1000) == win32event.WAIT_OBJECT_0:
                 return
 
+    def _noite_loop(self, conf: dict):
+        """Imagem da noite das câmeras DIGIFORT/DEFENSE: captura ao vivo só na janela 19h30-4h."""
+        from src.application import estado
+        from src.application.api_client import fetch_server_config
+        from src.application.captura_noite_vms import INTERVALO_CICLO_S, capturar_noite_vms, na_janela_noite
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 120 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                if na_janela_noite(datetime.now()) and not estado.backup_em_andamento:
+                    server_cfg = fetch_server_config(conf)
+                    equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                    capturar_noite_vms(equipamentos, conf)
+            except Exception as e:
+                log(f"Falha no ciclo da imagem da noite: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_CICLO_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
     def _logs_loop(self, conf: dict):
         """Envia periodicamente os logs acumulados do agente ao servidor."""
         from src.application import log_remoto
@@ -631,6 +653,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             self.threads_iniciadas = True
             threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._noite_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:

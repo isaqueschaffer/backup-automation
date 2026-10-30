@@ -55,6 +55,13 @@ function erroDaApi(e: unknown, padrao: string): string {
 }
 
 const nomeCam = (c: NvrCamera) => c.nome || `Canal ${c.canal}`;
+// Câmeras de DIGIFORT/DEFENSE são capturadas ao vivo: só é imagem da noite se for tirada entre 19h30 e 4h.
+const AVISO_FORA_DA_NOITE = "Fora do horário da noite (19h30 às 4h): esta captura é ao vivo e não será uma imagem noturna.";
+const foraDaJanelaNoite = (d = new Date()) => {
+  const min = d.getHours() * 60 + d.getMinutes();
+  return min >= 4 * 60 && min < 19 * 60 + 30;
+};
+
 const temImagem = (c: NvrCamera, tipo: Tipo) => !!(tipo === "ref" ? c.perfect_image_base64 : c.night_image_base64);
 
 function Chip({ ok, label, title }: { ok: boolean; label: string; title: string }) {
@@ -405,7 +412,10 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     const erro = tipo === "ref" ? await capturarReferencia(cam, true) : await capturarNoite(cam);
     if (!aliveRef.current) return;
     if (erro) toast(erro, "error");
-    else if (tipo === "noite") toast("Imagem da noite capturada.", "success");
+    else if (tipo === "noite") {
+      toast("Imagem da noite capturada.", "success");
+      if (isVms && foraDaJanelaNoite()) toast(AVISO_FORA_DA_NOITE, "info");
+    }
     setOcupado(null);
   };
 
@@ -433,7 +443,10 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     if (alvo.length === 0) { toast(`Todas as câmeras já têm ${TIPO_LABEL[tipo]}.`, "info"); return; }
     const tempo = tipo === "ref"
       ? "Leva cerca de 15 a 20 s por câmera (câmeras offline usam a gravação e podem levar até 2 min)."
-      : "Busca na gravação: pode levar até 2 min por câmera.";
+      : isVms
+        ? `Captura ao vivo por RTSP.${foraDaJanelaNoite() ? `
+${AVISO_FORA_DA_NOITE}` : ""}`
+        : "Busca na gravação: pode levar até 2 min por câmera.";
     const oque = somenteFaltantes ? `das ${alvo.length} câmera(s) sem ${TIPO_LABEL[tipo]}` : `de TODAS as ${alvo.length} câmera(s), substituindo as atuais`;
     if (!confirm(`Capturar a ${TIPO_LABEL[tipo]} ${oque}?\n${tempo}`)) return;
 

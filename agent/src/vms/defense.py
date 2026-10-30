@@ -606,7 +606,8 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
     4. Plano B: se a API estiver inacessível, cruza cameras_config com o CSV do webhook; câmera sem informação
        fica ERRO_COMUNICACAO (online None), nunca "online" por padrão.
     5. Gravação só vem da API: sem ela a câmera fica NAO_VERIFICADO (nada é deduzido do estado online).
-    6. Captura imagem da noite via RTSP se conf for fornecido e a câmera possuir senha individual cadastrada.
+    A imagem da noite não é capturada aqui: a rotina da noite do agente (captura_noite_vms) cuida disso, na
+    janela 19h30-4h, independente do horário do backup.
     """
     config_extra = parse_config_extra(equipamento)
     cameras_config = equipamento.get("cameras_config") or []
@@ -618,7 +619,6 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
         return None
 
     status_cameras = []
-    cameras_para_captura = []
     status_webhook = None
 
     for c in casadas:
@@ -666,21 +666,6 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
             "mapa": mapa,
             "dias_com_gravacao": dias_grav,
         })
-        if c["cam"].get("password"):
-            cameras_para_captura.append({**c["cam"], "canal": canal, "nome": nome_cam})
-
-    # Captura opcional de imagens noturnas RTSP
-    if conf is not None and cameras_para_captura:
-        try:
-            from src.camera.rtsp_client import capturar_imagens_noite_vms
-            capturar_imagens_noite_vms(equipamento.get("name", "Defense"), cameras_para_captura, conf)
-            por_canal = {c["canal"]: c for c in cameras_para_captura}
-            for st in status_cameras:
-                cap = por_canal.get(st["canal"])
-                if cap and "imagem_noite" in cap:
-                    st["imagem_noite"] = cap["imagem_noite"]
-        except Exception as e:
-            logging.warning(f"  [DEFENSE] Falha ao capturar imagens RTSP da noite: {e}")
 
     return status_cameras
 
