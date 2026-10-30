@@ -11,6 +11,7 @@ Fluxo:
 import hashlib
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -182,8 +183,10 @@ def check_and_apply_update(conf: dict) -> bool:
                 f":{rotulo}_ok\n"
             )
 
+        # A versão vem do servidor: só caracteres seguros no .bat (até a 1.1.34 entrava sem filtro e virava comando)
+        versao_bat = re.sub(r"[^0-9A-Za-z._-]", "", str(new_version))[:40] or "?"
         bat_content = "@echo off\n"
-        bat_content += f'echo [%date% %time%] Atualizando para {new_version}... >> "{log_ota}"\n'
+        bat_content += f'echo [%date% %time%] Atualizando para {versao_bat}... >> "{log_ota}"\n'
         bat_content += "sc stop TrilanAgentNVR >nul 2>&1\n"
         if has_tray_update:
             # Mata o Tray para destravar o arquivo e permitir a substituição

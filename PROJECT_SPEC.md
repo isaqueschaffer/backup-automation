@@ -659,7 +659,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | POST | `/api/v1/agent/logs` | Agente envia lote (até 100) de avisos/erros e marcos do backup: `{"logs": [{"nivel": "INFO\|WARNING\|ERROR", "mensagem", "equipamento", "segundos_atras"}]}`; o servidor calcula `created_at` (REGRA-005); aceita também conta bloqueada |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup. Equipamento com `status` ERRO e `cameras` nulo ou vazio (agente >= 1.1.34 manda `null` quando o equipamento não informou câmeras; os antigos mandam `[]`) não apaga `last_recording_status`: as câmeras conhecidas ficam com `status_comunicacao`/`status_gravacao` = `NAO_VERIFICADO` e `online` nulo |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
-| GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera) |
+| GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera). Com `OTA_PILOTO_MAQUINAS` preenchido, só essas máquinas recebem. Para `current_version` < 1.1.35, `version` leva também os comandos que encerram o processo antigo (ver changelog de 30/10/2026) |
 | POST | `/api/v1/agent/rtsp-result` | Agente devolve o resultado da tarefa RTSP do dashboard |
 | POST | `/api/v1/agent/nvr-cameras/night-image` | Agente envia a imagem da noite de um canal |
 
@@ -1084,9 +1084,11 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 **Alteração:**
 1. **Servidor:** `GET /agent/update-check` oferece a atualização à mesma máquina no máximo 1 vez por hora (dicionário em memória; a API roda com um worker). Vale para os agentes antigos, que pedem a atualização logo ao iniciar.
 2. **Agente (`service.py`):** depois de baixar a atualização, o serviço avisa `SERVICE_STOPPED` ao Windows e sai com `os._exit(0)`, sem esperar threads e pools (avisar antes evita a recuperação do Windows religar a versão antiga).
-3. **Agente (`updater.py`):** o `.bat` espera até ~45 s o processo antigo sair e, se não sair, roda `taskkill /F /IM TrilanAgentService.exe` (sem `/T`, porque o .bat é filho do serviço) antes de copiar.
+3. **Agente (`updater.py`):** o `.bat` espera até ~45 s o processo antigo sair e, se não sair, roda `taskkill /F /IM TrilanAgentService.exe` (sem `/T`, porque o .bat é filho do serviço) antes de copiar. A versão recebida do servidor entra no `.bat` só com `[0-9A-Za-z._-]` (até a 1.1.34 entrava sem filtro e virava comando).
+4. **Passagem 1.1.32 → 1.1.35 sem ir às máquinas (servidor):** o `.bat` dos agentes < 1.1.35 é gerado pela versão instalada e grava a versão sem filtro na 2ª linha. Para eles o `update-check` devolve `version` = `1.1.35` + `COMANDOS_ENCERRAR_PROCESSO_ANTIGO` (espera 25 s, `sc stop`, `taskkill /F /IM TrilanAgentService.exe`, registra no `atualizacao.log`), que encerra o processo preso antes da cópia. Agentes >= 1.1.35 recebem a versão pura. Linha testada no `cmd` com os comandos neutralizados.
+5. **Piloto temporário:** `OTA_PILOTO_MAQUINAS` com o ID da máquina do log do laço; com IDs no conjunto, só elas recebem atualização. Esvaziar o conjunto libera para todas.
 **Arquivos:** `server/api/routers/agent_update.py`, `agent/service.py`, `agent/src/application/updater.py`, `agent/installer.iss`, `server/dashboard/package.json`, `PROJECT_SPEC.md`.
-**Breaking Change:** Não. **Atenção:** o .bat é gerado pela versão instalada, então as correções 2 e 3 só valem a partir da 1.1.35; a passagem 1.1.32 → 1.1.35 ainda usa o script da 1.1.32 (com o limite do servidor, no máximo uma tentativa por hora por máquina).
+**Breaking Change:** Não. **Atenção:** o .bat é gerado pela versão instalada, então as correções 2 e 3 só valem a partir da 1.1.35; a passagem 1.1.32 → 1.1.35 depende do item 4 (com o limite do servidor, no máximo uma tentativa por hora por máquina).
 **Branch:** isaque
 
 ### [2026-10-29] — Agente 1.1.34: correções da auditoria do agente 1.1.33 (19 itens)
