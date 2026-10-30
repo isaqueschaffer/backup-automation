@@ -21,7 +21,7 @@ import requests
 
 logger = logging.getLogger("trilan.updater")
 
-CURRENT_VERSION = "1.1.34"   # <-- Atualizar manualmente a cada build
+CURRENT_VERSION = "1.1.35"   # <-- Atualizar manualmente a cada build
 _UPDATE_CHECK_INTERVAL = 3600  # segundos entre verificações de update (1h)
 _last_update_check: float = 0.0
 
@@ -188,14 +188,18 @@ def check_and_apply_update(conf: dict) -> bool:
         if has_tray_update:
             # Mata o Tray para destravar o arquivo e permitir a substituição
             bat_content += "taskkill /F /IM TrilanAgentTray.exe >nul 2>&1\n"
-        # Espera (até 90 s) não haver mais TrilanAgentService.exe rodando ("find" sem achar = errorlevel 1)
+        # Espera (até ~45 s) não haver mais TrilanAgentService.exe rodando ("find" sem achar = errorlevel 1).
+        # Um processo que não sai trava o arquivo e a cópia falha (a 1.1.32 entrava em laço assim): encerra
+        # à força. Sem /T: este script é filho do serviço e não pode ser encerrado junto.
         bat_content += (
             "set N=0\n:espera\n"
             'tasklist /FI "IMAGENAME eq TrilanAgentService.exe" | find /I "TrilanAgentService.exe" >nul\n'
             "if errorlevel 1 goto espera_ok\n"
-            "set /a N+=1\nif %N% GEQ 90 goto espera_falha\n"
+            "set /a N+=1\nif %N% GEQ 45 goto espera_falha\n"
             "ping -n 2 127.0.0.1 >nul\ngoto espera\n"
-            f':espera_falha\necho [%date% %time%] FALHA: processo antigo nao encerrou >> "{log_ota}"\n'
+            f':espera_falha\necho [%date% %time%] Processo antigo nao encerrou: encerrando a forca >> "{log_ota}"\n'
+            "taskkill /F /IM TrilanAgentService.exe >nul 2>&1\n"
+            "ping -n 4 127.0.0.1 >nul\n"
             ":espera_ok\n"
         )
         bat_content += passo("copia", f'copy /y "{tmp_exe}" "{current_exe}" >nul 2>&1', 15, 2)

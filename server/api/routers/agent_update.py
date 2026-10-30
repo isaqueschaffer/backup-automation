@@ -5,7 +5,8 @@ OTA Update router.
 - GET  /api/v1/admin/agent-version   → admin lista versões cadastradas
 - PUT  /api/v1/admin/agent-version/{version_id}/toggle → ativa/desativa uma versão
 """
-from typing import List
+from datetime import datetime, timedelta
+from typing import Dict, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,6 +22,13 @@ agent_router = APIRouter(prefix="/api/v1/agent", tags=["agent-update"])
 
 # ── Router para o admin (autenticado por Bearer token) ───────────────────────
 admin_router = APIRouter(prefix="/api/v1/admin", tags=["admin-update"])
+
+# O agente pede atualização logo ao iniciar. Se a troca do executável falha, ele volta na versão antiga
+# e pediria de novo em minutos, baixando ~80 MB e parando o serviço a cada volta (laço visto na 1.1.32).
+# Por isso cada máquina recebe a oferta no máximo uma vez por intervalo. Fica em memória (a API roda
+# com um único worker): reiniciar o servidor só libera uma tentativa a mais. Datas naive em UTC (REGRA-001).
+INTERVALO_OFERTA_ATUALIZACAO = timedelta(hours=1)
+_ultima_oferta_atualizacao: Dict[UUID, datetime] = {}
 
 
 @agent_router.get("/update-check", response_model=UpdateCheckResponse)
@@ -48,6 +56,11 @@ def check_for_update(
         return UpdateCheckResponse(has_update=False)
 
     if _parse(latest.version) > _parse(current_version):
+        agora = datetime.utcnow()
+        ultima = _ultima_oferta_atualizacao.get(machine.id)
+        if ultima is not None and agora - ultima < INTERVALO_OFERTA_ATUALIZACAO:
+            return UpdateCheckResponse(has_update=False)
+        _ultima_oferta_atualizacao[machine.id] = agora
         return UpdateCheckResponse(
             has_update=True,
             version=latest.version,
