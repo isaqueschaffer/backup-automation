@@ -44,8 +44,9 @@ COMANDOS_ENCERRAR_PROCESSO_ANTIGO = (
     " & echo Processo antigo encerrado a forca antes da copia"
 )
 
-# Piloto TEMPORÁRIO da 1.1.35: com IDs aqui, só essas máquinas recebem atualização (vazio = todas)
-OTA_PILOTO_MAQUINAS = {UUID("39fb4aed-dfd6-4d41-8357-57bbaa43339c")}
+# Piloto TEMPORÁRIO da 1.1.35: com IDs aqui, só essas máquinas recebem atualização (vazio = todas).
+# Piloto concluído em 30/10/2026 (máquina 39fb4aed-...: 1.1.32 -> 1.1.35 sem laço, sem intervenção manual).
+OTA_PILOTO_MAQUINAS: set = set()
 
 
 @agent_router.get("/update-check", response_model=UpdateCheckResponse)
