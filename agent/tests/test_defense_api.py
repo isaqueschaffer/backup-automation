@@ -159,6 +159,67 @@ class TestDefenseAPI(unittest.TestCase):
         self.assertEqual(info["status_gravacao"], "SEM_GRAVACAO")
         self.assertIn("█", info["mapa"])
 
+    def test_extrair_cameras_ignora_controle_de_acesso_e_nomeia_gravador(self):
+        encoder = lambda canais: {"unitType": "1", "encoder": True, "channels": canais}
+        canal = lambda nome, cod: {"channelName": nome, "channelCode": cod, "status": "1", "channelType": "1"}
+        devices = [
+            {"name": "FACIAL PORTA", "type": "16", "category": "8", "deviceIp": "10.0.0.2", "units": [
+                {"unitType": "7", "accessControl": True, "channels": [canal("Porta1", "F$7$0$0")]},
+                encoder([canal("BSC1", "F$1$0$0")]),
+            ]},
+            {"name": "NVR INTELBRAS", "type": "6", "category": "1", "deviceIp": "10.0.0.6", "units": [
+                encoder([canal("PORTAO DA FRENTE", "N$1$0$0")]),
+            ]},
+            {"name": "FRENTE", "type": "2", "category": "1", "deviceIp": "10.0.0.7", "units": [
+                encoder([canal("Camera 01", "C$1$0$0")]),
+            ]},
+        ]
+        cameras = extrair_cameras_defense_tree(devices)
+        self.assertEqual([c["nome"] for c in cameras], ["NVR INTELBRAS - PORTAO DA FRENTE", "FRENTE"])
+        self.assertFalse(cameras[0]["is_single_channel"])
+        self.assertTrue(cameras[1]["is_single_channel"])
+
+    @patch("requests.Session")
+    def test_consultar_gravacoes_defense_api_arquivo_que_atravessa_dias(self, mock_session_cls):
+        """Câmera com arquivo contínuo de 24 h (13:00 a 13:00): o arquivo de ontem 13:00 até hoje cobre hoje."""
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        agora_ts = int(datetime.now().timestamp())
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"code": 1000, "data": {"pageCount": "1", "records": [
+            {"channelId": "CH1", "startTime": str(agora_ts - 86400 * 2), "endTime": str(agora_ts - 86400)},
+            {"channelId": "CH1", "startTime": str(agora_ts - 86400), "endTime": str(agora_ts)},
+        ]}}
+        mock_session.post.return_value = resp
+        res = consultar_gravacoes_defense_api("https://x:4433", "tok", [{"codigo": "CH1", "nome": "A"}], dias_historico=15)
+        self.assertEqual(res["CH1"]["status_gravacao"], "COM_GRAVACAO")
+        self.assertEqual(res["CH1"]["total_dias"], 3)
+
+    @patch("requests.Session")
+    def test_consultar_gravacoes_defense_api_le_todas_as_paginas(self, mock_session_cls):
+        """O Defense limita a página a 256 registros e informa `pageCount`: a gravação de hoje fica na última página."""
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        agora_ts = int(datetime.now().timestamp())
+        paginas = {
+            "1": [{"channelId": "CH1", "startTime": str(agora_ts - 86400 * 3)}],
+            "2": [{"channelId": "CH1", "startTime": str(agora_ts)}],
+        }
+
+        def _post(url, json=None, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 200
+            pagina = json["data"]["page"]
+            resp.json.return_value = {"code": 1000, "data": {"pageCount": "2", "records": paginas[pagina]}}
+            return resp
+
+        mock_session.post.side_effect = _post
+        res = consultar_gravacoes_defense_api("https://x:4433", "tok", [{"codigo": "CH1", "nome": "A"}], dias_historico=15)
+        self.assertEqual(res["CH1"]["status_gravacao"], "COM_GRAVACAO")
+        self.assertEqual(res["CH1"]["total_dias"], 2)
+        self.assertEqual(mock_session.post.call_count, 2)
+
     @patch("requests.Session")
     def test_consultar_status_cameras_defense_api_sucesso(self, mock_session_cls):
         mock_session = MagicMock()

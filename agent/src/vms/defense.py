@@ -15,6 +15,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from src.core.config import parse_config_extra
 
+# Tipos de dispositivo na árvore do Defense (campo `type`): 2 = câmera IP, 1/6 = DVR/NVR, 16 = controle de acesso
+DEVICE_TYPES_GRAVADOR = {"1", "6"}
+DEVICE_TYPE_ACESSO = "16"
+DEVICE_CATEGORY_ACESSO = "8"
+
 
 def calcular_assinatura_defense(username: str, password: str, realm: str, random_key: str) -> str:
     """
@@ -53,6 +58,17 @@ def extrair_cameras_defense_tree(devices: list) -> list:
         if not isinstance(units, list):
             units = []
 
+        # Só câmeras: controle de acesso (leitor facial, type 16 / category 8) não é câmera, mesmo
+        # trazendo um canal de vídeo (BSC1/BSC2)
+        if (
+            str(dev.get("type", "")) == DEVICE_TYPE_ACESSO
+            or str(dev.get("category", "")) == DEVICE_CATEGORY_ACESSO
+            or any(isinstance(u, dict) and u.get("accessControl") for u in units)
+        ):
+            continue
+        # DVR/NVR gravam várias câmeras: o nome do equipamento sozinho não identifica o canal
+        eh_gravador = str(dev.get("type", "")) in DEVICE_TYPES_GRAVADOR
+
         # Fallback defensivo caso channels venha no nível raiz do dispositivo
         if not units and "channels" in dev and isinstance(dev.get("channels"), list):
             units = [{"channels": dev.get("channels"), "unitType": "1"}]
@@ -72,7 +88,8 @@ def extrair_cameras_defense_tree(devices: list) -> list:
                 continue
 
             for ch in channels:
-                if isinstance(ch, dict):
+                # channelType 1 = vídeo; outros valores (alarme, porta...) não são câmeras
+                if isinstance(ch, dict) and str(ch.get("channelType", "1")) == "1":
                     channels_validos.append(ch)
 
         total_canais_dev = len(channels_validos)
@@ -89,9 +106,10 @@ def extrair_cameras_defense_tree(devices: list) -> list:
             # 1. Se o dispositivo tem canal único e possui dev_name (ex: "LATERAL TERRENO"), prioriza dev_name
             # 2. Se o dispositivo tem múltiplos canais (ex: DVR-CATANDUVA), compõe "dev_name - raw_ch_name"
             #    (nunca substitui apenas por dev_name para evitar colisão entre múltiplos canais do DVR)
-            if total_canais_dev <= 1 and dev_name:
+            canal_unico = total_canais_dev <= 1 and not eh_gravador
+            if canal_unico and dev_name:
                 nome_final = dev_name
-            elif total_canais_dev > 1 and dev_name:
+            elif dev_name:
                 if dev_name.lower() not in raw_ch_name.lower():
                     nome_final = f"{dev_name} - {raw_ch_name}"
                 else:
@@ -109,7 +127,7 @@ def extrair_cameras_defense_tree(devices: list) -> list:
                 "status_comunicacao": "ONLINE" if is_online else "OFFLINE",
                 "dev_name": dev_name,
                 "canal_nome_original": raw_ch_name,
-                "is_single_channel": (total_canais_dev <= 1),
+                "is_single_channel": canal_unico,
             })
             canal_idx += 1
 
@@ -133,9 +151,6 @@ def consultar_gravacoes_defense_api(
       - status_gravacao: 'COM_GRAVACAO' (gravou HOJE, como no NVR), 'SEM_GRAVACAO' (resposta válida e
         nada hoje) ou 'NAO_VERIFICADO' (HTTP diferente de 200, JSON inválido, erro de rede ou canal sem código)
     """
-    import time
-    from concurrent.futures import ThreadPoolExecutor
-
     if not base_url or not token or not lista_cameras:
         return {}
 
@@ -145,9 +160,9 @@ def consultar_gravacoes_defense_api(
     inicio_dt = datetime.combine(hoje - timedelta(days=dias_historico - 1), datetime.min.time())
     fim_dt = datetime.combine(hoje, datetime.max.time())
     inicio = int(inicio_dt.timestamp())
-    inicio_hoje = int(datetime.combine(hoje, datetime.min.time()).timestamp())
     agora = int(fim_dt.timestamp())
-    tamanho_pagina = 1000
+    tamanho_pagina = 1000  # o servidor limita cada página a 256 registros e informa `pageCount`
+    max_paginas = 80
 
     headers = {
         "Content-Type": "application/json",
@@ -160,9 +175,9 @@ def consultar_gravacoes_defense_api(
 
     nao_verificado = {"total_dias": 0, "mapa": "", "dias_com_gravacao": [], "status_gravacao": "NAO_VERIFICADO"}
 
-    def _buscar_registros(ch_id: str, ini: int, fim: int):
-        """Registros de gravação do canal entre `ini` e `fim` (timestamps).
-        None = falha (HTTP diferente de 200 ou resposta sem `data`); JSON inválido levanta ValueError."""
+    def _pagina(ch_id: str, ini: int, fim: int, pagina: int):
+        """(registros, pageCount) de uma página; None = falha (HTTP diferente de 200 ou resposta sem `data`).
+        JSON inválido levanta ValueError."""
         payload = {
             "data": {
                 "channelId": ch_id,
@@ -171,7 +186,7 @@ def consultar_gravacoes_defense_api(
                 "streamType": "1",
                 "recordType": "0",
                 "recordSource": "3",  # 3 = Servidor de armazenamento central (SS)
-                "page": "1",
+                "page": str(pagina),
                 "pageSize": str(tamanho_pagina),
             }
         }
@@ -188,23 +203,67 @@ def consultar_gravacoes_defense_api(
         if not isinstance(data, dict):
             return None
         records = data.get("records") or []
-        return records if isinstance(records, list) else None
+        if not isinstance(records, list):
+            return None
+        try:
+            total_paginas = int(data.get("pageCount") or 1)
+        except (ValueError, TypeError):
+            total_paginas = 1
+        return records, total_paginas
+
+    def _buscar_registros(ch_id: str, ini: int, fim: int):
+        """Registros de gravação do canal entre `ini` e `fim` (timestamps), lendo TODAS as páginas.
+        O Defense guarda um cursor de consulta por usuário: enquanto as páginas de uma consulta não são lidas até
+        o fim, outra consulta (outro canal ou período) recebe o mesmo resultado. Por isso a leitura é sequencial,
+        completa, e o resultado de outro canal é descartado e refeito.
+        None = falha; JSON inválido levanta ValueError."""
+        for _ in range(3):
+            todos, total_paginas, pagina, de_outro_canal = [], 1, 1, False
+            while pagina <= min(total_paginas, max_paginas):
+                ret = _pagina(ch_id, ini, fim, pagina)
+                if ret is None:
+                    return None
+                records, total_paginas = ret
+                for rec in records:
+                    if isinstance(rec, dict) and rec.get("channelId") not in (None, ch_id):
+                        de_outro_canal = True
+                    else:
+                        todos.append(rec)
+                pagina += 1
+            if not de_outro_canal:
+                return todos
+        return None
+
+    def _timestamp(valor):
+        """Segundos (aceita string e milissegundos); None se inválido."""
+        try:
+            ts = int(float(valor))
+        except (ValueError, TypeError):
+            return None
+        if ts > 1e11:  # Timestamp em milissegundos
+            ts = int(ts / 1000)
+        return ts if ts > 0 else None
 
     def _dias_dos_registros(records: list) -> set:
+        """Dias cobertos pelos registros. Um arquivo pode atravessar dias (câmeras que gravam um arquivo contínuo
+        de 24 h, das 13:00 às 13:00), então vale do dia de `startTime` ao de `endTime`, não só o de início."""
         dias = set()
         for rec in records:
             if not isinstance(rec, dict):
                 continue
             try:
-                raw_st = rec.get("startTime")
-                if raw_st is None:
+                st = _timestamp(rec.get("startTime"))
+                if st is None:
                     continue
-                st = int(float(raw_st))
-                if st > 1e11:  # Timestamp em milissegundos
-                    st = int(st / 1000)
-                if st > 0:
-                    dias.add(datetime.fromtimestamp(st).strftime("%Y-%m-%d"))
-            except (ValueError, TypeError, OSError):
+                fim = _timestamp(rec.get("endTime"))
+                if fim is None or fim < st:
+                    fim = st
+                dia = datetime.fromtimestamp(st).date()
+                ultimo = min(datetime.fromtimestamp(fim).date(), hoje)
+                while dia <= ultimo:
+                    dias.add(dia.strftime("%Y-%m-%d"))
+                    dia += timedelta(days=1)
+            except (ValueError, TypeError, OSError, OverflowError):
                 continue
         return dias
 
@@ -219,15 +278,7 @@ def consultar_gravacoes_defense_api(
             if records is None:
                 return {"cam": cam, **nao_verificado}
             dias_grav = _dias_dos_registros(records)
-
             status_hoje = None
-            if hoje_str not in dias_grav and len(records) >= tamanho_pagina:
-                # Página cheia: a gravação de hoje pode ter ficado de fora; confere só o dia de hoje
-                registros_hoje = _buscar_registros(ch_id, inicio_hoje, agora)
-                if registros_hoje is None:
-                    status_hoje = "NAO_VERIFICADO"
-                else:
-                    dias_grav |= _dias_dos_registros(registros_hoje)
 
             dias_na_janela = dias_grav.intersection(set(dias_ord))
             total = len(dias_na_janela)
@@ -245,8 +296,8 @@ def consultar_gravacoes_defense_api(
             return {"cam": cam, **nao_verificado}
 
     try:
-        with ThreadPoolExecutor(max_workers=6) as executor:
-            resultados = list(executor.map(_consultar_uma_camera, lista_cameras))
+        # Sequencial de propósito: consultas paralelas dividem o cursor do usuário no Defense e trocam os resultados
+        resultados = [_consultar_uma_camera(cam) for cam in lista_cameras]
     finally:
         session.close()
 

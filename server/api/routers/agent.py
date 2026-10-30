@@ -76,6 +76,10 @@ def _build_cameras_config(machine: Machine, nvr: NVR):
         })
     if out:
         return out
+    if (nvr.tipo or "").upper() == "DEFENSE":
+        # Sem câmeras na Galeria o agente descobre todas pela API do Defense; câmeras avulsas aqui
+        # fariam ele reportar só elas (e com o estado/gravação casado por IP de outra câmera)
+        return out
     # Fallback: usa câmeras avulsas (tipo == "CAMERA") cadastradas na máquina
     machine_cams = [e for e in machine.equipamentos if (e.tipo or "").upper() == "CAMERA" and e.active and e.ip]
     for idx, mc in enumerate(machine_cams, start=1):
