@@ -8,11 +8,11 @@ from typing import Tuple
 from src.backup.file_manager.models import BackupStatus
 
 def calculate_sha256(filepath: Path) -> str:
-    """Calcula o hash SHA-256 de um arquivo em chunks."""
+    """Calcula o hash SHA-256 de um arquivo em blocos de 1MB para otimizar chamadas de I/O."""
     sha256_hash = hashlib.sha256()
     with open(filepath, "rb") as f:
-        # Read and update hash string value in blocks of 4K
-        for byte_block in iter(lambda: f.read(4096), b""):
+        # Blocos de 1MB (1048576 bytes) em vez de 4KB para evitar milhões de syscalls em backups grandes
+        for byte_block in iter(lambda: f.read(1048576), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 

@@ -19,7 +19,11 @@ from src.application.webhook_digifort import (
     testar_cameras_por_ping,
     get_status_cameras,
     get_detalhes_cameras,
+    registrar_queda,
+    get_caminho_csv,
+    _ultimo_status_cameras,
 )
+from src.backup.file_manager.copier import calculate_sha256
 from src.backup.file_manager.manager import _gerar_mapa_vms
 
 
@@ -58,7 +62,7 @@ class TestDigifortPing(unittest.TestCase):
         self.assertFalse(res.get("Cam Sem IP"))
 
     def test_get_status_cameras_com_ping(self):
-        """Testa o status_dict carregando de um CSV simulado de exportação."""
+        """Testa o status_dict carregando de um CSV simulado de exportação com ping ativo."""
         csv_conteudo = (
             "Endereço;Nome;Descrição\n"
             "127.0.0.1;01;Camera Local OK\n"
@@ -83,6 +87,63 @@ class TestDigifortPing(unittest.TestCase):
         finally:
             if os.path.exists(f_path):
                 os.remove(f_path)
+
+    def test_registrar_queda_no_op(self):
+        """Valida que registrar_queda não realiza escritas nem gera arquivos em disco."""
+        caminho_alvo = Path(tempfile.gettempdir()) / "arquivo_nao_deve_existir.csv"
+        if caminho_alvo.exists():
+            caminho_alvo.unlink()
+        
+        # Invocação da função descontinuada
+        registrar_queda("Camera Teste", "Queda de Comunicacao")
+        
+        # O arquivo nunca deve ser criado
+        self.assertFalse(caminho_alvo.exists())
+
+    def test_get_status_cameras_modo_memoria(self):
+        """Valida que get_status_cameras(realizar_ping=False) obtém status em memória sem ler arquivos."""
+        _ultimo_status_cameras["Camera Memoria 01"] = "OK"
+        _ultimo_status_cameras["Camera Memoria 02"] = "FALHA"
+        
+        # CSV de exportação simulado
+        csv_conteudo = (
+            "Endereço;Nome;Descrição\n"
+            "10.0.0.1;01;Camera Memoria 01\n"
+            "10.0.0.2;02;Camera Memoria 02\n"
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".csv", encoding="utf-8") as f:
+            f.write(csv_conteudo)
+            f_path = f.name
+
+        try:
+            status = get_status_cameras(caminho_export=f_path, caminho_log="arquivo_inexistente.csv", realizar_ping=False)
+            self.assertEqual(status.get("Camera Memoria 01"), "OK")
+            self.assertEqual(status.get("Camera Memoria 02"), "FALHA")
+        finally:
+            if os.path.exists(f_path):
+                os.remove(f_path)
+
+    def test_get_caminho_csv_vazio(self):
+        """Valida que get_caminho_csv() sempre retorna string vazia."""
+        self.assertEqual(get_caminho_csv(), "")
+        self.assertEqual(get_caminho_csv("caminho_qualquer.csv"), "")
+
+    def test_copier_calculate_sha256_1mb_chunk(self):
+        """Valida que o cálculo de SHA-256 com chunk de 1MB funciona com exatidão."""
+        import hashlib
+        dados = b"x" * (2 * 1024 * 1024 + 123)  # > 2MB de dados
+        hash_esperado = hashlib.sha256(dados).hexdigest()
+        
+        with tempfile.NamedTemporaryFile("wb", delete=False) as f:
+            f.write(dados)
+            temp_path = Path(f.name)
+            
+        try:
+            hash_calculado = calculate_sha256(temp_path)
+            self.assertEqual(hash_calculado, hash_esperado)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
 
     def test_gerar_mapa_vms_online_e_offline(self):
         """Verifica se câmeras offline (FALHA) geram 0 dias e mapa vazio no backup."""

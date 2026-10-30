@@ -65,7 +65,6 @@ def servico_rodando() -> bool:
 
 def reiniciar_servico(icone, _):
     # Um único comando elevado (1 confirmação do UAC) que espera o serviço parar antes de iniciar de novo.
-    # Antes eram dois "sc" separados com 2 s de intervalo: o "start" rodava com o serviço ainda parando e falhava.
     try:
         import ctypes
         ctypes.windll.shell32.ShellExecuteW(
@@ -75,8 +74,8 @@ def reiniciar_servico(icone, _):
         icone.notify(f"Erro ao reiniciar o servico: {e}", "Trilan Agente NVR")
 
 
-def monitorar_servico(icone):
-    while True:
+def monitorar_servico(icone, stop_event: threading.Event):
+    while not stop_event.is_set():
         try:
             ok = servico_rodando()
             status = "em execucao" if ok else "PARADO"
@@ -84,7 +83,7 @@ def monitorar_servico(icone):
             icone.icon = criar_icone(ok)
         except Exception:
             pass
-        time.sleep(10)
+        stop_event.wait(10)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -148,15 +147,41 @@ def ja_esta_aberta() -> bool:
 def main():
     if ja_esta_aberta():
         return
+    icone = None
+    stop_event = None
     while True:
         try:
+            if stop_event is not None:
+                stop_event.set()
+                stop_event = None
+            if icone is not None:
+                try:
+                    icone.stop()
+                except Exception:
+                    pass
+                icone = None
+
+            stop_event = threading.Event()
             icone = pystray.Icon("TrilanAgentNVR", criar_icone(), "Trilan Agente NVR", criar_menu())
-            threading.Thread(target=monitorar_servico, args=(icone,), daemon=True).start()
+            t = threading.Thread(target=monitorar_servico, args=(icone, stop_event), daemon=True)
+            t.start()
             icone.run()
             break
         except Exception as e:
             print(f"Erro na bandeja: {e} — reiniciando em 5s")
+            if stop_event is not None:
+                stop_event.set()
+                stop_event = None
+            if icone is not None:
+                try:
+                    icone.stop()
+                except Exception:
+                    pass
+                icone = None
             time.sleep(5)
+        finally:
+            if stop_event is not None:
+                stop_event.set()
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ class FileManager:
         if (equipamento.get("tipo") or "").upper() == "DIGIFORT" and resultado.get("cameras") is None:
             try:
                 pasta_destino.mkdir(parents=True, exist_ok=True)
-                # A imagem da noite continua so no backup novo (RTSP em todas as cameras e pesado)
+                # A imagem da noite no backup agendado foi desativada (captura sob demanda pela Galeria do painel)
                 resultado["cameras"] = self._status_cameras_digifort(
                     equipamento, pasta_destino, conf, [], capturar_imagens=False)
             except Exception:
@@ -169,7 +169,7 @@ class FileManager:
         # O DEFENSE não passa por aqui (src/vms/defense.py): só o Digifort monta o status das câmeras
         status_cameras = None
         if (equipamento.get("tipo") or "").upper() == "DIGIFORT":
-            status_cameras = self._status_cameras_digifort(equipamento, pasta_eq, conf, arquivos_copiados)
+            status_cameras = self._status_cameras_digifort(equipamento, pasta_eq, conf, arquivos_copiados, capturar_imagens=False)
 
         logging.info(f"  Backup processado com sucesso. Arquivos: {', '.join(arquivos_copiados)}")
 
