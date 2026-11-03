@@ -34,6 +34,7 @@ from services.agent_logs import podar_logs
 from services.crypto_service import decrypt
 from services.galeria_vms import (
     parear_cameras,
+    aprender_pastas,
     ips_compartilhados,
     bloqueada_por_ip_compartilhado,
 )
@@ -73,6 +74,7 @@ def _build_cameras_config(machine: Machine, nvr: NVR):
             "modelo": c.modelo or "Hikvision",
             "canal_rtsp": c.canal_rtsp,
             "ip_compartilhado": (c.ip or "").strip() in compartilhados,
+            "pasta_gravacao": c.pasta_gravacao,
         })
     if out:
         return out
@@ -512,6 +514,8 @@ def receive_backup_report(
                 )
                 novas = aplicar_presenca(anteriores, novas, server_finished_at, por_nome=vms)
                 nvr.last_recording_status = novas
+                if vms:
+                    aprender_pastas(list(nvr.cameras_status), novas)
                 if isinstance(r_dict.get("cameras"), list):
                     r_dict["cameras"] = [
                         {**orig, **{k: nova[k] for k in ("offline_desde", "offline_desde_aprox") if k in nova}}

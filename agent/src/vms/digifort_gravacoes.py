@@ -253,6 +253,21 @@ def _normalizar(texto):
     return normalizar_texto(sem_acento)
 
 
+def vincular_cameras_as_pastas(cameras_servidor, pastas):
+    """{nome da pasta: camera da Galeria}. O vinculo explicito (`pasta_gravacao`) vale mesmo com a camera renomeada;
+    sem ele, a camera cujo nome casa com a pasta. Uma camera por pasta e uma pasta por camera."""
+    por_pasta, usadas = {}, set()
+    for campo in ("pasta_gravacao", "nome"):
+        for cam in cameras_servidor or []:
+            if id(cam) in usadas or not (cam.get(campo) or "").strip():
+                continue
+            pasta = casar_pasta(cam[campo], pastas)
+            if pasta and pasta not in por_pasta:
+                por_pasta[pasta] = cam
+                usadas.add(id(cam))
+    return por_pasta
+
+
 def casar_pasta(nome_camera, pastas):
     """Nome da pasta que corresponde a camera, ou None. Primeiro pelo nome normalizado; se nao houver,
     ignorando tambem os espacos ('One Drive - Trilan' = 'OneDrive - Trilan'), desde que so uma pasta combine."""

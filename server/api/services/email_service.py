@@ -93,6 +93,10 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
                     problemas.append(f"  ⚠️ {cam_nome}: Online, mas sem gravação")
                 elif status_gravacao == "NAO_VERIFICADO":
                     problemas.append(f"  ⚠️ {cam_nome}: Online, mas falhou ao verificar histórico de gravação")
+            elif status_comunicacao == "NAO_VERIFICADO":
+                # Sem IP para o ping (ex.: câmera do Digifort só com pasta de gravação): não é queda
+                if status_gravacao == "SEM_GRAVACAO":
+                    problemas.append(f"  ⚠️ {cam_nome}: Sem gravação (comunicação não verificada)")
             else:
                 cameras_offline += 1
                 linha_offline = f"  ❌ {cam_nome}: Offline ({status_comunicacao})"
