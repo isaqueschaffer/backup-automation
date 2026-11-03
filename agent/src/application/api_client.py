@@ -151,6 +151,8 @@ def _get_telemetry() -> dict:
     # O servidor não fecha a rodada do Cliente enquanto a máquina ainda está fazendo o backup
     from src.application import estado
     telemetry["backup_em_andamento"] = estado.backup_em_andamento
+    # Há quanto tempo: o servidor deixa de esperar um backup que passou do razoável (travado) para reiniciar
+    telemetry["backup_ha_min"] = estado.backup_ha_min()
     return telemetry
 
 def _json_safe(obj):

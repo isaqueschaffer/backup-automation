@@ -38,6 +38,8 @@ DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Pa
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
 # O dashboard estima o "Próximo contato" como last_seen + este intervalo (AGENT_PING_INTERVAL_MS)
 PING_INTERVAL_S = 15
+# Backup que passa disto está travado (nenhum backup normal leva tanto): o vigia reinicia o serviço
+LIMITE_BACKUP_S = 6 * 3600
 
 # Usa ProgramData para logs — gravavel sem privilegios de admin
 PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
@@ -458,6 +460,11 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                         log(f"Servidor voltou a responder apos {falhas_seguidas} falha(s) seguida(s) de ping.")
                     falhas_seguidas = 0
                     last_successful_ping = time.monotonic()
+                    from src.application import estado
+                    if ping_resp.get("restart") and estado.backup_em_andamento:
+                        # O servidor só manda reiniciar com backup em andamento quando ele passou do razoável:
+                        # o loop principal está preso nele e nunca leria este comando
+                        self._reinicio_forcado("reinicio pedido pelo painel com backup travado.")
                     self.ping_responses.put(ping_resp)
                     win32event.SetEvent(self.hPingResp)
                     # Teste RTSP do painel sai daqui (em thread própria): o laço principal fica parado durante
@@ -511,6 +518,30 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
             if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_PRESENCA_S * 1000) == win32event.WAIT_OBJECT_0:
                 return
+
+    def _reinicio_forcado(self, motivo: str):
+        """Reinício com o loop principal preso num backup: ele não processa pings nem para sozinho, então
+        pede o reinício (script externo + recuperação do Windows) e encerra o processo na hora."""
+        log(f"Reiniciando o servico a forca: {motivo}", is_error=True, enviar=True)
+        try:
+            self._restart_service()
+        except Exception as e:
+            log(f"Falha ao preparar o reinicio forcado: {e}", is_error=True)
+        time.sleep(3)  # dá tempo de o log chegar ao disco e ao servidor
+        logging.shutdown()
+        os._exit(1)
+
+    def _vigia_backup_loop(self):
+        """Backup travado (equipamento que não responde, sem limite de tempo) prendia o loop principal
+        por dias: sem reinício pelo painel, sem atualização (OTA) e sem o backup seguinte."""
+        from src.application import estado
+
+        while not self.stop_requested:
+            if win32event.WaitForSingleObject(self.hWaitStop, 60 * 1000) == win32event.WAIT_OBJECT_0:
+                return
+            minutos = estado.backup_ha_min()
+            if minutos is not None and minutos * 60 >= LIMITE_BACKUP_S:
+                self._reinicio_forcado(f"backup em andamento ha {minutos} min (limite {LIMITE_BACKUP_S // 3600} h).")
 
     def _noite_loop(self, conf: dict):
         """Imagem da noite das câmeras DIGIFORT/DEFENSE: captura ao vivo só na janela 19h30-4h."""
@@ -654,6 +685,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._noite_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._vigia_backup_loop, daemon=True).start()
             threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:
@@ -697,6 +729,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
         from src.application import estado
         log(f"INICIANDO BACKUP — {trigger.upper()}", enviar=True)
+        estado.backup_inicio = time.monotonic()
         estado.backup_em_andamento = True
         try:
             agent_mod.run_backup(trigger)

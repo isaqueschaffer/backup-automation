@@ -221,6 +221,7 @@ def _manter_imagem_noite(anterior, novo, por_nome=False):
     return saida
 
 
+BACKUP_TRAVADO_MIN = 120  # backup em andamento há mais que isso: o painel pode reiniciar o agente mesmo assim
 OFFSET_UTC_PADRAO_MIN = -180  # Brasília (UTC-3): agentes < 1.1.34 não informam o fuso
 
 
@@ -256,7 +257,13 @@ async def ping_agent(
     machine_id = machine.id
     machine_id_str = str(machine_id)
     # Agente >= 1.1.8 informa que está fazendo backup: o reinício espera ele terminar (senão o backup se perde)
-    em_backup = bool((body.telemetry or {}).get("backup_em_andamento")) if body else False
+    # Passadas BACKUP_TRAVADO_MIN minutos (agente >= 1.1.36 informa `backup_ha_min`), o backup é tratado como
+    # travado e deixa de segurar o reinício: senão um backup preso nunca liberaria o agente.
+    telemetria_ping = (body.telemetry or {}) if body else {}
+    em_backup = bool(telemetria_ping.get("backup_em_andamento"))
+    ha_min = telemetria_ping.get("backup_ha_min")
+    if em_backup and isinstance(ha_min, (int, float)) and not isinstance(ha_min, bool) and ha_min >= BACKUP_TRAVADO_MIN:
+        em_backup = False
 
     # Libera a conexão do pool durante a espera: o long-poll não pode segurar a sessão
     # do banco por vários segundos (esgotaria o pool com muitos agentes). A mesma

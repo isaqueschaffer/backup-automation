@@ -239,6 +239,34 @@ def processar_defense(equipamento: dict, pasta_data: Path, conf: dict = None) ->
     return realizar_backup_defense(equipamento, pasta_data, conf)
 
 
+# Um equipamento que não responde (socket, FTP, ffmpeg...) sem limite de tempo prendia o backup da máquina inteira
+# por dias, e com ele o reinício pelo painel e a atualização. Passado o limite, ele vira ERRO e o backup segue.
+LIMITE_EQUIPAMENTO_S = 2 * 3600
+
+
+def _executar_com_limite(func, limite_s: float, *args, **kwargs):
+    """Roda func em thread e espera até `limite_s`. Levanta TimeoutError se passou (a thread fica órfã, em
+    segundo plano: não há como matar uma thread, mas o backup não depende mais dela)."""
+    import threading
+
+    saida = {}
+
+    def _alvo():
+        try:
+            saida["valor"] = func(*args, **kwargs)
+        except BaseException as e:  # repassa qualquer erro para quem chamou
+            saida["erro"] = e
+
+    thread = threading.Thread(target=_alvo, daemon=True)
+    thread.start()
+    thread.join(limite_s)
+    if thread.is_alive():
+        raise TimeoutError(f"sem resposta em {int(limite_s // 60)} min")
+    if "erro" in saida:
+        raise saida["erro"]
+    return saida.get("valor")
+
+
 def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None, trigger: str = "scheduled") -> dict:
     """
     Despachante principal — roteia o processamento pelo tipo do equipamento.
@@ -366,7 +394,8 @@ def run_backup(trigger: str = "scheduled"):
             pasta_trabalho.mkdir(parents=True, exist_ok=True)
 
             with log_remoto.equipamento_atual(nome):
-                res = processar_equipamento(eq, zip_password, pasta_trabalho, conf, trigger)
+                res = _executar_com_limite(processar_equipamento, LIMITE_EQUIPAMENTO_S,
+                                           eq, zip_password, pasta_trabalho, conf, trigger)
             res["tipo"] = tipo
             planilha = res.pop("_planilha", None)
 
