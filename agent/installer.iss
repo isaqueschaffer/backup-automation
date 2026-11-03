@@ -55,7 +55,7 @@ begin
   ConfigPage.Add('Client ID:', False);
   ConfigPage.Add('API Key:', False);
 
-  ConfigPage.Values[0] := 'https://server.suportetrilan.com.br';
+  ConfigPage.Values[0] := 'http://publico.suportetrilan.com.br:7001';
   ConfigPage.Values[1] := '';
   ConfigPage.Values[2] := '';
 end;
