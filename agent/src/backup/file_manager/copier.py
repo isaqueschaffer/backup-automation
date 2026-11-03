@@ -70,12 +70,6 @@ class SafeCopier:
             
         except Exception as e:
             logging.error(f"    Erro ao copiar {origem.name}: {e}")
-            # Limpa o temporário (pasta no Digifort, arquivo nos demais) sem nunca levantar exceção
-            try:
-                if destino_tmp.is_dir():
-                    shutil.rmtree(destino_tmp, ignore_errors=True)
-                else:
-                    destino_tmp.unlink(missing_ok=True)
-            except Exception:
-                pass
+            if destino_tmp.exists():
+                destino_tmp.unlink()
             return False, BackupStatus.ERRO

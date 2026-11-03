@@ -155,8 +155,7 @@ class TestDefenseAPI(unittest.TestCase):
         self.assertIn("192.168.75.66", res)
         info = res["LATERAL TERRENO"]
         self.assertGreater(info["total_dias"], 0)
-        # Mesma regra do NVR: gravou ontem e anteontem, mas não hoje = SEM_GRAVACAO
-        self.assertEqual(info["status_gravacao"], "SEM_GRAVACAO")
+        self.assertEqual(info["status_gravacao"], "COM_GRAVACAO")
         self.assertIn("█", info["mapa"])
 
     @patch("requests.Session")
@@ -264,12 +263,10 @@ class TestDefenseAPI(unittest.TestCase):
 
         res = _montar_status_cameras_defense(equipamento, conf=None)
         self.assertEqual(len(res), 2)
-        # Câmera 1 - Online, sem dados de gravação na API: não inventa 15 dias a partir do online
+        # Câmera 1 - Online
         self.assertTrue(res[0]["online"])
         self.assertEqual(res[0]["status_comunicacao"], "ONLINE")
-        self.assertEqual(res[0]["total_dias"], 0)
-        self.assertEqual(res[0]["status_gravacao"], "NAO_VERIFICADO")
-        self.assertEqual(res[0]["mapa"], "")
+        self.assertEqual(res[0]["total_dias"], 15)
 
         # Câmera 2 - Offline MAS com histórico de gravação real
         self.assertFalse(res[1]["online"])

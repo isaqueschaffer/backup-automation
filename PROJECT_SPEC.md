@@ -1091,6 +1091,18 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 **Breaking Change:** Não. **Atenção:** o .bat é gerado pela versão instalada, então as correções 2 e 3 só valem a partir da 1.1.35; a passagem 1.1.32 → 1.1.35 depende do item 4 (com o limite do servidor, no máximo uma tentativa por hora por máquina).
 **Branch:** isaque
 
+### [2026-11-03] — Agente 1.1.36: volta à base da 1.1.34 (correções da auditoria) sobre a 1.1.32, reaplicando só o fix do laço OTA
+
+**Problema:** depois da 1.1.35 ir para as 122 máquinas, várias passaram a aparecer offline no painel por horas/dias (ping, presença e backup silenciosos ao mesmo tempo). Revisado o diff 1.1.33→1.1.35 inteiro: nenhuma regressão óbvia de travamento foi encontrada (as mudanças da auditoria 1.1.34 são majoritariamente correções de robustez, não causas de travamento) — o padrão de silêncio em todas as threads juntas é mais consistente com instabilidade de rede/DNS do hostname `publico.suportetrilan.com.br:7001` (usado por parte das máquinas, as com `agent.conf` mais antigo) do que com o código do agente. Mesmo assim, a decisão foi voltar a um ponto de partida mais simples.
+**Alteração:** `agent/` revertido ao estado da 1.1.33 (commit `53dbaa2`), perdendo portanto as 19 correções da auditoria (changelog de 2026-10-29) e os ajustes posteriores de telemetria/codificação/dependências fixas. Reaplicado por cima, isoladamente:
+1. **Laço de atualização OTA** (changelog de 2026-10-30, itens 2 e 3): `service.py` sai com `os._exit(0)` após `SERVICE_STOPPED` ao aplicar a atualização; `updater.py` espera ~45 s o processo antigo encerrar e, se não encerrar, mata à força antes de copiar.
+2. **Versão filtrada no `.bat`** (changelog de 2026-10-30, item do `2696570`): a string de versão recebida do servidor só entra no `.bat` com `[0-9A-Za-z._-]`, mesmo não sendo mais estritamente necessário para agentes >= 1.1.35 (o servidor já não envia o payload de comandos para eles) — mantido como segurança em profundidade.
+3. **URL padrão do instalador:** mantida `https://server.suportetrilan.com.br` (o revert para a 1.1.33 traria de volta `http://publico.suportetrilan.com.br:7001`, que é justamente a URL que aparece nos logs das máquinas que mais ficam caladas por horas).
+4. **Build:** mantido `py -3.14` fixo e `pyinstaller==6.22.3`/`pywin32==312` pinados em `build.ps1` (só infraestrutura de build, sem efeito no comportamento do agente).
+**Arquivos:** agent/service.py, agent/src/application/updater.py, agent/installer.iss, agent/build.ps1, e os demais arquivos de `agent/` revertidos ao estado da 1.1.33 (ver changelog de 2026-10-29 para a lista completa do que se perde).
+**Breaking Change:** Sim, comportamental: volta a perder as 19 correções da auditoria 1.1.34 (status de NVR/Intelbras, resiliência por equipamento, Defense IA via API, telemetria, etc. — ver changelog de 2026-10-29). **Pendente:** a causa real do "offline" (suspeita de rede/DNS em `publico.suportetrilan.com.br:7001`) não foi investigada a fundo nem corrigida nesta entrega; se o problema persistir na 1.1.36, a causa não é o código revertido.
+**Branch:** isaque
+
 ### [2026-10-29] — Agente 1.1.34: correções da auditoria do agente 1.1.33 (19 itens)
 
 **Alteração:** correções dos 19 problemas encontrados na auditoria do agente 1.1.33.

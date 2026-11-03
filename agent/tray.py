@@ -55,9 +55,8 @@ def cmd_servico(acao):
 
 def servico_rodando() -> bool:
     try:
-        # sc.exe escreve na página de código OEM do console; "replace" nunca derruba a leitura
         r = subprocess.run(["sc.exe", "query", SERVICO], capture_output=True,
-                           encoding="oem", errors="replace", creationflags=NO_WINDOW)
+                           text=True, creationflags=NO_WINDOW)
         return "RUNNING" in r.stdout
     except Exception:
         return False

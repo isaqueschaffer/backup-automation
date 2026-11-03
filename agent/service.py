@@ -41,19 +41,7 @@ PING_INTERVAL_S = 15
 # Usa ProgramData para logs — gravavel sem privilegios de admin
 PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
 ARQUIVO_LOG = PASTA_LOG / "servico.log"
-# Acima disto, na inicialização, servico.log vira servico.1.log (substitui o anterior)
-LIMITE_LOG_BYTES = 10 * 1024 * 1024
 _LOGGING_CONFIGURADO = False
-
-
-def _rotacionar_log():
-    """Rotação simples, só na inicialização (antes do basicConfig). Não usa RotatingFileHandler: a bandeja
-    mantém o arquivo aberto (Get-Content -Wait) e renomear com o serviço rodando falharia."""
-    try:
-        if ARQUIVO_LOG.exists() and ARQUIVO_LOG.stat().st_size > LIMITE_LOG_BYTES:
-            ARQUIVO_LOG.replace(PASTA_LOG / "servico.1.log")
-    except Exception:
-        pass
 
 
 def _garantir_logging():
@@ -62,25 +50,18 @@ def _garantir_logging():
         return
     try:
         PASTA_LOG.mkdir(parents=True, exist_ok=True)
-        _rotacionar_log()
-        # cp1252 explícito: é o formato que a bandeja lê com Get-Content (ANSI); "replace" não perde a linha
-        # com caractere fora do cp1252 (o padrão do Python pode mudar para UTF-8 nas versões novas)
         logging.basicConfig(
             filename=str(ARQUIVO_LOG),
             level=logging.INFO,
             format="[%(asctime)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
-            encoding="cp1252",
-            errors="replace",
         )
         _LOGGING_CONFIGURADO = True
     except Exception:
         pass
 
 
-def log(msg, is_error=False, enviar=False, evento_windows=False):
-    """Grava no servico.log. No Log de Eventos do Windows só vão os erros e as marcas de início/parada do
-    serviço (`evento_windows=True`); antes ia toda mensagem, inclusive um ping a cada 15 s."""
+def log(msg, is_error=False, enviar=False):
     _garantir_logging()
     if is_error:
         logging.error(msg)
@@ -88,8 +69,6 @@ def log(msg, is_error=False, enviar=False, evento_windows=False):
         logging.info(msg, extra={"enviar_servidor": True})
     else:
         logging.info(msg)
-    if not (is_error or evento_windows):
-        return
     try:
         if is_error:
             servicemanager.LogErrorMsg(str(msg))
@@ -97,18 +76,6 @@ def log(msg, is_error=False, enviar=False, evento_windows=False):
             servicemanager.LogInfoMsg(str(msg))
     except Exception:
         pass
-
-
-def _horario_validado(hora, minuto) -> tuple:
-    """Horário do backup recebido do servidor: hora 0-23 e minuto 0-59. Inválido registra erro e usa 02:00."""
-    try:
-        h, m = int(hora), int(minuto)
-        if 0 <= h <= 23 and 0 <= m <= 59:
-            return h, m
-    except (TypeError, ValueError):
-        pass
-    log(f"Horario de backup invalido recebido do servidor ({hora!r}:{minuto!r}). Usando 02:00.", is_error=True)
-    return 2, 0
 
 
 # Janela após a troca do TrilanAgentTray.exe em que o serviço ainda a reabre ao iniciar.
@@ -258,9 +225,6 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.schedule_minute = 0
         self.config_loaded = False
         self.schedule_updated = False
-        # Threads de ping, presença e logs: uma única vez por processo (o laço de resiliência do SvcDoRun
-        # chama _run_loop de novo após um erro, e cada chamada criava mais três threads)
-        self.threads_iniciadas = False
         # Reinício pedido pelo painel: o processo termina com erro para a recuperação do Windows religar
         self.reiniciar_pelo_windows = False
         # Atualização OTA baixada: o processo sai na hora para o script de troca copiar o executável novo
@@ -274,14 +238,14 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
     def SvcStop(self):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-        log("Parada solicitada.", evento_windows=True)
+        log("Parada solicitada.")
         self.stop_requested = True
         win32event.SetEvent(self.hWaitStop)
 
     def SvcShutdown(self):
         # Chamado pelo Windows quando o servidor é desligado/reiniciado (SERVICE_CONTROL_SHUTDOWN)
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-        log("Desligamento do Windows detectado (SvcShutdown). Encerrando servico de forma limpa...", evento_windows=True)
+        log("Desligamento do Windows detectado (SvcShutdown). Encerrando servico de forma limpa...")
         self.stop_requested = True
         win32event.SetEvent(self.hWaitStop)
 
@@ -301,7 +265,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             v = "Desconhecida"
 
         log("=" * 60)
-        log(f"TRILAN AGENT NVR INICIADO (Versão: {v})", evento_windows=True)
+        log(f"TRILAN AGENT NVR INICIADO (Versão: {v})")
         log(f"Diretorio: {DIRETORIO}")
         # Em thread: nunca atrasa nem derruba a inicialização do serviço
         threading.Thread(target=reabrir_bandeja_atualizada, daemon=True).start()
@@ -319,7 +283,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 if win32event.WaitForSingleObject(self.hWaitStop, 10000) == win32event.WAIT_OBJECT_0:
                     break
 
-        log("TRILAN AGENT NVR ENCERRADO", evento_windows=True)
+        log("TRILAN AGENT NVR ENCERRADO")
         log("=" * 60)
         if self.reiniciar_pelo_windows:
             # Termina sem avisar "parado" ao Windows: ele trata como falha e a recuperação configurada
@@ -354,7 +318,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 try:
                     from src.application.webhook_defense import start_webhook_defense
                     start_webhook_defense()
-                    log("Agente Webhook Defense IA iniciado com sucesso em 127.0.0.1:8181.")
+                    log("Agente Webhook Defense IA iniciado com sucesso na porta 8181.")
                 except Exception as e:
                     log(f"Falha ao iniciar Agente Webhook Defense IA: {e}", is_error=True)
 
@@ -379,8 +343,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         log(f"Testando comunicacao com o servidor: {conf['server_url']}/api/v1/agent/config ...")
         try:
             server_cfg = fetch_server_config(conf)
-            self.schedule_hour, self.schedule_minute = _horario_validado(
-                server_cfg.get("backup_hour", 2), server_cfg.get("backup_minute", 0))
+            self.schedule_hour = int(server_cfg.get("backup_hour", 2))
+            self.schedule_minute = int(server_cfg.get("backup_minute", 0))
             self.config_loaded = True
             log("COMUNICACAO BEM SUCEDIDA! Configuracoes do servidor recebidas.")
             self._init_webhooks(server_cfg)
@@ -437,45 +401,26 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         return str(resumo)
 
     def _ping_loop(self, conf: dict):
-        """Pinga em cadência fixa (início a início), independente de backups em andamento no loop principal.
-        Log enxuto: ping sem instrução não é registrado; falhas seguidas, só a primeira e depois no máximo
-        uma linha a cada 10 minutos com a contagem."""
+        """Pinga em cadência fixa (início a início), independente de backups em andamento no loop principal."""
         from src.application.api_client import ping_server
 
         last_successful_ping = time.monotonic()
         proximo_ping = time.monotonic()
-        falhas_seguidas = 0
-        ultimo_log_falha = 0.0
         while not self.stop_requested:
             proximo_ping += PING_INTERVAL_S
             try:
                 ping_resp = ping_server(conf)
                 if ping_resp:
-                    if ping_resp.get("restart") or ping_resp.get("backup") or ping_resp.get("rtsp_task"):
-                        log(f"Ping recebido pelo servidor. Instrucoes: {self._resumo_ping(ping_resp)}")
-                    if falhas_seguidas or time.monotonic() - last_successful_ping > 300:
-                        log(f"Servidor voltou a responder apos {falhas_seguidas} falha(s) seguida(s) de ping.")
-                    falhas_seguidas = 0
+                    log(f"Ping recebido pelo servidor. Instrucoes: {self._resumo_ping(ping_resp)}")
+                    if time.monotonic() - last_successful_ping > 300:
+                        log("Servidor voltou a responder apos periodo de desconexao!")
                     last_successful_ping = time.monotonic()
                     self.ping_responses.put(ping_resp)
                     win32event.SetEvent(self.hPingResp)
-                    # Teste RTSP do painel sai daqui (em thread própria): o laço principal fica parado durante
-                    # o backup e o servidor desiste em 55 s
-                    try:
-                        self._disparar_rtsp(ping_resp, conf)
-                    except Exception as e:
-                        log(f"Falha ao disparar o teste RTSP: {e}", is_error=True)
                 else:
                     log("Ping enviado, mas resposta vazia.")
             except Exception as e:
-                falhas_seguidas += 1
-                agora_falha = time.monotonic()
-                if falhas_seguidas == 1:
-                    log(f"Falha ao enviar ping para o servidor (tentara novamente a cada {PING_INTERVAL_S}s): {e}", is_error=True)
-                    ultimo_log_falha = agora_falha
-                elif agora_falha - ultimo_log_falha >= 600:
-                    log(f"Ping ainda falhando: {falhas_seguidas} falha(s) seguida(s). Ultimo erro: {e}", is_error=True)
-                    ultimo_log_falha = agora_falha
+                log(f"Falha ao enviar ping para o servidor (tentara novamente em {PING_INTERVAL_S}s): {e}", is_error=True)
 
             espera = proximo_ping - time.monotonic()
             if espera < 0:
@@ -573,8 +518,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 try:
                     from src.application.api_client import fetch_server_config
                     server_cfg = fetch_server_config(conf)
-                    nova_hora, novo_minuto = _horario_validado(
-                        server_cfg.get("backup_hour", 2), server_cfg.get("backup_minute", 0))
+                    nova_hora = int(server_cfg.get("backup_hour", 2))
+                    novo_minuto = int(server_cfg.get("backup_minute", 0))
                     self._init_webhooks(server_cfg)
                     self.config_loaded = True
                     if (nova_hora, novo_minuto) != (self.schedule_hour, self.schedule_minute):
@@ -587,7 +532,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 except Exception as e:
                     log(f"Falha ao sincronizar configuracoes apos reconexao: {e}", is_error=True)
 
-            # A tarefa RTSP (rtsp_task) já foi disparada na thread de ping (_ping_loop)
+            self._disparar_rtsp(ping_resp, conf)
 
             if ping_resp.get("restart"):
                 log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
@@ -602,6 +547,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 while not self.ping_responses.empty():
                     try:
                         discarded = self.ping_responses.get_nowait()
+                        self._disparar_rtsp(discarded, conf)
                         if discarded.get("restart"):
                             self._restart_service()
                             return True
@@ -627,11 +573,9 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     def _run_loop(self, server_url: str, headers: dict, conf: dict):
         import agent as agent_mod
 
-        if not self.threads_iniciadas:
-            self.threads_iniciadas = True
-            threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
-            threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
-            threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
+        threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
+        threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
+        threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:
             agora = datetime.now()
