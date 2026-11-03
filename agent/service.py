@@ -228,6 +228,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.schedule_minute = 0
         self.config_loaded = False
         self.schedule_updated = False
+        self.threads_iniciadas = False
         # Reinício pedido pelo painel: o processo termina com erro para a recuperação do Windows religar
         self.reiniciar_pelo_windows = False
         # Atualização OTA baixada: o processo sai na hora para o script de troca copiar o executável novo
@@ -305,7 +306,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     def _init_webhooks(self, server_cfg: dict):
         """Inicializa integrações locais de webhook (Digifort / Defense) de forma segura."""
         from src.core.config import parse_config_extra
-        for eq in server_cfg.get("equipamentos", []):
+        for eq in (server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []):
             tipo = (eq.get("tipo") or "").upper()
             if tipo == "DIGIFORT":
                 cfg_ext = parse_config_extra(eq)
