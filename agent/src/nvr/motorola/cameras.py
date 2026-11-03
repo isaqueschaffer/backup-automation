@@ -63,8 +63,6 @@ def abrir_sessao_motorola(nvr_ip, usuario, senha):
     return None
 
 def buscar_cameras(nvr_ip, usuario, senha):
-    """(cameras, sessao). Login falhou ou NVR inacessivel: (None, None). Logou mas nao achou cameras:
-    ({}, sessao), para o chamador distinguir NVR fora do ar/senha errada de NVR sem cameras."""
     session = abrir_sessao_motorola(nvr_ip, usuario, senha)
     if not session:
         return None, None
@@ -101,7 +99,7 @@ def buscar_cameras(nvr_ip, usuario, senha):
 
         if not cameras:
             logging.error(f"  [{nvr_ip}] Nenhuma câmera encontrada pelas estratégias de descoberta.")
-            return {}, session
+            return None, None
 
         # Buscando status real de rede (online/offline)
         r3 = session.post(f"http://{nvr_ip}/queryOnlineChlList", data=xml_chls.encode('utf-8'), headers={"Content-Type": "application/xml"}, timeout=10, verify=False)

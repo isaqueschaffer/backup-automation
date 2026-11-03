@@ -386,8 +386,6 @@ def run_backup(trigger: str = "scheduled"):
         nome = eq.get("name", "equipamento")
         nome_safe = nome_seguro(nome)
 
-        # Erro inesperado num equipamento vira ERRO dele e o backup segue para o próximo
-        # (antes a exceção derrubava o backup da máquina inteira, sem relatório)
         try:
             # Diretório temporário de trabalho
             pasta_trabalho = TEMP_DIR_WORK / f"{tipo}_{nome_safe}"
