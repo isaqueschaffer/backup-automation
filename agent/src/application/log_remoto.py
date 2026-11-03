@@ -113,7 +113,9 @@ class ManipuladorLogRemoto(logging.Handler):
     def __init__(self):
         super().__init__()
         self.fila: collections.deque[Dict[str, Any]] = collections.deque(maxlen=MAX_FILA)
-        self.lock = threading.Lock()
+        # Não reaproveitar self.lock: é o lock do logging.Handler, já seguro por handle() durante o emit().
+        # Trocá-lo por um Lock comum travava para sempre a thread no primeiro aviso/erro (e as demais em seguida).
+        self.trava_fila = threading.Lock()
         self.dedup: Dict[Tuple[str, Optional[str], str], float] = {}
         self.extras: Tuple[str, ...] = ()
 
@@ -169,7 +171,7 @@ class ManipuladorLogRemoto(logging.Handler):
             # (6) Deduplicação para registros ordinários (não marcados com enviar_servidor)
             if not enviar_servidor:
                 chave = (nivel, equipamento, mensagem[:200])
-                with self.lock:
+                with self.trava_fila:
                     ultimo = self.dedup.get(chave)
                     if ultimo is not None and (agora - ultimo) < JANELA_DEDUP_S:
                         return
@@ -187,7 +189,7 @@ class ManipuladorLogRemoto(logging.Handler):
                 "equipamento": equipamento,
                 "_t": agora,
             }
-            with self.lock:
+            with self.trava_fila:
                 self.fila.append(item)
 
         except Exception:
@@ -226,7 +228,7 @@ def enviar_pendentes(conf: dict) -> int:
     if _instancia is None:
         return 0
 
-    with _instancia.lock:
+    with _instancia.trava_fila:
         if not _instancia.fila:
             return 0
         qtd = min(len(_instancia.fila), MAX_POR_ENVIO)
@@ -253,7 +255,7 @@ def enviar_pendentes(conf: dict) -> int:
             sucesso = False
 
     if sucesso:
-        with _instancia.lock:
+        with _instancia.trava_fila:
             # Remove exatamente os itens enviados confirmados
             for item in itens_para_enviar:
                 if _instancia.fila and _instancia.fila[0] is item:
