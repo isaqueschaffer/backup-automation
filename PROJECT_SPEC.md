@@ -1078,6 +1078,19 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-04] — E-mail do relatório seletivo: só os equipamentos que o cliente possui
+
+**Problema:** o e-mail de backup era igual para todos: sempre trazia a seção "Verificação de Câmeras dos CFTVs" (com "Nenhum equipamento do tipo CFTV verificado"), o título fixo "Backup de Equipamentos (NVR, PABX, Mikrotik...)", as linhas "Monitoramento (Câmeras/Gravações): Sem dados" e o assunto "Verificação de câmeras e Backup dos equipamentos", mesmo para cliente sem câmeras.
+**Alteração (`services/email_service.py`, decisões do dono):**
+1. **Assunto e cabeçalho dinâmicos:** com equipamento de câmeras (`NVR`, `DIGIFORT`, `DEFENSE`, `CAMERA`) continua "Verificação de câmeras e Backup dos equipamentos"; sem, vira "Backup dos equipamentos". O "Serviço executado" cita só os tipos presentes (ex.: "Backup das configurações dos equipamentos (Mikrotik, OLT)."). Os tipos vêm dos resultados da rodada somados aos equipamentos ativos cadastrados nas máquinas (`_tipos_cadastrados`), para o assunto não mudar quando a máquina das câmeras não reporta. Rodapé "Trilan CFTV" → "Trilan" (inclusive nas respostas encadeadas com imagens).
+2. **Backup em lista única:** igual a antes, mas o título cita só os tipos presentes, na ordem do painel: `Backup de Equipamentos (NVR/DVR, Mikrotik, PABX)`.
+3. **Por máquina:** a seção de câmeras (e a nota das imagens offline, no e-mail da máquina sem Cliente) só aparece se aquela máquina tiver equipamento de câmeras; as linhas "Monitoramento (Câmeras/Gravações)" do "Resultado do Serviço" seguem a mesma regra. A numeração das seções é sequencial (sem câmeras: 1 Backup, 2 Resultado).
+4. **Câmeras não verificadas:** equipamento de câmeras em `ERRO` sem lista de câmeras ganha a linha "❌ Câmeras não verificadas (equipamento sem resposta ou falha no login)" e deixa o monitoramento como "Concluída com problemas" (antes contava como zero câmeras e saía "Concluída"). O total da seção passa a ser "Total de equipamentos com câmeras" (antes a conta misturava todos os equipamentos).
+Resultado antigo sem `tipo` (reenvio de backup antigo): vale como `NVR` se trouxe câmeras; senão, tipo desconhecido (não entra no título).
+**Arquivos:** server/api/services/email_service.py, server/api/tests/test_email_offline_images.py (NVR falso ganha `tipo` e `active`), PROJECT_SPEC.md.
+**Breaking Change:** Não (só o texto do e-mail). **Atenção:** o assunto muda para clientes sem câmeras; regras/filtros de e-mail dos clientes baseados no assunto antigo deixam de casar. Só servidor; versão do agente não muda.
+**Branch:** isaque
+
 ### [2026-10-30] — Agente 1.1.35: laço de atualização OTA (a 1.1.32 não trocava o executável)
 
 **Problema:** publicada a 1.1.34, agentes 1.1.32 baixavam a versão, o `apply_update.bat` trocava a bandeja mas não o serviço, e o serviço voltava na 1.1.32 cerca de 2 min 15 s depois e baixava tudo de novo (~78 MB e ~2 min parado a cada 2,5 min). O processo antigo do `TrilanAgentService.exe` não saía: na OTA o `SvcDoRun` retornava normalmente e o Python esperava threads/pools pendentes; o .bat esperava 90 s, a cópia falhava 15 vezes (arquivo em uso) e o serviço religava a versão antiga. Mitigação na hora: 1.1.33 e 1.1.34 desativadas no painel (só a 1.1.32 ativa).

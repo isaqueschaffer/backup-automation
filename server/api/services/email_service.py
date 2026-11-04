@@ -20,6 +20,22 @@ logger = logging.getLogger(__name__)
 LIMIT_ATTACH_BYTES = 5 * 1024 * 1024  # 5 MB
 MAX_OFFLINE_IMAGES = 10  # máx. de imagens de referência (câmeras offline) anexadas por e-mail
 
+# Tipos de equipamento que têm câmeras: só eles geram a seção de câmeras e as linhas de monitoramento
+TIPOS_COM_CAMERAS = ("NVR", "DIGIFORT", "DEFENSE", "CAMERA")
+# Ordem e rótulo dos tipos no e-mail (mesma ordem do painel, eqTipos.tsx); tipo fora da lista vai ao final
+ORDEM_TIPOS = ("NVR", "DIGIFORT", "DEFENSE", "CAMERA", "OLT", "ONU", "MIKROTIK", "PABX", "MIXED")
+ROTULO_TIPO = {
+    "NVR": "NVR/DVR",
+    "DIGIFORT": "Digifort",
+    "DEFENSE": "Defense IA",
+    "CAMERA": "Câmeras",
+    "OLT": "OLT",
+    "ONU": "ONU",
+    "MIKROTIK": "Mikrotik",
+    "PABX": "PABX",
+    "MIXED": "Misto",
+}
+
 
 def _norm_status(r: dict) -> str:
     """Normaliza o status de um resultado de equipamento para OK / PARCIAL / ERRO.
@@ -35,8 +51,67 @@ def _norm_status(r: dict) -> str:
     return st
 
 
-def _build_backup_section(nvr_results: List[dict], overall: str) -> str:
-    """Seção 2 do e-mail — Backup dos equipamentos."""
+def _tipo(r: dict) -> str:
+    """Tipo do equipamento do resultado (NVR, MIKROTIK...).
+
+    Resultado antigo sem `tipo`: NVR se trouxe câmeras, senão vazio (tipo desconhecido).
+    """
+    t = str(r.get("tipo") or "").strip().upper()
+    if t:
+        return t
+    return "NVR" if r.get("cameras") else ""
+
+
+def _tem_cameras(r: dict) -> bool:
+    """O equipamento é de câmeras (NVR, Digifort, Defense, câmera avulsa) ou trouxe câmeras."""
+    return _tipo(r) in TIPOS_COM_CAMERAS or bool(r.get("cameras"))
+
+
+def _com_cameras(tipos) -> bool:
+    """Algum dos tipos tem câmeras."""
+    return any(t in TIPOS_COM_CAMERAS for t in tipos)
+
+
+def _rotulos_tipos(tipos) -> List[str]:
+    """Rótulos dos tipos presentes, na ordem do painel (vazios ignorados; desconhecidos ao final)."""
+    presentes = {t for t in tipos if t}
+    ordenados = [t for t in ORDEM_TIPOS if t in presentes] + sorted(t for t in presentes if t not in ORDEM_TIPOS)
+    return [ROTULO_TIPO.get(t, t) for t in ordenados]
+
+
+def _tipos_cadastrados(db: Session, machine_ids) -> set:
+    """Tipos dos equipamentos ativos cadastrados nas máquinas (o que o cliente possui, mesmo sem reportar)."""
+    tipos: set = set()
+    for machine_id in machine_ids or []:
+        if machine_id is None:
+            continue
+        for nvr in db.query(NVR).filter(NVR.machine_id == machine_id).all():
+            if nvr.active:
+                tipos.add(str(nvr.tipo or "NVR").strip().upper())
+    return tipos
+
+
+def _titulo_relatorio(tipos) -> str:
+    """Título do assunto/cabeçalho: só cita câmeras se houver equipamento com câmeras."""
+    if _com_cameras(tipos):
+        return "Verificação de câmeras e Backup dos equipamentos"
+    return "Backup dos equipamentos"
+
+
+def _texto_servico(tipos) -> str:
+    """Linha de "Serviço executado", citando só os tipos presentes."""
+    rotulos = _rotulos_tipos(tipos)
+    lista = f" ({', '.join(rotulos)})" if rotulos else ""
+    if _com_cameras(tipos):
+        return f"Backup das configurações dos equipamentos{lista} e verificação das câmeras e gravações."
+    return f"Backup das configurações dos equipamentos{lista}."
+
+
+def _build_backup_section(nvr_results: List[dict], overall: str, numero: int) -> str:
+    """Seção de backup dos equipamentos (lista única; o título cita só os tipos presentes)."""
+    rotulos = _rotulos_tipos(_tipo(r) for r in nvr_results)
+    titulo = f"Backup de Equipamentos ({', '.join(rotulos)})" if rotulos else "Backup de Equipamentos"
+
     icon_map = {"OK": "✅", "PARCIAL": "⚠️", "PARTIAL": "⚠️", "ERRO": "❌", "ERROR": "❌", "SEM_ARQUIVOS": "ℹ️"}
 
     lines = "\n".join(
@@ -46,7 +121,7 @@ def _build_backup_section(nvr_results: List[dict], overall: str) -> str:
     )
 
     return (
-        f"\n2. Backup de Equipamentos (NVR, PABX, Mikrotik...)\n"
+        f"\n{numero}. {titulo}\n"
         f"{'─' * 40}\n"
         f"Backup automático de configurações\n"
         f"Total de equipamentos: {len(nvr_results)}\n"
@@ -55,19 +130,22 @@ def _build_backup_section(nvr_results: List[dict], overall: str) -> str:
     )
 
 
-def _build_camera_section(nvr_results: List[dict]) -> str:
-    """Seção 1 do e-mail — Verificação de Câmeras e Gravações."""
-    total_nvrs = len(nvr_results)
+def _build_camera_section(nvr_results: List[dict], numero: int) -> str:
+    """Seção de verificação de câmeras e gravações (só equipamentos com câmeras)."""
+    cam_results = [r for r in nvr_results if _tem_cameras(r)]
     total_cameras = 0
     cameras_online = 0
     cameras_offline = 0
     cameras_online_sem_gravacao = 0
     problemas_por_nvr: dict[str, list[str]] = {}
 
-    for r in nvr_results:
+    for r in cam_results:
         cameras = r.get("cameras") or []
         nvr_nome = r.get("nome", "?")
         problemas: list[str] = []
+
+        if not cameras and _norm_status(r) == "ERRO":
+            problemas.append("  ❌ Câmeras não verificadas (equipamento sem resposta ou falha no login)")
 
         for cam in cameras:
             total_cameras += 1
@@ -106,10 +184,10 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
             problemas_por_nvr[nvr_nome] = problemas
 
     section = (
-        f"\n1. Verificação de Câmeras dos CFTVs\n"
+        f"\n{numero}. Verificação de Câmeras dos CFTVs\n"
         f"{'─' * 40}\n"
         f"Verificação das câmeras dos equipamentos compatíveis\n"
-        f"Total de equipamentos verificados (com câmeras): {len(problemas_por_nvr) if problemas_por_nvr else (total_nvrs if total_cameras > 0 else 0)}\n"
+        f"Total de equipamentos com câmeras: {len(cam_results)}\n"
         f"Total de câmeras: {total_cameras}\n"
         f"Câmeras online: {cameras_online}\n"
         f"Câmeras offline: {cameras_offline}\n"
@@ -124,14 +202,14 @@ def _build_camera_section(nvr_results: List[dict]) -> str:
     elif total_cameras > 0:
         section += f"\n✅ Todas as câmeras estão online e gravando.\n"
     else:
-        section += f"\nℹ️ Nenhum equipamento do tipo CFTV verificado neste ciclo.\n"
+        section += f"\nℹ️ Nenhuma câmera informada pelos equipamentos neste ciclo.\n"
 
     return section
 
 
-def _build_result_section(nvr_results: List[dict]) -> str:
-    """Seção 3 do e-mail — Resultado do Serviço."""
-    has_cameras = any(r.get("cameras") for r in nvr_results)
+def _build_result_section(nvr_results: List[dict], numero: int) -> str:
+    """Seção Resultado do Serviço (linhas de câmeras/gravações só se houver equipamento com câmeras)."""
+    has_cameras = any(_tem_cameras(r) for r in nvr_results)
 
     backup_ok = all(_norm_status(r) == "OK" for r in nvr_results)
     has_unsupported_backup = any(_norm_status(r) == "SEM_ARQUIVOS" for r in nvr_results)
@@ -144,6 +222,7 @@ def _build_result_section(nvr_results: List[dict]) -> str:
         backup_icon = "⚠️ Concluído com ressalvas"
 
     if has_cameras:
+        any_nao_verificado = any(_tem_cameras(r) and not r.get("cameras") and _norm_status(r) == "ERRO" for r in nvr_results)
         all_cameras = [cam for r in nvr_results for cam in (r.get("cameras") or [])]
         any_offline = False
         any_no_rec = False
@@ -166,19 +245,20 @@ def _build_result_section(nvr_results: List[dict]) -> str:
                 if status_gravacao in ("SEM_GRAVACAO", "NAO_VERIFICADO"):
                     any_no_rec = True
 
-        cam_icon = "⚠️ Concluída com problemas" if any_offline else "✅ Concluída"
-        rec_icon = "⚠️ Concluída com problemas" if (any_offline or any_no_rec) else "✅ Concluída"
-    else:
-        cam_icon = "ℹ️ Sem dados de câmeras"
-        rec_icon = "ℹ️ Sem dados de gravações"
+        cam_icon = "⚠️ Concluída com problemas" if (any_offline or any_nao_verificado) else "✅ Concluída"
+        rec_icon = "⚠️ Concluída com problemas" if (any_offline or any_no_rec or any_nao_verificado) else "✅ Concluída"
 
-    return (
-        f"\n3. Resultado do Serviço\n"
+    section = (
+        f"\n{numero}. Resultado do Serviço\n"
         f"{'─' * 40}\n"
         f"Backup das configurações: {backup_icon}\n"
-        f"Monitoramento (Câmeras): {cam_icon}\n"
-        f"Monitoramento (Gravações): {rec_icon}\n"
     )
+    if has_cameras:
+        section += (
+            f"Monitoramento (Câmeras): {cam_icon}\n"
+            f"Monitoramento (Gravações): {rec_icon}\n"
+        )
+    return section
 
 
 def _cam_is_online(cam: dict) -> bool:
@@ -316,7 +396,7 @@ def _send_offline_images_replies(
             f"{'═' * 50}\n\n"
             f"📷 Imagens de referência das câmeras offline: {current_start} a {batch_end} de {total_images} em anexo.\n\n"
             f"{'═' * 50}\n"
-            f"  Relatório gerado automaticamente — Trilan CFTV\n"
+            f"  Relatório gerado automaticamente — Trilan\n"
             f"{'═' * 50}\n"
         )
         reply_msg.set_content(body)
@@ -447,6 +527,8 @@ def send_backup_report(
 
     # ── Overall backup status ──
     overall = _overall_status(nvr_results)
+    tipos = {_tipo(r) for r in nvr_results} | _tipos_cadastrados(db, [machine_id])
+    titulo = _titulo_relatorio(tipos)
 
     # ── Date/time formatting (BRT = UTC-3, independente do fuso do container) ──
     now = datetime.utcnow() - timedelta(hours=3)
@@ -458,26 +540,30 @@ def send_backup_report(
     msg["Message-ID"] = msg_id
     msg["From"] = cfg["email"]
     msg["To"] = ", ".join(clean_recipients)
-    msg["Subject"] = f"{machine_name} POP - Verificação de câmeras e Backup dos equipamentos — {date_str}"
+    msg["Subject"] = f"{machine_name} POP - {titulo} — {date_str}"
 
     # ── Header ──
     body = (
         f"{'═' * 50}\n"
-        f"  {machine_name} POP - Verificação de câmeras e Backup dos equipamentos\n"
+        f"  {machine_name} POP - {titulo}\n"
         f"{'═' * 50}\n\n"
         f"Máquina: {machine_name}\n"
         f"Data e hora: {date_hora_str}\n\n"
         f"Serviço executado:\n"
-        f"Backup das configurações dos equipamentos de rede/CFTV e verificação de status operacional.\n\n"
+        f"{_texto_servico(tipos)}\n\n"
     )
 
-    # ── Section 1: Câmeras e Gravações ──
-    body += _build_camera_section(nvr_results)
+    # ── Câmeras e Gravações (só se a máquina tiver equipamento com câmeras) ──
+    numero = 1
     offline_images = _collect_offline_images(db, [(machine_id, nvr_results)])
-    body += _offline_images_note(offline_images)
+    if any(_tem_cameras(r) for r in nvr_results):
+        body += _build_camera_section(nvr_results, numero)
+        body += _offline_images_note(offline_images)
+        numero += 1
 
-    # ── Section 2: Backup ──
-    body += _build_backup_section(nvr_results, overall)
+    # ── Backup ──
+    body += _build_backup_section(nvr_results, overall, numero)
+    numero += 1
 
     # ── Download links / attachment ──
     attach = False
@@ -504,13 +590,13 @@ def send_backup_report(
     elif zip_path and not attach:
         body += f"\n  Arquivado no servidor: {zip_path.name}\n"
 
-    # ── Section 3: Resultado do Serviço ──
-    body += _build_result_section(nvr_results)
+    # ── Resultado do Serviço ──
+    body += _build_result_section(nvr_results, numero)
 
     # ── Footer ──
     body += (
         f"\n{'═' * 50}\n"
-        f"  Relatório gerado automaticamente — Trilan CFTV\n"
+        f"  Relatório gerado automaticamente — Trilan\n"
         f"{'═' * 50}\n"
     )
 
@@ -607,7 +693,12 @@ def send_customer_report(
     date_str = ref.strftime("%d-%m-%Y")
     date_hora_str = ref.strftime("%d/%m/%Y – %H:%M")
 
-    subject = f"{customer_name} - Verificação de câmeras e Backup dos equipamentos — {date_str}"
+    reported = [e for e in entries if e.get("status")]
+    tipos = {_tipo(r) for e in reported for r in (e.get("nvr_results") or [])}
+    tipos |= _tipos_cadastrados(db, [e.get("machine_id") for e in entries])
+    titulo = _titulo_relatorio(tipos)
+
+    subject = f"{customer_name} - {titulo} — {date_str}"
     tipo = RUN_TRIGGER_LABELS.get(run_trigger, run_trigger)
     if run_trigger == "manual_machine" and manual_machine_name:
         subject += f" (backup avulso: {manual_machine_name})"
@@ -620,18 +711,16 @@ def send_customer_report(
     msg["To"] = ", ".join(clean_recipients)
     msg["Subject"] = subject
 
-    reported = [e for e in entries if e.get("status")]
-
     # ── Cabeçalho ──
     body = (
         f"{'═' * 50}\n"
-        f"  {customer_name} - Verificação de câmeras e Backup dos equipamentos\n"
+        f"  {customer_name} - {titulo}\n"
         f"{'═' * 50}\n\n"
         f"Cliente: {customer_name}\n"
         f"Data e hora: {date_hora_str}\n"
         f"Tipo da rodada: {tipo}\n\n"
         f"Serviço executado:\n"
-        f"Backup das configurações dos equipamentos de rede/CFTV e verificação de status operacional.\n\n"
+        f"{_texto_servico(tipos)}\n\n"
     )
 
     # ── Resumo por máquina ──
@@ -649,8 +738,11 @@ def send_customer_report(
             f"  Máquina: {e.get('name') or '?'}\n"
             f"{'═' * 50}\n"
         )
-        body += _build_camera_section(nvr_results)
-        body += _build_backup_section(nvr_results, _overall_status(nvr_results))
+        numero = 1
+        if any(_tem_cameras(r) for r in nvr_results):
+            body += _build_camera_section(nvr_results, numero)
+            numero += 1
+        body += _build_backup_section(nvr_results, _overall_status(nvr_results), numero)
 
     # ── Imagens de referência das câmeras offline (todas as máquinas) ──
     offline_images = _collect_offline_images(
@@ -678,7 +770,7 @@ def send_customer_report(
     # ── Rodapé ──
     body += (
         f"\n{'═' * 50}\n"
-        f"  Relatório gerado automaticamente — Trilan CFTV\n"
+        f"  Relatório gerado automaticamente — Trilan\n"
         f"{'═' * 50}\n"
     )
 

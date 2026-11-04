@@ -59,7 +59,7 @@ B64 = base64.b64encode(JPEG).decode()
 
 def _setup(n_cams, with_image=lambda ch: True):
     machine_id = uuid.uuid4()
-    nvr = _Obj(id=uuid.uuid4(), machine_id=machine_id, name="NVR Portaria")
+    nvr = _Obj(id=uuid.uuid4(), machine_id=machine_id, name="NVR Portaria", tipo="NVR", active=True)
     cams_db = [
         _Obj(nvr_id=nvr.id, canal=ch, perfect_image_base64=B64 if with_image(ch) else None)
         for ch in range(1, n_cams + 1)
