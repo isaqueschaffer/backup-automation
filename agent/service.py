@@ -30,6 +30,10 @@ def _pyinstaller_hidden_imports():
     import src.camera.rtsp_client  # noqa: F401
     import src.application.api_client  # noqa: F401
     import src.application.presenca_cameras  # noqa: F401
+    import src.application.captura_noite_vms  # noqa: F401
+    import src.application.status_olt  # noqa: F401
+    import src.olt.unm_telnet  # noqa: F401
+    import src.olt.unm_nomes  # noqa: F401
     import src.application.log_remoto  # noqa: F401
 
 
@@ -37,6 +41,8 @@ DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Pa
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
 # O dashboard estima o "Próximo contato" como last_seen + este intervalo (AGENT_PING_INTERVAL_MS)
 PING_INTERVAL_S = 15
+# Backup que passa disto está travado (nenhum backup normal leva tanto): o vigia reinicia o serviço
+LIMITE_BACKUP_S = 6 * 3600
 
 # Usa ProgramData para logs — gravavel sem privilegios de admin
 PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
@@ -225,6 +231,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.schedule_minute = 0
         self.config_loaded = False
         self.schedule_updated = False
+        self.threads_iniciadas = False
         # Reinício pedido pelo painel: o processo termina com erro para a recuperação do Windows religar
         self.reiniciar_pelo_windows = False
         # Atualização OTA baixada: o processo sai na hora para o script de troca copiar o executável novo
@@ -302,7 +309,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     def _init_webhooks(self, server_cfg: dict):
         """Inicializa integrações locais de webhook (Digifort / Defense) de forma segura."""
         from src.core.config import parse_config_extra
-        for eq in server_cfg.get("equipamentos", []):
+        for eq in (server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []):
             tipo = (eq.get("tipo") or "").upper()
             if tipo == "DIGIFORT":
                 cfg_ext = parse_config_extra(eq)
@@ -415,6 +422,11 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                     if time.monotonic() - last_successful_ping > 300:
                         log("Servidor voltou a responder apos periodo de desconexao!")
                     last_successful_ping = time.monotonic()
+                    from src.application import estado
+                    if ping_resp.get("restart") and estado.backup_em_andamento:
+                        # O servidor só manda reiniciar com backup em andamento quando ele passou do razoável:
+                        # o loop principal está preso nele e nunca leria este comando
+                        self._reinicio_forcado("reinicio pedido pelo painel com backup travado.")
                     self.ping_responses.put(ping_resp)
                     win32event.SetEvent(self.hPingResp)
                 else:
@@ -454,6 +466,72 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 log(f"Falha no ciclo de presença de câmeras: {e}", is_error=True)
 
             if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_PRESENCA_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _reinicio_forcado(self, motivo: str):
+        """Reinício com o loop principal preso num backup: ele não processa pings nem para sozinho, então
+        pede o reinício (script externo + recuperação do Windows) e encerra o processo na hora."""
+        log(f"Reiniciando o servico a forca: {motivo}", is_error=True, enviar=True)
+        try:
+            self._restart_service()
+        except Exception as e:
+            log(f"Falha ao preparar o reinicio forcado: {e}", is_error=True)
+        time.sleep(3)  # dá tempo de o log chegar ao disco e ao servidor
+        logging.shutdown()
+        os._exit(1)
+
+    def _vigia_backup_loop(self):
+        """Backup travado (equipamento que não responde, sem limite de tempo) prendia o loop principal
+        por dias: sem reinício pelo painel, sem atualização (OTA) e sem o backup seguinte."""
+        from src.application import estado
+
+        while not self.stop_requested:
+            if win32event.WaitForSingleObject(self.hWaitStop, 60 * 1000) == win32event.WAIT_OBJECT_0:
+                return
+            minutos = estado.backup_ha_min()
+            if minutos is not None and minutos * 60 >= LIMITE_BACKUP_S:
+                self._reinicio_forcado(f"backup em andamento ha {minutos} min (limite {LIMITE_BACKUP_S // 3600} h).")
+
+    def _noite_loop(self, conf: dict):
+        """Imagem da noite das câmeras DIGIFORT/DEFENSE: captura ao vivo só na janela 19h30-4h."""
+        from src.application import estado
+        from src.application.api_client import fetch_server_config
+        from src.application.captura_noite_vms import INTERVALO_CICLO_S, capturar_noite_vms, na_janela_noite
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 120 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                if na_janela_noite(datetime.now()) and not estado.backup_em_andamento:
+                    server_cfg = fetch_server_config(conf)
+                    equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                    capturar_noite_vms(equipamentos, conf)
+            except Exception as e:
+                log(f"Falha no ciclo da imagem da noite: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_CICLO_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _olt_loop(self, conf: dict):
+        """Status das OLTs das UNM2000 (ONUs, PONs, placas) por SNMP, independente do backup diário."""
+        from src.application.api_client import fetch_server_config, send_status_olts
+        from src.application.status_olt import INTERVALO_OLT_S, coletar_status_olts
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 150 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                server_cfg = fetch_server_config(conf)
+                equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                lista = coletar_status_olts(equipamentos)
+                if lista:
+                    send_status_olts(conf, lista)
+            except Exception as e:
+                log(f"Falha no ciclo de status das OLTs: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_OLT_S * 1000) == win32event.WAIT_OBJECT_0:
                 return
 
     def _logs_loop(self, conf: dict):
@@ -573,9 +651,14 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
     def _run_loop(self, server_url: str, headers: dict, conf: dict):
         import agent as agent_mod
 
-        threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
-        threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
-        threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
+        if not self.threads_iniciadas:
+            self.threads_iniciadas = True
+            threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._noite_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._olt_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._vigia_backup_loop, daemon=True).start()
+            threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:
             agora = datetime.now()
@@ -618,6 +701,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
         from src.application import estado
         log(f"INICIANDO BACKUP — {trigger.upper()}", enviar=True)
+        estado.backup_inicio = time.monotonic()
         estado.backup_em_andamento = True
         try:
             agent_mod.run_backup(trigger)

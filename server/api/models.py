@@ -211,6 +211,7 @@ class NVR(Base):
     config_extra = Column(JSON, nullable=True)  # configurações específicas de cada tipo
     last_recording_status = Column(JSON, nullable=True)
     last_telemetry_status = Column(JSON, nullable=True)  # CPU/RAM/discos (NVR Hikvision)
+    olt_status = Column(JSON, nullable=True)  # OLT UNM2000: status das OLTs/ONUs por SNMP (enviado pelo agente a cada 5 min)
     active = Column(Boolean, default=True, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -232,6 +233,8 @@ class NVRCamera(Base):
     password = Column(Text, nullable=True)  # Fernet-encrypted quando preenchido
     modelo = Column(String(50), nullable=True)  # Hikvision, Intelbras, Grandstream, ONVIF
     canal_rtsp = Column(Integer, nullable=True)  # canal da câmera dentro do equipamento do IP (IP compartilhado entre câmeras)
+    # DIGIFORT: nome da pasta de gravação da câmera (é a chave do vínculo; `nome` pode ser trocado sem perder o histórico)
+    pasta_gravacao = Column(String(255), nullable=True)
     perfect_image_base64 = Column(Text, nullable=True)
     night_image_base64 = Column(Text, nullable=True)
     night_image_date = Column(DateTime, nullable=True)

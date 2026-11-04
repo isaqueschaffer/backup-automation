@@ -52,6 +52,15 @@ export function eqToForm(eq: NVR): EqForm {
     pasta_gravacoes: cfg?.pasta_gravacoes || "",
     marca: cfg?.marca || "Hikvision",
     porta_api: cfg?.porta_api ?? 4433,
+    olts: cfg?.olts || "",
+    telnet_usuario: cfg?.telnet_usuario || "",
+    telnet_senha: "",
+    telnet_enable: "",
+    telnet_senha_definida: !!cfg?.telnet_senha_definida,
+    nomes_db_host: cfg?.nomes_db_host || "",
+    nomes_db_usuario: cfg?.nomes_db_usuario || "",
+    nomes_db_senha: "",
+    nomes_db_senha_definida: !!cfg?.nomes_db_senha_definida,
   };
 }
 
@@ -99,6 +108,19 @@ export function buildEqPayload(
       if (!eqForm.pasta_origem) return { error: "Para UNM2000, informe a pasta de origem dos backups." };
       payload.ip = "127.0.0.1";
       cfg.pasta_origem = eqForm.pasta_origem.trim();
+      cfg.olts = (eqForm.olts || "").trim();
+      cfg.telnet_usuario = (eqForm.telnet_usuario || "").trim();
+      // Senhas só vão se digitadas; em branco o servidor mantém a atual
+      if (eqForm.telnet_senha) cfg.telnet_senha = eqForm.telnet_senha;
+      if (eqForm.telnet_enable) cfg.telnet_enable = eqForm.telnet_enable;
+      cfg.nomes_db_host = (eqForm.nomes_db_host || "").trim();
+      cfg.nomes_db_usuario = (eqForm.nomes_db_usuario || "").trim();
+      if (eqForm.nomes_db_senha) cfg.nomes_db_senha = eqForm.nomes_db_senha;
+      if (cfg.nomes_db_host && !cfg.nomes_db_usuario) return { error: "Para buscar os nomes das ONUs, informe o usuário do banco da UNM2000." };
+      if (cfg.olts) {
+        if (!cfg.telnet_usuario) return { error: "Para monitorar as OLTs, informe o usuário do Telnet." };
+        if (!eqForm.telnet_senha && !(editingEqId && eqForm.telnet_senha_definida)) return { error: "Para monitorar as OLTs, informe a senha do Telnet." };
+      }
       const usuarioApi = eqForm.username.trim();
       if (!usuarioApi) {
         payload.username = "unm2000";

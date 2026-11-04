@@ -143,6 +143,8 @@ def _get_telemetry() -> dict:
     # O servidor não fecha a rodada do Cliente enquanto a máquina ainda está fazendo o backup
     from src.application import estado
     telemetry["backup_em_andamento"] = estado.backup_em_andamento
+    # Há quanto tempo: o servidor deixa de esperar um backup que passou do razoável (travado) para reiniciar
+    telemetry["backup_ha_min"] = estado.backup_ha_min()
     return telemetry
 
 def _json_safe(obj):
@@ -215,6 +217,23 @@ def send_presenca_cameras(conf: dict, equipamentos: list) -> bool:
         return True
     except Exception as e:
         logging.error(f"Erro ao enviar presenca de cameras: {e}")
+        return False
+
+
+def send_status_olts(conf: dict, equipamentos: list) -> bool:
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/olt/status",
+            json={"equipamentos": equipamentos},
+            headers=headers,
+            timeout=60,
+            verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao enviar status das OLTs: {e}")
         return False
 
 

@@ -3,9 +3,11 @@ from typing import List, Optional, Any, Dict, Union, Literal
 from datetime import datetime
 from uuid import UUID
 import re
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from services.contas import TIPOS_CONTA
+from services.galeria_vms import com_nomes_da_galeria
+from services.segredos_config import mascarar_segredos, tem_segredos
 from services.senhas import validar_senha_nova
 
 
@@ -45,6 +47,24 @@ class NVRResponse(NVRBase):
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ajustes_de_exibicao(cls, data):
+        """Só exibição. Digifort: o painel mostra o nome que a câmera tem na Galeria (também no lugar do nome da pasta
+        de gravação), mesmo antes do próximo backup. Qualquer tipo: as senhas do config_extra nunca saem do servidor."""
+        if isinstance(data, dict):
+            return data
+        digifort = (getattr(data, "tipo", None) or "").upper() == "DIGIFORT"
+        config = getattr(data, "config_extra", None)
+        if not digifort and not tem_segredos(config):
+            return data
+        campos = {nome: getattr(data, nome, None) for nome in cls.model_fields}
+        campos["config_extra"] = mascarar_segredos(config)
+        if digifort:
+            campos["last_recording_status"] = com_nomes_da_galeria(
+                campos["last_recording_status"], list(getattr(data, "cameras_status", None) or []))
+        return campos
 
 
 # ─────────────────────────────────────────────
@@ -324,6 +344,15 @@ class EquipamentoPresenca(BaseModel):
 
 class PresencaCamerasReport(BaseModel):
     equipamentos: List[EquipamentoPresenca] = Field(default_factory=list, max_length=200)
+
+
+class EquipamentoStatusOlt(BaseModel):
+    nome: str
+    olts: List[Dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
+class StatusOltReport(BaseModel):
+    equipamentos: List[EquipamentoStatusOlt] = Field(default_factory=list, max_length=50)
 
 
 # ─────────────────────────────────────────────

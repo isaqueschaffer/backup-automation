@@ -56,6 +56,14 @@ export interface EquipamentoConfig {
   marca?: string;
   modelo?: string;
   porta_api?: number;
+  olts?: string;
+  telnet_usuario?: string;
+  telnet_senha_definida?: boolean;
+  telnet_enable_definida?: boolean;
+  nomes_db_host?: string;
+  nomes_db_usuario?: string;
+  nomes_db_nome?: string;
+  nomes_db_senha_definida?: boolean;
   [key: string]: unknown;
 }
 
@@ -74,6 +82,15 @@ export interface EqForm {
   caminho_log_csv?: string;
   pasta_gravacoes?: string;
   porta_api?: number | string;
+  olts?: string;
+  telnet_usuario?: string;
+  telnet_senha?: string;
+  telnet_enable?: string;
+  telnet_senha_definida?: boolean;
+  nomes_db_host?: string;
+  nomes_db_usuario?: string;
+  nomes_db_senha?: string;
+  nomes_db_senha_definida?: boolean;
   // Planilha das câmeras do Digifort lida no formulário (enviada à Galeria ao salvar)
   planilhaNova?: PlanilhaPendente | null;
   // Digifort já cadastrado: o que a Galeria do equipamento já tem (exigência satisfeita sem nova planilha)
@@ -382,3 +399,65 @@ export interface Usuario {
   criado_em: string;
 }
 
+
+// Status das OLTs de uma UNM2000, enviado pelo agente por SNMP (GET /machines/{id}/equipamentos/{id}/olt-status)
+export interface OltOnu {
+  indice: string;
+  slot: number | null;
+  pon: number | null;
+  onu?: number;
+  tipo?: string | null;
+  serial?: string | null;
+  nome?: string | null;
+  sinal_olt_dbm?: number;
+  sinal_onu_dbm?: number;
+  qualidade?: "BOM" | "RUIM" | null;
+  medido_em?: string;
+  estado: "ONLINE" | "OFFLINE" | "FALHA" | "SEM_ENERGIA" | "DESCONHECIDO";
+}
+
+export interface OltPonResumo {
+  slot: number | null;
+  pon: number | null;
+  total: number;
+  online: number;
+  offline: number;
+  falha: number;
+  sem_energia: number;
+  sinal_ruim?: number;
+}
+
+export interface OltPlaca {
+  slot: number | null;
+  tipo?: string | null;
+  hardware?: string | null;
+  software?: string | null;
+  status?: string | null;
+  portas?: number | null;
+  portas_livres?: number | null;
+  cpu_percent?: number | null;
+  memoria_percent?: number | null;
+}
+
+export interface OltStatus {
+  nome: string;
+  ip: string;
+  erro?: string;
+  coletado_em?: string;
+  firmware?: string | null;
+  hardware?: string | null;
+  modelo?: string | null;
+  controladora?: { slot: number; tipo?: string | null; software?: string | null } | null;
+  temperatura?: number | null;
+  total_onus_olt?: number | null;
+  totais?: { total: number; online: number; offline: number; falha: number; sem_energia: number; sinal_ruim?: number };
+  por_pon?: OltPonResumo[];
+  placas?: OltPlaca[];
+  interfaces_pon?: { nome: string; ativa: boolean }[];
+  onus?: OltOnu[];
+}
+
+export interface OltStatusResponse {
+  atualizado_em: string | null;
+  olts: OltStatus[];
+}

@@ -26,6 +26,7 @@ from schemas import (
     PingResponse,
     PingRequest,
     PresencaCamerasReport,
+    StatusOltReport,
     RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
 )
@@ -34,6 +35,7 @@ from services.agent_logs import podar_logs
 from services.crypto_service import decrypt
 from services.galeria_vms import (
     parear_cameras,
+    aprender_pastas,
     ips_compartilhados,
     bloqueada_por_ip_compartilhado,
 )
@@ -41,6 +43,7 @@ from services.storage_service import save_zip_stream, UploadTooLargeError, _sani
 from services.email_service import send_backup_report
 from services.backup_runs import attach_report_to_run, finish_queue_run
 from services.contas import maquina_bloqueada
+from services.segredos_config import config_extra_para_agente
 from services.camera_offline import aplicar_presenca, atualizar_presenca
 from config import settings
 
@@ -73,8 +76,13 @@ def _build_cameras_config(machine: Machine, nvr: NVR):
             "modelo": c.modelo or "Hikvision",
             "canal_rtsp": c.canal_rtsp,
             "ip_compartilhado": (c.ip or "").strip() in compartilhados,
+            "pasta_gravacao": c.pasta_gravacao,
         })
     if out:
+        return out
+    if (nvr.tipo or "").upper() == "DEFENSE":
+        # Sem câmeras na Galeria o agente descobre todas pela API do Defense; câmeras avulsas aqui
+        # fariam ele reportar só elas (e com o estado/gravação casado por IP de outra câmera)
         return out
     # Fallback: usa câmeras avulsas (tipo == "CAMERA") cadastradas na máquina
     machine_cams = [e for e in machine.equipamentos if (e.tipo or "").upper() == "CAMERA" and e.active and e.ip]
@@ -111,7 +119,7 @@ def get_agent_config(machine: Machine = Depends(get_current_machine), db: Sessio
                 ip=nvr.ip,
                 username=nvr.username,
                 password=decrypt(nvr.password),
-                config_extra=nvr.config_extra,
+                config_extra=config_extra_para_agente(nvr.config_extra),
                 cameras_config=_build_cameras_config(machine, nvr),
             )
             for nvr in machine.equipamentos if nvr.active
@@ -217,6 +225,7 @@ def _manter_imagem_noite(anterior, novo, por_nome=False):
     return saida
 
 
+BACKUP_TRAVADO_MIN = 120  # backup em andamento há mais que isso: o painel pode reiniciar o agente mesmo assim
 OFFSET_UTC_PADRAO_MIN = -180  # Brasília (UTC-3): agentes < 1.1.34 não informam o fuso
 
 
@@ -252,7 +261,13 @@ async def ping_agent(
     machine_id = machine.id
     machine_id_str = str(machine_id)
     # Agente >= 1.1.8 informa que está fazendo backup: o reinício espera ele terminar (senão o backup se perde)
-    em_backup = bool((body.telemetry or {}).get("backup_em_andamento")) if body else False
+    # Passadas BACKUP_TRAVADO_MIN minutos (agente >= 1.1.36 informa `backup_ha_min`), o backup é tratado como
+    # travado e deixa de segurar o reinício: senão um backup preso nunca liberaria o agente.
+    telemetria_ping = (body.telemetry or {}) if body else {}
+    em_backup = bool(telemetria_ping.get("backup_em_andamento"))
+    ha_min = telemetria_ping.get("backup_ha_min")
+    if em_backup and isinstance(ha_min, (int, float)) and not isinstance(ha_min, bool) and ha_min >= BACKUP_TRAVADO_MIN:
+        em_backup = False
 
     # Libera a conexão do pool durante a espera: o long-poll não pode segurar a sessão
     # do banco por vários segundos (esgotaria o pool com muitos agentes). A mesma
@@ -424,6 +439,28 @@ def receive_night_image(
     db.commit()
     return {"status": "ok"}
 
+@router.post("/olt/status")
+def receive_olt_status(
+    body: StatusOltReport,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Status periódico das OLTs de uma UNM2000 (ONUs, PONs, placas por SNMP)."""
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
+    atualizados = 0
+    for item in body.equipamentos:
+        nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == item.nome, NVR.active == True).first()
+        if not nvr or (nvr.tipo or "").upper() != "OLT":
+            continue
+        # Naive em UTC (REGRA-001)
+        nvr.olt_status = {"atualizado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "olts": item.olts}
+        atualizados += 1
+    db.commit()
+    return {"status": "ok", "atualizados": atualizados}
+
+
 @router.post("/cameras/status")
 def receive_cameras_status(
     body: PresencaCamerasReport,
@@ -501,6 +538,8 @@ def receive_backup_report(
                 )
                 novas = aplicar_presenca(anteriores, novas, server_finished_at, por_nome=vms)
                 nvr.last_recording_status = novas
+                if vms:
+                    aprender_pastas(list(nvr.cameras_status), novas)
                 if isinstance(r_dict.get("cameras"), list):
                     r_dict["cameras"] = [
                         {**orig, **{k: nova[k] for k in ("offline_desde", "offline_desde_aprox") if k in nova}}

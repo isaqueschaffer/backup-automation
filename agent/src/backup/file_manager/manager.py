@@ -56,6 +56,50 @@ def _gravacao_digifort(nome_cam: str, is_ok: bool, resumos, usadas: set) -> tupl
     return resumo["total_dias"], resumo["mapa"], resumo["dias_com_gravacao"], resumo["status_gravacao"], pasta
 
 
+def _cameras_pelas_pastas(resumos: dict, cameras_servidor: list, ping) -> tuple:
+    """Cameras do Digifort a partir das pastas de gravacao (nome da pasta = nome da camera), sem export/CSV.
+    A camera da Galeria vinculada a pasta (pelo vinculo salvo ou pelo nome) da o nome de exibicao e o IP; sem IP
+    nao ha ping e a comunicacao fica NAO_VERIFICADO. Cameras da Galeria sem pasta entram como NAO_VERIFICADO.
+    Retorna (status_cameras, cameras_para_captura)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from src.vms.digifort_gravacoes import vincular_cameras_as_pastas
+
+    por_pasta = vincular_cameras_as_pastas(cameras_servidor, resumos)
+    vinculadas = {id(c) for c in por_pasta.values()}
+    itens = [(pasta, resumos[pasta], por_pasta.get(pasta)) for pasta in resumos]
+    itens += [(None, None, c) for c in (cameras_servidor or []) if id(c) not in vinculadas]
+
+    ips = sorted({(c.get("ip") or "").strip() for _, _, c in itens if c and (c.get("ip") or "").strip()})
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        respostas = dict(zip(ips, pool.map(ping, ips)))
+
+    status_cameras, cameras_para_captura = [], []
+    for n, (pasta, resumo, cam) in enumerate(itens, start=1):
+        nome = (cam or {}).get("nome") or pasta
+        ip = ((cam or {}).get("ip") or "").strip()
+        online = respostas[ip] if ip else None
+        if resumo is None:
+            total_dias, mapa, dias, status_grav = 0, "", [], "NAO_VERIFICADO"
+        else:
+            total_dias, mapa, dias, status_grav = (
+                resumo["total_dias"], resumo["mapa"], resumo["dias_com_gravacao"], resumo["status_gravacao"])
+        status_cameras.append({
+            "canal": n,
+            "nome": nome,
+            "ip": ip or "N/A",
+            "online": online,
+            "status_comunicacao": "NAO_VERIFICADO" if online is None else "ONLINE" if online else "OFFLINE",
+            "status_gravacao": status_grav,
+            "pasta_gravacao": pasta,
+            "total_dias": total_dias,
+            "mapa": mapa,
+            "dias_com_gravacao": dias,
+        })
+        if ip and cam:
+            cameras_para_captura.append(cam)
+    return status_cameras, cameras_para_captura
+
+
 class FileManager:
     def __init__(self, check_hash: bool = True):
         self.copier = SafeCopier(check_hash=check_hash)
@@ -68,7 +112,7 @@ class FileManager:
         if (equipamento.get("tipo") or "").upper() == "DIGIFORT" and resultado.get("cameras") is None:
             try:
                 pasta_destino.mkdir(parents=True, exist_ok=True)
-                # A imagem da noite continua so no backup novo (RTSP em todas as cameras e pesado)
+                # A imagem da noite no backup agendado foi desativada (captura sob demanda pela Galeria do painel)
                 resultado["cameras"] = self._status_cameras_digifort(
                     equipamento, pasta_destino, conf, [], capturar_imagens=False)
             except Exception:
@@ -166,38 +210,8 @@ class FileManager:
             arquivos_copiados.append(destino.name)
 
         status_cameras = None
-        if equipamento.get("tipo", "").upper() == "DIGIFORT":
-            status_cameras = self._status_cameras_digifort(equipamento, pasta_eq, conf, arquivos_copiados)
-        elif equipamento.get("tipo", "").upper() == "DEFENSE":
-            logging.info("  [DEFENSE] Buscando status de gravacoes via Webhook CSV...")
-            try:
-                from src.application.webhook_defense import get_status_cameras_defense
-                
-                cfg_ext = equipamento.get("config_extra", {})
-                caminho_log = cfg_ext.get("pasta_origem", "")
-                
-                status_dict = get_status_cameras_defense(caminho_log)
-                if status_dict:
-                    status_cameras = []
-                    for nome_cam, st in status_dict.items():
-                        is_ok = (st == "OK")
-                        total_dias, mapa_str, dias_gravados = _gerar_mapa_vms(is_ok)
-                        status_cameras.append({
-                            "canal": "N/A",
-                            "nome": nome_cam,
-                            "ip": "N/A",
-                            "online": is_ok,
-                            "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
-                            "status_gravacao": "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO",
-                            "total_dias": total_dias,
-                            "mapa": mapa_str,
-                            "dias_com_gravacao": dias_gravados,
-                        })
-                    logging.info("  [DEFENSE] Status das cameras obtido com sucesso via Webhook.")
-                else:
-                    logging.info("  [DEFENSE] Nenhum status de camera encontrado no arquivo do Webhook.")
-            except Exception as e:
-                logging.warning(f"  [DEFENSE] Falha ao processar status do Webhook: {e}")
+        if (equipamento.get("tipo") or "").upper() == "DIGIFORT":
+            status_cameras = self._status_cameras_digifort(equipamento, pasta_eq, conf, arquivos_copiados, capturar_imagens=False)
 
         logging.info(f"  Backup processado com sucesso. Arquivos: {', '.join(arquivos_copiados)}")
 
@@ -224,6 +238,25 @@ class FileManager:
             cfg_ext = equipamento.get("config_extra", {})
             caminho_export = cfg_ext.get("caminho_csv", "")
             caminho_log = cfg_ext.get("caminho_log_csv", "")
+
+            # Com a pasta de gravacoes configurada, as cameras e o status vem das pastas (sem export/CSV de quedas)
+            resumos_pastas = _resumos_gravacao_digifort(cfg_ext.get("pasta_gravacoes", ""))
+            if resumos_pastas:
+                status_cameras, cameras_para_captura = _cameras_pelas_pastas(
+                    resumos_pastas, equipamento.get("cameras_config") or [], ping_camera)
+                sem_pasta = [c["nome"] for c in status_cameras if c["pasta_gravacao"] is None]
+                if sem_pasta:
+                    logging.warning(f"  [DIGIFORT] Camera(s) da Galeria sem pasta de gravacao: {', '.join(sem_pasta[:10])}")
+                logging.info(f"  [DIGIFORT] {len(status_cameras)} camera(s) lidas das pastas de gravacao.")
+                if capturar_imagens and cameras_para_captura and conf is not None:
+                    from src.camera.rtsp_client import capturar_imagens_noite_vms
+                    capturar_imagens_noite_vms(nome_original, cameras_para_captura, conf)
+                    por_nome = {(c.get("nome") or "").strip().lower(): c for c in cameras_para_captura}
+                    for st in status_cameras:
+                        cap = por_nome.get((st["nome"] or "").strip().lower())
+                        if cap and "imagem_noite" in cap:
+                            st["imagem_noite"] = cap["imagem_noite"]
+                return status_cameras
 
             # Câmeras detectadas localmente (export_cameras.csv): canal 1..N, nome, ip, status.
             # Câmeras configuradas na Galeria do servidor: ip/usuário/senha/modelo por nome.

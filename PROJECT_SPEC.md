@@ -273,6 +273,7 @@ trilan-nvr-backup-automation/
 | config_extra | JSON | dict | NULL | — |
 | last_recording_status | JSON | list | NULL | — |
 | last_telemetry_status | JSON | dict | NULL | — |
+| olt_status | JSON | dict | NULL | OLT UNM2000: `{"atualizado_em", "olts": [...]}` enviado pelo agente a cada 5 min (Telnet) |
 | active | BOOLEAN | bool | NOT NULL | TRUE |
 | updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | NOW() |
 
@@ -288,11 +289,12 @@ trilan-nvr-backup-automation/
 | password | TEXT | str | NULL | Fernet quando preenchida (REGRA-004) |
 | modelo | VARCHAR(50) | str | NULL | Hikvision, Intelbras, Grandstream, ONVIF, Motorola |
 | canal_rtsp | INTEGER | int | NULL | Canal da câmera dentro do equipamento do IP; obrigatório na prática quando o mesmo IP é usado por 2 ou mais câmeras da Galeria (gravador/encoder com vários canais) |
+| pasta_gravacao | VARCHAR(255) | str | NULL | DIGIFORT: pasta de gravação da câmera (chave do vínculo; aprendida pelo nome igual no relatório; a câmera pode ser renomeada depois) |
 | perfect_image_base64 | TEXT | str | NULL | Imagem de referência |
 | night_image_base64 / night_image_date | TEXT / TIMESTAMP WITHOUT TIME ZONE | str / datetime naive | NULL | Imagem da noite e data |
 | updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | utcnow() |
 
-A tabela nasce por `Base.metadata.create_all` (`main.py`); as colunas `ip`, `username`, `password`, `modelo` e `canal_rtsp` vêm da migração inline.
+A tabela nasce por `Base.metadata.create_all` (`main.py`); as colunas `ip`, `username`, `password`, `modelo`, `canal_rtsp` e `pasta_gravacao` vêm da migração inline.
 
 #### `nvr_planilhas` (última planilha importada na Galeria de um equipamento DIGIFORT/DEFENSE; model `NVRPlanilha`)
 
@@ -662,6 +664,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera). Com `OTA_PILOTO_MAQUINAS` preenchido, só essas máquinas recebem. Para `current_version` < 1.1.35, `version` leva também os comandos que encerram o processo antigo (ver changelog de 30/10/2026) |
 | POST | `/api/v1/agent/rtsp-result` | Agente devolve o resultado da tarefa RTSP do dashboard |
 | POST | `/api/v1/agent/nvr-cameras/night-image` | Agente envia a imagem da noite de um canal |
+| POST | `/api/v1/agent/olt/status` | Agente (>= 1.1.38) envia o status das OLTs das UNM2000 da máquina: `{"equipamentos": [{"nome", "olts": [...]}]}` (até 50 equipamentos e 100 OLTs); grava `nvrs.olt_status` só em equipamento OLT ativo DA máquina; 403 com conta bloqueada |
 
 ### Endpoints de Admin (Bearer Token)
 
@@ -691,6 +694,7 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 | GET/PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{eq_id}` | Gerenciar equipamento |
 | POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/test-rtsp` | Tarefa RTSP via agente (409 se já houver uma pendente) |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras` | Galeria do NVR (une `nvr_cameras` + `last_recording_status`) |
+| GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/olt-status` | Último status das OLTs/ONUs de uma UNM2000 (`olt_status`; vazio `{"atualizado_em": null, "olts": []}` se ainda não chegou) |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/perfect-image` | Salvar imagem de referência |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/import` | Importar câmeras para a galeria (lista `cameras` lida do CSV/XLSX pelo painel) ou, com `sync_from_machine=true`, copiar as câmeras avulsas (tipo `CAMERA`) da máquina |
 | PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/{canal}` | Editar / remover uma câmera da galeria (DIGIFORT e DEFENSE) |
@@ -1077,6 +1081,27 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-04] — Agente 1.1.38: merge com a Helena (status das OLTs UNM2000, backup travado, Digifort por pasta, Defense, imagem da noite dos VMS)
+
+**Incorporado (ramo `helena`, até `a0a5577`):**
+1. **Status das OLTs FiberHome da UNM2000 (agente e painel):** nova thread `_olt_loop` (a cada 300 s) consulta por Telnet (porta 23) cada OLT listada em `config_extra.olts` (um IP por linha ou `Nome=IP`) com `telnet_usuario`/`telnet_senha`/`telnet_enable` (`agent/src/olt/unm_telnet.py`). Só comandos de leitura (`dir`, `show version`, `show onu_state`, `show authorization`, `show optic_module`, `show onu active-state all`, `show onu optical-info`, `show card`; `config`/`interface pon`/`exit` só navegam): estado de cada ONU, totais por PON, placas/firmware e sinal óptico (rodízio de até 150 s por ciclo; BOM acima de -25,9 dBm, mesmo corte do Zabbix). Duas famílias de CLI (clássica V104 / AN5516 e `config` V105 / AN6000-AN6001). Nomes das ONUs lidos (só `SELECT`) do MySQL da UNM2000 (`t_ontdevice`, `nomes_db_*` no `config_extra`; nova dependência `pymysql`). Envio por `POST /api/v1/agent/olt/status` → `nvrs.olt_status` (migração inline); painel: `GET .../equipamentos/{id}/olt-status` e `OltStatusModal`.
+2. **Senhas dentro do `config_extra` (`services/segredos_config.py`):** `telnet_senha`, `telnet_enable` e `nomes_db_senha` ficam em Fernet (`<campo>_enc`); o painel recebe só `<campo>_definida` (o `NVRResponse` mascara) e campo em branco ao editar mantém a senha; o agente recebe em texto pelo `/agent/config` (`config_extra_para_agente`).
+3. **Backup travado:** cada equipamento roda com limite de 2 h (`_executar_com_limite`; passado o limite vira ERRO e o backup segue); o vigia (`_vigia_backup_loop`) reinicia o serviço com backup em andamento há 6 h; o ping passa `backup_ha_min` e o servidor deixa o reinício pelo painel passar quando o backup está há 120 min ou mais (`BACKUP_TRAVADO_MIN`), e o agente então se reinicia à força. `threads_iniciadas` impede threads duplicadas quando o `_run_loop` roda de novo. Equipamento com exceção inesperada vira ERRO em vez de derrubar o backup.
+4. **Digifort:** `nvr_cameras.pasta_gravacao` (migração inline) é a chave do vínculo câmera × pasta: aprendida no relatório quando o nome é igual (`aprender_pastas`), passada ao agente em `cameras_config` e usada primeiro no pareamento; a câmera pode ser renomeada na Galeria sem perder o histórico, e o painel mostra o nome da Galeria. Câmera sem IP para o ping sai com comunicação `NAO_VERIFICADO` (não é queda).
+5. **Defense:** gravações pela API (`/brms/api/v1.0/SS/Record/QueryRecords`, só consulta); sem câmeras na Galeria o agente descobre todas pela API (o servidor não manda mais as câmeras avulsas da máquina como fallback para DEFENSE).
+6. **Imagem da noite das câmeras DIGIFORT/DEFENSE:** thread `_noite_loop` captura ao vivo (RTSP) na janela 19h30–4h, uma vez por noite e por câmera, repetindo as falhas a cada 30 min; o horário da captura ao vivo vai em UTC naive (antes ia a hora local e o painel deslocava).
+7. Bandeja: o monitor do serviço é encerrado e recriado junto com o ícone ao reiniciar após erro. SHA-256 em blocos de 1 MB. `legacy/fiberhome_onu_discovery_name.py` (script original do Zabbix) entra e `legacy/digifort_snmp.py` sai.
+**Bloqueado/ajustado no merge:**
+- `legacy/fiberhome_onu_discovery_name.py` trazia usuário e senha do MySQL da UNM2000 fixos no código: passam a vir de `UNM_DB_USER`/`UNM_DB_PASS`. **A senha continua no histórico do ramo `helena` do repositório público: trocar a senha do usuário `zabbix_reader`.**
+- REGRA-001: `datetime.now(timezone.utc).replace(tzinfo=None)` em `unm_telnet.py` e `rtsp_client.py` virou `datetime.utcnow()` (mesmo valor, padrão do projeto).
+- O limite de tempo roda o equipamento em outra thread e o nome do equipamento do log remoto é por thread: `_executar_com_limite` repassa o contexto (senão os logs do backup perdiam o equipamento no painel).
+- E-mail: com a regra nova de `NAO_VERIFICADO`, o "Resultado do Serviço" e os anexos de câmeras offline passam a seguir o mesmo critério da seção de câmeras (não conta como queda; só a falta de gravação conta).
+- Restaurado um comentário apagado em `tray.py`.
+**Atenção:** o `NVRResponse` de equipamento DIGIFORT carrega as câmeras da Galeria (com as imagens base64) para trocar os nomes; a listagem de equipamentos de máquina com Digifort grande fica mais pesada. A coleta das OLTs consulta o `/agent/config` a cada 5 min em toda máquina (mesmo sem OLT).
+**Arquivos:** agent/service.py, agent/tray.py, agent/requirements.txt, agent/src/application/{api_client.py, backup_job.py, captura_noite_vms.py, estado.py, status_olt.py, webhook_digifort.py, updater.py}, agent/src/olt/{unm_telnet.py, unm_nomes.py}, agent/src/vms/{defense.py, digifort_gravacoes.py}, agent/src/backup/file_manager/{manager.py, copier.py}, agent/src/camera/rtsp_client.py, agent/installer.iss, agent/tests/*, server/api/{main.py, models.py, schemas.py}, server/api/routers/{agent.py, equipamentos.py}, server/api/services/{email_service.py, galeria_vms.py, segredos_config.py}, server/api/tests/*, server/dashboard/src/**, server/dashboard/package.json, legacy/*, PROJECT_SPEC.md.
+**Breaking Change:** Não (colunas novas anuláveis; agentes antigos não enviam `backup_ha_min` nem status de OLT).
+**Branch:** isaque
 
 ### [2026-11-04] — E-mail do relatório seletivo: só os equipamentos que o cliente possui
 

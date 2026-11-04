@@ -61,6 +61,38 @@ def bloqueada_por_ip_compartilhado(camera, cameras_db: list) -> bool:
     return bool(ip and ip in ips_compartilhados(cameras_db) and canal_rtsp is None)
 
 
+def aprender_pastas(cameras_db: list, relatorio: list) -> int:
+    """Grava `pasta_gravacao` nas câmeras da Galeria que casam por nome igual com uma entrada do relatório que
+    informa a pasta. Depois disso o vínculo é pela pasta e a câmera pode ser renomeada sem perder a gravação.
+    Só nome igual: pareamento por IP ou nome parecido poderia gravar o vínculo errado, e ele fica."""
+    gravadas = 0
+    for _, st, c, _ in parear_cameras(cameras_db, relatorio):
+        pasta = ((st or {}).get("pasta_gravacao") or "").strip()
+        if c is None or not pasta or (getattr(c, "pasta_gravacao", None) or "").strip():
+            continue
+        if _norm(c.nome) == _norm(st.get("nome")):
+            c.pasta_gravacao = pasta
+            gravadas += 1
+    return gravadas
+
+
+def com_nomes_da_galeria(relatorio, cameras_db: list):
+    """Cópia do relatório do agente com o nome da Galeria no lugar do nome de cada câmera pareada e, onde o agente
+    informou a pasta de gravação, o mesmo nome também em `pasta_gravacao`. Só para exibição: o vínculo real com a
+    pasta (coluna `pasta_gravacao` da Galeria) e o relatório gravado não mudam."""
+    if not isinstance(relatorio, list) or not cameras_db:
+        return relatorio
+    saida = list(relatorio)
+    for i, st, c, _ in parear_cameras(cameras_db, relatorio):
+        if i is None or c is None or not (c.nome or "").strip():
+            continue
+        novo = {**st, "nome": c.nome}
+        if st.get("pasta_gravacao"):
+            novo["pasta_gravacao"] = c.nome
+        saida[i] = novo
+    return saida
+
+
 def parear_cameras(cameras_db: list, relatorio: list) -> List[Tuple[Optional[int], Optional[dict], Optional[object], int]]:
     """Pareia as câmeras do relatório do agente com as da Galeria.
 
@@ -84,6 +116,8 @@ def parear_cameras(cameras_db: list, relatorio: list) -> List[Tuple[Optional[int
                     usadas.add(c.id)
                     break
 
+    # Passada 0: pasta de gravação (Digifort). É a chave do vínculo: vale mesmo se a câmera foi renomeada na Galeria
+    passada(lambda st, c: bool(_norm(st.get("pasta_gravacao"))) and _norm(getattr(c, "pasta_gravacao", None)) == _norm(st.get("pasta_gravacao")))
     passada(lambda st, c: bool(_norm(st.get("nome"))) and _norm(c.nome) == _norm(st.get("nome")))
 
     # Passada 2: pareamento por IP apenas quando houver EXATAMENTE UMA câmera não usada com aquele IP

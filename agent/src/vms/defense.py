@@ -15,6 +15,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from src.core.config import parse_config_extra
 
+# Tipos de dispositivo na árvore do Defense (campo `type`): 2 = câmera IP, 1/6 = DVR/NVR, 16 = controle de acesso
+DEVICE_TYPES_GRAVADOR = {"1", "6"}
+DEVICE_TYPE_ACESSO = "16"
+DEVICE_CATEGORY_ACESSO = "8"
+
 
 def calcular_assinatura_defense(username: str, password: str, realm: str, random_key: str) -> str:
     """
@@ -53,6 +58,17 @@ def extrair_cameras_defense_tree(devices: list) -> list:
         if not isinstance(units, list):
             units = []
 
+        # Só câmeras: controle de acesso (leitor facial, type 16 / category 8) não é câmera, mesmo
+        # trazendo um canal de vídeo (BSC1/BSC2)
+        if (
+            str(dev.get("type", "")) == DEVICE_TYPE_ACESSO
+            or str(dev.get("category", "")) == DEVICE_CATEGORY_ACESSO
+            or any(isinstance(u, dict) and u.get("accessControl") for u in units)
+        ):
+            continue
+        # DVR/NVR gravam várias câmeras: o nome do equipamento sozinho não identifica o canal
+        eh_gravador = str(dev.get("type", "")) in DEVICE_TYPES_GRAVADOR
+
         # Fallback defensivo caso channels venha no nível raiz do dispositivo
         if not units and "channels" in dev and isinstance(dev.get("channels"), list):
             units = [{"channels": dev.get("channels"), "unitType": "1"}]
@@ -72,7 +88,8 @@ def extrair_cameras_defense_tree(devices: list) -> list:
                 continue
 
             for ch in channels:
-                if isinstance(ch, dict):
+                # channelType 1 = vídeo; outros valores (alarme, porta...) não são câmeras
+                if isinstance(ch, dict) and str(ch.get("channelType", "1")) == "1":
                     channels_validos.append(ch)
 
         total_canais_dev = len(channels_validos)
@@ -89,9 +106,10 @@ def extrair_cameras_defense_tree(devices: list) -> list:
             # 1. Se o dispositivo tem canal único e possui dev_name (ex: "LATERAL TERRENO"), prioriza dev_name
             # 2. Se o dispositivo tem múltiplos canais (ex: DVR-CATANDUVA), compõe "dev_name - raw_ch_name"
             #    (nunca substitui apenas por dev_name para evitar colisão entre múltiplos canais do DVR)
-            if total_canais_dev <= 1 and dev_name:
+            canal_unico = total_canais_dev <= 1 and not eh_gravador
+            if canal_unico and dev_name:
                 nome_final = dev_name
-            elif total_canais_dev > 1 and dev_name:
+            elif dev_name:
                 if dev_name.lower() not in raw_ch_name.lower():
                     nome_final = f"{dev_name} - {raw_ch_name}"
                 else:
@@ -109,7 +127,7 @@ def extrair_cameras_defense_tree(devices: list) -> list:
                 "status_comunicacao": "ONLINE" if is_online else "OFFLINE",
                 "dev_name": dev_name,
                 "canal_nome_original": raw_ch_name,
-                "is_single_channel": (total_canais_dev <= 1),
+                "is_single_channel": canal_unico,
             })
             canal_idx += 1
 
@@ -130,20 +148,21 @@ def consultar_gravacoes_defense_api(
       - dias_com_gravacao: lista de datas 'YYYY-MM-DD'
       - total_dias: contagem de dias com gravação
       - mapa: string de 15 caracteres ('█' gravado, '░' sem gravação)
-      - status_gravacao: 'COM_GRAVACAO' ou 'SEM_GRAVACAO'
+      - status_gravacao: 'COM_GRAVACAO' (gravou HOJE, como no NVR), 'SEM_GRAVACAO' (resposta válida e
+        nada hoje) ou 'NAO_VERIFICADO' (HTTP diferente de 200, JSON inválido, erro de rede ou canal sem código)
     """
-    import time
-    from concurrent.futures import ThreadPoolExecutor
-
     if not base_url or not token or not lista_cameras:
         return {}
 
     hoje = datetime.now().date()
+    hoje_str = hoje.strftime("%Y-%m-%d")
     dias_ord = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(dias_historico - 1, -1, -1)]
     inicio_dt = datetime.combine(hoje - timedelta(days=dias_historico - 1), datetime.min.time())
     fim_dt = datetime.combine(hoje, datetime.max.time())
     inicio = int(inicio_dt.timestamp())
     agora = int(fim_dt.timestamp())
+    tamanho_pagina = 1000  # o servidor limita cada página a 256 registros e informa `pageCount`
+    max_paginas = 80
 
     headers = {
         "Content-Type": "application/json",
@@ -154,54 +173,112 @@ def consultar_gravacoes_defense_api(
     session = requests.Session()
     session.verify = False
 
-    def _consultar_uma_camera(cam: dict) -> dict:
-        ch_id = cam.get("codigo")
-        if not ch_id:
-            return {
-                "cam": cam,
-                "total_dias": 0,
-                "mapa": "░" * dias_historico,
-                "dias_com_gravacao": [],
-                "status_gravacao": "SEM_GRAVACAO",
-            }
+    nao_verificado = {"total_dias": 0, "mapa": "", "dias_com_gravacao": [], "status_gravacao": "NAO_VERIFICADO"}
 
+    def _pagina(ch_id: str, ini: int, fim: int, pagina: int):
+        """(registros, pageCount) de uma página; None = falha (HTTP diferente de 200 ou resposta sem `data`).
+        JSON inválido levanta ValueError."""
         payload = {
             "data": {
                 "channelId": ch_id,
-                "startTime": str(inicio),
-                "endTime": str(agora),
+                "startTime": str(ini),
+                "endTime": str(fim),
                 "streamType": "1",
                 "recordType": "0",
                 "recordSource": "3",  # 3 = Servidor de armazenamento central (SS)
-                "page": "1",
-                "pageSize": "1000",
+                "page": str(pagina),
+                "pageSize": str(tamanho_pagina),
             }
         }
+        resp = session.post(
+            f"{base_url}/brms/api/v1.0/SS/Record/QueryRecords",
+            json=payload,
+            headers=headers,
+            timeout=timeout,
+        )
+        if resp.status_code != 200:
+            return None
+        corpo = resp.json()
+        data = corpo.get("data") if isinstance(corpo, dict) else None
+        if not isinstance(data, dict):
+            return None
+        records = data.get("records") or []
+        if not isinstance(records, list):
+            return None
         try:
-            resp = session.post(
-                f"{base_url}/brms/api/v1.0/SS/Record/QueryRecords",
-                json=payload,
-                headers=headers,
-                timeout=timeout,
-            )
-            data = resp.json().get("data") if resp.status_code == 200 else {}
-            records = (data.get("records") if isinstance(data, dict) else []) or []
+            total_paginas = int(data.get("pageCount") or 1)
+        except (ValueError, TypeError):
+            total_paginas = 1
+        return records, total_paginas
 
-            dias_grav = set()
-            for rec in records:
-                if not isinstance(rec, dict):
+    def _buscar_registros(ch_id: str, ini: int, fim: int):
+        """Registros de gravação do canal entre `ini` e `fim` (timestamps), lendo TODAS as páginas.
+        O Defense guarda um cursor de consulta por usuário: enquanto as páginas de uma consulta não são lidas até
+        o fim, outra consulta (outro canal ou período) recebe o mesmo resultado. Por isso a leitura é sequencial,
+        completa, e o resultado de outro canal é descartado e refeito.
+        None = falha; JSON inválido levanta ValueError."""
+        for _ in range(3):
+            todos, total_paginas, pagina, de_outro_canal = [], 1, 1, False
+            while pagina <= min(total_paginas, max_paginas):
+                ret = _pagina(ch_id, ini, fim, pagina)
+                if ret is None:
+                    return None
+                records, total_paginas = ret
+                for rec in records:
+                    if isinstance(rec, dict) and rec.get("channelId") not in (None, ch_id):
+                        de_outro_canal = True
+                    else:
+                        todos.append(rec)
+                pagina += 1
+            if not de_outro_canal:
+                return todos
+        return None
+
+    def _timestamp(valor):
+        """Segundos (aceita string e milissegundos); None se inválido."""
+        try:
+            ts = int(float(valor))
+        except (ValueError, TypeError):
+            return None
+        if ts > 1e11:  # Timestamp em milissegundos
+            ts = int(ts / 1000)
+        return ts if ts > 0 else None
+
+    def _dias_dos_registros(records: list) -> set:
+        """Dias cobertos pelos registros. Um arquivo pode atravessar dias (câmeras que gravam um arquivo contínuo
+        de 24 h, das 13:00 às 13:00), então vale do dia de `startTime` ao de `endTime`, não só o de início."""
+        dias = set()
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            try:
+                st = _timestamp(rec.get("startTime"))
+                if st is None:
                     continue
-                try:
-                    raw_st = rec.get("startTime")
-                    if raw_st is None:
-                        continue
-                    st = int(float(raw_st))
-                    if st > 1e11:  # Timestamp em milissegundos
-                        st = int(st / 1000)
-                    if st > 0:
-                        dias_grav.add(datetime.fromtimestamp(st).strftime("%Y-%m-%d"))
-                except (ValueError, TypeError, OSError):
-                    continue
+                fim = _timestamp(rec.get("endTime"))
+                if fim is None or fim < st:
+                    fim = st
+                dia = datetime.fromtimestamp(st).date()
+                ultimo = min(datetime.fromtimestamp(fim).date(), hoje)
+                while dia <= ultimo:
+                    dias.add(dia.strftime("%Y-%m-%d"))
+                    dia += timedelta(days=1)
+            except (ValueError, TypeError, OSError, OverflowError):
+                continue
+        return dias
+
+    def _consultar_uma_camera(cam: dict) -> dict:
+        ch_id = cam.get("codigo")
+        if not ch_id:
+            # Sem o código do canal não há como consultar: não dá para afirmar "sem gravação"
+            return {"cam": cam, **nao_verificado}
+
+        try:
+            records = _buscar_registros(ch_id, inicio, agora)
+            if records is None:
+                return {"cam": cam, **nao_verificado}
+            dias_grav = _dias_dos_registros(records)
+            status_hoje = None
 
             dias_na_janela = dias_grav.intersection(set(dias_ord))
             total = len(dias_na_janela)
@@ -211,21 +288,16 @@ def consultar_gravacoes_defense_api(
                 "total_dias": total,
                 "mapa": mapa,
                 "dias_com_gravacao": [d for d in dias_ord if d in dias_grav],
-                "status_gravacao": "COM_GRAVACAO" if total > 0 else "SEM_GRAVACAO",
+                # Mesma regra do NVR (factory.py): COM_GRAVACAO só se hoje está entre os dias com gravação
+                "status_gravacao": status_hoje or ("COM_GRAVACAO" if hoje_str in dias_grav else "SEM_GRAVACAO"),
             }
         except Exception as e:
             logging.debug(f"  [DEFENSE] Falha ao consultar gravações para {ch_id}: {e}")
-            return {
-                "cam": cam,
-                "total_dias": 0,
-                "mapa": "░" * dias_historico,
-                "dias_com_gravacao": [],
-                "status_gravacao": "SEM_GRAVACAO",
-            }
+            return {"cam": cam, **nao_verificado}
 
     try:
-        with ThreadPoolExecutor(max_workers=6) as executor:
-            resultados = list(executor.map(_consultar_uma_camera, lista_cameras))
+        # Sequencial de propósito: consultas paralelas dividem o cursor do usuário no Defense e trocam os resultados
+        resultados = [_consultar_uma_camera(cam) for cam in lista_cameras]
     finally:
         session.close()
 
@@ -268,13 +340,15 @@ def consultar_status_cameras_defense_api(
     username: str,
     password: str,
     porta_api: int = 4433,
-    timeout: int = 10
+    timeout: int = 10,
+    incluir_gravacoes: bool = True
 ) -> tuple[dict, list, dict]:
     """
     Consulta o status em tempo real e o histórico de gravações das câmeras na API REST nativa do Intelbras Defense IA (BRMS porta 4433 HTTPS).
     Retorna (status_dict, lista_cameras, gravacoes_map).
     status_dict contém chaves por {nome: is_ok, dev_name: is_ok, ip: is_ok}.
-    gravacoes_map contém histórico dia a dia por canal/IP/nome.
+    gravacoes_map contém histórico dia a dia por canal/IP/nome ({} com incluir_gravacoes=False: só o estado
+    das câmeras, usado pela presença a cada 5 min).
     Em caso de falha de conexão, credenciais inválidas ou timeout, registra aviso e retorna ({}, [], {}).
     """
     if not ip or not username or not password:
@@ -403,6 +477,11 @@ def consultar_status_cameras_defense_api(
                 if ip_cam and ip_cam != "N/A":
                     status_dict[ip_cam] = is_ok
 
+        if not incluir_gravacoes:
+            # Presença (a cada 5 min): só o estado das câmeras, sem consultar gravações e sem poluir o log
+            logging.debug(f"  [DEFENSE] Estado de {len(lista_cameras)} câmera(s) lido pela API em {ip}:{porta_api}.")
+            return status_dict, lista_cameras, {}
+
         # Etapa 4: Consulta paralela de gravações dia a dia via Storage Server
         gravacoes_map = consultar_gravacoes_defense_api(base_url, token, lista_cameras, dias_historico=15)
 
@@ -430,15 +509,9 @@ def consultar_status_cameras_defense_api(
         session.close()
 
 
-def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list:
-    """
-    Monta o status das câmeras (canal 1..N):
-    1. Tenta consultar a API nativa do Defense IA (BRMS HTTPS) para status online e histórico de gravações.
-    2. Se cameras_config da Galeria existir: cruza com os status e gravações obtidos na API.
-    3. Se cameras_config não existir mas a API retornou câmeras: usa diretamente as câmeras da API.
-    4. Fallback legado: se a API estiver inacessível, cruza cameras_config com o Webhook CSV.
-    5. Captura imagem da noite via RTSP se conf for fornecido e a câmera possuir senha individual cadastrada.
-    """
+def _consultar_api_defense(equipamento: dict, incluir_gravacoes: bool = True) -> tuple:
+    """(status_dict, cameras_api, gravacoes_map) da API do Defense IA com as credenciais do equipamento.
+    Sem senha cadastrada não consulta: ({}, [], {})."""
     config_extra = parse_config_extra(equipamento)
     ip = equipamento.get("ip", "127.0.0.1")
     username = equipamento.get("username", "system")
@@ -447,34 +520,33 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
         porta_api = int(config_extra.get("porta_api") or 4433)
     except (ValueError, TypeError):
         porta_api = 4433
-    cameras_config = equipamento.get("cameras_config") or []
 
-    # Consulta à API REST BRMS se houver senha cadastrada
     status_dict, cameras_api, gravacoes_map = {}, [], {}
     if password:
         ret = consultar_status_cameras_defense_api(
-            ip=ip, username=username, password=password, porta_api=porta_api
+            ip=ip, username=username, password=password, porta_api=porta_api,
+            incluir_gravacoes=incluir_gravacoes,
         )
         if len(ret) == 3:
             status_dict, cameras_api, gravacoes_map = ret
         elif len(ret) == 2:
             status_dict, cameras_api = ret
+    return status_dict, cameras_api, gravacoes_map
 
-    hoje = datetime.now().date()
-    dias_15_ord = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(14, -1, -1)]
 
-    status_cameras = []
-    cameras_para_captura = []
-
+def _casar_cameras_defense(cameras_config: list, status_dict: dict, cameras_api: list) -> list:
+    """Câmeras do DEFENSE com o estado online já casado, com os nomes que o backup grava em
+    `nvr.last_recording_status` (o servidor casa a presença por nome):
+    1. cameras_config da Galeria primeiro: estado na API por nome exato, minúsculo ou IP; câmera fora da API
+       (que respondeu) = offline;
+    2. senão, as câmeras descobertas pela API.
+    `online` None = API sem resposta (o chamador decide o plano B). Itens: {canal, nome, ip, codigo, online, cam}."""
+    casadas = []
     if cameras_config:
-        # Caso 1: Galeria possui câmeras cadastradas pelo usuário
-        status_webhook = None
         for idx, cam in enumerate(cameras_config, start=1):
             canal = cam.get("canal") or idx
             nome_cam = cam.get("nome") or f"Camera {canal}"
             ip_cam = cam.get("ip") or "N/A"
-
-            # Busca status na API (por nome exato, minúsculo ou IP)
             is_ok = None
             if status_dict:
                 is_ok = status_dict.get(nome_cam)
@@ -482,106 +554,118 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
                     is_ok = status_dict.get(nome_cam.lower())
                 if is_ok is None and ip_cam != "N/A":
                     is_ok = status_dict.get(ip_cam)
-
-            # Fallback para webhook CSV legado se a API estava inacessível
-            if is_ok is None:
-                if not status_dict:
-                    if status_webhook is None:
-                        try:
-                            from src.application.webhook_defense import get_status_cameras_defense
-                            caminho_log = config_extra.get("pasta_origem", "")
-                            status_webhook = get_status_cameras_defense(caminho_log)
-                        except Exception:
-                            status_webhook = {}
-                    is_ok = status_webhook.get(nome_cam, "OK") == "OK"
-                else:
+                if is_ok is None:
                     # A API respondeu com sucesso, mas a câmera não está cadastrada no Defense IA
                     is_ok = False
-
-            # Busca dados reais de gravação na API
-            info_grav = gravacoes_map.get(nome_cam) or gravacoes_map.get(nome_cam.lower()) or (gravacoes_map.get(ip_cam) if ip_cam != "N/A" else None)
-            if info_grav:
-                total_dias = info_grav["total_dias"]
-                mapa = info_grav["mapa"]
-                dias_grav = info_grav["dias_com_gravacao"]
-                status_grav = info_grav["status_gravacao"]
-            else:
-                total_dias = 15 if is_ok else 0
-                mapa = ("█" * 15) if is_ok else ("░" * 15)
-                dias_grav = dias_15_ord if is_ok else []
-                status_grav = "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO"
-
-            status_cameras.append({
-                "canal": canal,
-                "nome": nome_cam,
-                "ip": ip_cam,
-                "online": is_ok,
-                "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
-                "status_gravacao": status_grav,
-                "total_dias": total_dias,
-                "mapa": mapa,
-                "dias_com_gravacao": dias_grav,
-            })
-            if cam.get("password"):
-                cameras_para_captura.append({**cam, "canal": canal, "nome": nome_cam})
-
-    elif cameras_api:
-        # Caso 2: Galeria vazia, mas a API descobriu câmeras dinamicamente
-        for cam in cameras_api:
-            canal = cam.get("canal")
-            nome_cam = cam.get("nome")
-            ip_cam = cam.get("ip") or "N/A"
-            ch_code = cam.get("codigo") or ""
-            is_ok = cam.get("online", False)
-
-            # Busca dados reais de gravação na API
-            info_grav = (
-                gravacoes_map.get(ch_code)
-                or gravacoes_map.get(nome_cam)
-                or gravacoes_map.get(nome_cam.lower())
-                or (gravacoes_map.get(ip_cam) if ip_cam != "N/A" else None)
-            )
-            if info_grav:
-                total_dias = info_grav["total_dias"]
-                mapa = info_grav["mapa"]
-                dias_grav = info_grav["dias_com_gravacao"]
-                status_grav = info_grav["status_gravacao"]
-            else:
-                total_dias = 15 if is_ok else 0
-                mapa = ("█" * 15) if is_ok else ("░" * 15)
-                dias_grav = dias_15_ord if is_ok else []
-                status_grav = "COM_GRAVACAO" if is_ok else "SEM_GRAVACAO"
-
-            status_cameras.append({
-                "canal": canal,
-                "nome": nome_cam,
-                "ip": ip_cam,
-                "online": is_ok,
-                "status_comunicacao": "ONLINE" if is_ok else "OFFLINE",
-                "status_gravacao": status_grav,
-                "total_dias": total_dias,
-                "mapa": mapa,
-                "dias_com_gravacao": dias_grav,
-            })
-            if cam.get("password"):
-                cameras_para_captura.append({**cam, "canal": canal, "nome": nome_cam})
-
+            casadas.append({"canal": canal, "nome": nome_cam, "ip": ip_cam, "codigo": "", "online": is_ok, "cam": cam})
     else:
-        # Caso 3: Nem cameras_config nem a API retornaram nada
+        for cam in cameras_api:
+            casadas.append({
+                "canal": cam.get("canal"),
+                "nome": cam.get("nome") or "",
+                "ip": cam.get("ip") or "N/A",
+                "codigo": cam.get("codigo") or "",
+                "online": cam.get("online", False),
+                "cam": cam,
+            })
+    return casadas
+
+
+def _status_webhook_defense(config_extra: dict) -> dict:
+    """Plano B (API sem resposta): último evento de cada câmera no CSV do webhook ({nome minúsculo: "OK"/"FALHA"}).
+    Lê `config_extra.caminho_log_csv` ou o CSV padrão do webhook, NUNCA a `pasta_origem` (é a pasta dos backups)."""
+    try:
+        from src.application.webhook_defense import get_status_cameras_defense
+        brutos = get_status_cameras_defense(config_extra.get("caminho_log_csv") or "")
+    except Exception:
+        logging.warning("  [DEFENSE] Falha ao ler o CSV do webhook.", exc_info=True)
+        return {}
+    return {(nome or "").strip().lower(): evento for nome, evento in (brutos or {}).items()}
+
+
+def coletar_presenca_defense(equipamento: dict):
+    """Estado online/offline das câmeras do DEFENSE para a presença (a cada 5 min): só handshake, login e árvore
+    de dispositivos da API, sem consultar gravações e sem RTSP. Mesmos nomes do backup (_casar_cameras_defense).
+    Retorna [{canal, nome, online}] só com online True/False, ou None se a API não respondeu."""
+    status_dict, cameras_api, _ = _consultar_api_defense(equipamento, incluir_gravacoes=False)
+    if not status_dict:
+        return None
+    casadas = _casar_cameras_defense(equipamento.get("cameras_config") or [], status_dict, cameras_api)
+    return [
+        {"canal": None, "nome": c["nome"], "online": c["online"]}
+        for c in casadas if c["nome"] and c["online"] in (True, False)
+    ]
+
+
+def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list:
+    """
+    Monta o status das câmeras (canal 1..N):
+    1. Tenta consultar a API nativa do Defense IA (BRMS HTTPS) para status online e histórico de gravações.
+    2. Se cameras_config da Galeria existir: cruza com os status e gravações obtidos na API.
+    3. Se cameras_config não existir mas a API retornou câmeras: usa diretamente as câmeras da API.
+    4. Plano B: se a API estiver inacessível, cruza cameras_config com o CSV do webhook; câmera sem informação
+       fica ERRO_COMUNICACAO (online None), nunca "online" por padrão.
+    5. Gravação só vem da API: sem ela a câmera fica NAO_VERIFICADO (nada é deduzido do estado online).
+    A imagem da noite não é capturada aqui: a rotina da noite do agente (captura_noite_vms) cuida disso, na
+    janela 19h30-4h, independente do horário do backup.
+    """
+    config_extra = parse_config_extra(equipamento)
+    cameras_config = equipamento.get("cameras_config") or []
+
+    status_dict, cameras_api, gravacoes_map = _consultar_api_defense(equipamento)
+    casadas = _casar_cameras_defense(cameras_config, status_dict, cameras_api)
+    if not casadas:
+        # Nem cameras_config nem a API retornaram nada
         return None
 
-    # Captura opcional de imagens noturnas RTSP
-    if conf is not None and cameras_para_captura:
-        try:
-            from src.camera.rtsp_client import capturar_imagens_noite_vms
-            capturar_imagens_noite_vms(equipamento.get("name", "Defense"), cameras_para_captura, conf)
-            por_canal = {c["canal"]: c for c in cameras_para_captura}
-            for st in status_cameras:
-                cap = por_canal.get(st["canal"])
-                if cap and "imagem_noite" in cap:
-                    st["imagem_noite"] = cap["imagem_noite"]
-        except Exception as e:
-            logging.warning(f"  [DEFENSE] Falha ao capturar imagens RTSP da noite: {e}")
+    status_cameras = []
+    status_webhook = None
+
+    for c in casadas:
+        canal, nome_cam, ip_cam, ch_code = c["canal"], c["nome"], c["ip"], c["codigo"]
+        is_ok = c["online"]
+
+        if is_ok is None:
+            # API inacessível: plano B pelo CSV do webhook
+            if status_webhook is None:
+                status_webhook = _status_webhook_defense(config_extra)
+            evento = status_webhook.get(nome_cam.strip().lower())
+            if evento is not None:
+                is_ok = evento == "OK"
+
+        # Gravação: só os dados reais da API
+        info_grav = (
+            (gravacoes_map.get(ch_code) if ch_code else None)
+            or gravacoes_map.get(nome_cam)
+            or gravacoes_map.get(nome_cam.lower())
+            or (gravacoes_map.get(ip_cam) if ip_cam != "N/A" else None)
+        )
+        if info_grav:
+            total_dias = info_grav["total_dias"]
+            mapa = info_grav["mapa"]
+            dias_grav = info_grav["dias_com_gravacao"]
+            status_grav = info_grav["status_gravacao"]
+        else:
+            total_dias, mapa, dias_grav, status_grav = 0, "", [], "NAO_VERIFICADO"
+
+        if is_ok is True:
+            status_com = "ONLINE"
+        elif is_ok is False:
+            status_com = "OFFLINE"
+        else:
+            status_com = "ERRO_COMUNICACAO"
+
+        status_cameras.append({
+            "canal": canal,
+            "nome": nome_cam,
+            "ip": ip_cam,
+            "online": is_ok,
+            "status_comunicacao": status_com,
+            "status_gravacao": status_grav,
+            "total_dias": total_dias,
+            "mapa": mapa,
+            "dias_com_gravacao": dias_grav,
+        })
 
     return status_cameras
 
@@ -608,20 +692,25 @@ def realizar_backup_defense(equipamento: dict, pasta_destino: Path, conf: dict =
     if pasta_origem_str:
         logging.info(f"  [DEFENSE] Coletando arquivo de backup nativo na pasta: {pasta_origem_str}")
         pasta_origem = Path(pasta_origem_str)
-        if not pasta_origem.exists() or not pasta_origem.is_dir():
-            logging.error(f"  [DEFENSE] Pasta de origem não encontrada: {pasta_origem}")
+        # Pasta em rede/sem permissão pode falhar no exists/iterdir/stat: vira ERRO com as câmeras já montadas
+        try:
+            if not pasta_origem.exists() or not pasta_origem.is_dir():
+                logging.error(f"  [DEFENSE] Pasta de origem não encontrada: {pasta_origem}")
+                return {"nome": nome, "status": "ERRO", "cameras": status_cameras}
+
+            # Busca apenas os arquivos de backup (.enc, .zip, .dbk) ignorando .cfg e temporários
+            extensoes_validas = {".enc", ".zip", ".dbk", ".bak"}
+            arquivos = [f for f in pasta_origem.iterdir() if f.is_file() and f.suffix.lower() in extensoes_validas]
+
+            if not arquivos:
+                logging.warning(f"  [DEFENSE] Nenhum arquivo encontrado na pasta: {pasta_origem}")
+                return {"nome": nome, "status": "SEM_ARQUIVOS", "cameras": status_cameras}
+
+            # Pega o arquivo mais recente baseado na data de modificação
+            arquivo_mais_recente = max(arquivos, key=lambda f: f.stat().st_mtime)
+        except Exception as e:
+            logging.error(f"  [DEFENSE] Erro ao ler a pasta de origem {pasta_origem}: {e}")
             return {"nome": nome, "status": "ERRO", "cameras": status_cameras}
-
-        # Busca apenas os arquivos de backup (.enc, .zip, .dbk) ignorando .cfg e temporários
-        extensoes_validas = {".enc", ".zip", ".dbk", ".bak"}
-        arquivos = [f for f in pasta_origem.iterdir() if f.is_file() and f.suffix.lower() in extensoes_validas]
-
-        if not arquivos:
-            logging.warning(f"  [DEFENSE] Nenhum arquivo encontrado na pasta: {pasta_origem}")
-            return {"nome": nome, "status": "SEM_ARQUIVOS", "cameras": status_cameras}
-
-        # Pega o arquivo mais recente baseado na data de modificação
-        arquivo_mais_recente = max(arquivos, key=lambda f: f.stat().st_mtime)
         destino_arquivo = pasta_destino / arquivo_mais_recente.name
 
         try:

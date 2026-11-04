@@ -171,6 +171,10 @@ def _build_camera_section(nvr_results: List[dict], numero: int) -> str:
                     problemas.append(f"  ⚠️ {cam_nome}: Online, mas sem gravação")
                 elif status_gravacao == "NAO_VERIFICADO":
                     problemas.append(f"  ⚠️ {cam_nome}: Online, mas falhou ao verificar histórico de gravação")
+            elif status_comunicacao == "NAO_VERIFICADO":
+                # Sem IP para o ping (ex.: câmera do Digifort só com pasta de gravação): não é queda
+                if status_gravacao == "SEM_GRAVACAO":
+                    problemas.append(f"  ⚠️ {cam_nome}: Sem gravação (comunicação não verificada)")
             else:
                 cameras_offline += 1
                 linha_offline = f"  ❌ {cam_nome}: Offline ({status_comunicacao})"
@@ -231,7 +235,13 @@ def _build_result_section(nvr_results: List[dict], numero: int) -> str:
             status_comunicacao = cam.get("status_comunicacao")
             if not status_comunicacao:
                 status_comunicacao = "ONLINE" if cam.get("online") else "OFFLINE"
-                
+
+            if status_comunicacao == "NAO_VERIFICADO":
+                # Mesmo critério da seção de câmeras: sem IP para o ping não é queda; só conta a falta de gravação
+                if cam.get("status_gravacao") == "SEM_GRAVACAO":
+                    any_no_rec = True
+                continue
+
             if status_comunicacao != "ONLINE":
                 any_offline = True
             
@@ -307,7 +317,9 @@ def _collect_offline_images(db: Session, groups: List[tuple]) -> dict:
 
     for machine_id, nvr_results in groups:
         for r in nvr_results or []:
-            offline = [c for c in (r.get("cameras") or []) if not _cam_is_online(c)]
+            # Comunicação não verificada (sem IP para o ping) não é queda: sem imagem de câmera offline
+            offline = [c for c in (r.get("cameras") or [])
+                       if not _cam_is_online(c) and c.get("status_comunicacao") != "NAO_VERIFICADO"]
             if not offline:
                 continue
             nvr = None

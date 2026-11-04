@@ -151,28 +151,12 @@ def carregar_cameras_servidor(cameras_config):
 
 
 def registrar_queda(nome_camera, nome_evento):
-    agora = datetime.datetime.now()
-    data = agora.strftime("%Y-%m-%d")
-    hora = agora.strftime("%H:%M:%S")
-    
-    pasta = os.path.dirname(ARQUIVO_CSV)
-    if pasta and not os.path.exists(pasta):
-        try:
-            os.makedirs(pasta, exist_ok=True)
-        except Exception:
-            pass
-        
-    arquivo_existe = os.path.isfile(ARQUIVO_CSV)
-    
-    try:
-        with open(ARQUIVO_CSV, mode='a', newline='', encoding='utf-8-sig') as file:
-            writer = csv.writer(file, delimiter=';')
-            if not arquivo_existe:
-                writer.writerow(['Data', 'Hora', 'Camera', 'Evento'])
-                
-            writer.writerow([data, hora, nome_camera, nome_evento])
-    except Exception as e:
-        logging.error(f"[DIGIFORT] Erro ao gravar log de queda no CSV '{ARQUIVO_CSV}': {e}")
+    """
+    Descontinuado: a gravação do relatório de quedas em arquivo CSV em disco
+    foi descontinuada a pedido do usuário. O status de câmeras agora opera
+    exclusivamente em tempo real e em memória via Ping ICMP.
+    """
+    pass
 
 
 # ==========================================
@@ -286,10 +270,11 @@ def testar_cameras_por_ping(cameras: list, timeout_ms: int = 1000, max_workers: 
 def get_status_cameras(caminho_export="", caminho_log="", realizar_ping=True):
     """
     Retorna dicionário {nome_camera: "OK" | "FALHA"}.
-    Se realizar_ping=True, executa ping concorrente nas câmeras.
-    Se realizar_ping=False, consulta o histórico do CSV de quedas.
+    Se realizar_ping=True, executa ping concorrente nas câmeras e atualiza o cache em memória.
+    Se realizar_ping=False, consulta o último status conhecido em memória (_ultimo_status_cameras).
+    A leitura do CSV de quedas em disco foi descontinuada a pedido do usuário.
     """
-    global ULTIMO_CAMINHO_EXPORT
+    global ULTIMO_CAMINHO_EXPORT, _ultimo_status_cameras
     
     with _cameras_lock:
         if caminho_export and (caminho_export != ULTIMO_CAMINHO_EXPORT or not DICIONARIO_CAMERAS_NOME):
@@ -325,41 +310,28 @@ def get_status_cameras(caminho_export="", caminho_log="", realizar_ping=True):
                 nome = cam['Nome']
                 ip = cam.get('IP') or ''
                 is_ok = bool(res_ping.get(nome, False) or (ip and res_ping.get(ip, False)))
-                status_cameras[nome] = "OK" if is_ok else "FALHA"
+                st = "OK" if is_ok else "FALHA"
+                status_cameras[nome] = st
+                _ultimo_status_cameras[nome] = st
         return status_cameras
 
-    # Modo histórico (realizar_ping=False)
+    # Modo em memória (realizar_ping=False)
     if cameras_snapshot:
         for cam in cameras_snapshot:
-            status_cameras[cam['Nome']] = "OK"
+            nome = cam['Nome']
+            status_cameras[nome] = _ultimo_status_cameras.get(nome, "OK")
     else:
-        for nome in dicionario_nome_snapshot.keys():
+        for nome, info in dicionario_nome_snapshot.items():
             if not str(nome).isdigit():
-                status_cameras[nome] = "OK"
-            
-    arquivo_alvo = caminho_log if caminho_log else ARQUIVO_CSV
-    if os.path.isfile(arquivo_alvo):
-        linhas_log, _ = ler_linhas_csv(arquivo_alvo)
-        for row in linhas_log:
-            camera_raw = obter_valor_coluna(row, 'camera')
-            evento = obter_valor_coluna(row, 'evento')
-            if not camera_raw or not evento:
-                continue
-                
-            info = (dicionario_nome_snapshot.get(camera_raw) or 
-                    dicionario_nome_snapshot.get(camera_raw.lower()) or 
-                    dicionario_nome_snapshot.get(normalizar_texto(camera_raw)))
-                    
-            nome_alvo = info['Nome'] if info else camera_raw
-            is_ok = ('restaurada' in evento.lower() or 'online' in evento.lower() or evento.lower() == 'ok')
-            status_cameras[nome_alvo] = "OK" if is_ok else "FALHA"
+                nome_canonico = info.get('Nome', nome)
+                status_cameras[nome_canonico] = _ultimo_status_cameras.get(nome_canonico, "OK")
 
     return status_cameras
 
 
 def get_caminho_csv(caminho_log=""):
-    """Retorna o caminho do arquivo de quedas"""
-    return caminho_log if caminho_log else ARQUIVO_CSV
+    """Retorna string vazia pois a criação de relatório CSV foi descontinuada."""
+    return ""
 
 
 def get_detalhes_cameras(caminho_export="", caminho_log="", realizar_ping=True, status_dict=None):
@@ -394,7 +366,7 @@ def rodar_monitor_ping():
     """
     Thread de monitoramento periódico via Ping ICMP.
     A cada intervalo pré-definido, testa as câmeras e registra transições de status
-    (queda / retorno) no CSV de histórico.
+    (queda / retorno) nos logs do agente, mantendo o status atualizado em memória.
     """
     global _ultimo_status_cameras
     logging.info(f"[OK] Monitor de Ping Digifort rodando (intervalo: {INTERVALO_MONITORAMENTO_PING_S}s)...")
@@ -415,10 +387,8 @@ def rodar_monitor_ping():
                     status_anterior = _ultimo_status_cameras.get(nome)
                     if status_anterior is not None and status_anterior != status_atual:
                         if status_atual == "FALHA":
-                            registrar_queda(nome, "Falha de Comunicacao (Ping Timeout)")
                             logging.info(f"[DIGIFORT PING] Queda detectada: {nome} ({ip})")
                         else:
-                            registrar_queda(nome, "Camera Restaurada (Ping OK)")
                             logging.info(f"[DIGIFORT PING] Câmera restaurada: {nome} ({ip})")
                             
                     _ultimo_status_cameras[nome] = status_atual
