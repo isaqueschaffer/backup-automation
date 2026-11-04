@@ -1,0 +1,765 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: e897392990ba428092e9c683ad4522b2
+      name: Templates/OLT
+  templates:
+    - uuid: 6a735006f62f4b1e8a3ac4a68e7f16be
+      template: 'Cloud - FiberHome 2.0'
+      name: 'Cloud - FiberHome 2.0'
+      templates:
+        - name: 'Template Module Generic SNMPv2'
+      groups:
+        - name: Templates/OLT
+      items:
+        - uuid: c82dae743d8444c7bdcdd1a5d81d4321
+          name: 'Inventário Geral ONUs'
+          type: EXTERNAL
+          key: 'fiberhome_onu_discovery_name.py["{HOST.IP}","{$SNMP_COMMUNITY}","{$DB_HOST}","{$GEPON_USER}","{$GEPON_PASS}","{$GEPON_ENABLE}","inventory"]'
+          delay: 10m
+          history: 7d
+          value_type: TEXT
+          trends: '0'
+          tags:
+            - tag: Application
+              value: INVENTARIO
+        - uuid: 063dae743d8444c7bdcdd1a5d81d1010
+          name: 'ONUs SEM ENERGIA'
+          type: DEPENDENT
+          key: onu.energia
+          delay: '0'
+          history: 30d
+          trends: 90d
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  function qtd_clientes(json,status){
+                       var count=0;
+                       for (var index  in json){
+                         var statusONU = json[index]["{#STATUS}"];
+                          
+                         if (statusONU == status){
+                           count+=1;
+                         }
+                        }
+                       return count;
+                  }
+                  
+                  var file = JSON.parse(value);
+                  /* {#STATUS}  1 - UP | 0 - DOWN | -1 - INVALID */
+                  var json = qtd_clientes(file,3);
+                   return JSON.stringify(json);
+          master_item:
+            key: qtd.onu
+          tags:
+            - tag: Application
+              value: 'TOTAIS ONUs'
+        - uuid: fd0a05dedf8b4643b2fe627df5cdc4ad
+          name: 'ONUs COM FALHA'
+          type: DEPENDENT
+          key: onu.falha
+          delay: '0'
+          history: 30d
+          trends: 90d
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  function qtd_clientes(json,status){
+                       var count=0;
+                       for (var index  in json){
+                         var statusONU = json[index]["{#STATUS}"];
+                          
+                         if (statusONU == status){
+                           count+=1;
+                         }
+                        }
+                       return count;
+                  }
+                  
+                  var file = JSON.parse(value);
+                  /* {#STATUS}  1 - UP | 0 - DOWN | -1 - INVALID */
+                  var json = qtd_clientes(file,0);
+                   return JSON.stringify(json);
+          master_item:
+            key: qtd.onu
+          tags:
+            - tag: Application
+              value: 'TOTAIS ONUs'
+        - uuid: 3479a6c9c4db49c3a1dd9309fa919c1e
+          name: 'ONUs OFFLINE'
+          type: DEPENDENT
+          key: onu.offline
+          delay: '0'
+          history: 30d
+          trends: 90d
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  function qtd_clientes(json,status){
+                       var count=0;
+                       for (var index  in json){
+                         var statusONU = json[index]["{#STATUS}"];
+                          
+                         if (statusONU == status){
+                           count+=1;
+                         }
+                        }
+                       return count;
+                  }
+                  
+                  var file = JSON.parse(value);
+                  /* {#STATUS}  1 - UP | 0 - DOWN | -1 - INVALID */
+                  var json = qtd_clientes(file,2);
+                   return JSON.stringify(json);
+          master_item:
+            key: qtd.onu
+          tags:
+            - tag: Application
+              value: 'TOTAIS ONUs'
+        - uuid: 901cd86d52a34a96ac30abed842d0b10
+          name: 'ONUs ONLINE'
+          type: DEPENDENT
+          key: onu.online
+          delay: '0'
+          history: 30d
+          trends: 90d
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  function qtd_clientes(json,status){
+                       var count=0;
+                       for (var index  in json){
+                         var statusONU = json[index]["{#STATUS}"];
+                          
+                         if (statusONU == status){
+                           count+=1;
+                         }
+                        }
+                       return count;
+                  }
+                  
+                  var file = JSON.parse(value);
+                  /* {#STATUS}  1 - UP | 0 - DOWN | -1 - INVALID */
+                  var json = qtd_clientes(file,1);
+                   return JSON.stringify(json);
+          master_item:
+            key: qtd.onu
+          tags:
+            - tag: Application
+              value: 'TOTAIS ONUs'
+        - uuid: 22a8ed0dad264d3dae040924ea3561db
+          name: 'TOTAL DE ONU'
+          type: SNMP_AGENT
+          snmp_oid: .1.3.6.1.4.1.5875.800.3.9.4.6.0
+          key: onuCount
+          history: 30d
+          trends: 90d
+          tags:
+            - tag: Application
+              value: 'TOTAIS ONUs'
+        - uuid: 7b08aec5de1149d38580d56e137c1124
+          name: 'Contador por PON (JSON)'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#SLOT},1.3.6.1.4.1.5875.800.3.10.1.1.2,{#PON},1.3.6.1.4.1.5875.800.3.10.1.1.3,{#STATUS},1.3.6.1.4.1.5875.800.3.10.1.1.11]'
+          key: onuStatus
+          history: 90d
+          value_type: TEXT
+          trends: '0'
+          tags:
+            - tag: Application
+              value: CONT-PON
+        - uuid: 86970c4d66044c898310634054264ffe
+          name: 'QUANTIDADE ONUS'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#STATUS}, 1.3.6.1.4.1.5875.800.3.10.1.1.11]'
+          key: qtd.onu
+          delay: 3m
+          history: 90d
+          value_type: TEXT
+          trends: '0'
+          tags:
+            - tag: Application
+              value: ONU-GERAL
+        - uuid: 6043f397016042bf8aabecf1cb13fc6e
+          name: Temperatura
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.5875.800.3.9.4.5.0
+          key: Temp
+          delay: 2m
+          history: 30d
+          trends: 90d
+          units: °C
+          tags:
+            - tag: Application
+              value: temperatura
+          triggers:
+            - uuid: c5b31b74ec23432e8f6f73425e2f5b52
+              expression: 'last(/Cloud - FiberHome 2.0/Temp)>=48'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'last(/Cloud - FiberHome 2.0/Temp)<=46'
+              name: 'A temperatura está acima de 48 Graus'
+              priority: HIGH
+              tags:
+                - tag: TEMPERATURA
+        - uuid: e82dae743d8444c7bdcdd1a5d81d1234
+          name: 'Licença UNM2000: [{$UNM_LICENSE_START} até {$UNM_LICENSE_END}] - Dias Restantes'
+          type: EXTERNAL
+          key: 'unm_license_check.py["{$UNM_LICENSE_START}","{$UNM_LICENSE_END}"]'
+          history: 7d
+          value_type: TEXT
+          trends: '0'
+          tags:
+            - tag: Application
+              value: LICENCA
+      discovery_rules:
+        - uuid: 45348ec9473249eb872406ea9cf0c07a
+          name: 'Descoberta de Cards'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#CARD},.1.3.6.1.4.1.5875.800.3.101.1.1.1,{#CARDTYPE},.1.3.6.1.4.1.5875.800.3.9.2.1.1.2,{#CARDMENUTIL},.1.3.6.1.4.1.5875.800.3.9.2.1.1.9,{#CARDCPUULTIL},.1.3.6.1.4.1.5875.800.3.9.2.1.1.8]'
+          key: cardInfoEntry
+          delay: 1d
+          filter:
+            conditions:
+              - macro: '{#CARDCPUULTIL}'
+                value: '[1-9]'
+                formulaid: A
+              - macro: '{#CARDMENUTIL}'
+                value: '[1-9]'
+                formulaid: B
+              - macro: '{#CARDTYPE}'
+                value: (527|550)
+                formulaid: C
+          lifetime: 30d
+          enabled_lifetime_type: DISABLE_NEVER
+          item_prototypes:
+            - uuid: 5e848f2d5e544127bc47089e5579aef3
+              name: 'cardAvaliablePorts [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.2.1.1.7.{#SNMPINDEX}'
+              key: 'cardAvaliablePorts[{#CARD}]'
+              delay: '300'
+              history: 7d
+              trends: 30d
+              tags:
+                - tag: Application
+                  value: 'Portas disponiveis no Card'
+            - uuid: 8247e3a1b55d4dc29047237753d4dfa8
+              name: 'cardCpuUtil [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.2.1.1.8.{#SNMPINDEX}'
+              key: 'cardCpuUtil[{#CARD}]'
+              delay: '60'
+              history: 7d
+              trends: 30d
+              units: '%'
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.01'
+              tags:
+                - tag: Application
+                  value: 'CPU por Card'
+            - uuid: 7948a25ce1a048aab0a8549b27cb40e4
+              name: 'cardHardwareVersion [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.2.1.1.3.{#SNMPINDEX}'
+              key: 'cardHardwareVersion[{#CARD}]'
+              delay: '300'
+              history: 7d
+              value_type: CHAR
+              trends: '0'
+              tags:
+                - tag: Application
+                  value: 'Versao de Hardware por Card'
+            - uuid: 9bffc41b344d4142817b0dd124e54da2
+              name: 'cardMenUtil [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.2.1.1.9.{#SNMPINDEX}'
+              key: 'cardMenUtil[{#CARD}]'
+              delay: '60'
+              history: 7d
+              trends: 30d
+              units: '%'
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.01'
+              tags:
+                - tag: Application
+                  value: 'Memoria por Card'
+            - uuid: 6f3f9da5f53f44dc8c45714293e78762
+              name: 'cardNumOfPorts [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.2.1.1.6.{#SNMPINDEX}'
+              key: 'cardNumOfPorts[{#CARD}]'
+              delay: '300'
+              history: 7d
+              trends: 30d
+              tags:
+                - tag: Application
+                  value: 'Total de Portas por Card'
+            - uuid: 31bc7adbcd984f97a4d0869cf7cd1523
+              name: 'cardSoftwareVersion [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.2.1.1.4.{#SNMPINDEX}'
+              key: 'cardSoftwareVersion[{#CARD}]'
+              delay: '300'
+              history: 30d
+              value_type: CHAR
+              trends: '0'
+              tags:
+                - tag: Application
+                  value: 'Versao de Software por Card'
+            - uuid: b6da219355ff4c86bb38720561facf20
+              name: 'cardStatus [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.2.1.1.5.{#SNMPINDEX}'
+              key: 'cardStatus[{#CARD}]'
+              delay: '300'
+              history: 7d
+              trends: 30d
+              tags:
+                - tag: Application
+                  value: 'Status por Card'
+            - uuid: 6e0076c4bea4483a822ba26bfae541da
+              name: 'cardType [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.2.1.1.2.{#SNMPINDEX}'
+              key: 'cardType[{#CARD}]'
+              delay: '300'
+              history: 7d
+              trends: 30d
+              valuemap:
+                name: cardType
+              tags:
+                - tag: Application
+                  value: 'Tipo por Card'
+            - uuid: 3d5828965e6d4a1cbde632e695fcb66a
+              name: 'slotIndex [{#CARD}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.101.1.1.1.{#SNMPINDEX}'
+              key: 'slotIndex[{#CARD}]'
+              delay: '300'
+              history: 7d
+              trends: 30d
+              tags:
+                - tag: Application
+                  value: 'Index por Card'
+        - uuid: 8045ae02fb324550ae76de346dce8189
+          name: ONUs
+          type: EXTERNAL
+          key: 'fiberhome_onu_discovery_name.py[{HOST.IP},{$SNMP_COMMUNITY}]'
+          lifetime: 3d
+          enabled_lifetime_type: DISABLE_NEVER
+          item_prototypes:
+            - uuid: 5c9a1d2e3f4b4a6c8d8e9f0a1b2c3d4e
+              name: '{#ONUNAME} ({#IFSERIAL}) - Sinal OLT RECV (CLI)'
+              type: EXTERNAL
+              key: 'fiberhome_optical.py["{HOST.IP}","{$GEPON_USER}","{$GEPON_PASS}","{$GEPON_ENABLE}","{#SLOT}","{#PON}","{#ONU}"]'
+              delay: 5m
+              history: 30d
+              value_type: FLOAT
+              trends: 90d
+              units: dBm
+              tags:
+                - tag: Application
+                  value: ONU
+        - uuid: 847f4bc64174424db34577f3307f342c
+          name: 'Descoberta de CPU e Memoria'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#MGRCARDTYPE},.1.3.6.1.4.1.5875.800.3.9.8.1.1.1,{#CARDTYPEMGR},.1.3.6.1.4.1.5875.800.3.9.8.1.1.1,{#MGRCARDWORKSTATUS},.1.3.6.1.4.1.5875.800.3.9.8.1.1.4]'
+          key: mgrCardType
+          delay: 1d
+          filter:
+            conditions:
+              - macro: '{#CARDTYPEMGR}'
+                value: (355|374|365)
+                formulaid: A
+              - macro: '{#MGRCARDWORKSTATUS}'
+                value: (1)
+                formulaid: B
+          lifetime: 30d
+          enabled_lifetime_type: DISABLE_NEVER
+          item_prototypes:
+            - uuid: 51a2e5ac4f8f4ec0a7e73cd786f6ee1d
+              name: mgrCardCpuUtil
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.8.1.1.5.{#SNMPINDEX}'
+              key: 'mgrCardCpuUtil[{#SNMPINDEX}]'
+              units: '%'
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.01'
+              tags:
+                - tag: 'Uso de CPU'
+            - uuid: 369d46eb843f42beb38326facbda270c
+              name: mgrCardMemUtil
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.8.1.1.5.{#SNMPINDEX}'
+              key: 'mgrCardMemUtil[{#SNMPINDEX}]'
+              units: '%'
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.01'
+              tags:
+                - tag: 'Uso de Memoria'
+            - uuid: eb0744cae5a843009635744ec41ad826
+              name: mgrCardType
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.8.1.1.1.{#SNMPINDEX}'
+              key: 'mgrCardType[{#SNMPINDEX}]'
+              delay: 5m
+              valuemap:
+                name: mgrCardType
+              tags:
+                - tag: 'Tipo de Card'
+        - uuid: c71978e78714446f8392342923309852
+          name: 'Network interfaces PON'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#IFOPERSTATUS},1.3.6.1.2.1.2.2.1.8,{#IFADMINSTATUS},1.3.6.1.2.1.2.2.1.7,{#IFALIAS},1.3.6.1.2.1.31.1.1.1.18,{#IFNAME},1.3.6.1.2.1.31.1.1.1.1,{#IFDESCR},1.3.6.1.2.1.2.2.1.2,{#IFTYPE},1.3.6.1.2.1.2.2.1.3]'
+          key: nxet.if.discovery
+          delay: 6h
+          filter:
+            conditions:
+              - macro: '{#IFNAME}'
+                value: 'PON\s\d{1,2}\/\d{1,2}$'
+                formulaid: A
+          lifetime: 3d
+          enabled_lifetime_type: DISABLE_NEVER
+          item_prototypes:
+            - uuid: 723da8cb12984a6987aef082351b0f69
+              name: 'Trafego de Entrada na Interface {#IFNAME}'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.6.{#SNMPINDEX}'
+              key: 'net.if.in[ifHCInOctets.{#SNMPINDEX}]'
+              delay: 10m
+              history: 30d
+              trends: 90d
+              units: bps
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '8'
+                - type: CHANGE_PER_SECOND
+                  parameters:
+                    - ''
+              tags:
+                - tag: Application
+                  value: Network
+            - uuid: b5f7d9a527bd4be49fb3383fcd8f9e55
+              name: 'Trafego de Saida na Interface {#IFNAME}'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.10.{#SNMPINDEX}'
+              key: 'net.if.out[ifHCOutOctets.{#SNMPINDEX}]'
+              delay: 10m
+              history: 30d
+              trends: 90d
+              units: bps
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '8'
+                - type: CHANGE_PER_SECOND
+                  parameters:
+                    - ''
+              tags:
+                - tag: Application
+                  value: Network
+            - uuid: 654f9927daca450db3c378eb45eacd59
+              name: '{#IFNAME}'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.2.2.1.8.{#SNMPINDEX}'
+              key: 'net.if.status[ifOperStatus.{#SNMPINDEX}]'
+              history: 30d
+              trends: 90d
+              valuemap:
+                name: INFERTACEPON
+              tags:
+                - tag: Application
+                  value: Net_status
+              trigger_prototypes:
+                - uuid: 42a7490815e340b1b95764c7d69b6878
+                  expression: 'last(/Cloud - FiberHome 2.0/net.if.status[ifOperStatus.{#SNMPINDEX}])=2 and (last(/Cloud - FiberHome 2.0/net.if.status[ifOperStatus.{#SNMPINDEX}],#1)<>last(/Cloud - FiberHome 2.0/net.if.status[ifOperStatus.{#SNMPINDEX}],#2))=1'
+                  recovery_mode: RECOVERY_EXPRESSION
+                  recovery_expression: 'last(/Cloud - FiberHome 2.0/net.if.status[ifOperStatus.{#SNMPINDEX}])<>2'
+                  name: 'Interface {#IFNAME}: Link down'
+                  priority: AVERAGE
+                  tags:
+                    - tag: PORTA_OFF_PON
+        - uuid: 5d46833f648447d095b8174075371dfa
+          name: 'Network interfaces XFP/SFP'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#IFOPERSTATUS},1.3.6.1.2.1.2.2.1.8,{#IFADMINSTATUS},1.3.6.1.2.1.2.2.1.7,{#IFALIAS},1.3.6.1.2.1.31.1.1.1.18,{#IFNAME},1.3.6.1.2.1.31.1.1.1.1,{#IFDESCR},1.3.6.1.2.1.2.2.1.2,{#IFTYPE},1.3.6.1.2.1.2.2.1.3]'
+          key: nxet.if.discovery.SFP
+          delay: 6h
+          filter:
+            conditions:
+              - macro: '{#IFNAME}'
+                value: 'SFP\s\d{1,2}\/\d{1,2}$'
+                formulaid: A
+              - macro: '{#IFNAME}'
+                value: 'XFP\s\d{1,2}\/\d{1,2}$'
+                formulaid: B
+          lifetime: 3d
+          enabled_lifetime_type: DISABLE_NEVER
+          item_prototypes:
+            - uuid: 335a01a1d3694b50b1fc748b65fbf657
+              name: 'Trafego de Entrada na Interface {#IFNAME}'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.6.{#SNMPINDEX}'
+              key: 'neeet.if.in[ifHCInOctets.{#SNMPINDEX}]'
+              delay: 3m
+              history: 30d
+              trends: 90d
+              units: bps
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '8'
+                - type: CHANGE_PER_SECOND
+                  parameters:
+                    - ''
+              tags:
+                - tag: Application
+                  value: Network
+            - uuid: 7515e1ce5dd54a2da9eb90c3ce590fa6
+              name: 'Trafego de Saida na Interface {#IFNAME}'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.10.{#SNMPINDEX}'
+              key: 'neeet.if.out[ifHCOutOctets.{#SNMPINDEX}]'
+              delay: 3m
+              history: 30d
+              trends: 90d
+              units: bps
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '8'
+                - type: CHANGE_PER_SECOND
+                  parameters:
+                    - ''
+              tags:
+                - tag: Application
+                  value: Network
+            - uuid: 0fcaae3b8d4d46fe899c7c12d1dcabcd
+              name: '{#IFNAME}'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.2.2.1.8.{#SNMPINDEX}'
+              key: 'neeet.if.status[ifOperStatus.{#SNMPINDEX}]'
+              history: 30d
+              trends: 90d
+              tags:
+                - tag: Application
+                  value: Net_status
+              trigger_prototypes:
+                - uuid: ca9db3c6b9fe4c6c862c3b0cc3c0112e
+                  expression: 'last(/Cloud - FiberHome 2.0/neeet.if.status[ifOperStatus.{#SNMPINDEX}])=2 and (last(/Cloud - FiberHome 2.0/neeet.if.status[ifOperStatus.{#SNMPINDEX}],#1)<>last(/Cloud - FiberHome 2.0/neeet.if.status[ifOperStatus.{#SNMPINDEX}],#2))=1'
+                  recovery_mode: RECOVERY_EXPRESSION
+                  recovery_expression: 'last(/Cloud - FiberHome 2.0/neeet.if.status[ifOperStatus.{#SNMPINDEX}])<>2'
+                  name: 'Interface {#IFNAME}: Link down'
+                  priority: WARNING
+                  tags:
+                    - tag: PORTA_OFF_XFP
+        - uuid: 56ace4a252ef428183c55f9e83098c9c
+          name: 'Descoberta de Interfaces Gpon'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#OLTPONDESC},.1.3.6.1.4.1.5875.800.3.9.3.4.1.3]'
+          key: oltPonDesc
+          delay: 1d
+          lifetime: 30d
+          enabled_lifetime_type: DISABLE_NEVER
+          item_prototypes:
+            - uuid: 4ce1a9c8c4f543ba9ef7584567aee108
+              name: 'oltPonAuthOnuNum [{#OLTPONDESC}]'
+              type: SNMP_AGENT
+              snmp_oid: '.1.3.6.1.4.1.5875.800.3.9.3.4.1.12.{#SNMPINDEX}'
+              key: 'oltPonAuthOnuNum[{#OLTPONDESC}]'
+              delay: '300'
+              history: 7d
+              trends: 30d
+              description: 'The current operational state of the interface.'
+              tags:
+                - tag: Application
+                  value: 'Porta Autorizadas'
+        - uuid: 7529c58d68fb446c9586519ec853681a
+          name: 'Portas PON'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#OLTPONNAME},.1.3.6.1.4.1.5875.800.3.9.3.4.1.2,{#IFPONSPEED},1.3.6.1.4.1.5875.800.3.9.3.4.1.6]'
+          key: oltPonName
+          delay: 1h
+          lifetime: 3d
+          enabled_lifetime_type: DISABLE_NEVER
+          item_prototypes:
+            - uuid: 4be5f14526474bc097b1927854792357
+              name: '{#OLTPONNAME}: Potencia de saida da porta'
+              type: EXTERNAL
+              key: 'fiberhome_pon_tx.py["{HOST.IP}","{$GEPON_USER}","{$GEPON_PASS}","{$GEPON_ENABLE}","{{#OLTPONNAME}.regsub(\"PON\s(\d+)\/(\d+)\", \1)}","{{#OLTPONNAME}.regsub(\"PON\s(\d+)\/(\d+)\", \2)}"]'
+              delay: 15m
+              history: 30d
+              value_type: FLOAT
+              trends: 90d
+              units: dBm
+              tags:
+                - tag: Application
+                  value: POTENCIA_PON
+            - uuid: de33ed6c74d843e8a4a4b047871cf321
+              name: '{#OLTPONNAME}: Total de ONUs autorizadas'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.4.1.5875.800.3.9.3.4.1.12.{#SNMPINDEX}'
+              key: 'GEPON-OLT-COMMON-MIB.oltPonAuthOnuNum.[{#SNMPINDEX}]'
+              delay: 30m
+              history: 30d
+              trends: 90d
+              tags:
+                - tag: Application
+                  value: AUTENTICADAS_PON
+            - uuid: 2af2e67250d04aff9812e98ce3eb87c9
+              name: '{#OLTPONNAME}: Total de ONUs offline'
+              type: DEPENDENT
+              key: 'GEPON-OLT-COMMON-MIB[onuStatus!=1,{#OLTPONNAME}]'
+              delay: '0'
+              history: 30d
+              trends: 90d
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$..[?(@[''{#SLOT}''] == ''{{#OLTPONNAME}.regsub("PON\s(\d+)\/(\d+)", \1)}'' && @[''{#PON}''] == ''{{#OLTPONNAME}.regsub("PON\s(\d+)\/(\d+)", \2)}'' && @[''{#STATUS}''] != ''1'')].length()'
+              master_item:
+                key: onuStatus
+              tags:
+                - tag: Application
+                  value: OFFLINE_PON
+            - uuid: 0999ec57816d4b91a3e007bb644b4797
+              name: '{#OLTPONNAME}: Total de ONUs online'
+              type: DEPENDENT
+              key: 'GEPON-OLT-COMMON-MIB[onuStatus=1,{#OLTPONNAME}]'
+              delay: '0'
+              history: 30d
+              trends: 90d
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$..[?(@[''{#SLOT}''] == ''{{#OLTPONNAME}.regsub("PON\s(\d+)\/(\d+)", \1)}'' && @[''{#PON}''] == ''{{#OLTPONNAME}.regsub("PON\s(\d+)\/(\d+)", \2)}'' && @[''{#STATUS}''] == ''1'')].length()'
+              master_item:
+                key: onuStatus
+              tags:
+                - tag: Application
+                  value: ONLINE_PON
+            - uuid: 00ef0009d1584ff1992c265d9ece6280
+              name: '{#OLTPONNAME}: Temperatura do GBIC'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.4.1.5875.800.3.9.3.4.1.11.{#SNMPINDEX}'
+              key: 'oltPonOpticalTemperature.[{#SNMPINDEX}]'
+              delay: 15m
+              history: 30d
+              trends: 90d
+              units: ºC
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.01'
+              tags:
+                - tag: Application
+                  value: TEMPERATURA_PON
+          trigger_prototypes:
+            - uuid: d80c02ad701e471299f1f15fe2fdca66
+              expression: 'last(/Cloud - FiberHome 2.0/GEPON-OLT-COMMON-MIB.oltPonAuthOnuNum.[{#SNMPINDEX}])>3 and last(/Cloud - FiberHome 2.0/GEPON-OLT-COMMON-MIB[onuStatus=1,{#OLTPONNAME}])<3 and last(/Cloud - FiberHome 2.0/GEPON-OLT-COMMON-MIB[onuStatus!=1,{#OLTPONNAME}])>3'
+              name: 'Queda de ONUs detectada no slot {{#OLTPONNAME}.regsub("PON\s(\d+)\/(\d+)", \1)} PON {{#OLTPONNAME}.regsub("PON\s(\d+)\/(\d+)", \2)}'
+              priority: WARNING
+              tags:
+                - tag: QUEDA_PON
+      macros:
+        - macro: '{$DB_HOST}'
+          value: 192.168.31.5
+          description: 'IP do Banco de Dados UNM2000'
+        - macro: '{$GEPON_ENABLE}'
+          description: 'Senha do modo Enable da OLT'
+        - macro: '{$GEPON_PASS}'
+          description: 'Senha de acesso Telnet/SSH'
+        - macro: '{$GEPON_USER}'
+          description: 'Usuário de acesso Telnet/SSH'
+        - macro: '{$SNMP_COMMUNITY}'
+          value: adsl
+          description: 'Comunidade SNMP da OLT'
+        - macro: '{$UNM_LICENSE_END}'
+          value: '20261026'
+          description: 'Data de término do licenciamento do UNM2000'
+        - macro: '{$UNM_LICENSE_START}'
+          value: '20251028'
+          description: 'Data de início do licenciamento do UNM2000'
+      valuemaps:
+        - uuid: e46af87357fc4a769f07e3b5b365125e
+          name: cardType
+          mappings:
+            - value: '415'
+              newvalue: HU1A
+            - value: '527'
+              newvalue: GC8B
+            - value: '550'
+              newvalue: GCOB
+        - uuid: bb45a05dd4a7482e88784b666b9aa795
+          name: fanAlarmStatus
+          mappings:
+            - value: '1'
+              newvalue: normal
+            - value: '2'
+              newvalue: stop
+            - value: '3'
+              newvalue: abnormity
+            - value: '4'
+              newvalue: nonChecking
+        - uuid: 2d9b872de4f6412ab223b7668a11cb3c
+          name: INFERTACEPON
+          mappings:
+            - value: '1'
+              newvalue: UP
+            - value: '2'
+              newvalue: DOWN
+        - uuid: b200f6e97a774ff5a759ff3f35628d0c
+          name: mgrCardType
+          mappings:
+            - value: '355'
+              newvalue: HSWA
+            - value: '374'
+              newvalue: HSUB
+            - value: '365'
+              newvalue: WSWD
+        - uuid: 23a971a1b2ee4cfd8438fc31a4e408e4
+          name: 'Service state'
+          mappings:
+            - value: '0'
+              newvalue: Down
+            - value: '1'
+              newvalue: Up
+        - uuid: 24bb118a49e647eab851866cc2b85a8a
+          name: 'SNMP interface status (ifAdminStatus)'
+          mappings:
+            - value: '1'
+              newvalue: up
+            - value: '2'
+              newvalue: down
+            - value: '3'
+              newvalue: testing
+        - uuid: 1118651c6cc54d9dbd8a6c3f93d692f3
+          name: 'SNMP interface status (ifOperStatus)'
+          mappings:
+            - value: '1'
+              newvalue: up
+            - value: '2'
+              newvalue: down
+            - value: '3'
+              newvalue: testing
+            - value: '4'
+              newvalue: unknown
+            - value: '5'
+              newvalue: dormant
+            - value: '6'
+              newvalue: notPresent
+            - value: '7'
+              newvalue: lowerLayerDown
