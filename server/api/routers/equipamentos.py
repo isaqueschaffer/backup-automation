@@ -23,6 +23,7 @@ from schemas import (
 )
 from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
+from services.segredos_config import proteger_segredos
 from services.escopo import obter_maquina
 from services.galeria_vms import (
     canal_int as _canal_int,
@@ -102,7 +103,7 @@ def create_equipamento(
         ip=body.ip,
         username=body.username,
         password=encrypt(body.password),
-        config_extra=body.config_extra,
+        config_extra=proteger_segredos(body.config_extra),
         active=body.active,
     )
     db.add(equipamento)
@@ -133,6 +134,8 @@ def update_equipamento(
     for field, value in body.model_dump(exclude_none=True).items():
         if field == "password" and value:
             eq.password = encrypt(value)
+        elif field == "config_extra":
+            eq.config_extra = proteger_segredos(value, eq.config_extra)
         elif field == "tipo" and value:
             if value.upper() not in TIPOS_EQUIPAMENTO:
                 raise HTTPException(
@@ -376,6 +379,23 @@ def _marcar_imagem_noite(db: Session, nvr: NVR, canal: int, info: dict, nome: Op
         relatorio = [{**st, "imagem_noite": info} if isinstance(st, dict) and _canal_int(st.get("canal")) == canal else st
                      for st in relatorio]
     nvr.last_recording_status = relatorio
+
+
+# ─── Status das OLTs (UNM2000) ─────────────────────────────────────────────
+
+@router.get("/{id}/olt-status")
+def get_olt_status(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Último status das OLTs/ONUs de uma UNM2000, enviado pelo agente (SNMP). Vazio se ainda não chegou."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    return nvr.olt_status or {"atualizado_em": None, "olts": []}
 
 
 # ─── NVR Cameras Gallery ───────────────────────────────────────────────────

@@ -220,6 +220,23 @@ def send_presenca_cameras(conf: dict, equipamentos: list) -> bool:
         return False
 
 
+def send_status_olts(conf: dict, equipamentos: list) -> bool:
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/olt/status",
+            json={"equipamentos": equipamentos},
+            headers=headers,
+            timeout=60,
+            verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao enviar status das OLTs: {e}")
+        return False
+
+
 def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 resultados: list, trigger: str) -> str | None:
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}

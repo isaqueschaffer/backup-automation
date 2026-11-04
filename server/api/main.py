@@ -208,6 +208,7 @@ _MIGRACOES_COLUNAS = [
     ("nvr_cameras", "password", "ALTER TABLE nvr_cameras ADD COLUMN password TEXT;"),
     ("nvr_cameras", "modelo", "ALTER TABLE nvr_cameras ADD COLUMN modelo VARCHAR(50);"),
     ("nvr_cameras", "canal_rtsp", "ALTER TABLE nvr_cameras ADD COLUMN canal_rtsp INTEGER;"),
+    ("nvrs", "olt_status", "ALTER TABLE nvrs ADD COLUMN olt_status JSON;"),
     ("nvr_cameras", "pasta_gravacao", "ALTER TABLE nvr_cameras ADD COLUMN pasta_gravacao VARCHAR(255);"),
     # Multi-contas: conta dona do Cliente/Setor e da Máquina (nullable até a etapa 2b)
     ("client_groups", "conta_id", "ALTER TABLE client_groups ADD COLUMN conta_id UUID REFERENCES contas(id) ON DELETE RESTRICT;"),

@@ -211,6 +211,7 @@ class NVR(Base):
     config_extra = Column(JSON, nullable=True)  # configurações específicas de cada tipo
     last_recording_status = Column(JSON, nullable=True)
     last_telemetry_status = Column(JSON, nullable=True)  # CPU/RAM/discos (NVR Hikvision)
+    olt_status = Column(JSON, nullable=True)  # OLT UNM2000: status das OLTs/ONUs por SNMP (enviado pelo agente a cada 5 min)
     active = Column(Boolean, default=True, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

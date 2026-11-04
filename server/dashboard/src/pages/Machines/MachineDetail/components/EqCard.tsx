@@ -1,14 +1,15 @@
-import { Activity, Edit2, FolderOpen, Image, RefreshCw, Trash2, Video } from "lucide-react";
+import { Activity, Cable, Edit2, FolderOpen, Image, RefreshCw, Trash2, Video } from "lucide-react";
 import { NVR } from "../../../../api/types";
 import { eqCor, eqIcone } from "./eqTipos";
 
-export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onEdit, onToggleActive }: {
+export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onViewOlt, onEdit, onToggleActive }: {
   eq: NVR;
   somenteLeitura?: boolean;
   onDelete: () => void;
   onViewRecording: () => void;
   onViewCameras?: () => void;
   onViewTelemetry?: () => void;
+  onViewOlt?: () => void;
   onEdit: () => void;
   onToggleActive: () => void;
 }) {
@@ -72,6 +73,12 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
           <button className="btn btn-secondary btn-sm" onClick={onViewRecording}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Video size={13} /> Gravações
+          </button>
+        )}
+        {eq.tipo === "OLT" && onViewOlt && String(eq.config_extra?.olts || "").trim() && (
+          <button className="btn btn-secondary btn-sm" onClick={onViewOlt}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Cable size={13} /> ONUs
           </button>
         )}
         {eq.tipo === "NVR" && onViewTelemetry && (

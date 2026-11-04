@@ -26,6 +26,7 @@ from schemas import (
     PingResponse,
     PingRequest,
     PresencaCamerasReport,
+    StatusOltReport,
     RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
 )
@@ -42,6 +43,7 @@ from services.storage_service import save_zip_stream, UploadTooLargeError, _sani
 from services.email_service import send_backup_report
 from services.backup_runs import attach_report_to_run, finish_queue_run
 from services.contas import maquina_bloqueada
+from services.segredos_config import config_extra_para_agente
 from services.camera_offline import aplicar_presenca, atualizar_presenca
 from config import settings
 
@@ -117,7 +119,7 @@ def get_agent_config(machine: Machine = Depends(get_current_machine), db: Sessio
                 ip=nvr.ip,
                 username=nvr.username,
                 password=decrypt(nvr.password),
-                config_extra=nvr.config_extra,
+                config_extra=config_extra_para_agente(nvr.config_extra),
                 cameras_config=_build_cameras_config(machine, nvr),
             )
             for nvr in machine.equipamentos if nvr.active
@@ -436,6 +438,28 @@ def receive_night_image(
 
     db.commit()
     return {"status": "ok"}
+
+@router.post("/olt/status")
+def receive_olt_status(
+    body: StatusOltReport,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Status periódico das OLTs de uma UNM2000 (ONUs, PONs, placas por SNMP)."""
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
+    atualizados = 0
+    for item in body.equipamentos:
+        nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == item.nome, NVR.active == True).first()
+        if not nvr or (nvr.tipo or "").upper() != "OLT":
+            continue
+        # Naive em UTC (REGRA-001)
+        nvr.olt_status = {"atualizado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "olts": item.olts}
+        atualizados += 1
+    db.commit()
+    return {"status": "ok", "atualizados": atualizados}
+
 
 @router.post("/cameras/status")
 def receive_cameras_status(

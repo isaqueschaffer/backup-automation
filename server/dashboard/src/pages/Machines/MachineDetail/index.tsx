@@ -28,6 +28,7 @@ import RotatedKeyModal from "./components/RotatedKeyModal";
 import RecordingModal from "./components/RecordingModal";
 import NVRCamerasGalleryModal from "./components/NVRCamerasGalleryModal";
 import NVRTelemetryModal from "./components/NVRTelemetryModal";
+import OltStatusModal from "./components/OltStatusModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
 import { useSomenteLeitura } from "../../../contexts/AuthContext";
 
@@ -66,6 +67,7 @@ export default function MachineDetail() {
   const [showRecordingModal, setShowRecordingModal] = useState<{ show: boolean, nvrName: string, cameras: CameraRecStatus[] }>({ show: false, nvrName: "", cameras: [] });
   const [showNVRCamerasModal, setShowNVRCamerasModal] = useState<{ show: boolean, nvrId: string, nvrName: string, eqTipo: TipoEquipamento }>({ show: false, nvrId: "", nvrName: "", eqTipo: "NVR" });
   const [showTelemetryModal, setShowTelemetryModal] = useState<{ show: boolean, nvrName: string, telemetry: NVRTelemetry | null | undefined }>({ show: false, nvrName: "", telemetry: null });
+  const [showOltModal, setShowOltModal] = useState<{ nvrId: string, nvrName: string } | null>(null);
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState<EqForm>(emptyEqForm());
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
@@ -435,6 +437,7 @@ export default function MachineDetail() {
                           onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
                           onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}
                           onViewTelemetry={() => setShowTelemetryModal({ show: true, nvrName: eq.name, telemetry: eq.last_telemetry_status })}
+                          onViewOlt={() => setShowOltModal({ nvrId: eq.id, nvrName: eq.name })}
                           onEdit={() => openEqModal(eqToForm(eq), eq.id)}
                           onToggleActive={() => handleToggleEquipamento(eq)}
                         />
@@ -526,6 +529,15 @@ export default function MachineDetail() {
           nvrName={showNVRCamerasModal.nvrName}
           eqTipo={showNVRCamerasModal.eqTipo}
           onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "", eqTipo: "NVR" })}
+        />
+      )}
+
+      {showOltModal && (
+        <OltStatusModal
+          machineId={id!}
+          nvrId={showOltModal.nvrId}
+          nvrName={showOltModal.nvrName}
+          onClose={() => setShowOltModal(null)}
         />
       )}
 
