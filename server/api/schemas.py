@@ -3,9 +3,10 @@ from typing import List, Optional, Any, Dict, Union, Literal
 from datetime import datetime
 from uuid import UUID
 import re
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from services.contas import TIPOS_CONTA
+from services.galeria_vms import com_nomes_da_galeria
 from services.senhas import validar_senha_nova
 
 
@@ -45,6 +46,18 @@ class NVRResponse(NVRBase):
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _nomes_da_galeria(cls, data):
+        """Digifort: o painel mostra o nome que a câmera tem na Galeria (também no lugar do nome da pasta de gravação),
+        mesmo antes do próximo backup. Só exibição."""
+        if isinstance(data, dict) or (getattr(data, "tipo", None) or "").upper() != "DIGIFORT":
+            return data
+        campos = {nome: getattr(data, nome, None) for nome in cls.model_fields}
+        campos["last_recording_status"] = com_nomes_da_galeria(
+            campos["last_recording_status"], list(getattr(data, "cameras_status", None) or []))
+        return campos
 
 
 # ─────────────────────────────────────────────

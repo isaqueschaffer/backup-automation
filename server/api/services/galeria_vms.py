@@ -76,6 +76,23 @@ def aprender_pastas(cameras_db: list, relatorio: list) -> int:
     return gravadas
 
 
+def com_nomes_da_galeria(relatorio, cameras_db: list):
+    """Cópia do relatório do agente com o nome da Galeria no lugar do nome de cada câmera pareada e, onde o agente
+    informou a pasta de gravação, o mesmo nome também em `pasta_gravacao`. Só para exibição: o vínculo real com a
+    pasta (coluna `pasta_gravacao` da Galeria) e o relatório gravado não mudam."""
+    if not isinstance(relatorio, list) or not cameras_db:
+        return relatorio
+    saida = list(relatorio)
+    for i, st, c, _ in parear_cameras(cameras_db, relatorio):
+        if i is None or c is None or not (c.nome or "").strip():
+            continue
+        novo = {**st, "nome": c.nome}
+        if st.get("pasta_gravacao"):
+            novo["pasta_gravacao"] = c.nome
+        saida[i] = novo
+    return saida
+
+
 def parear_cameras(cameras_db: list, relatorio: list) -> List[Tuple[Optional[int], Optional[dict], Optional[object], int]]:
     """Pareia as câmeras do relatório do agente com as da Galeria.
 
