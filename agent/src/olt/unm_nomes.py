@@ -30,14 +30,47 @@ BANCO_PADRAO = "integratecfgdb"
 # Pode ser trocada por TRILAN_UNM_DB_USER/TRILAN_UNM_DB_PASS na maquina do agente, ou por servidor no proprio cadastro.
 USUARIO_PADRAO = os.environ.get("TRILAN_UNM_DB_USER") or "zabbix_reader"
 SENHA_PADRAO = os.environ.get("TRILAN_UNM_DB_PASS") or "Zabbix@2024"
+
+# Criacao automatica do usuario de leitura: o agente roda SEMPRE no proprio servidor da UNM2000, entao se a credencial
+# padrao for recusada ele cria o usuario de leitura usando o root do MySQL, so por localhost (127.0.0.1), sem SSH nem
+# acesso remoto. A senha do root (padrao de instalacao da UNM2000) pode ser trocada por TRILAN_UNM_ROOT_PASS; a criacao
+# pode ser desligada com TRILAN_UNM_AUTOCRIAR=0. O root nunca sai da maquina: e usado so para esse GRANT local.
+HOST_LOCAL = "127.0.0.1"
+ROOT_USUARIO = os.environ.get("TRILAN_UNM_ROOT_USER") or "root"
+ROOT_SENHA = os.environ.get("TRILAN_UNM_ROOT_PASS") or "vislecaina"
+AUTO_CRIAR_LEITURA = (os.environ.get("TRILAN_UNM_AUTOCRIAR") or "1") != "0"
 TIMEOUT_S = 5
 _SQL = "SELECT LOWER(contmac), cobjectname FROM t_ontdevice"
 _RE_NOME_AUTOMATICO = re.compile(r"^PON\[\d+\]-.*\[\d+\]$")
+_RE_IDENTIFICADOR = re.compile(r"^\w+$")
 
 
 def nome_automatico(nome: Optional[str]) -> bool:
     """True para o nome que a UNM2000 gera sozinha ("PON[1]-HG6145E[3]"), ou seja, ONU sem nome dado pelo operador."""
     return bool(_RE_NOME_AUTOMATICO.match((nome or "").strip()))
+
+
+def _acesso_negado(e: Exception) -> bool:
+    return bool(getattr(e, "args", None)) and isinstance(e.args[0], int) and e.args[0] in (1044, 1045, 1142)
+
+
+def criar_usuario_leitura(usuario: str, senha: str, banco: Optional[str] = None, porta: int = PORTA_BANCO_PADRAO) -> None:
+    """Cria (ou atualiza) o usuario so-leitura `usuario` no MySQL local da UNM2000, logando como root por 127.0.0.1.
+    Da apenas GRANT SELECT no banco. Levanta excecao se o root nao aceitar a conexao."""
+    import pymysql
+    nome_banco = banco or BANCO_PADRAO
+    if not _RE_IDENTIFICADOR.match(nome_banco):
+        raise ValueError(f"nome de banco invalido: {nome_banco}")
+    conexao = pymysql.connect(host=HOST_LOCAL, port=porta, user=ROOT_USUARIO, password=ROOT_SENHA,
+                              charset="utf8mb4", connect_timeout=TIMEOUT_S)
+    try:
+        with conexao.cursor() as cur:
+            cur.execute(f"GRANT SELECT ON `{nome_banco}`.* TO %s@'%%' IDENTIFIED BY %s", (usuario, senha))
+            cur.execute("FLUSH PRIVILEGES")
+        conexao.commit()
+        logging.info(f"Usuario de leitura '{usuario}' criado/ajustado no MySQL local da UNM2000.")
+    finally:
+        conexao.close()
 
 
 def buscar_nomes(host: str, usuario: str, senha: str, banco: Optional[str] = None, porta: int = PORTA_BANCO_PADRAO) -> Dict[str, str]:
@@ -103,34 +136,47 @@ def hosts_do_banco(cfg: dict) -> List[str]:
     return saida
 
 
-def consultar_nomes(cfg: dict, buscar=None) -> Tuple[Dict[str, str], List[str]]:
-    """({serial: nome}, [erros]) juntando os servidores de `nomes_db_host`. Usuario e senha em branco caem no padrao
-    (`USUARIO_PADRAO`/`SENHA_PADRAO`), igual para qualquer servidor; o cadastro so precisa informa-los quando aquele
-    servidor usar outra credencial. Um nome dado pelo operador vale mais que o automatico, venha de qual servidor vier.
-    Sem host devolve vazio e sem erro."""
-    hosts = hosts_do_banco(cfg)
-    if not hosts:
-        return {}, []
+def consultar_nomes(cfg: dict, buscar=None, provisionar=None) -> Tuple[Dict[str, str], List[str]]:
+    """({serial: nome}, [erros]) juntando os servidores de `nomes_db_host`. Sem host informado usa 127.0.0.1 (o agente
+    roda no proprio servidor da UNM2000). Usuario e senha em branco caem no padrao (`USUARIO_PADRAO`/`SENHA_PADRAO`);
+    o cadastro so precisa informa-los quando aquele servidor usar outra credencial. Se o padrao for recusado, cria o
+    usuario de leitura pelo root local (uma vez) e refaz a leitura. Um nome dado pelo operador vale mais que o automatico."""
+    hosts = hosts_do_banco(cfg) or [HOST_LOCAL]
     usuario_cfg = (cfg.get("nomes_db_usuario") or "").strip()
-    if usuario_cfg:  # o que o usuario digitou no cadastro tem prioridade
-        usuario, senha = usuario_cfg, (cfg.get("nomes_db_senha") or "")
+    if usuario_cfg:  # o que o usuario digitou no cadastro tem prioridade; nesse caso nao criamos nada
+        usuario, senha, usa_padrao = usuario_cfg, (cfg.get("nomes_db_senha") or ""), False
     else:
-        usuario, senha = USUARIO_PADRAO, SENHA_PADRAO
+        usuario, senha, usa_padrao = USUARIO_PADRAO, SENHA_PADRAO, True
     try:
         porta = int(cfg.get("nomes_db_porta") or PORTA_BANCO_PADRAO)
     except (TypeError, ValueError):
         porta = PORTA_BANCO_PADRAO
     banco = (cfg.get("nomes_db_nome") or "").strip() or None
+    ler = buscar or buscar_nomes
     nomes: Dict[str, str] = {}
     erros: List[str] = []
+    ja_tentou_criar = False
     for host in hosts:
-        try:
-            for serial, nome in (buscar or buscar_nomes)(host, usuario, senha, banco, porta).items():
+        while True:
+            try:
+                dados = ler(host, usuario, senha, banco, porta)
+            except Exception as e:
+                if usa_padrao and AUTO_CRIAR_LEITURA and _acesso_negado(e) and not ja_tentou_criar:
+                    ja_tentou_criar = True
+                    try:
+                        (provisionar or criar_usuario_leitura)(usuario, senha, banco, porta)
+                        continue  # usuario criado: refaz a leitura deste host
+                    except Exception as ec:
+                        logging.warning(f"Nao foi possivel criar o usuario de leitura na UNM2000: {ec}")
+                        erros.append(f"nao foi possivel criar o usuario de leitura: {explicar_erro(ec, HOST_LOCAL)}")
+                        break
+                logging.warning(f"Nao foi possivel ler os nomes das ONUs em {host}: {e}")
+                erros.append(explicar_erro(e, host))
+                break
+            for serial, nome in dados.items():
                 if serial not in nomes or (nome_automatico(nomes[serial]) and not nome_automatico(nome)):
                     nomes[serial] = nome
-        except Exception as e:
-            logging.warning(f"Nao foi possivel ler os nomes das ONUs em {host}: {e}")
-            erros.append(explicar_erro(e, host))
+            break
     return nomes, erros
 
 

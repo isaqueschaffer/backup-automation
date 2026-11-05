@@ -185,7 +185,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
               <div className="form-group" style={{ marginTop: 12 }}>
                 <label className="form-label">Nomes das ONUs: banco da UNM2000 (somente leitura) — opcional</label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <input className="form-input" type="text" autoComplete="off" placeholder="IP(s) do servidor da UNM2000"
+                  <input className="form-input" type="text" autoComplete="off" placeholder="IP do servidor (vazio = este servidor)"
                     value={eqForm.nomes_db_host || ""}
                     onChange={e => setEqForm({ ...eqForm, nomes_db_host: e.target.value })} />
                   <input className="form-input" type="text" autoComplete="off" placeholder="Usuário (padrão do sistema)"
@@ -197,7 +197,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
                     onChange={e => setEqForm({ ...eqForm, nomes_db_senha: e.target.value })} />
                 </div>
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  Informe só o IP do servidor da UNM2000 (não o da OLT); se a OLT e as ONUs estiverem em servidores diferentes, informe todos separados por vírgula. Usuário e senha em branco usam a credencial padrão do sistema, que funciona na maioria das instalações — preencha só se aquele servidor for diferente. Sem o IP, as ONUs aparecem só pelo serial.
+                  Como o agente roda no próprio servidor da UNM2000, pode deixar tudo em branco: ele lê os nomes no MySQL local e, se precisar, cria sozinho o usuário de leitura. Preencha o IP só se o banco estiver em outro servidor (vários, separados por vírgula) e o usuário/senha só se aquele servidor usar outra credencial. ONUs sem nome dado na UNM2000 aparecem só pelo serial.
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>

@@ -284,13 +284,44 @@ class TestNomesDasOnus(unittest.TestCase):
         self.assertEqual((info["com_nome"], info["sem_nome"]), (0, 1))
         self.assertIn("porta 3306", info["erro"])
 
-    def test_sem_host_nao_consulta(self):
-        from src.olt.unm_nomes import nomes_das_onus
+    def test_sem_host_usa_o_localhost_do_proprio_servidor(self):
+        from src.olt import unm_nomes
+        chamadas = []
+        unm_nomes.nomes_das_onus({}, lambda *a: chamadas.append(a[0]) or {})
+        self.assertEqual(chamadas, [unm_nomes.HOST_LOCAL])
 
-        def nao_deve_chamar(*a):
-            raise AssertionError("consultou sem host")
+    def test_cria_usuario_de_leitura_quando_o_padrao_e_recusado(self):
+        from src.olt import unm_nomes
+        estado = {"criado": False}
+        criadas = []
 
-        self.assertEqual(nomes_das_onus({"nomes_db_usuario": "u", "nomes_db_senha": "s"}, nao_deve_chamar), {})
+        def buscar(host, usuario, senha, banco, porta):
+            if not estado["criado"]:
+                raise Exception(1045, "Access denied")
+            return {"fhtt1": "SALA 1"}
+
+        def provisionar(usuario, senha, banco, porta):
+            criadas.append((usuario, senha))
+            estado["criado"] = True
+
+        nomes, erros = unm_nomes.consultar_nomes({"nomes_db_host": "127.0.0.1"}, buscar, provisionar)
+        self.assertEqual(nomes, {"fhtt1": "SALA 1"})
+        self.assertEqual(erros, [])
+        self.assertEqual(criadas, [(unm_nomes.USUARIO_PADRAO, unm_nomes.SENHA_PADRAO)])
+
+    def test_nao_cria_usuario_quando_a_credencial_e_do_cadastro(self):
+        from src.olt import unm_nomes
+
+        def buscar(*a):
+            raise Exception(1045, "Access denied")
+
+        def provisionar(*a):
+            raise AssertionError("nao deveria criar usuario com credencial do cadastro")
+
+        nomes, erros = unm_nomes.consultar_nomes(
+            {"nomes_db_host": "127.0.0.1", "nomes_db_usuario": "u", "nomes_db_senha": "s"}, buscar, provisionar)
+        self.assertEqual(nomes, {})
+        self.assertTrue(erros)
 
     def test_host_sem_usuario_usa_a_credencial_padrao(self):
         from src.olt import unm_nomes
