@@ -18,7 +18,7 @@ def coletar_status_olts(equipamentos: list, coletar=None, buscar_nomes=None) -> 
     """[{'nome': equipamento, 'olts': [{'nome', 'ip', ...status ou 'erro'}]}] das UNM2000 ativas com OLTs
     (`olts`, um IP por linha) e acesso Telnet (`telnet_usuario`, `telnet_senha`, `telnet_enable`)
     configurados. `coletar(ip, usuario, senha, enable, porta)` e injetavel para teste."""
-    from src.olt.unm_nomes import aplicar_nomes, nomes_das_onus
+    from src.olt.unm_nomes import aplicar_nomes, consultar_nomes
     from src.olt.unm_telnet import PORTA_PADRAO, coletar_olt, parse_hosts
     coletar = coletar or coletar_olt
     resultado = []
@@ -40,10 +40,13 @@ def coletar_status_olts(equipamentos: list, coletar=None, buscar_nomes=None) -> 
             except (TypeError, ValueError):
                 porta = PORTA_PADRAO
             olts = [{"nome": h["nome"], **coletar(h["ip"], usuario, senha, enable, porta)} for h in hosts]
-            nomes = nomes_das_onus(cfg, buscar_nomes)
-            if nomes:
+            nomes, erros_nomes = consultar_nomes(cfg, buscar_nomes)
+            if nomes or erros_nomes:
                 for olt in olts:
-                    aplicar_nomes(olt.get("onus"), nomes)
+                    if olt.get("erro"):
+                        continue
+                    com, sem = aplicar_nomes(olt.get("onus"), nomes)
+                    olt["nomes"] = {"com_nome": com, "sem_nome": sem, **({"erro": " | ".join(erros_nomes)} if erros_nomes else {})}
             resultado.append({"nome": eq.get("name"), "olts": olts})
         except Exception as e:
             logging.warning(f"Erro ao coletar o status das OLTs de {eq.get('name')}: {e}", exc_info=True)

@@ -25,6 +25,7 @@ from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
 from services.segredos_config import proteger_segredos
 from services.escopo import obter_maquina
+from services.licenca_unm import licenca_da_config
 from services.galeria_vms import (
     canal_int as _canal_int,
     ip_valido,
@@ -395,7 +396,8 @@ def get_olt_status(
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
-    return nvr.olt_status or {"atualizado_em": None, "olts": []}
+    status_olt = nvr.olt_status or {"atualizado_em": None, "olts": []}
+    return {**status_olt, "licenca": licenca_da_config(nvr.config_extra)}
 
 
 # ─── NVR Cameras Gallery ───────────────────────────────────────────────────

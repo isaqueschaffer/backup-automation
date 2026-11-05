@@ -61,6 +61,8 @@ export function eqToForm(eq: NVR): EqForm {
     nomes_db_usuario: cfg?.nomes_db_usuario || "",
     nomes_db_senha: "",
     nomes_db_senha_definida: !!cfg?.nomes_db_senha_definida,
+    licenca_inicio: cfg?.licenca_inicio || "",
+    licenca_fim: cfg?.licenca_fim || "",
   };
 }
 
@@ -117,6 +119,8 @@ export function buildEqPayload(
       cfg.nomes_db_host = (eqForm.nomes_db_host || "").trim();
       cfg.nomes_db_usuario = (eqForm.nomes_db_usuario || "").trim();
       if (eqForm.nomes_db_senha) cfg.nomes_db_senha = eqForm.nomes_db_senha;
+      cfg.licenca_inicio = eqForm.licenca_inicio || "";
+      cfg.licenca_fim = eqForm.licenca_fim || "";
       if (cfg.nomes_db_host && !cfg.nomes_db_usuario) return { error: "Para buscar os nomes das ONUs, informe o usuário do banco da UNM2000." };
       if (cfg.olts) {
         if (!cfg.telnet_usuario) return { error: "Para monitorar as OLTs, informe o usuário do Telnet." };

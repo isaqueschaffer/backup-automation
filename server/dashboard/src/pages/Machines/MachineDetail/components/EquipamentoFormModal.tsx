@@ -185,7 +185,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
               <div className="form-group" style={{ marginTop: 12 }}>
                 <label className="form-label">Nomes das ONUs: banco da UNM2000 (somente leitura) — opcional</label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <input className="form-input" type="text" autoComplete="off" placeholder="IP do servidor (ex.: 192.168.91.6)"
+                  <input className="form-input" type="text" autoComplete="off" placeholder="IP(s) do servidor da UNM2000"
                     value={eqForm.nomes_db_host || ""}
                     onChange={e => setEqForm({ ...eqForm, nomes_db_host: e.target.value })} />
                   <input className="form-input" type="text" autoComplete="off" placeholder="Usuário do banco"
@@ -197,9 +197,24 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
                     onChange={e => setEqForm({ ...eqForm, nomes_db_senha: e.target.value })} />
                 </div>
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  O agente lê o nome cadastrado de cada ONU (porta 3306) e o liga ao serial. Em branco, as ONUs aparecem só pelo serial.
+                  O agente lê o nome cadastrado de cada ONU no MySQL da UNM2000 (porta 3306) e o liga ao serial. Use o IP do servidor da UNM2000, não o da OLT; se a OLT e as ONUs estiverem em servidores diferentes, informe todos separados por vírgula. O usuário só precisa de leitura (GRANT SELECT ON integratecfgdb.*). Em branco, as ONUs aparecem só pelo serial.
                 </span>
               </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Licença da UNM2000: início — opcional</label>
+                  <input className="form-input" type="date" value={eqForm.licenca_inicio || ""}
+                    onChange={e => setEqForm({ ...eqForm, licenca_inicio: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Licença da UNM2000: validade — opcional</label>
+                  <input className="form-input" type="date" value={eqForm.licenca_fim || ""}
+                    onChange={e => setEqForm({ ...eqForm, licenca_fim: e.target.value })} />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                A UNM2000 não informa a validade da licença por nenhuma consulta; informe a data para o painel mostrar os dias restantes.
+              </span>
             </>
           )}
 

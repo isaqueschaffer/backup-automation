@@ -63,6 +63,8 @@ export interface EquipamentoConfig {
   nomes_db_host?: string;
   nomes_db_usuario?: string;
   nomes_db_nome?: string;
+  licenca_inicio?: string;
+  licenca_fim?: string;
   nomes_db_senha_definida?: boolean;
   [key: string]: unknown;
 }
@@ -91,6 +93,8 @@ export interface EqForm {
   nomes_db_usuario?: string;
   nomes_db_senha?: string;
   nomes_db_senha_definida?: boolean;
+  licenca_inicio?: string;
+  licenca_fim?: string;
   // Planilha das câmeras do Digifort lida no formulário (enviada à Galeria ao salvar)
   planilhaNova?: PlanilhaPendente | null;
   // Digifort já cadastrado: o que a Galeria do equipamento já tem (exigência satisfeita sem nova planilha)
@@ -411,7 +415,7 @@ export interface OltOnu {
   nome?: string | null;
   sinal_olt_dbm?: number;
   sinal_onu_dbm?: number;
-  qualidade?: "BOM" | "RUIM" | null;
+  qualidade?: "BOM" | "ATENCAO" | "RUIM" | null;
   medido_em?: string;
   estado: "ONLINE" | "OFFLINE" | "FALHA" | "SEM_ENERGIA" | "DESCONHECIDO";
 }
@@ -425,6 +429,8 @@ export interface OltPonResumo {
   falha: number;
   sem_energia: number;
   sinal_ruim?: number;
+  tx_dbm?: number | null;
+  temperatura_gbic?: number | null;
 }
 
 export interface OltPlaca {
@@ -446,6 +452,7 @@ export interface OltStatus {
   coletado_em?: string;
   firmware?: string | null;
   hardware?: string | null;
+  nomes?: { com_nome: number; sem_nome: number; erro?: string } | null;
   modelo?: string | null;
   controladora?: { slot: number; tipo?: string | null; software?: string | null } | null;
   temperatura?: number | null;
@@ -460,4 +467,5 @@ export interface OltStatus {
 export interface OltStatusResponse {
   atualizado_em: string | null;
   olts: OltStatus[];
+  licenca?: { inicio: string | null; fim: string; dias_restantes: number } | null;
 }

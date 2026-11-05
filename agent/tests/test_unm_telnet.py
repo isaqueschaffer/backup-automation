@@ -94,7 +94,29 @@ CARD   EXIST   CONFIG   DETECT    DETAIL
 """
 
 
+PON_OPTICO = """ -----  PON OPTIC MODULE PAR INFO  -----
+NAME                VALUE	UNIT
+---------------------------------------
+TYPE              : 20	(KM)
+TEMPERATURE       : 24.39	('C)
+VOLTAGE           :  3.27	(V)
+BIAS CURRENT      : 10.92	(mA)
+SEND POWER        :  5.04	(Dbm)
+
+ONU_NO	RECV_POWER , ITEM=3
+1	-19.82	(Dbm)
+2	-24.55	(Dbm)
+10	-26.02	(Dbm)
+"""
+
+
 class TestUnmTelnet(unittest.TestCase):
+    def test_modulo_optico_da_pon_e_sinal_de_todas_as_onus(self):
+        r = u.parse_pon_optico(PON_OPTICO)
+        self.assertEqual((r["tx_dbm"], r["temperatura"]), (5.04, 24.39))
+        self.assertEqual(r["sinal_onus"], {1: -19.82, 2: -24.55, 10: -26.02})
+        self.assertEqual(u.parse_pon_optico("% Unknown command."), {})
+        self.assertEqual(u.parse_pon_optico("ONU OPTIC MODULE PAR INFO RECV POWER : -20.0"), {})
     def test_optico_da_serie_6000_nos_dois_formatos(self):
         esperado = {"sinal_olt_dbm": -19.78, "sinal_onu_dbm": -18.27, "tx_onu_dbm": 2.36, "temperatura_onu": 42.86}
         self.assertEqual(u.parse_optico(OPTICO_TABELA), esperado)
@@ -162,9 +184,13 @@ class TestUnmTelnet(unittest.TestCase):
         self.assertEqual(r["temperatura_onu"], 39.56)
         self.assertEqual(u.parse_optico("[ ERR -553 ] onu is in unactive!\nCommand executes failed."), {})
 
-    def test_qualidade_do_sinal_corta_em_menos_25_9(self):
-        self.assertEqual(u.qualidade_sinal(-25.8), "BOM")
-        self.assertEqual(u.qualidade_sinal(-25.9), "RUIM")
+    def test_qualidade_do_sinal_tres_niveis(self):
+        self.assertEqual(u.qualidade_sinal(-25.0), "BOM")
+        self.assertEqual(u.qualidade_sinal(-25.4), "BOM")
+        self.assertEqual(u.qualidade_sinal(-25.5), "ATENCAO")   # limite: amarelo comeca em -25,5
+        self.assertEqual(u.qualidade_sinal(-26.0), "ATENCAO")
+        self.assertEqual(u.qualidade_sinal(-26.9), "ATENCAO")
+        self.assertEqual(u.qualidade_sinal(-27.0), "RUIM")      # limite: vermelho comeca em -27
         self.assertEqual(u.qualidade_sinal(-30.0), "RUIM")
         self.assertIsNone(u.qualidade_sinal(None))
 
@@ -212,9 +238,51 @@ class TestNomesDasOnus(unittest.TestCase):
     def test_nome_ligado_ao_serial_sem_diferenciar_maiusculas(self):
         from src.olt.unm_nomes import aplicar_nomes
         onus = [{"serial": "FHTTc093e037"}, {"serial": "FHTTzzzz"}, {"serial": None}]
-        self.assertEqual(aplicar_nomes(onus, {"fhttc093e037": "QUARTO 229"}), 1)
+        self.assertEqual(aplicar_nomes(onus, {"fhttc093e037": "QUARTO 229"}), (1, 1))
         self.assertEqual(onus[0]["nome"], "QUARTO 229")
         self.assertNotIn("nome", onus[1])
+
+    def test_nome_automatico_da_unm_conta_como_sem_nome(self):
+        from src.olt.unm_nomes import aplicar_nomes, nome_automatico
+        self.assertTrue(nome_automatico("PON[1]-HG6145E[3]"))
+        self.assertTrue(nome_automatico("PON[4]-AN5506-04-B2[20]"))
+        self.assertFalse(nome_automatico("PON 1 - SALA 609"))
+        onus = [{"serial": "FHTT1"}, {"serial": "FHTT2"}]
+        self.assertEqual(aplicar_nomes(onus, {"fhtt1": "PON[1]-HG6145E[1]", "fhtt2": "SALA 2"}), (1, 1))
+        self.assertNotIn("nome", onus[0])
+
+    def test_varios_servidores_e_nome_real_vence_o_automatico(self):
+        from src.olt.unm_nomes import consultar_nomes, hosts_do_banco
+        self.assertEqual(hosts_do_banco({"nomes_db_host": "10.0.0.1, 10.0.0.2;10.0.0.1 10.0.0.3"}), ["10.0.0.1", "10.0.0.2", "10.0.0.3"])
+        bancos = {"10.0.0.1": {"a": "PON[1]-X[1]", "b": "SALA B"}, "10.0.0.2": {"a": "SALA A", "b": "PON[2]-X[2]"}}
+
+        def buscar(host, *_):
+            if host not in bancos:
+                raise OSError("sem rota")
+            return bancos[host]
+
+        nomes, erros = consultar_nomes({"nomes_db_host": "10.0.0.1 10.0.0.2 10.0.0.9", "nomes_db_usuario": "u"}, buscar)
+        self.assertEqual(nomes, {"a": "SALA A", "b": "SALA B"})
+        self.assertEqual(len(erros), 1)
+        self.assertIn("10.0.0.9", erros[0])
+        self.assertIn("porta 3306", erros[0])
+
+    def test_mensagem_de_acesso_negado_ao_banco(self):
+        from src.olt.unm_nomes import explicar_erro
+        self.assertIn("GRANT SELECT", explicar_erro(Exception(1045, "Access denied"), "h"))
+
+    def test_coleta_informa_nomes_e_erro_do_banco(self):
+        eq = {"tipo": "OLT", "name": "UNM", "active": True,
+              "config_extra": {"olts": "10.0.0.1", "telnet_usuario": "g", "telnet_senha": "p",
+                               "nomes_db_host": "h", "nomes_db_usuario": "u"}}
+
+        def sem_banco(*a):
+            raise OSError("sem rota")
+
+        r = coletar_status_olts([eq], coletar=lambda *a: {"ip": a[0], "onus": [{"serial": "FHTT1"}]}, buscar_nomes=sem_banco)
+        info = r[0]["olts"][0]["nomes"]
+        self.assertEqual((info["com_nome"], info["sem_nome"]), (0, 1))
+        self.assertIn("porta 3306", info["erro"])
 
     def test_sem_banco_configurado_nao_consulta(self):
         from src.olt.unm_nomes import nomes_das_onus

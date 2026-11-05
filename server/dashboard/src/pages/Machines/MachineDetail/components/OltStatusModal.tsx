@@ -19,7 +19,7 @@ function Tile({ titulo, valor, cor }: { titulo: string; valor: number | string; 
   );
 }
 
-function OltPainel({ olt }: { olt: OltStatus }) {
+function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusResponse["licenca"] }) {
   const [filtro, setFiltro] = useState<string>("");
   const [busca, setBusca] = useState("");
 
@@ -42,6 +42,12 @@ function OltPainel({ olt }: { olt: OltStatus }) {
         <Tile titulo="Sem energia" valor={t?.sem_energia ?? "—"} cor={t && t.sem_energia ? "var(--warn)" : undefined} />
         {t && t.falha > 0 && <Tile titulo="Com falha" valor={t.falha} cor="var(--err)" />}
         <Tile titulo="Sinal ruim" valor={t?.sinal_ruim ?? "—"} cor={t && t.sinal_ruim ? "var(--err)" : undefined} />
+        {licenca && (
+          <Tile titulo="Licença UNM2000"
+            valor={licenca.dias_restantes >= 0 ? `${licenca.dias_restantes} dias` : "vencida"}
+            cor={licenca.dias_restantes < 0 ? "var(--err)" : licenca.dias_restantes <= 30 ? "var(--warn)" : undefined} />
+        )}
+        {olt.nomes && <Tile titulo="Sem nome" valor={olt.nomes.sem_nome} cor={olt.nomes.sem_nome ? "var(--warn)" : undefined} />}
         {olt.temperatura != null && <Tile titulo="Temperatura" valor={`${olt.temperatura} °C`} cor={quente ? "var(--err)" : undefined} />}
       </div>
       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
@@ -49,14 +55,27 @@ function OltPainel({ olt }: { olt: OltStatus }) {
         {olt.total_onus_olt != null && ` · ${olt.total_onus_olt} ONUs segundo a OLT`}
       </div>
 
+      {olt.nomes?.erro && (
+        <div style={{ fontSize: 12, color: "var(--err)" }}>Nomes das ONUs indisponíveis: {olt.nomes.erro}</div>
+      )}
+      {olt.nomes && !olt.nomes.erro && olt.nomes.sem_nome > 0 && (
+        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          {olt.nomes.sem_nome} ONU(s) sem nome cadastrado na UNM2000 (a UNM só tem o nome automático da posição). Dê um nome a elas na UNM2000 e ele aparece aqui.
+        </div>
+      )}
+
       {(olt.por_pon || []).length > 0 && (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Slot / PON</th><th>Total</th><th>Online</th><th>Offline</th><th>Sem energia</th><th>Sinal ruim</th></tr></thead>
+            <thead><tr><th>Slot / PON</th><th>TX da porta</th><th>Temp. GBIC</th><th>Total</th><th>Online</th><th>Offline</th><th>Sem energia</th><th>Sinal ruim</th></tr></thead>
             <tbody>
               {olt.por_pon!.map(p => (
                 <tr key={`${p.slot}-${p.pon}`}>
                   <td>{p.slot ?? "?"} / {p.pon ?? "?"}</td>
+                  <td>{p.tx_dbm != null ? `${p.tx_dbm.toFixed(2)} dBm` : "—"}</td>
+                  <td style={{ color: p.temperatura_gbic != null && p.temperatura_gbic >= TEMPERATURA_ALERTA ? "var(--err)" : undefined }}>
+                    {p.temperatura_gbic != null ? `${p.temperatura_gbic.toFixed(1)} °C` : "—"}
+                  </td>
                   <td>{p.total}</td>
                   <td>{p.online}</td>
                   <td style={{ color: p.offline ? "var(--err)" : undefined }}>{p.offline}</td>
@@ -107,7 +126,7 @@ function OltPainel({ olt }: { olt: OltStatus }) {
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.indice}</td>
                   <td>{o.tipo ?? "—"}</td>
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.serial ?? "—"}</td>
-                  <td style={{ color: o.qualidade === "RUIM" ? "var(--err)" : undefined }}>
+                  <td style={{ color: o.qualidade === "RUIM" ? "var(--err)" : o.qualidade === "ATENCAO" ? "var(--warn)" : undefined }}>
                     {o.sinal_olt_dbm != null ? `${o.sinal_olt_dbm.toFixed(2)} dBm` : "—"}
                   </td>
                   <td>{o.sinal_onu_dbm != null ? `${o.sinal_onu_dbm.toFixed(2)} dBm` : "—"}</td>
@@ -180,7 +199,7 @@ export default function OltStatusModal({ machineId, nvrId, nvrName, onClose }: {
           {carregando ? "Carregando..." : "Ainda sem dados. O agente envia o status a cada 5 minutos; confira se os IPs das OLTs e o usuário e a senha do Telnet estão preenchidos no equipamento."}
         </div>
       ) : (
-        <OltPainel key={olt.ip} olt={olt} />
+        <OltPainel key={olt.ip} olt={olt} licenca={dados?.licenca} />
       )}
     </Modal>
   );
