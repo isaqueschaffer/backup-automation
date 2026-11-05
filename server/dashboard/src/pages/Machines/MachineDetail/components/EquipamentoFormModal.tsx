@@ -147,42 +147,17 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
 
           {eqForm.fabricante_olt === "UNM2000" && (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Usuário da API do UNM2000 (opcional)</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    value={eqForm.username}
-                    onChange={e => setEqForm({ ...eqForm, username: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Senha da API (opcional)</label>
-                  <input
-                    className="form-input"
-                    type="password"
-                    autoComplete="new-password"
-                    value={eqForm.password}
-                    onChange={e => setEqForm({ ...eqForm, password: e.target.value })}
-                  />
-                </div>
-              </div>
-              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                Preencha para que o backup manual gere uma exportação nova na hora. Em branco, o backup apenas copia o arquivo mais recente da pasta.
-              </span>
               <div className="form-group" style={{ marginTop: 12 }}>
-                <label className="form-label">IPs das OLTs para monitorar (Telnet, porta 23) — opcional</label>
-                <textarea
+                <label className="form-label">IP da OLT (Telnet, porta 23) — opcional</label>
+                <input
                   className="form-input"
-                  rows={3}
-                  placeholder={"OLT Centro=192.168.90.2\n192.168.90.3"}
+                  type="text"
+                  placeholder="192.168.90.2"
                   value={eqForm.olts || ""}
                   onChange={e => setEqForm({ ...eqForm, olts: e.target.value })}
                 />
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  Um IP por linha, ou Nome=IP. O agente precisa alcançar esses IPs pela rede da máquina. A cada 5 minutos ele lê o estado das ONUs e o sinal óptico.
+                  Uma OLT por equipamento. O agente precisa alcançar esse IP pela rede da máquina. A cada 5 minutos ele lê o estado das ONUs e o sinal óptico.
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
@@ -210,21 +185,36 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
               <div className="form-group" style={{ marginTop: 12 }}>
                 <label className="form-label">Nomes das ONUs: banco da UNM2000 (somente leitura) — opcional</label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <input className="form-input" type="text" autoComplete="off" placeholder="IP do servidor (ex.: 192.168.91.6)"
+                  <input className="form-input" type="text" autoComplete="off" placeholder="IP do servidor (vazio = este servidor)"
                     value={eqForm.nomes_db_host || ""}
                     onChange={e => setEqForm({ ...eqForm, nomes_db_host: e.target.value })} />
-                  <input className="form-input" type="text" autoComplete="off" placeholder="Usuário do banco"
+                  <input className="form-input" type="text" autoComplete="off" placeholder="Usuário (padrão do sistema)"
                     value={eqForm.nomes_db_usuario || ""}
                     onChange={e => setEqForm({ ...eqForm, nomes_db_usuario: e.target.value })} />
                   <input className="form-input" type="password" autoComplete="new-password"
-                    placeholder={eqForm.nomes_db_senha_definida ? "•••••• (vazio mantém)" : "Senha do banco"}
+                    placeholder={eqForm.nomes_db_senha_definida ? "•••••• (vazio mantém)" : "Senha (padrão do sistema)"}
                     value={eqForm.nomes_db_senha || ""}
                     onChange={e => setEqForm({ ...eqForm, nomes_db_senha: e.target.value })} />
                 </div>
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  O agente lê o nome cadastrado de cada ONU (porta 3306) e o liga ao serial. Em branco, as ONUs aparecem só pelo serial.
+                  Como o agente roda no próprio servidor da UNM2000, pode deixar tudo em branco: ele lê os nomes no MySQL local e, se precisar, cria sozinho o usuário de leitura. Preencha o IP só se o banco estiver em outro servidor (vários, separados por vírgula) e o usuário/senha só se aquele servidor usar outra credencial. ONUs sem nome dado na UNM2000 aparecem só pelo serial.
                 </span>
               </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Licença da UNM2000: início — opcional</label>
+                  <input className="form-input" type="date" value={eqForm.licenca_inicio || ""}
+                    onChange={e => setEqForm({ ...eqForm, licenca_inicio: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Licença da UNM2000: validade — opcional</label>
+                  <input className="form-input" type="date" value={eqForm.licenca_fim || ""}
+                    onChange={e => setEqForm({ ...eqForm, licenca_fim: e.target.value })} />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                A UNM2000 não informa a validade da licença por nenhuma consulta; informe a data para o painel mostrar os dias restantes.
+              </span>
             </>
           )}
 

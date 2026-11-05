@@ -1082,6 +1082,18 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-05] — Merge auditado do ramo `helena` (27670b1) e agente 1.1.39
+
+**Tipo:** merge real (`git merge --no-ff`), sem conflitos; auditado pelo checklist do CLAUDE.md.
+
+**Incorporado:** FiberHome UNM2000 (resolução dos nomes das ONUs, leitura óptica/sinal por PON no modo clássico, status das OLTs), licença da UNM2000 no cadastro (`services/licenca_unm.py`, `licenca` na resposta de `GET .../olt-status`), `EquipamentoFormModal` e `OltStatusModal` do painel, utilitário `baixar_fotos_facial` (script + tela + `build_baixar_fotos.ps1`, para fotos da facial Intelbras), `.gitignore` das pastas de build das ferramentas, material de referência em `legacy/Template OLT FH`.
+**Bloqueado/ajustado:** `server/docker-compose.local.yml` voltou a `7001:7001` (a Helena trazia `7005`); `datetime.now(timezone.utc).replace(tzinfo=None)` em `agent/src/olt/unm_telnet.py` virou `datetime.utcnow()` (REGRA-001). O `legacy/Template OLT FH.rar` (binário) entrou junto com a pasta extraída.
+
+**Verificado e sem problema:** nenhuma rota nova (a alteração em `equipamentos.py` só acrescenta `licenca` ao retorno de uma rota que já usa `obter_maquina`; REGRA-010 mantida), nenhum `nginx`/`models`/migração/`requirements`/`.env` alterado.
+**Atenção (não bloqueado):** o código do agente traz credenciais padrão da UNM2000 (`SENHA_PADRAO` do MySQL e `ROOT_SENHA`), ambas trocáveis por `TRILAN_UNM_DB_PASS` e `TRILAN_UNM_ROOT_PASS`; já estavam públicas no ramo da Helena.
+
+**Breaking Change:** Não. **Requer:** nova build do agente (1.1.39 em `updater.py`, `installer.iss` e `package.json`).
+
 ### [2026-11-04] — Agente 1.1.38: merge com a Helena (status das OLTs UNM2000, backup travado, Digifort por pasta, Defense, imagem da noite dos VMS)
 
 **Incorporado (ramo `helena`, até `a0a5577`):**

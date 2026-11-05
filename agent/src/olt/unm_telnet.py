@@ -23,9 +23,10 @@ TIMEOUT_COMANDO_S = 8
 MAX_SLOT = 16
 MAX_PON = 16
 REVER_SLOTS_S = 6 * 3600       # de quanto em quanto tempo procura de novo as placas autorizadas
-ORCAMENTO_OPTICO_S = 150       # tempo por ciclo para ler o sinal optico; o que sobrar fica para o proximo (rodizio)
+ORCAMENTO_OPTICO_S = 60        # tempo por ciclo para ler, ONU a ONU, os detalhes opticos (sinal na ONU, temperatura); rodizio
 SLOT_CONTROLADORA = 9          # placa HSUB/HSCA/HSCP; o software dela (RPxxxx) muda o formato de algumas respostas
-LIMITE_SINAL_BOM_DBM = -25.9   # mesmo corte da consulta do Zabbix (acima disso = Bom)
+LIMITE_SINAL_BOM_DBM = -25.5       # acima disso = Bom (verde)
+LIMITE_SINAL_CRITICO_DBM = -27.0   # a partir daqui (igual ou abaixo) = Ruim (vermelho); entre os dois = Atencao (amarelo)
 
 ESTADOS_ONU = {"active": "ONLINE", "inactive": "OFFLINE", "power down": "SEM_ENERGIA"}
 CONTADOR = {"ONLINE": "online", "FALHA": "falha", "OFFLINE": "offline", "SEM_ENERGIA": "sem_energia"}
@@ -149,11 +150,35 @@ def parse_optico(texto: str) -> dict:
     return {k: v for k, v in leitura.items() if v is not None}
 
 
+_RE_ONU_POTENCIA = re.compile(r"^\s*(\d+)\s+(-?\d+(?:\.\d+)?)\s*\(Dbm\)", re.M | re.I)
+
+
+def parse_pon_optico(texto: str) -> dict:
+    """Modulo optico de uma PON e o sinal recebido na OLT de cada ONU dela, de uma so consulta:
+    `show optic_module_para slot S pon P` (serie 5000, dentro de `card`) ou `show optical info` (serie 6000, dentro da
+    interface da PON). {'tx_dbm', 'temperatura', 'sinal_onus': {onu: dBm}}; vazio se a resposta nao for desse modulo."""
+    if "PON OPTIC MODULE" not in (texto or "").upper():
+        return {}
+    numero = r":\s*(-?\d+(?:\.\d+)?)"
+    leitura = {
+        "tx_dbm": _decimal(r"^\s*SEND POWER\s*" + numero, texto),
+        "temperatura": _decimal(r"^\s*TEMPERATURE\s*" + numero, texto),
+    }
+    saida = {k: v for k, v in leitura.items() if v is not None}
+    saida["sinal_onus"] = {int(n): float(v) for n, v in _RE_ONU_POTENCIA.findall(texto)}
+    return saida
+
+
 def qualidade_sinal(dbm):
-    """BOM acima de -25,9 dBm (sinal recebido na OLT), RUIM no limite ou abaixo; None sem leitura."""
+    """Sinal recebido na OLT: BOM acima de -25,5 dBm; ATENCAO de -25,5 a -27; RUIM a partir de -27 (igual ou abaixo).
+    None sem leitura."""
     if dbm is None:
         return None
-    return "BOM" if dbm > LIMITE_SINAL_BOM_DBM else "RUIM"
+    if dbm > LIMITE_SINAL_BOM_DBM:
+        return "BOM"
+    if dbm > LIMITE_SINAL_CRITICO_DBM:
+        return "ATENCAO"
+    return "RUIM"
 
 
 def resumir_onus(onus: list) -> tuple:
@@ -207,6 +232,7 @@ class SessaoOlt:
         self.sock.settimeout(1.0)
         self.versao = {}
         self.modelo = None
+        self.pons_opticos = {}  # {(slot, pon): parse_pon_optico(...)} da ultima coleta
 
     def fechar(self):
         try:
@@ -235,8 +261,21 @@ class SessaoOlt:
     def esperar(self, *trechos, limite_s=8) -> str:
         return self._ler_ate(lambda b: any(t in b for t in trechos), limite_s)
 
-    def comando(self, cmd, limite_s=TIMEOUT_COMANDO_S) -> str:
+    def _drenar(self):
+        """Descarta o que sobrou no socket (resposta atrasada de um comando anterior)."""
+        self.sock.settimeout(0.1)
+        try:
+            while self.sock.recv(4096):
+                pass
+        except OSError:
+            pass
+        finally:
+            self.sock.settimeout(1.0)
+
+    def comando(self, cmd, limite_s=TIMEOUT_COMANDO_S, limpar=False) -> str:
         """Executa um comando e devolve a resposta (sem o eco e sem o prompt), passando as paginas se houver."""
+        if limpar:
+            self._drenar()
         self.enviar(cmd)
         resposta, fim = "", time.monotonic() + limite_s
         while time.monotonic() < fim:
@@ -315,6 +354,24 @@ def _ler_opticos(sessao, ip, onus_online, orcamento_s):
                                     "medido_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")}
 
 
+def _ler_pons_classico(sessao, pons):
+    """Modulo optico e sinal de todas as ONUs de cada PON, um comando por PON (diretorio `card` da serie 5000)."""
+    resultado = {}
+    if not pons:
+        return resultado
+    sessao.comando("cd /")
+    sessao.comando("cd card")
+    try:
+        for slot, pon in pons:
+            leitura = parse_pon_optico(sessao.comando(f"show optic_module_para slot {slot} pon {pon}", limite_s=15, limpar=True))
+            if leitura:
+                resultado[(slot, pon)] = leitura
+    finally:
+        sessao.comando("cd /")
+        sessao.comando("cd onu")
+    return resultado
+
+
 def _coletar_classico(sessao, ip):
     slots = _slots_autorizados(sessao, ip, time.monotonic())
     onus, cadastro = [], {}
@@ -325,7 +382,9 @@ def _coletar_classico(sessao, ip):
                 continue
             onus += estados
             cadastro.update(parse_authorization(sessao.comando(f"show authorization slot {slot} pon {pon}")))
-    _ler_opticos(sessao, ip, [o for o in onus if o["estado"] == "ONLINE"], ORCAMENTO_OPTICO_S)
+    online = [o for o in onus if o["estado"] == "ONLINE"]
+    sessao.pons_opticos = _ler_pons_classico(sessao, sorted({(o["slot"], o["pon"]) for o in online}))
+    _ler_opticos(sessao, ip, online, ORCAMENTO_OPTICO_S)
     return onus, cadastro
 
 
@@ -359,10 +418,16 @@ def _coletar_config(sessao, ip):
         raise RuntimeError("modelo de OLT nao reconhecido (comando 'show authorization' ausente)")
     cadastro = parse_authorization(autorizacao)
     onus = []
+    sessao.pons_opticos = {}
     for slot, pon in pons_da_autorizacao(autorizacao):
         sessao.comando(f"interface pon 1/{slot}/{pon}")
         try:
-            onus += parse_active_state(sessao.comando("show onu active-state all"), slot, pon)
+            da_pon = parse_active_state(sessao.comando("show onu active-state all"), slot, pon)
+            onus += da_pon
+            if any(o["estado"] == "ONLINE" for o in da_pon):
+                leitura = parse_pon_optico(sessao.comando("show optical info", limite_s=15, limpar=True))
+                if leitura:
+                    sessao.pons_opticos[(slot, pon)] = leitura
         finally:
             sessao.comando("exit")
     _ler_opticos_config(sessao, ip, [o for o in onus if o["estado"] == "ONLINE"], ORCAMENTO_OPTICO_S)
@@ -379,6 +444,8 @@ def _coletar(ip, usuario, senha, enable, porta) -> dict:
     finally:
         sessao.fechar()
 
+    pons_opticos = sessao.pons_opticos
+    agora = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
     saida = []
     for o in onus:
         cad = cadastro.get((o["slot"], o["pon"], o["onu"]), {})
@@ -389,9 +456,19 @@ def _coletar(ip, usuario, senha, enable, porta) -> dict:
         leitura = _cache_optico.get((ip, o["slot"], o["pon"], o["onu"]))
         if leitura and o["estado"] == "ONLINE":
             item.update({k: v for k, v in leitura.items() if k != "t"})
-            item["qualidade"] = qualidade_sinal(leitura.get("sinal_olt_dbm"))
+        # o sinal na OLT lido de uma vez por PON e mais recente que a leitura ONU a ONU
+        da_pon = pons_opticos.get((o["slot"], o["pon"]), {}).get("sinal_onus", {})
+        if o["estado"] == "ONLINE" and o["onu"] in da_pon:
+            item["sinal_olt_dbm"] = da_pon[o["onu"]]
+            item.setdefault("medido_em", agora)
+        if "sinal_olt_dbm" in item:
+            item["qualidade"] = qualidade_sinal(item["sinal_olt_dbm"])
         saida.append(item)
     totais, por_pon = resumir_onus(saida)
+    for p in por_pon:
+        modulo = pons_opticos.get((p["slot"], p["pon"]), {})
+        p["tx_dbm"] = modulo.get("tx_dbm")
+        p["temperatura_gbic"] = modulo.get("temperatura")
     return {
         "ip": ip,
         "coletado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
