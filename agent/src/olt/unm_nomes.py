@@ -4,22 +4,32 @@ O CLI da OLT so devolve o tipo da ONU; o nome que o operador deu (ex.: "1 ANDAR 
 MySQL do servidor da UNM2000 (tabela `t_ontdevice`, coluna `cobjectname`), ligado ao serial pela coluna `contmac`.
 A consulta e somente de leitura.
 
-Acesso (mesmo do template Zabbix "Cloud - FiberHome 2.0"): usuario MySQL so de leitura, criado uma vez no servidor da
-UNM2000, e a porta 3306 liberada para a maquina do agente:
+Acesso: por padrao usa o usuario do MySQL da UNM2000 (abaixo), que serve na maioria das instalacoes; so e preciso
+informar usuario/senha no cadastro quando aquele servidor for diferente. Em vez do root e possivel criar um usuario
+so de leitura e apontar para ele:
     CREATE USER IF NOT EXISTS 'zabbix_reader'@'%' IDENTIFIED BY '<senha>';
     GRANT SELECT ON integratecfgdb.* TO 'zabbix_reader'@'%';  FLUSH PRIVILEGES;
 Cada servidor de UNM2000 tem o seu banco (uma OLT pode estar em um e outra em outro): informe todos em `nomes_db_host`.
+
+O usuario e a senha padrao podem ser trocados pelas variaveis de ambiente TRILAN_UNM_DB_USER e TRILAN_UNM_DB_PASS,
+para nao deixar a senha fixa no codigo (ver a observacao de seguranca no cadastro).
 
 ONU sem nome dado pelo operador aparece no banco com um nome automatico ("PON[1]-HG6145E[3]"); esse nome so repete a
 posicao da ONU e e tratado como "sem nome".
 """
 import logging
+import os
 import re
 import time
 from typing import Dict, List, Optional, Tuple
 
 PORTA_BANCO_PADRAO = 3306
 BANCO_PADRAO = "integratecfgdb"
+# Credencial padrao do MySQL da UNM2000, usada para qualquer servidor quando o cadastro nao informa usuario/senha.
+# E um usuario SO DE LEITURA (GRANT SELECT em integratecfgdb), nao o root: se vazar, so da para ler o inventario de ONUs.
+# Pode ser trocada por TRILAN_UNM_DB_USER/TRILAN_UNM_DB_PASS na maquina do agente, ou por servidor no proprio cadastro.
+USUARIO_PADRAO = os.environ.get("TRILAN_UNM_DB_USER") or "zabbix_reader"
+SENHA_PADRAO = os.environ.get("TRILAN_UNM_DB_PASS") or "Zabbix@2024"
 TIMEOUT_S = 5
 _SQL = "SELECT LOWER(contmac), cobjectname FROM t_ontdevice"
 _RE_NOME_AUTOMATICO = re.compile(r"^PON\[\d+\]-.*\[\d+\]$")
@@ -94,12 +104,18 @@ def hosts_do_banco(cfg: dict) -> List[str]:
 
 
 def consultar_nomes(cfg: dict, buscar=None) -> Tuple[Dict[str, str], List[str]]:
-    """({serial: nome}, [erros]) juntando os servidores de `nomes_db_host` (com `nomes_db_usuario`, `nomes_db_senha`,
-    `nomes_db_nome`, `nomes_db_porta`). Um nome dado pelo operador vale mais que o automatico, venha de qual servidor vier.
-    Sem host/usuario configurados devolve vazio e sem erro."""
-    hosts, usuario = hosts_do_banco(cfg), (cfg.get("nomes_db_usuario") or "").strip()
-    if not hosts or not usuario:
+    """({serial: nome}, [erros]) juntando os servidores de `nomes_db_host`. Usuario e senha em branco caem no padrao
+    (`USUARIO_PADRAO`/`SENHA_PADRAO`), igual para qualquer servidor; o cadastro so precisa informa-los quando aquele
+    servidor usar outra credencial. Um nome dado pelo operador vale mais que o automatico, venha de qual servidor vier.
+    Sem host devolve vazio e sem erro."""
+    hosts = hosts_do_banco(cfg)
+    if not hosts:
         return {}, []
+    usuario_cfg = (cfg.get("nomes_db_usuario") or "").strip()
+    if usuario_cfg:  # o que o usuario digitou no cadastro tem prioridade
+        usuario, senha = usuario_cfg, (cfg.get("nomes_db_senha") or "")
+    else:
+        usuario, senha = USUARIO_PADRAO, SENHA_PADRAO
     try:
         porta = int(cfg.get("nomes_db_porta") or PORTA_BANCO_PADRAO)
     except (TypeError, ValueError):
@@ -109,7 +125,7 @@ def consultar_nomes(cfg: dict, buscar=None) -> Tuple[Dict[str, str], List[str]]:
     erros: List[str] = []
     for host in hosts:
         try:
-            for serial, nome in (buscar or buscar_nomes)(host, usuario, cfg.get("nomes_db_senha") or "", banco, porta).items():
+            for serial, nome in (buscar or buscar_nomes)(host, usuario, senha, banco, porta).items():
                 if serial not in nomes or (nome_automatico(nomes[serial]) and not nome_automatico(nome)):
                     nomes[serial] = nome
         except Exception as e:

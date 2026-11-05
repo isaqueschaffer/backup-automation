@@ -284,13 +284,29 @@ class TestNomesDasOnus(unittest.TestCase):
         self.assertEqual((info["com_nome"], info["sem_nome"]), (0, 1))
         self.assertIn("porta 3306", info["erro"])
 
-    def test_sem_banco_configurado_nao_consulta(self):
+    def test_sem_host_nao_consulta(self):
         from src.olt.unm_nomes import nomes_das_onus
 
         def nao_deve_chamar(*a):
-            raise AssertionError("consultou sem configuracao")
+            raise AssertionError("consultou sem host")
 
-        self.assertEqual(nomes_das_onus({"nomes_db_host": "10.0.0.1"}, nao_deve_chamar), {})
+        self.assertEqual(nomes_das_onus({"nomes_db_usuario": "u", "nomes_db_senha": "s"}, nao_deve_chamar), {})
+
+    def test_host_sem_usuario_usa_a_credencial_padrao(self):
+        from src.olt import unm_nomes
+        chamadas = []
+        unm_nomes.nomes_das_onus({"nomes_db_host": "10.0.0.1"}, lambda *a: chamadas.append(a) or {})
+        self.assertEqual(chamadas, [("10.0.0.1", unm_nomes.USUARIO_PADRAO, unm_nomes.SENHA_PADRAO, None, 3306)])
+
+    def test_mesma_credencial_padrao_para_todos_os_hosts(self):
+        from src.olt import unm_nomes
+        chamadas = []
+        unm_nomes.nomes_das_onus({"nomes_db_host": "10.0.0.1, 10.0.0.2"}, lambda *a: chamadas.append(a[:3]) or {})
+        self.assertEqual(chamadas, [("10.0.0.1", unm_nomes.USUARIO_PADRAO, unm_nomes.SENHA_PADRAO),
+                                    ("10.0.0.2", unm_nomes.USUARIO_PADRAO, unm_nomes.SENHA_PADRAO)])
+
+    def test_usuario_e_senha_do_cadastro_tem_prioridade(self):
+        from src.olt.unm_nomes import nomes_das_onus
         chamadas = []
         r = nomes_das_onus({"nomes_db_host": " 10.0.0.1 ", "nomes_db_usuario": "u", "nomes_db_senha": "s", "nomes_db_porta": "x"},
                            lambda *a: chamadas.append(a) or {"a": "B"})

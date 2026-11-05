@@ -121,7 +121,6 @@ export function buildEqPayload(
       if (eqForm.nomes_db_senha) cfg.nomes_db_senha = eqForm.nomes_db_senha;
       cfg.licenca_inicio = eqForm.licenca_inicio || "";
       cfg.licenca_fim = eqForm.licenca_fim || "";
-      if (cfg.nomes_db_host && !cfg.nomes_db_usuario) return { error: "Para buscar os nomes das ONUs, informe o usuário do banco da UNM2000." };
       if (cfg.olts) {
         if (!cfg.telnet_usuario) return { error: "Para monitorar as OLTs, informe o usuário do Telnet." };
         if (!eqForm.telnet_senha && !(editingEqId && eqForm.telnet_senha_definida)) return { error: "Para monitorar as OLTs, informe a senha do Telnet." };

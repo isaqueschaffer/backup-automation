@@ -188,16 +188,16 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
                   <input className="form-input" type="text" autoComplete="off" placeholder="IP(s) do servidor da UNM2000"
                     value={eqForm.nomes_db_host || ""}
                     onChange={e => setEqForm({ ...eqForm, nomes_db_host: e.target.value })} />
-                  <input className="form-input" type="text" autoComplete="off" placeholder="Usuário do banco"
+                  <input className="form-input" type="text" autoComplete="off" placeholder="Usuário (padrão do sistema)"
                     value={eqForm.nomes_db_usuario || ""}
                     onChange={e => setEqForm({ ...eqForm, nomes_db_usuario: e.target.value })} />
                   <input className="form-input" type="password" autoComplete="new-password"
-                    placeholder={eqForm.nomes_db_senha_definida ? "•••••• (vazio mantém)" : "Senha do banco"}
+                    placeholder={eqForm.nomes_db_senha_definida ? "•••••• (vazio mantém)" : "Senha (padrão do sistema)"}
                     value={eqForm.nomes_db_senha || ""}
                     onChange={e => setEqForm({ ...eqForm, nomes_db_senha: e.target.value })} />
                 </div>
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  O agente lê o nome cadastrado de cada ONU no MySQL da UNM2000 (porta 3306) e o liga ao serial. Use o IP do servidor da UNM2000, não o da OLT; se a OLT e as ONUs estiverem em servidores diferentes, informe todos separados por vírgula. O usuário só precisa de leitura (GRANT SELECT ON integratecfgdb.*). Em branco, as ONUs aparecem só pelo serial.
+                  Informe só o IP do servidor da UNM2000 (não o da OLT); se a OLT e as ONUs estiverem em servidores diferentes, informe todos separados por vírgula. Usuário e senha em branco usam a credencial padrão do sistema, que funciona na maioria das instalações — preencha só se aquele servidor for diferente. Sem o IP, as ONUs aparecem só pelo serial.
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
