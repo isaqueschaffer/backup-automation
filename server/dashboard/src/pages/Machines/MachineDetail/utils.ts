@@ -109,6 +109,7 @@ export function buildEqPayload(
       payload.ip = "127.0.0.1";
       cfg.pasta_origem = eqForm.pasta_origem.trim();
       cfg.olts = (eqForm.olts || "").trim();
+      if (/[\s,;=]/.test(cfg.olts)) return { error: "Informe um só IP de OLT por equipamento (crie outro equipamento para cada OLT)." };
       cfg.telnet_usuario = (eqForm.telnet_usuario || "").trim();
       // Senhas só vão se digitadas; em branco o servidor mantém a atual
       if (eqForm.telnet_senha) cfg.telnet_senha = eqForm.telnet_senha;
@@ -121,18 +122,8 @@ export function buildEqPayload(
         if (!cfg.telnet_usuario) return { error: "Para monitorar as OLTs, informe o usuário do Telnet." };
         if (!eqForm.telnet_senha && !(editingEqId && eqForm.telnet_senha_definida)) return { error: "Para monitorar as OLTs, informe a senha do Telnet." };
       }
-      const usuarioApi = eqForm.username.trim();
-      if (!usuarioApi) {
-        payload.username = "unm2000";
-        payload.password = "unm2000";
-      } else {
-        if (!editingEqId && !eqForm.password) {
-          return { error: "Para a exportação na hora, informe usuário e senha da API do UNM2000." };
-        }
-        payload.username = usuarioApi;
-        payload.password = eqForm.password;
-        cfg.exportar_no_manual = true;
-      }
+      payload.username = "unm2000";
+      payload.password = "unm2000";
     } else if (eqForm.fabricante_olt === "HUAWEI" || eqForm.fabricante_olt === "VSOL") {
       if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.fabricante_olt}, preencha IP, usuário e senha.` };
       payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;

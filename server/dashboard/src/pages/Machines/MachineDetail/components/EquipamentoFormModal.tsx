@@ -147,42 +147,17 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
 
           {eqForm.fabricante_olt === "UNM2000" && (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Usuário da API do UNM2000 (opcional)</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    value={eqForm.username}
-                    onChange={e => setEqForm({ ...eqForm, username: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Senha da API (opcional)</label>
-                  <input
-                    className="form-input"
-                    type="password"
-                    autoComplete="new-password"
-                    value={eqForm.password}
-                    onChange={e => setEqForm({ ...eqForm, password: e.target.value })}
-                  />
-                </div>
-              </div>
-              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                Preencha para que o backup manual gere uma exportação nova na hora. Em branco, o backup apenas copia o arquivo mais recente da pasta.
-              </span>
               <div className="form-group" style={{ marginTop: 12 }}>
-                <label className="form-label">IPs das OLTs para monitorar (Telnet, porta 23) — opcional</label>
-                <textarea
+                <label className="form-label">IP da OLT (Telnet, porta 23) — opcional</label>
+                <input
                   className="form-input"
-                  rows={3}
-                  placeholder={"OLT Centro=192.168.90.2\n192.168.90.3"}
+                  type="text"
+                  placeholder="192.168.90.2"
                   value={eqForm.olts || ""}
                   onChange={e => setEqForm({ ...eqForm, olts: e.target.value })}
                 />
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  Um IP por linha, ou Nome=IP. O agente precisa alcançar esses IPs pela rede da máquina. A cada 5 minutos ele lê o estado das ONUs e o sinal óptico.
+                  Uma OLT por equipamento. O agente precisa alcançar esse IP pela rede da máquina. A cada 5 minutos ele lê o estado das ONUs e o sinal óptico.
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
