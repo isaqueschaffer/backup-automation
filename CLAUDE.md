@@ -22,12 +22,12 @@ Sempre que gerar os executáveis do agente (`agent/build.ps1` + Inno Setup), pub
 repositório **público** `isaqueschaffer/backup-automation` (as máquinas dos clientes baixam daqui):
 
 - Tag: a versão sem prefixo (ex.: `1.1.13`). Título: `v<versão>` (ex.: `v1.1.13`).
-- Anexar **apenas** `TrilanAgentService.exe` e `TrilanAgentTray.exe` (de `agent/dist/`). O `TrilanAgentSetup.exe` só se for pedido.
+- Anexar os três executáveis de `agent/dist/`: `TrilanAgentService.exe`, `TrilanAgentTray.exe` e `TrilanAgentSetup.exe` (o instalador, para máquinas novas; desde 05/11/2026). Só Service e Tray são cadastrados no painel (OTA); o Setup não entra no `publish_version.ps1`.
 - Alvo: o commit atual (`--target $(git rev-parse HEAD)`), já enviado aos repositórios.
-- Comando: `gh release create <versão> agent/dist/TrilanAgentService.exe agent/dist/TrilanAgentTray.exe -R isaqueschaffer/backup-automation --title "v<versão>" --target "$(git rev-parse HEAD)" --notes "<resumo>"`
+- Comando: `gh release create <versão> agent/dist/TrilanAgentService.exe agent/dist/TrilanAgentTray.exe agent/dist/TrilanAgentSetup.exe -R isaqueschaffer/backup-automation --title "v<versão>" --target "$(git rev-parse HEAD)" --notes "<resumo>"`
 - Não usar o nome antigo `isaqueschaffer/trilan-nvr-backup-automation` nas releases: é o mesmo repositório (foi renomeado); o nome correto é `backup-automation`.
 - Ramos: `isaque` em `projetoswmfa/trilan-backup-automation` (privado) é a produção e dispara o deploy no Dokploy. `helena` e `integracao-equipamentos` (repositório público `isaqueschaffer/backup-automation`) são de colaboradores e testadores, sem acesso direto à `isaque`; o código deles só entra na produção por merge feito pelo dono.
-- No fim, informar os links de download e os hashes SHA-256 de Service e Tray para o cadastro no painel.
+- No fim, informar os links de download e os hashes SHA-256 de Service e Tray (para o cadastro no painel) e também o link e o hash do Setup.
 
 A versão fica em três lugares: `agent/src/application/updater.py` (`CURRENT_VERSION`), `agent/installer.iss` (`AppVersion`) e `server/dashboard/package.json`.
 
@@ -46,8 +46,8 @@ Depois da release, informar os links e os hashes e esperar o usuário dizer "pub
 1. Subir a versão nos três lugares (updater.py, installer.iss, package.json) e registrar no changelog do `PROJECT_SPEC.md`.
 2. Commit e push para `origin isaque` e `isaque_repo isaque:integracao-equipamentos`.
 3. Gerar os executáveis: `agent/build.ps1` e depois `ISCC.exe installer.iss` (Inno Setup 7). Encerrar antes processos `TrilanAgent*` abertos.
-4. Calcular os SHA-256 de `TrilanAgentService.exe` e `TrilanAgentTray.exe`.
-5. Criar a release em `isaqueschaffer/backup-automation` (tag = versão, título `v<versão>`) com os dois executáveis e conferir que os `digest` dos assets batem com os hashes.
+4. Calcular os SHA-256 de `TrilanAgentService.exe`, `TrilanAgentTray.exe` e `TrilanAgentSetup.exe`.
+5. Criar a release em `isaqueschaffer/backup-automation` (tag = versão, título `v<versão>`) com os três executáveis (Service, Tray e Setup) e conferir que os `digest` dos assets batem com os hashes.
 6. Informar ao usuário os links de download e os hashes e **parar**. Cadastrar só quando ele disser "publique" e passar a senha na hora.
 7. Cadastrar com `agent/publish_version.ps1` (API em `https://server.suportetrilan.com.br`; o painel `backups.suportetrilan.com.br` é só a tela e não atende `/api`). Depois conferir via `GET /api/v1/admin/agent-version` que links e hashes ficaram corretos.
 8. Lembrar o usuário: o cadastro libera a versão a todos os agentes (atualizam em até 1 h); a senha do painel deve ser forte.
@@ -68,7 +68,7 @@ O merge em `isaque` é o único portão da produção (cada push dispara o deplo
 O usuário não quer pedir cada etapa de novo. Quando ele pedir o merge com a Helena (ou com outro colaborador) e o ramo trouxer mudança no agente, fazer a sequência inteira, sem perguntar entre as etapas:
 
 1. Auditar e fazer o merge (`git merge --no-ff isaque_repo/helena`, depois da auditoria acima), resolver conflitos mantendo os dois lados quando forem só texto/campos, e registrar o merge no changelog do `PROJECT_SPEC.md`.
-2. Se o ramo mexeu em `agent/`, subir a versão (três lugares) e seguir o "Checklist de uma nova versão do agente": commit e push duplo, `agent/build.ps1` + `ISCC.exe installer.iss`, SHA-256, release em `isaqueschaffer/backup-automation` com Service e Tray, conferência dos `digest`.
+2. Se o ramo mexeu em `agent/`, subir a versão (três lugares) e seguir o "Checklist de uma nova versão do agente": commit e push duplo, `agent/build.ps1` + `ISCC.exe installer.iss`, SHA-256, release em `isaqueschaffer/backup-automation` com Service, Tray e Setup, conferência dos `digest`.
 3. **Cadastrar a versão no painel na mesma rodada** (`agent/publish_version.ps1`), sem esperar o "publique": neste fluxo o pedido de merge com a Helena já é a autorização. Depois conferir via `GET /api/v1/admin/agent-version` (login em `/api/v1/auth/login` com `{"password": ...}`) que links e hashes batem.
 4. Se o ramo só mexeu em servidor/painel (sem `agent/`), não gerar executável nem cadastrar versão: só merge, changelog e push.
 5. A senha do painel NÃO fica neste arquivo nem em nada versionado (o repositório é espelhado em um público). Ela está em `CLAUDE.local.md`, só nesta máquina, e o usuário autorizou usá-la neste fluxo sem perguntar. Se esse arquivo não existir (outra máquina), pedir a senha só no momento do passo 3. Nunca passá-la ao Gemini.
