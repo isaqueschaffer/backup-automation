@@ -9,6 +9,9 @@ import { fmtDate } from "../../../../utils/date";
 const TEMPERATURA_ALERTA = 48;
 const MAX_LINHAS_ONUS = 300;
 const ESTADOS = ["ONLINE", "OFFLINE", "SEM_ENERGIA", "FALHA"] as const;
+const ROTULO_ESTADO: Record<(typeof ESTADOS)[number], string> = {
+  ONLINE: "Online", OFFLINE: "Offline", SEM_ENERGIA: "Sem energia", FALHA: "Fibra desconectada",
+};
 
 function Tile({ titulo, valor, cor }: { titulo: string; valor: number | string; cor?: string }) {
   return (
@@ -40,7 +43,7 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
         <Tile titulo="Online" valor={t?.online ?? "—"} cor="var(--ok)" />
         <Tile titulo="Offline" valor={t?.offline ?? "—"} cor={t && t.offline ? "var(--err)" : undefined} />
         <Tile titulo="Sem energia" valor={t?.sem_energia ?? "—"} cor={t && t.sem_energia ? "var(--warn)" : undefined} />
-        {t && t.falha > 0 && <Tile titulo="Com falha" valor={t.falha} cor="var(--err)" />}
+        {t && t.falha > 0 && <Tile titulo="Fibra desconectada" valor={t.falha} cor="var(--err)" />}
         <Tile titulo="Sinal ruim" valor={t?.sinal_ruim ?? "—"} cor={t && t.sinal_ruim ? "var(--err)" : undefined} />
         {licenca && (
           <Tile titulo="Licença UNM2000"
@@ -110,7 +113,7 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
         <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
           <select className="form-input" style={{ width: 160 }} value={filtro} onChange={e => setFiltro(e.target.value)}>
             <option value="">Todos os estados</option>
-            {ESTADOS.map(e => <option key={e} value={e}>{e.replace("_", " ")}</option>)}
+            {ESTADOS.map(e => <option key={e} value={e}>{ROTULO_ESTADO[e]}</option>)}
           </select>
           <input className="form-input" style={{ width: 200 }} placeholder="Buscar nome, slot/PON ou serial"
             value={busca} onChange={e => setBusca(e.target.value)} />
