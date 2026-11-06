@@ -1,12 +1,15 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { AgentLog, Customer, CustomerRun, Machine, PaginatedBackups } from "./types";
+import { AgentLog, ConfiguracaoNotificacao, Customer, CustomerRun, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedBackups, TipoNotificacao } from "./types";
 import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Conta escolhida pelo administrador da plataforma (enviada em X-Conta-ID)
 export const CONTA_KEY = "trilan_conta_id";
+
+// sessionStorage: "já mostrei o pop-up de notificações nesta sessão" (ver NotificacoesPopup.tsx)
+export const NOTIF_POPUP_KEY = "trilan_notificacoes_popup_mostrado";
 
 const api = axios.create({
   baseURL: `${API_BASE}/api/v1`,
@@ -211,5 +214,27 @@ export const downloadCustomerZip = async (id: string, customerName: string): Pro
   document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 };
+
+// ─── Notificações ───────────────────────────────────────────────────────────
+export const fetchNotificacoes = (apenasAbertas = true, apenasPopup = false): Promise<Notificacao[]> =>
+  api.get("/notificacoes", { params: { apenas_abertas: apenasAbertas, apenas_popup: apenasPopup } }).then((r) => r.data);
+
+export const fetchConfigNotificacoes = (): Promise<ConfiguracaoNotificacao[]> =>
+  api.get("/notificacoes/config").then((r) => r.data);
+
+export const atualizarConfigNotificacao = (tipo: TipoNotificacao, ativo: boolean): Promise<ConfiguracaoNotificacao> =>
+  api.put(`/notificacoes/config/${tipo}`, { ativo }).then((r) => r.data);
+
+export const fetchNotificacoesPersonalizadas = (): Promise<NotificacaoPersonalizada[]> =>
+  api.get("/notificacoes/personalizadas").then((r) => r.data);
+
+export const criarNotificacaoPersonalizada = (data: NotificacaoPersonalizadaPayload): Promise<NotificacaoPersonalizada> =>
+  api.post("/notificacoes/personalizadas", data).then((r) => r.data);
+
+export const atualizarNotificacaoPersonalizada = (id: string, data: NotificacaoPersonalizadaPayload): Promise<NotificacaoPersonalizada> =>
+  api.put(`/notificacoes/personalizadas/${id}`, data).then((r) => r.data);
+
+export const apagarNotificacaoPersonalizada = (id: string) =>
+  api.delete(`/notificacoes/personalizadas/${id}`);
 
 export default api;

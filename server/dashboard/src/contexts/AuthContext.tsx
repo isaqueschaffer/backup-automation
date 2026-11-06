@@ -6,7 +6,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import { login as apiLogin, CONTA_KEY } from "../api/client";
+import { login as apiLogin, CONTA_KEY, NOTIF_POPUP_KEY } from "../api/client";
 import { fetchMe } from "../api/contas";
 import type { Me } from "../api/types";
 
@@ -55,8 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await apiLogin(email, password);
       try {
         localStorage.setItem("trilan_token", data.access_token);
+        sessionStorage.removeItem(NOTIF_POPUP_KEY); // login novo: o pop-up de notificações deve aparecer de novo
       } catch {
-        // localStorage indisponível
+        // localStorage/sessionStorage indisponível
       }
       setIsAuthenticated(true);
       await recarregarMe();

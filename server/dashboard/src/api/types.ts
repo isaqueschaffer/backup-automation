@@ -469,3 +469,52 @@ export interface OltStatusResponse {
   olts: OltStatus[];
   licenca?: { inicio: string | null; fim: string; dias_restantes: number } | null;
 }
+
+// ─── Notificações ───────────────────────────────────────────────────────────
+export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA";
+export type ModoNotificacaoPersonalizada = "RECORRENTE" | "DATA";
+
+export interface Notificacao {
+  id: string;
+  tipo: TipoNotificacao;
+  titulo: string;
+  mensagem: string;
+  machine_id?: string | null;
+  nvr_id?: string | null;
+  definicao_id?: string | null;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface NotificacaoPersonalizada {
+  id: string;
+  titulo: string;
+  mensagem: string;
+  enviar_email: boolean;
+  mostrar_popup: boolean;
+  ativo: boolean;
+  modo: ModoNotificacaoPersonalizada;
+  intervalo_dias?: number | null;
+  data_alvo?: string | null;
+  dias_antes?: number | null;
+  ultimo_disparo_em?: string | null;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface NotificacaoPersonalizadaPayload {
+  titulo: string;
+  mensagem: string;
+  enviar_email: boolean;
+  mostrar_popup: boolean;
+  ativo: boolean;
+  modo: ModoNotificacaoPersonalizada;
+  intervalo_dias?: number | null;
+  data_alvo?: string | null;
+  dias_antes?: number | null;
+}
+
+export interface ConfiguracaoNotificacao {
+  tipo: TipoNotificacao;
+  ativo: boolean;
+}

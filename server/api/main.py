@@ -12,7 +12,7 @@ from schemas import StatsResponse
 from auth import Contexto, get_contexto
 from services.escopo import filtrar_por_conta
 from config import settings
-from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta, notificacoes
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -216,6 +216,8 @@ _MIGRACOES_COLUNAS = [
     # Logs do agente no painel: nível e equipamento
     ("agent_logs", "nivel", "ALTER TABLE agent_logs ADD COLUMN nivel VARCHAR(10) NOT NULL DEFAULT 'INFO';"),
     ("agent_logs", "equipamento", "ALTER TABLE agent_logs ADD COLUMN equipamento VARCHAR(255);"),
+    # Notificações personalizadas: liga o alerta gerado (notificacoes) à definição que o criou
+    ("notificacoes", "definicao_id", "ALTER TABLE notificacoes ADD COLUMN definicao_id UUID REFERENCES notificacoes_personalizadas(id) ON DELETE SET NULL;"),
 ]
 
 _colunas_cache: dict = {}
@@ -231,6 +233,15 @@ for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
 # Expansão de colunas existentes para acomodar hosts/caminhos longos
 _run_ddl("ALTER TABLE nvrs ALTER COLUMN ip TYPE VARCHAR(255);", "nvrs.ip VARCHAR(255)")
 _run_ddl("ALTER TABLE nvr_cameras ALTER COLUMN ip TYPE VARCHAR(255);", "nvr_cameras.ip VARCHAR(255)")
+
+# Notificações personalizadas: o tipo 'PERSONALIZADA' passou a valer em notificacoes.tipo (idempotente)
+if _tem_tabela("notificacoes"):
+    _run_ddl("ALTER TABLE notificacoes DROP CONSTRAINT IF EXISTS ck_notificacoes_tipo;", "dropar ck_notificacoes_tipo antigo")
+    _run_ddl(
+        "ALTER TABLE notificacoes ADD CONSTRAINT ck_notificacoes_tipo "
+        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA'));",
+        "recriar ck_notificacoes_tipo com PERSONALIZADA",
+    )
 
 
 def _popular_email_to_clientes() -> None:
@@ -361,6 +372,7 @@ app.include_router(settings_router.router)
 app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 app.include_router(storage_admin.router)  # Armazenamento admin: /api/v1/admin/storage
+app.include_router(notificacoes.router)   # Notificações: /api/v1/notificacoes
 
 
 # ─── Tarefa de fundo: fechamento das rodadas de backup do Cliente ──────────
@@ -436,6 +448,42 @@ async def _start_vencimentos() -> None:
 async def _stop_vencimentos() -> None:
     if _vencimentos_task is not None:
         _vencimentos_task.cancel()
+
+
+# ─── Tarefa de fundo: notificações (licença UNM2000, backup com falha, agente offline) ────────────
+# A cada 10 min abre/atualiza/resolve as notificações do painel; a de licença também manda e-mail
+# (1 por dia corrido, dedup em notificacoes.ultimo_email_em) enquanto faltar <= 10 dias para vencer.
+NOTIFICACOES_INTERVAL_SECONDS = 600
+_notificacoes_task = None
+
+
+def _verificar_notificacoes_once() -> None:
+    from services.notificacoes import verificar_notificacoes
+    with SessionLocal() as db:
+        verificar_notificacoes(db)
+
+
+async def _notificacoes_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(_verificar_notificacoes_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Falha na tarefa de notificações")
+        await asyncio.sleep(NOTIFICACOES_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_notificacoes() -> None:
+    global _notificacoes_task
+    _notificacoes_task = asyncio.create_task(_notificacoes_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_notificacoes() -> None:
+    if _notificacoes_task is not None:
+        _notificacoes_task.cancel()
 
 
 @app.on_event("startup")

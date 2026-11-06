@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Any, Dict, Union, Literal
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 import re
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -353,6 +353,71 @@ class EquipamentoStatusOlt(BaseModel):
 
 class StatusOltReport(BaseModel):
     equipamentos: List[EquipamentoStatusOlt] = Field(default_factory=list, max_length=50)
+
+
+# ─────────────────────────────────────────────
+# Notificações
+# ─────────────────────────────────────────────
+TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA"]
+ModoNotificacaoPersonalizada = Literal["RECORRENTE", "DATA"]
+
+
+class NotificacaoResponse(BaseModel):
+    id: UUID
+    tipo: TipoNotificacao
+    titulo: str
+    mensagem: str
+    machine_id: Optional[UUID] = None
+    nvr_id: Optional[UUID] = None
+    definicao_id: Optional[UUID] = None
+    criado_em: datetime
+    atualizado_em: datetime
+    model_config = {"from_attributes": True}
+
+
+class ConfiguracaoNotificacaoResponse(BaseModel):
+    tipo: TipoNotificacao
+    ativo: bool
+
+
+class ConfiguracaoNotificacaoUpdate(BaseModel):
+    ativo: bool
+
+
+class NotificacaoPersonalizadaBase(BaseModel):
+    titulo: str = Field(min_length=1, max_length=255)
+    mensagem: str = Field(min_length=1, max_length=2000)
+    enviar_email: bool = False
+    mostrar_popup: bool = True
+    ativo: bool = True
+    modo: ModoNotificacaoPersonalizada
+    intervalo_dias: Optional[int] = Field(default=None, ge=1, le=365)
+    data_alvo: Optional[date] = None
+    dias_antes: Optional[int] = Field(default=None, ge=0, le=365)
+
+    @model_validator(mode="after")
+    def _checar_modo(self):
+        if self.modo == "RECORRENTE" and not self.intervalo_dias:
+            raise ValueError("Informe a cada quantos dias repetir (intervalo_dias).")
+        if self.modo == "DATA" and (not self.data_alvo or self.dias_antes is None):
+            raise ValueError("Informe a data e quantos dias antes avisar (data_alvo e dias_antes).")
+        return self
+
+
+class NotificacaoPersonalizadaCreate(NotificacaoPersonalizadaBase):
+    pass
+
+
+class NotificacaoPersonalizadaUpdate(NotificacaoPersonalizadaBase):
+    pass
+
+
+class NotificacaoPersonalizadaResponse(NotificacaoPersonalizadaBase):
+    id: UUID
+    ultimo_disparo_em: Optional[datetime] = None
+    criado_em: datetime
+    atualizado_em: datetime
+    model_config = {"from_attributes": True}
 
 
 # ─────────────────────────────────────────────
