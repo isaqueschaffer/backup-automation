@@ -29,7 +29,7 @@ def test_isolamento_contas():
     from fastapi.testclient import TestClient
     from main import app
     from database import SessionLocal
-    from models import Plano, Conta, Usuario, Customer, Machine, NVR, Backup, AgentLog, Setting
+    from models import Plano, Conta, Usuario, Customer, Machine, NVR, Backup, AgentLog, Setting, Notificacao
     from services import senhas
     from auth import generate_api_key
     from services.crypto_service import encrypt
@@ -46,6 +46,7 @@ def test_isolamento_contas():
     mB_id = uuid4()
     mV_id = uuid4()
     nvrV_id = uuid4()
+    notifA_id = uuid4()
     usr_adminA_id = uuid4()
     usr_leituraA_id = uuid4()
     usr_adminB_id = uuid4()
@@ -203,6 +204,18 @@ def test_isolamento_contas():
 
         db.commit()
 
+        # notifA depende de mA já estar gravada (FK machine_id); por isso vai num commit separado
+        notifA = Notificacao(
+            id=notifA_id,
+            conta_id=contaA_id,
+            tipo="AGENTE_OFFLINE",
+            titulo=f"Agente offline em 'MachineA-{sufixo}'",
+            mensagem="Teste de isolamento.",
+            machine_id=mA_id,
+        )
+        db.add(notifA)
+        db.commit()
+
     try:
         client = TestClient(app)
 
@@ -318,7 +331,33 @@ def test_isolamento_contas():
         r = client.post("/api/v1/agent/backup/report", headers=headers_agent, json=report_minimo)
         assert r.status_code == 403, f"Esperado 403 para /agent/backup/report de conta vencida, obteve {r.status_code}"
 
-        # 10. adminA POST /api/v1/auth/trocar-senha -> 200; token ANTIGO em GET /auth/me -> 401
+        # 10. Notificações: adminA vê a sua, adminB não vê; super admin sem conta escolhida também não (mesma regra
+        # do item 7: fica na conta da plataforma); filtrado para A (X-Conta-ID) vê; PUT config exige admin
+        r = client.get("/api/v1/notificacoes", headers=headers_A)
+        assert r.status_code == 200, f"adminA GET /notificacoes falhou: {r.status_code}"
+        ids_notif_A = [n["id"] for n in r.json()]
+        assert str(notifA_id) in ids_notif_A, "notifA deve constar na listagem de adminA"
+
+        r = client.get("/api/v1/notificacoes", headers=headers_B)
+        assert r.status_code == 200, f"adminB GET /notificacoes falhou: {r.status_code}"
+        assert str(notifA_id) not in [n["id"] for n in r.json()], "notifA NÃO deve constar na listagem de adminB"
+
+        r = client.get("/api/v1/notificacoes", headers=headers_super)
+        assert r.status_code == 200, f"super admin GET /notificacoes falhou: {r.status_code}"
+        assert str(notifA_id) not in [n["id"] for n in r.json()], "Super admin sem conta escolhida (conta da plataforma) NÃO deve ver notifA"
+
+        r = client.get("/api/v1/notificacoes", headers=headers_super_A)
+        assert r.status_code == 200, f"super admin filtrado para A GET /notificacoes falhou: {r.status_code}"
+        assert str(notifA_id) in [n["id"] for n in r.json()], "Super admin filtrado para A deve ver notifA"
+
+        r = client.put("/api/v1/notificacoes/config/BACKUP_FALHOU", headers=headers_leituraA, json={"ativo": False})
+        assert r.status_code == 403, f"Esperado 403 para leituraA alterar config de notificação, obteve {r.status_code}"
+
+        r = client.put("/api/v1/notificacoes/config/BACKUP_FALHOU", headers=headers_A, json={"ativo": False})
+        assert r.status_code == 200, f"adminA PUT config de notificação falhou: {r.status_code}"
+        assert r.json().get("ativo") is False, f"Esperado ativo=False, obteve {r.json()}"
+
+        # 11. adminA POST /api/v1/auth/trocar-senha -> 200; token ANTIGO em GET /auth/me -> 401
         r = client.post(
             "/api/v1/auth/trocar-senha",
             headers=headers_A,
@@ -329,11 +368,14 @@ def test_isolamento_contas():
         r = client.get("/api/v1/auth/me", headers=headers_A)
         assert r.status_code == 401, f"Esperado 401 para token antigo após troca de senha, obteve {r.status_code}"
 
-        print("\nTODAS AS 10 ASSERÇÕES DE ISOLAMENTO DE CONTAS PASSARAM COM SUCESSO! [OK]")
+        print("\nTODAS AS 11 ASSERÇÕES DE ISOLAMENTO DE CONTAS PASSARAM COM SUCESSO! [OK]")
 
     finally:
         with SessionLocal() as db_clean:
             try:
+                from models import ConfiguracaoNotificacao
+                db_clean.query(Notificacao).filter(Notificacao.conta_id.in_([contaA_id, contaB_id, contaV_id])).delete(synchronize_session=False)
+                db_clean.query(ConfiguracaoNotificacao).filter(ConfiguracaoNotificacao.conta_id.in_([contaA_id, contaB_id, contaV_id])).delete(synchronize_session=False)
                 db_clean.query(NVR).filter(NVR.machine_id.in_([mA_id, mB_id, mV_id])).delete(synchronize_session=False)
                 db_clean.query(Backup).filter(Backup.machine_id.in_([mA_id, mB_id, mV_id])).delete(synchronize_session=False)
                 db_clean.query(AgentLog).filter(AgentLog.machine_id.in_([mA_id, mB_id, mV_id])).delete(synchronize_session=False)

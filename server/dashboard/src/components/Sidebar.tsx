@@ -12,6 +12,7 @@ import {
   Server,
   UserCircle,
   Building2,
+  Bell,
 } from "lucide-react";
 import pkg from "../../package.json";
 
@@ -53,6 +54,7 @@ export default function Sidebar() {
     { to: "/clientes", icon: Users, label: plural },
     { to: "/maquinas", icon: Server, label: "Máquinas" },
     { to: "/backups", icon: Archive, label: "Backups" },
+    { to: "/notificacoes", icon: Bell, label: "Notificações" },
     { to: "/minha-conta", icon: UserCircle, label: "Minha conta" },
   ];
 

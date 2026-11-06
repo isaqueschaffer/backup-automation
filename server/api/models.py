@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import (
-    Column, String, Integer, Boolean, DateTime,
-    BigInteger, Text, JSON, ForeignKey, CheckConstraint
+    Column, String, Integer, Boolean, DateTime, Date,
+    BigInteger, Text, JSON, ForeignKey, CheckConstraint, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
@@ -311,4 +311,73 @@ class AgentVersion(Base):
     sha256_tray = Column(String(64), nullable=True)                  # hash SHA256 do tray exe
     active = Column(Boolean, default=True, nullable=False)           # se False, não será distribuída
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Notificacao(Base):
+    """Alerta operacional (licença UNM2000 vencendo, backup com falha, agente offline, personalizada), gerado
+    periodicamente (services/notificacoes.py) e mostrado no painel (pop-up ao logar + aba Notificações).
+    Uma linha aberta (resolvido_em NULL) por (conta, tipo, equipamento/máquina/definição personalizada); some
+    sozinha quando a condição deixa de valer (ou, na personalizada recorrente, quando o próximo ciclo dispara)."""
+    __tablename__ = "notificacoes"
+    __table_args__ = (
+        CheckConstraint(
+            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA')",
+            name="ck_notificacoes_tipo",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo = Column(String(30), nullable=False)
+    titulo = Column(String(255), nullable=False)
+    mensagem = Column(Text, nullable=False)
+    machine_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=True)
+    nvr_id = Column(UUID(as_uuid=True), ForeignKey("nvrs.id", ondelete="CASCADE"), nullable=True)
+    # Definição que gerou o alerta (tipo PERSONALIZADA); SET NULL ao apagar a definição para preservar o histórico
+    definicao_id = Column(UUID(as_uuid=True), ForeignKey("notificacoes_personalizadas.id", ondelete="SET NULL"), nullable=True)
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+    atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    resolvido_em = Column(DateTime, nullable=True)
+    # Dedup do e-mail (LICENCA_UNM2000 e PERSONALIZADA no modo DATA): no máx. 1 por dia corrido enquanto aberto
+    ultimo_email_em = Column(Date, nullable=True)
+
+
+class ConfiguracaoNotificacao(Base):
+    """Preferência por conta: tipo de notificação desligado não gera pop-up, lista nem e-mail. Ausente = ativo.
+    Vale para os 3 tipos automáticos; a PERSONALIZADA é ligada/desligada por definição (NotificacaoPersonalizada.ativo)."""
+    __tablename__ = "configuracoes_notificacao"
+    __table_args__ = (
+        UniqueConstraint("conta_id", "tipo", name="uq_config_notificacao_conta_tipo"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo = Column(String(30), nullable=False)
+    ativo = Column(Boolean, default=True, nullable=False)
+
+
+class NotificacaoPersonalizada(Base):
+    """Notificação criada pelo usuário (ADMIN da conta): título/mensagem livres, por e-mail e/ou pop-up, em um dos
+    dois modos — RECORRENTE (dispara a cada `intervalo_dias`, cada disparo é um alerta novo no histórico) ou DATA
+    (avisa a partir de `dias_antes` dias antes de `data_alvo`; depois que a data passa continua avisando "venceu
+    há N dias" até o usuário desativar/apagar). Verificada junto com os alertas automáticos (services/notificacoes.py)."""
+    __tablename__ = "notificacoes_personalizadas"
+    __table_args__ = (
+        CheckConstraint("modo IN ('RECORRENTE', 'DATA')", name="ck_notif_personalizada_modo"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conta_id = Column(UUID(as_uuid=True), ForeignKey("contas.id", ondelete="CASCADE"), nullable=False, index=True)
+    titulo = Column(String(255), nullable=False)
+    mensagem = Column(Text, nullable=False)
+    enviar_email = Column(Boolean, default=False, nullable=False)
+    mostrar_popup = Column(Boolean, default=True, nullable=False)
+    ativo = Column(Boolean, default=True, nullable=False)
+    modo = Column(String(20), nullable=False)
+    intervalo_dias = Column(Integer, nullable=True)   # modo RECORRENTE: dispara a cada N dias
+    data_alvo = Column(Date, nullable=True)           # modo DATA: a data que o usuário escolheu
+    dias_antes = Column(Integer, nullable=True)       # modo DATA: avisa a partir de N dias antes da data_alvo
+    ultimo_disparo_em = Column(DateTime, nullable=True)  # modo RECORRENTE: quando disparou da última vez
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+    atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
