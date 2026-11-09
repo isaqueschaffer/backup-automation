@@ -230,8 +230,11 @@ class TestSelecaoDeOlts(unittest.TestCase):
         r = coletar_status_olts(equipamentos, coletar=falso)
         self.assertEqual(chamadas, [("10.0.0.1", "GEPON", "s1", "e1", 23), ("10.0.0.2", "GEPON", "s1", "e1", 23),
                                     ("10.0.0.3", "u", "p", "p", 2323)])
-        self.assertEqual([e["nome"] for e in r], ["UNM", "Porta"])
+        # "Huawei" entra pelo caminho proprio (SSH, IP/usuario/senha do equipamento), nao pelo Telnet da UNM2000;
+        # sem esses campos no equipamento de teste, vira erro em vez de chamar o `coletar` falso do Telnet.
+        self.assertEqual([e["nome"] for e in r], ["UNM", "Porta", "Huawei"])
         self.assertEqual([o["nome"] for o in r[0]["olts"]], ["OLT A", "10.0.0.2"])
+        self.assertIn("erro", r[2]["olts"][0])
 
 
 class TestNomesDasOnus(unittest.TestCase):

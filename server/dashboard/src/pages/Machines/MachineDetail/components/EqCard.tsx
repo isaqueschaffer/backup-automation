@@ -77,7 +77,8 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
           </button>
         )}
         {eq.tipo === "OLT" && onViewOlt && (
-          eq.config_extra?.fabricante_olt === "VSOL" || String(eq.config_extra?.olts || "").trim()
+          eq.config_extra?.fabricante_olt === "VSOL" || eq.config_extra?.fabricante_olt === "HUAWEI"
+          || String(eq.config_extra?.olts || "").trim()
         ) && (
           <button className="btn btn-secondary btn-sm" onClick={onViewOlt}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
