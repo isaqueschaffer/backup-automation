@@ -1,4 +1,5 @@
-"""Coleta periodica do status das OLTs (ONUs e sinal optico) das UNM2000 cadastradas com OLTs para monitorar."""
+"""Coleta periodica do status das OLTs (ONUs, e sinal optico quando disponivel) cadastradas para monitorar
+(UNM2000 por Telnet, VSOL por HTTP)."""
 import logging
 from typing import Any, Dict, List
 
@@ -7,27 +8,43 @@ from src.core.config import parse_config_extra
 INTERVALO_OLT_S = 300
 
 
-def _eh_unm2000(eq: dict, cfg: dict) -> bool:
-    if (eq.get("tipo") or "").upper() != "OLT":
-        return False
-    fabricante = (eq.get("fabricante") or cfg.get("fabricante_olt") or cfg.get("fabricante") or "unm2000").lower()
-    return "unm" in fabricante
+def _fabricante_olt(eq: dict, cfg: dict) -> str:
+    """Fabricante da OLT (mesma logica do backup, `processar_olt`): campo explicito ou, na falta
+    dele, 'unm2000' quando houver `olts` configurado (compatibilidade com cadastros antigos)."""
+    fabricante = (eq.get("fabricante") or cfg.get("fabricante_olt") or cfg.get("fabricante") or "").lower().strip()
+    if not fabricante and cfg.get("olts"):
+        fabricante = "unm2000"
+    return fabricante
 
 
-def coletar_status_olts(equipamentos: list, coletar=None, buscar_nomes=None) -> List[Dict[str, Any]]:
-    """[{'nome': equipamento, 'olts': [{'nome', 'ip', ...status ou 'erro'}]}] das UNM2000 ativas com OLTs
-    (`olts`, um IP por linha) e acesso Telnet (`telnet_usuario`, `telnet_senha`, `telnet_enable`)
-    configurados. `coletar(ip, usuario, senha, enable, porta)` e injetavel para teste."""
+def _eh_olt_ativa(eq: dict) -> bool:
+    return bool(eq.get("active", True)) and (eq.get("tipo") or "").upper() == "OLT"
+
+
+def coletar_status_olts(equipamentos: list, coletar=None, buscar_nomes=None, coletar_vsol=None) -> List[Dict[str, Any]]:
+    """[{'nome': equipamento, 'olts': [{'nome', 'ip', ...status ou 'erro'}]}] das OLTs ativas:
+    - UNM2000 (fabricante com 'unm'): uma ou mais OLTs por Telnet (`olts`, um IP por linha; usuario/senha/enable
+      em `telnet_usuario`/`telnet_senha`/`telnet_enable`). `coletar(ip, usuario, senha, enable, porta)` e
+      injetavel para teste.
+    - VSOL (fabricante 'vsol'): a propria OLT do equipamento (IP/usuario/senha do cadastro), por HTTP.
+      `coletar_vsol(equipamento)` e injetavel para teste.
+    """
     from src.olt.unm_nomes import aplicar_nomes, consultar_nomes
     from src.olt.unm_telnet import PORTA_PADRAO, coletar_olt, parse_hosts
     coletar = coletar or coletar_olt
     resultado = []
     for eq in equipamentos or []:
         try:
-            if not eq.get("active", True):
+            if not _eh_olt_ativa(eq):
                 continue
             cfg = parse_config_extra(eq)
-            if not _eh_unm2000(eq, cfg):
+            fabricante = _fabricante_olt(eq, cfg)
+            if "vsol" in fabricante:
+                from src.olt.vsol_status import coletar_vsol as _coletar_vsol
+                vsol_fn = coletar_vsol or _coletar_vsol
+                resultado.append({"nome": eq.get("name"), "olts": [{"nome": eq.get("name"), **vsol_fn(eq)}]})
+                continue
+            if "unm" not in fabricante:
                 continue
             hosts = parse_hosts(cfg.get("olts"))
             usuario = (cfg.get("telnet_usuario") or "").strip()

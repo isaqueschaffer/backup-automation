@@ -21,7 +21,7 @@ const map: Record<string, { cls: string; dot: string; label: string }> = {
   SOMENTE_LEITURA: { cls: "warn", dot: "warn", label: "Somente leitura" },
   SAUDE_BAIXA: { cls: "warn", dot: "warn", label: "Saúde baixa" },
   SEM_ENERGIA: { cls: "warn", dot: "warn", label: "Sem energia" },
-  FALHA: { cls: "err", dot: "err", label: "Com falha" },
+  FALHA: { cls: "err", dot: "err", label: "Fibra desconectada" },  // ONU com "link loss" na OLT
   DESCONHECIDO: { cls: "muted", dot: "muted", label: "Desconhecido" },
   UP: { cls: "ok", dot: "ok", label: "Conectado" },
   DOWN: { cls: "err", dot: "err", label: "Desconectado" },

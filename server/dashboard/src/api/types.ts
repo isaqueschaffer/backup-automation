@@ -413,6 +413,8 @@ export interface OltOnu {
   tipo?: string | null;
   serial?: string | null;
   nome?: string | null;
+  mac?: string | null;
+  temperatura_onu?: number;
   sinal_olt_dbm?: number;
   sinal_onu_dbm?: number;
   qualidade?: "BOM" | "ATENCAO" | "RUIM" | null;
