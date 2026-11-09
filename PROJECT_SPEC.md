@@ -1088,6 +1088,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-09] — Merge auditado do ramo `helena` (04a3f9e): status de OLT VSOL e UNM2000 (agente 1.1.40)
+
+**Tipo:** merge real (`git merge --no-ff`), sem conflitos; mexeu em `agent/`, então nova versão **1.1.40** (updater.py, installer.iss, package.json), build, release e cadastro no painel (fluxo "merge com a Helena").
+
+**Incorporado:** monitoramento de status de OLT da VSOL (novo `agent/src/olt/vsol_status.py`, por HTTP, usando IP/usuário/senha do cadastro do equipamento) e ajustes no status das ONUs da UNM2000 em `status_olt.py`; testes `agent/tests/test_vsol_status.py`; painel: `OltStatusModal.tsx`, `StatusBadge.tsx` e `api/types.ts`.
+**Verificado e sem problema:** nenhum arquivo sensível (compose, nginx, models, main.py, requirements, build.ps1, installer.iss, .env) nem rota do servidor no diff; nenhuma data com fuso (REGRA-001); sem segredos reais (só credenciais fictícias nos testes).
+**Bloqueado:** nada.
+
+**Breaking Change:** Não. **Requer:** deploy do painel (push em `isaque`) e atualização OTA do agente.
+
 ### [2026-11-06] — Merge auditado do ramo `helena` (66c1dc3): notificações do painel
 
 **Tipo:** merge real (`git merge --no-ff`), sem conflitos; só servidor e painel (nenhum arquivo em `agent/`), então sem nova versão do agente, build ou cadastro.
