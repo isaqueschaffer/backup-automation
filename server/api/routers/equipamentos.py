@@ -400,6 +400,23 @@ def get_olt_status(
     return {**status_olt, "licenca": licenca_da_config(nvr.config_extra)}
 
 
+# ─── Alarmes (DEFENSE) ──────────────────────────────────────────────────────
+
+@router.get("/{id}/alarmes")
+def get_alarmes_status(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Último status das centrais de alarme de um DEFENSE, enviado pelo agente. Vazio se ainda não chegou."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    return nvr.last_alarm_status or {"atualizado_em": None, "ip": None, "erro": None, "alarmes": []}
+
+
 # ─── NVR Cameras Gallery ───────────────────────────────────────────────────
 
 @router.get("/{id}/cameras", response_model=List[NVRCameraResponse])

@@ -26,6 +26,7 @@ from schemas import (
     PingResponse,
     PingRequest,
     PresencaCamerasReport,
+    StatusAlarmeReport,
     StatusOltReport,
     RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
@@ -456,6 +457,31 @@ def receive_olt_status(
             continue
         # Naive em UTC (REGRA-001)
         nvr.olt_status = {"atualizado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "olts": item.olts}
+        atualizados += 1
+    db.commit()
+    return {"status": "ok", "atualizados": atualizados}
+
+
+@router.post("/defense/alarmes/status")
+def receive_alarmes_status(
+    body: StatusAlarmeReport,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Status periódico das centrais de alarme Intelbras cadastradas num DEFENSE (API `/api/alarm-centrals`)."""
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
+    atualizados = 0
+    for item in body.equipamentos:
+        nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == item.nome, NVR.active == True).first()
+        if not nvr or (nvr.tipo or "").upper() != "DEFENSE":
+            continue
+        # Naive em UTC (REGRA-001)
+        nvr.last_alarm_status = {
+            "atualizado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+            "ip": item.ip, "erro": item.erro, "alarmes": item.alarmes,
+        }
         atualizados += 1
     db.commit()
     return {"status": "ok", "atualizados": atualizados}

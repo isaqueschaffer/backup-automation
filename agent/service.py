@@ -534,6 +534,27 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_OLT_S * 1000) == win32event.WAIT_OBJECT_0:
                 return
 
+    def _alarmes_loop(self, conf: dict):
+        """Alarmes das centrais Intelbras cadastradas nos equipamentos DEFENSE, independente do backup diário."""
+        from src.application.api_client import fetch_server_config, send_status_alarmes
+        from src.application.status_alarmes_defense import INTERVALO_ALARMES_S, coletar_status_alarmes
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 150 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                server_cfg = fetch_server_config(conf)
+                equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                lista = coletar_status_alarmes(equipamentos)
+                if lista:
+                    send_status_alarmes(conf, lista)
+            except Exception as e:
+                log(f"Falha no ciclo de alarmes do DEFENSE: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_ALARMES_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
     def _logs_loop(self, conf: dict):
         """Envia periodicamente os logs acumulados do agente ao servidor."""
         from src.application import log_remoto
@@ -657,6 +678,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._noite_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._olt_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._alarmes_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._vigia_backup_loop, daemon=True).start()
             threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 

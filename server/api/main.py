@@ -218,6 +218,8 @@ _MIGRACOES_COLUNAS = [
     ("agent_logs", "equipamento", "ALTER TABLE agent_logs ADD COLUMN equipamento VARCHAR(255);"),
     # Notificações personalizadas: liga o alerta gerado (notificacoes) à definição que o criou
     ("notificacoes", "definicao_id", "ALTER TABLE notificacoes ADD COLUMN definicao_id UUID REFERENCES notificacoes_personalizadas(id) ON DELETE SET NULL;"),
+    # Alarmes das centrais Intelbras cadastradas no DEFENSE (API /api/alarm-centrals, enviado pelo agente)
+    ("nvrs", "last_alarm_status", "ALTER TABLE nvrs ADD COLUMN last_alarm_status JSON;"),
 ]
 
 _colunas_cache: dict = {}
