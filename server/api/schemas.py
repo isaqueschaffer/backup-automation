@@ -355,6 +355,17 @@ class StatusOltReport(BaseModel):
     equipamentos: List[EquipamentoStatusOlt] = Field(default_factory=list, max_length=50)
 
 
+class EquipamentoStatusAlarme(BaseModel):
+    nome: str
+    ip: Optional[str] = None
+    erro: Optional[str] = None
+    alarmes: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)
+
+
+class StatusAlarmeReport(BaseModel):
+    equipamentos: List[EquipamentoStatusAlarme] = Field(default_factory=list, max_length=50)
+
+
 # ─────────────────────────────────────────────
 # Notificações
 # ─────────────────────────────────────────────

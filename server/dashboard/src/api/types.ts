@@ -56,6 +56,7 @@ export interface EquipamentoConfig {
   marca?: string;
   modelo?: string;
   porta_api?: number;
+  porta_alarme?: number;
   olts?: string;
   telnet_usuario?: string;
   telnet_senha_definida?: boolean;
@@ -84,6 +85,7 @@ export interface EqForm {
   caminho_log_csv?: string;
   pasta_gravacoes?: string;
   porta_api?: number | string;
+  porta_alarme?: number | string;
   olts?: string;
   telnet_usuario?: string;
   telnet_senha?: string;
@@ -470,6 +472,25 @@ export interface OltStatusResponse {
   atualizado_em: string | null;
   olts: OltStatus[];
   licenca?: { inicio: string | null; fim: string; dias_restantes: number } | null;
+}
+
+// ─── Alarmes (DEFENSE) ────────────────────────────────────────────────────
+export interface AlarmPartition {
+  nome: string;
+  armada: boolean;
+}
+
+export interface AlarmCentral {
+  nome: string;
+  status?: number | null;
+  particoes: AlarmPartition[];
+}
+
+export interface AlarmeStatusResponse {
+  atualizado_em: string | null;
+  ip?: string | null;
+  erro?: string | null;
+  alarmes: AlarmCentral[];
 }
 
 // ─── Notificações ───────────────────────────────────────────────────────────
