@@ -1088,6 +1088,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-06] — Merge auditado do ramo `helena` (66c1dc3): notificações do painel
+
+**Tipo:** merge real (`git merge --no-ff`), sem conflitos; só servidor e painel (nenhum arquivo em `agent/`), então sem nova versão do agente, build ou cadastro.
+
+**Incorporado:** sistema de notificações (licença da UNM2000, backup com falha, agente offline e personalizadas recorrentes ou por data): tabelas `notificacoes`, `configuracoes_notificacao` e `notificacoes_personalizadas`, router `/api/v1/notificacoes`, `services/notificacoes.py` (tarefa de fundo a cada 10 min, com e-mail pelos destinatários da Conta), pop-up ao logar e aba Notificações no painel (detalhes nas duas entradas da Helena abaixo).
+**Verificado e sem problema:** toda rota nova recebe `ctx` e usa `filtrar_por_conta` (REGRA-010); escrita só com `exigir_admin_conta`; nenhuma data com fuso (REGRA-001); migração inline idempotente (coluna `definicao_id` em `_MIGRACOES_COLUNAS` e recriação de `ck_notificacoes_tipo`), sem alterar `docker-compose`, `nginx`, `requirements` ou `.env`; nenhum segredo.
+**Bloqueado:** nada.
+
+**Breaking Change:** Não. **Requer:** deploy do servidor e do painel (o push em `isaque` dispara o Dokploy).
+
 ### [2026-11-06] — Notificações: cor por tipo e notificação personalizada (recorrente ou por data)
 
 **Alteração:** tabela nova `notificacoes_personalizadas` (modelo `NotificacaoPersonalizada`: título/mensagem, `enviar_email`, `mostrar_popup`, `ativo`, `modo` RECORRENTE/DATA, `intervalo_dias`, `data_alvo`, `dias_antes`, `ultimo_disparo_em`) e coluna `notificacoes.definicao_id` (FK para ela, `ON DELETE SET NULL`) — migração inline em `main.py` (`_MIGRACOES_COLUNAS` + recriação de `ck_notificacoes_tipo` com o valor `PERSONALIZADA`, já que a tabela `notificacoes` já existia). `services/notificacoes.py` ganhou `verificar_personalizadas`: no modo DATA funciona como a licença (1 notificação aberta, atualizada a cada ciclo; depois que a data passa continua "venceu há N dias" até desativar/apagar — decisão do usuário); no modo RECORRENTE, a cada `intervalo_dias` fecha o alerta anterior e cria um novo (fica histórico). `enviar_email`/`mostrar_popup` não mudam o que é gravado — só o que o router filtra: `GET /notificacoes?apenas_popup=true` (usado pelo pop-up) tira as personalizadas com `mostrar_popup=false`; a aba Notificações sempre mostra todas. CRUD em `routers/notificacoes.py` (`/notificacoes/personalizadas`, ADMIN da conta ou super admin; schemas com validação cruzada por `modo` em `schemas.py`). Painel: cor e ícone por tipo (`utils/notificacoes.ts`: licença=âmbar, backup=vermelho, agente offline=roxo, personalizada=verde — tokens `--warn/--err/--accent/--ok` já existentes), usados no pop-up e na lista; seção "Notificações personalizadas" e `NotificacaoPersonalizadaFormModal.tsx` em `NotificacoesPage.tsx`.
