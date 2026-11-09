@@ -910,6 +910,9 @@ Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose 
 | `SMTP_PORT` | `587` | Porta SMTP |
 | `SMTP_EMAIL` | None | E-mail remetente |
 | `SMTP_PASSWORD` | None | Senha do e-mail |
+| `WHATSAPP_BRIDGE_KEY` | None (WhatsApp desligado) | Chave compartilhada entre a API e o container `whatsapp` (mínimo 16 caracteres). Ver o changelog de 09/11/2026 |
+| `WHATSAPP_BRIDGE_URL` | `http://whatsapp:3000` | Endereço do container `whatsapp` na rede do Docker |
+| `WHATSAPP_INSTANCE` | `trilan` | Nome da instância (o container usa o mesmo, em `INSTANCE_NAME`) |
 | `PUBLISH_TOKEN` | `""` (desativado) | Token só para registrar versões do agente (`POST /api/v1/admin/agent-version`), enviado em `X-Publish-Token`; não dá acesso ao painel (REGRA-003) |
 | `MAX_UPLOAD_MB` | `1024` | Tamanho máximo do ZIP enviado pelo agente (413 acima) |
 | `RUN_DEADLINE_HOURS` | `2` | Prazo da rodada de backup do Cliente, a partir do início (horas) |
@@ -1087,6 +1090,46 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-09] — WhatsApp só por QR code: removida a opção de Evolution API externa
+
+**Decisão do usuário:** o WhatsApp passa a funcionar apenas pelo container `whatsapp` com QR code; sem Evolution. **Esta entrada substitui o que as duas entradas de WhatsApp de 09/11/2026 dizem sobre `evolution_*`/`EVOLUTION_*`.**
+
+**Removido:** as chaves `evolution_url`/`evolution_instance`/`evolution_apikey` da tabela `settings` e do `GET/PUT /api/v1/settings` (e os campos de URL/instância/chave no painel); `POST /api/v1/settings/whatsapp/teste`; as variáveis `EVOLUTION_*`; o `environment` do compose local. **Como fica a configuração:** `config.py` ganhou `WHATSAPP_BRIDGE_KEY` (sem ela o WhatsApp fica desligado), `WHATSAPP_BRIDGE_URL` (padrão `http://whatsapp:3000`) e `WHATSAPP_INSTANCE` (padrão `trilan`); a API recebe a chave pelo `env_file` (`server/.env`), sem bloco `environment`. `whatsapp_service.whatsapp_config()` não consulta mais o banco. Rotas, todas só do admin global em `routers/whatsapp_router.py`: `GET /api/v1/whatsapp/conexao` (`configurado`, `disponivel`, `connected`, `numero`, `qr`), `POST /api/v1/whatsapp/desconectar` e `POST /api/v1/whatsapp/teste` (antes em `/settings`). **Painel:** Configurações mostra só o cartão WhatsApp (QR, número conectado, Desconectar e envio de teste, que aparece depois de conectar); avisa quando falta a chave ou o container não responde. As rotas de envio da ponte (`/message/sendText|sendMedia/:instance`) mantêm o formato antigo só por conveniência; o Trilan não depende da Evolution.
+
+**Testado:** 26 testes (WhatsApp, e-mail com imagens e avisos da conta) passam em container; `tsc --noEmit` do painel limpo; com a API recriada, a sessão já conectada seguiu ativa (conferido só em leitura). 
+
+**Produção (mesma data):** `server/docker-compose.yml` ganhou o serviço `whatsapp` (build de `./whatsapp`, sem porta publicada, volume nomeado `whatsapp_auth` para a sessão, `API_KEY: ${WHATSAPP_BRIDGE_KEY:-}`). Nada mais do arquivo foi tocado (nginx `7005:7001` e `pg_data_local` ficaram como estavam). A chave usa `:-`, e não `:?`, para o deploy nunca falhar por falta dela; sem a chave o container `whatsapp` fica ocioso com um aviso no log (em vez de reiniciar em loop) e o WhatsApp fica desligado, sem afetar o resto. A API lê a mesma `WHATSAPP_BRIDGE_KEY` do `.env`.
+
+**Breaking Change:** Não. **Requer, depois do deploy:** definir `WHATSAPP_BRIDGE_KEY` (aleatória, mínimo 16 caracteres) nas variáveis de ambiente do Dokploy, reimplantar, e ler o QR code em Configurações > WhatsApp (a sessão local não vai para o servidor).
+
+### [2026-11-09] — WhatsApp sem servidor externo: container `whatsapp` (Baileys) com conexão por QR code no painel
+
+**Motivo:** o usuário não quer instalar/manter uma Evolution API. Modelo tirado do repositório `isaqueschaffer/BotMercadolivre` (Baileys direto no processo, sessão em volume, QR no dashboard).
+
+**Novo serviço `server/whatsapp/`** (Node 22 + `@whiskeysockets/baileys` ^6.7.16 + express): mantém uma sessão do WhatsApp Web e expõe, só na rede interna do Docker (sem porta publicada), as **mesmas rotas de envio da Evolution v2** (`POST /message/sendText|sendMedia/:instance`, header `apikey`), então `services/whatsapp_service.py` não mudou. Extras: `GET /status`, `GET /qr` (PNG em data URL), `POST /logout` (apaga a sessão e volta a gerar QR) e `GET /health`. Resolve o número com `onWhatsApp` (cobre o 9º dígito dos celulares BR; número sem WhatsApp = 404), usa `fetchLatestBaileysVersion` (o WhatsApp recusa versões antigas do protocolo) e reconecta sozinho (inclusive o reinício que o WhatsApp pede logo após ler o QR). A chave `API_KEY` (≥16 caracteres) é obrigatória e comparada em tempo constante. A sessão fica no volume `whatsapp_auth_local` (`/data/auth`): sem volume, pede QR a cada recriação.
+
+**API:** `routers/whatsapp_router.py`, só admin global: `GET /api/v1/whatsapp/conexao` (`configurado`, `suportado`, `connected`, `numero`, `qr`; `suportado=false` quando o envio usa uma Evolution externa, que não tem `/status`/`/qr`) e `POST /api/v1/whatsapp/desconectar`. **Painel:** o cartão de WhatsApp em Configurações mostra o QR (atualiza a cada 3 s), o número conectado e o botão Desconectar; os campos URL/instância/chave só são preenchidos para usar uma Evolution externa (têm prioridade sobre as variáveis `EVOLUTION_*`).
+
+**Compose:** só `server/docker-compose.local.yml` foi alterado (serviço `whatsapp`, volume `whatsapp_auth_local`, e a API recebe `EVOLUTION_API_URL=http://whatsapp:3000`, `EVOLUTION_INSTANCE=trilan`, `EVOLUTION_API_KEY=${WHATSAPP_BRIDGE_KEY}`). A chave `WHATSAPP_BRIDGE_KEY` fica em `server/.env` (exemplo em `.env.local.example`). **`server/docker-compose.yml` (produção) NÃO foi alterado**: para usar em produção é preciso replicar o serviço, o volume e a variável lá (o push na `isaque` dispara o deploy no Dokploy). Também foi criado `server/dashboard/.dockerignore` (o build do painel tentava copiar `node_modules` da pasta do OneDrive).
+
+**Riscos:** a biblioteca não é oficial; o número pode ser bloqueado pelo WhatsApp e a versão do Baileys pode precisar de atualização quando o protocolo mudar. **Testado:** ponte rodando no compose local (gera QR; 401 sem chave, 503 sem conexão, 404 instância errada), ligação API → ponte e rota `/whatsapp/conexao` conferidas por dentro do container da API, `tsc --noEmit` do painel sem erros. **Não testado:** envio real (depende de ler o QR com um celular).
+
+**Breaking Change:** Não. **Requer:** build do novo container no deploy (quando for levado à produção).
+
+### [2026-11-09] — WhatsApp: os mesmos relatórios e avisos do e-mail, pela Evolution API
+
+**Pedido:** poder cadastrar números de WhatsApp para receber o que hoje sai por e-mail. **Decisões (perguntadas ao usuário):** provedor = Evolution API própria; vão por WhatsApp o relatório de backup, as notificações da conta e os avisos da conta; o número é cadastrado ao lado dos e-mails; formato = texto resumido + imagens das câmeras offline.
+
+**Banco (migração inline em `_MIGRACOES_COLUNAS`, idempotente):** `client_groups.whatsapp_to TEXT[]` (Cliente) e `clients.whatsapp_to TEXT[]` (Máquina), ambos `NOT NULL DEFAULT '{}'`; `contas.whatsapp_contato VARCHAR(30)`. Números guardados só com dígitos e DDI (`5511999998888`): `server/api/whatsapp_numero.py` normaliza e valida (10/11 dígitos sem `+` = Brasil, ganha o 55; com `+` ou `00` vale o DDI informado, 8 a 15 dígitos) e é usado nos validadores Pydantic (`whatsapp_to` em Cliente/Máquina, `whatsapp_contato` em Conta). Número inválido = 422.
+
+**Servidor:** `services/whatsapp_service.py` (config em `settings` com fallback para `EVOLUTION_*`; `POST {url}/message/sendText|sendMedia/{instância}` com header `apikey`; 3 tentativas só em falha de rede/5xx; pausas entre mensagens; nunca levanta exceção) e `services/whatsapp_relatorios.py` (monta o texto resumido reaproveitando os helpers do e-mail: status geral, contagens, só os equipamentos com falha, contagem de câmeras, link de download; envia depois as imagens de referência das câmeras offline, no máximo `MAX_OFFLINE_IMAGES`=10; `disparar_em_segundo_plano` roda numa thread com sessão própria e grava `AgentLog` `whatsapp_sent`/`whatsapp_error`). Pontos de envio: upload do ZIP de máquina sem Cliente (`routers/agent.py`), reenvio do relatório (`routers/backups.py`), fechamento/reenvio da rodada do Cliente (`services/backup_runs.send_run_email`, números do Cliente), notificações de licença e personalizadas (`services/notificacoes._enviar_email`) e avisos de vencimento (`services/avisos_conta.enviar_aviso`), estes dois para o `whatsapp_contato` da conta. O e-mail continua igual: falha ou ausência de WhatsApp nunca afeta o e-mail, e o aviso conta como enviado se saiu por pelo menos um canal. Máquina com Cliente herda os números do Cliente (como os e-mails; `PUT /machines` recusa mudar `whatsapp_to` de máquina vinculada). Rotas novas: `GET/PUT /api/v1/settings` ganham `evolution_url`, `evolution_instance`, `evolution_apikey` (a chave não volta; só `evolution_apikey_configurada`) e `POST /api/v1/settings/whatsapp/teste` (admin global; manda uma mensagem de teste).
+
+**Painel:** Configurações ganha o cartão "WhatsApp (Evolution API)" com botão de teste; campo "WhatsApp do relatório" nos formulários de Cliente e de Máquina (travado na máquina vinculada) e no cartão da Máquina; "WhatsApp de contato" no formulário e no detalhe da Conta; o log da máquina mostra "WhatsApp enviado"/"Erro de WhatsApp".
+
+**Atenção:** as notificações personalizadas continuam com a caixa "enviar e-mail"; o WhatsApp acompanha essa caixa (sai para o número da conta se ele existir). Pré-requisito de operação: servidor Evolution API v2 próprio, com uma instância conectada (QR code) ao número remetente; número não oficial pode ser bloqueado pelo WhatsApp. **Testado:** `tests/test_whatsapp.py` (18 testes: normalização, configuração, envio com retentativas, montagem das mensagens e limite de imagens) e as demais suítes da API rodadas uma a uma em container Python 3.12 (todas passam, exceto `test_storage.py` e `test_galeria_pasta_gravacao.py`, que já falham por variável de ambiente ausente nos próprios testes: `ADMIN_PASSWORD`, `DATABASE_URL`, `SECRET_KEY`); `tsc --noEmit` do painel sem erros. **Não testado contra uma Evolution API real.**
+
+**Breaking Change:** Não (colunas novas com padrão vazio). **Requer:** deploy do servidor e do painel; sem mudança no agente nem no compose.
 
 ### [2026-11-09] — Merge auditado do ramo `helena` (39a028a): OLT Huawei e alarmes do DEFENSE (agente 1.1.41)
 

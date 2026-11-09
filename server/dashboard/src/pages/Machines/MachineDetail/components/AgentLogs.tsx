@@ -31,6 +31,8 @@ const TIPO_LABELS: Record<string, string> = {
   queue_backup_skipped: "Fila ignorada",
   email_sent: "E-mail enviado",
   email_error: "Erro de e-mail",
+  whatsapp_sent: "WhatsApp enviado",
+  whatsapp_error: "Erro de WhatsApp",
   agent_log: "Agente",
 };
 
@@ -44,10 +46,10 @@ function tipoStyle(tipo: string, nivel?: string): { background: string; color: s
     }
     return { background: "rgba(59, 130, 246, 0.15)", color: "#3b82f6" };
   }
-  if (tipo === "ping" || tipo === "email_sent") {
+  if (tipo === "ping" || tipo === "email_sent" || tipo === "whatsapp_sent") {
     return { background: "rgba(16, 185, 129, 0.15)", color: "#10b981" };
   }
-  if (tipo === "email_error") {
+  if (tipo === "email_error" || tipo === "whatsapp_error") {
     return { background: "rgba(239, 68, 68, 0.15)", color: "#ef4444" };
   }
   return { background: "rgba(59, 130, 246, 0.15)", color: "#3b82f6" };

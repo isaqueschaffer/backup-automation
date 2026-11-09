@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { fetchSettings, updateSettings, fetchAgentVersions, createAgentVersion, toggleAgentVersion, deleteAgentVersion, editAgentVersion } from "../api/client";
+import { fetchSettings, updateSettings, testWhatsapp, fetchWhatsappConexao, disconnectWhatsapp, WhatsappConexao,fetchAgentVersions, createAgentVersion, toggleAgentVersion, deleteAgentVersion, editAgentVersion } from "../api/client";
 import { useToast } from "../components/Toast";
 import { AgentVersion } from "../api/types";
-import { Save, Mail, Lock, Database, UploadCloud, Trash2, Power, PowerOff } from "lucide-react";
+import { apiErrorMessage } from "../utils/errors";
+import { Save, Mail, MessageCircle, Lock, Database, UploadCloud, Trash2, Power, PowerOff } from "lucide-react";
 
 function OtaManager() {
   const [versions, setVersions] = useState<AgentVersion[]>([]);
@@ -170,6 +171,100 @@ function OtaManager() {
   );
 }
 
+// WhatsApp: conexão do número remetente por QR code (container "whatsapp") e mensagem de teste.
+function WhatsappCard() {
+  const [estado, setEstado] = useState<WhatsappConexao | null>(null);
+  const [desconectando, setDesconectando] = useState(false);
+  const [numeroTeste, setNumeroTeste] = useState("");
+  const [testando, setTestando] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    let ativo = true;
+    const buscar = () => fetchWhatsappConexao().then(e => { if (ativo) setEstado(e); }).catch(() => { /* tenta no próximo ciclo */ });
+    buscar();
+    // Enquanto espera a leitura do QR (ele troca a cada ~20 s), consulta com frequência
+    const t = setInterval(buscar, 3000);
+    return () => { ativo = false; clearInterval(t); };
+  }, []);
+
+  const desconectar = async () => {
+    if (!confirm("Desconectar este número do WhatsApp? Os envios param até conectar de novo (novo QR code).")) return;
+    setDesconectando(true);
+    try {
+      await disconnectWhatsapp();
+      toast("Número desconectado. Leia o novo QR code para conectar outro.", "success");
+    } catch (e) { toast(apiErrorMessage(e, "Erro ao desconectar."), "error"); }
+    finally { setDesconectando(false); }
+  };
+
+  const testar = async () => {
+    if (!numeroTeste.trim()) { toast("Informe o número que vai receber o teste.", "error"); return; }
+    setTestando(true);
+    try {
+      await testWhatsapp(numeroTeste.trim());
+      toast("Mensagem de teste enviada! Confira o WhatsApp.", "success");
+    } catch (e) { toast(apiErrorMessage(e, "Não foi possível enviar o teste."), "error"); }
+    finally { setTestando(false); }
+  };
+
+  return (
+    <div className="card">
+      <div className="section-title"><MessageCircle size={15} />WhatsApp</div>
+      {!estado ? (
+        <div className="text-sm text-muted"><span className="spinner spinner-sm" /> Verificando…</div>
+      ) : !estado.configurado ? (
+        <p className="text-sm text-muted">
+          WhatsApp desligado: defina <strong>WHATSAPP_BRIDGE_KEY</strong> nas variáveis do servidor (e suba o container do WhatsApp) para conectar um número.
+        </p>
+      ) : !estado.disponivel ? (
+        <p className="text-sm text-muted">
+          O container do WhatsApp não está respondendo. Confira se ele está no ar e tente de novo em instantes.
+        </p>
+      ) : estado.connected ? (
+        <div className="flex gap-3" style={{ alignItems: "center", justifyContent: "space-between" }}>
+          <span className="badge badge-success">
+            Conectado{estado.numero ? ` · +${estado.numero}` : ""}
+          </span>
+          <button type="button" className="btn btn-sm btn-danger" onClick={desconectar} disabled={desconectando}>
+            {desconectando ? <span className="spinner spinner-sm" /> : "Desconectar"}
+          </button>
+        </div>
+      ) : estado.qr ? (
+        <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+          <img src={estado.qr} alt="QR code do WhatsApp" width={200} height={200}
+            style={{ background: "#fff", borderRadius: 8, padding: 4 }} />
+          <div className="text-sm text-muted" style={{ flex: 1, minWidth: 220 }}>
+            No celular do número que vai enviar as mensagens: WhatsApp → <strong>Aparelhos conectados</strong> →
+            <strong> Conectar um aparelho</strong> e leia este código. Ele se renova sozinho.
+          </div>
+        </div>
+      ) : (
+        <div className="text-sm text-muted"><span className="spinner spinner-sm" /> Gerando o QR code…</div>
+      )}
+
+      {estado?.connected && (
+        <>
+          <p className="text-sm text-muted mt-3">
+            Os destinatários são cadastrados em cada cliente, máquina e conta, ao lado dos e-mails.
+          </p>
+          <div className="flex gap-3 mt-2" style={{ alignItems: "flex-end" }}>
+            <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+              <label className="form-label">Enviar mensagem de teste para</label>
+              <input className="form-input" placeholder="(11) 99999-8888"
+                value={numeroTeste} onChange={e => setNumeroTeste(e.target.value)} />
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={testar} disabled={testando}
+              style={{ height: 38, flexShrink: 0 }}>
+              {testando ? <span className="spinner spinner-sm" /> : "Enviar teste"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [form, setForm] = useState({
     smtp_server: "", smtp_port: "587", smtp_email: "", smtp_password: "",
@@ -240,6 +335,9 @@ export default function Settings() {
               value={form.smtp_password} onChange={e => setForm({ ...form, smtp_password: e.target.value })} />
           </div>
         </div>
+
+        {/* WhatsApp (conexão por QR code) */}
+        <WhatsappCard />
 
         {/* Retention */}
         <div className="card">

@@ -47,6 +47,21 @@ services:
     networks:
       - trilan_local
 
+  # ── WhatsApp (ponte Baileys; sessão por QR code) ──────────
+  # Sem porta publicada: só a API acessa, pela rede interna. A sessão fica no volume whatsapp_auth_local.
+  whatsapp:
+    build:
+      context: ./whatsapp
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      API_KEY: ${WHATSAPP_BRIDGE_KEY:?defina WHATSAPP_BRIDGE_KEY no .env (mínimo 16 caracteres)}
+      INSTANCE_NAME: trilan
+    volumes:
+      - whatsapp_auth_local:/data
+    networks:
+      - trilan_local
+
   # ── Dashboard (React/Vite → Nginx) ────────────────────────
   dashboard:
     build:
@@ -83,6 +98,7 @@ services:
 volumes:
   pg_data_local:
   trilan_backups_local:
+  whatsapp_auth_local:
 
 networks:
   trilan_local:

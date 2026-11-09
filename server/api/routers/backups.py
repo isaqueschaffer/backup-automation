@@ -269,6 +269,22 @@ def resend_backup_email(
             message=f"Falha no reenvio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
         ))
 
+    # WhatsApp: reenvia também para os números cadastrados (em segundo plano)
+    if b.machine.whatsapp_to:
+        from services.whatsapp_relatorios import disparar_em_segundo_plano, enviar_relatorio_maquina
+        disparar_em_segundo_plano(
+            enviar_relatorio_maquina,
+            descricao=f"reenvio do relatório da máquina '{b.machine.name}' para {', '.join(b.machine.whatsapp_to)}",
+            log_machine_id=b.machine.id,
+            machine_name=b.machine.name,
+            nvr_results=nvr_results,
+            numeros=list(b.machine.whatsapp_to),
+            machine_id=b.machine_id,
+            backup_id=str(b.id),
+            public_url=settings.PUBLIC_URL,
+            base_url=str(request.base_url),
+        )
+
     db.commit()
 
     if not email_sent:

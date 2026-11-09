@@ -119,6 +119,7 @@ def listar_contas(
                 **resumo,
                 documento=c.documento,
                 email_contato=c.email_contato,
+                whatsapp_contato=c.whatsapp_contato,
                 telefone=c.telefone,
                 observacoes=c.observacoes,
                 plano_id=c.plano_id,
@@ -157,6 +158,7 @@ def criar_conta(
         tipo=body.tipo,
         documento=body.documento,
         email_contato=body.email_contato,
+        whatsapp_contato=body.whatsapp_contato,
         telefone=body.telefone,
         observacoes=body.observacoes,
         plano_id=body.plano_id,
@@ -237,6 +239,8 @@ def atualizar_conta(
         conta.documento = body.documento
     if "email_contato" in body.model_fields_set:
         conta.email_contato = body.email_contato
+    if "whatsapp_contato" in body.model_fields_set:
+        conta.whatsapp_contato = body.whatsapp_contato
     if "telefone" in body.model_fields_set:
         conta.telefone = body.telefone
     if "observacoes" in body.model_fields_set:

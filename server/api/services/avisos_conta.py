@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from models import Conta, Usuario
 from services.contas import status_da_conta
 from services.email_service import _clean_recipients, _smtp_config, _smtp_send
+from services.whatsapp_relatorios import enviar_aviso_whatsapp
 
 logger = logging.getLogger("trilan.avisos_conta")
 
@@ -39,11 +40,8 @@ def destinatarios(db: Session, conta: Conta) -> List[str]:
 
 
 def enviar_aviso(db: Session, conta: Conta, marco: int, dias: int, para: List[str]) -> bool:
-    """Envia o e-mail de aviso de vencimento ou conta vencida. Retorna True em caso de sucesso."""
-    cfg = _smtp_config(db)
-    if cfg is None:
-        return False
-
+    """Envia o aviso de vencimento ou conta vencida por e-mail e, se a conta tiver, por WhatsApp.
+    Retorna True se saiu por pelo menos um canal."""
     data_formatada = (conta.expira_em - timedelta(hours=3)).strftime("%d/%m/%Y às %H:%M") + " (horário de Brasília)"
 
     if marco == 0:
@@ -71,14 +69,22 @@ def enviar_aviso(db: Session, conta: Conta, marco: int, dias: int, para: List[st
             "<p>Para não interromper os backups automáticos, fale com a Trilan e renove o plano.</p>"
         )
 
-    msg = EmailMessage()
-    msg["Subject"] = assunto
-    msg["From"] = cfg["email"]
-    msg["To"] = ", ".join(para)
-    msg.set_content(texto_puro)
-    msg.add_alternative(html_corpo, subtype="html")
+    enviado_email = False
+    cfg = _smtp_config(db)
+    if cfg is not None and para:
+        msg = EmailMessage()
+        msg["Subject"] = assunto
+        msg["From"] = cfg["email"]
+        msg["To"] = ", ".join(para)
+        msg.set_content(texto_puro)
+        msg.add_alternative(html_corpo, subtype="html")
+        enviado_email = _smtp_send(msg, cfg, para)
 
-    return _smtp_send(msg, cfg, para)
+    enviado_whatsapp = enviar_aviso_whatsapp(
+        db, [conta.whatsapp_contato] if conta.whatsapp_contato else [], assunto, texto_puro,
+        f"Aviso de vencimento da conta {conta.nome}",
+    )
+    return enviado_email or enviado_whatsapp
 
 
 def verificar_vencimentos(db: Session, agora: Optional[datetime] = None) -> int:
@@ -94,7 +100,7 @@ def verificar_vencimentos(db: Session, agora: Optional[datetime] = None) -> int:
                 continue
 
             para = destinatarios(db, conta)
-            if not para:
+            if not para and not conta.whatsapp_contato:
                 logger.warning("Conta %s (%s) sem destinatários para aviso de vencimento (marco %s).", conta.id, conta.nome, marco)
                 conta.avisos_enviados = list(conta.avisos_enviados or []) + [marco]
                 db.commit()

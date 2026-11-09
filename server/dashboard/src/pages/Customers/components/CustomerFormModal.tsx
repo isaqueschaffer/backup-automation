@@ -10,13 +10,15 @@ export interface CustomerForm {
   backup_minute: number;
   // E-mails do relatório como texto separado por vírgula (vira lista ao salvar)
   email_to: string;
+  // Números de WhatsApp do relatório como texto separado por vírgula (o servidor normaliza e valida)
+  whatsapp_to: string;
   password_mode: "default" | "custom";
   zip_password?: string;
   has_zip_password?: boolean;
 }
 
 export const emptyCustomerForm = (): CustomerForm => ({
-  name: "", description: "", backup_hour: 2, backup_minute: 0, email_to: "", password_mode: "default", zip_password: "",
+  name: "", description: "", backup_hour: 2, backup_minute: 0, email_to: "", whatsapp_to: "", password_mode: "default", zip_password: "",
 });
 
 // "a@x.com, , b@y.com" → ["a@x.com", "b@y.com"] (trim, sem vazios, sem repetidos)
@@ -54,6 +56,14 @@ export default function CustomerFormModal({ title, initial, isEdit, saving, onSa
           onChange={e => setForm({ ...form, email_to: e.target.value })} />
         <div className="text-xs text-muted" style={{ marginTop: 6 }}>
           Um único e-mail por rodada com o relatório de todas as máquinas. Substitui os e-mails próprios das máquinas deste {singularMin}.
+        </div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">WhatsApp do relatório (separados por vírgula)</label>
+        <input className="form-input" placeholder="Ex: (11) 99999-8888, (21) 98888-7777" value={form.whatsapp_to}
+          onChange={e => setForm({ ...form, whatsapp_to: e.target.value })} />
+        <div className="text-xs text-muted" style={{ marginTop: 6 }}>
+          Opcional. Recebem o mesmo relatório do e-mail em mensagem resumida, com as imagens das câmeras offline. Use DDD + número; para outro país, comece com + e o código do país.
         </div>
       </div>
       <div className="form-group">

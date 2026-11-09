@@ -17,6 +17,7 @@ import { useToast } from "../../components/Toast";
 import { useAuth } from "../../contexts/AuthContext";
 import { fmtDay } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
+import { formatWhatsapp } from "../../utils/whatsapp";
 import { StatusContaBadge, TIPO_CONTA_LABEL, textoValidade } from "./contaUi";
 import ContaFormModal from "./ContaFormModal";
 import UsuariosSection from "./UsuariosSection";
@@ -381,6 +382,13 @@ export default function ContaDetalhePage() {
               <div className="text-xs text-muted">E-mail de contato</div>
               <div style={{ fontSize: 14, color: "var(--text-primary)" }}>
                 {conta.email_contato ?? "—"}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs text-muted">WhatsApp de contato</div>
+              <div style={{ fontSize: 14, color: "var(--text-primary)" }}>
+                {conta.whatsapp_contato ? formatWhatsapp(conta.whatsapp_contato) : "—"}
               </div>
             </div>
 

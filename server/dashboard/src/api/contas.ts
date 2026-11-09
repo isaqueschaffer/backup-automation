@@ -13,6 +13,7 @@ export interface NovaContaPayload {
   tipo: TipoConta;
   documento?: string | null;
   email_contato?: string | null;
+  whatsapp_contato?: string | null;
   telefone?: string | null;
   observacoes?: string | null;
   plano_id: string;
@@ -28,6 +29,7 @@ export interface EditarContaPayload {
   tipo: TipoConta;
   documento: string | null;
   email_contato: string | null;
+  whatsapp_contato: string | null;
   telefone: string | null;
   observacoes: string | null;
   expira_em: string;

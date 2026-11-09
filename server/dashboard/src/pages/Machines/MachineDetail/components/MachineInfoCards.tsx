@@ -1,5 +1,6 @@
-import { Archive, Building2, CalendarCheck, Clock, KeyRound, Mail, Server, Wifi } from "lucide-react";
+import { Archive, Building2, CalendarCheck, Clock, KeyRound, Mail, MessageCircle, Server, Wifi } from "lucide-react";
 import { Machine } from "../../../../api/types";
+import { formatWhatsapp } from "../../../../utils/whatsapp";
 import StatusBadge from "../../../../components/StatusBadge";
 import { Link } from "react-router-dom";
 import { fmtDate, fmtSchedule } from "../../../../utils/date";
@@ -9,10 +10,12 @@ import ServerHealthCard from "./ServerHealthCard";
 import { useRotulos } from "../../../../contexts/AuthContext";
 
 // As três colunas do topo: Configuração, Status do Agente e Saúde do Servidor (telemetria)
-export default function MachineInfoCards({ machine, customerEmails, isAgentOnline, nextPingStr, onCopy, nowMs }: {
+export default function MachineInfoCards({ machine, customerEmails, customerWhatsapp, isAgentOnline, nextPingStr, onCopy, nowMs }: {
   machine: Machine;
   // E-mails do cliente quando a máquina os herda (null = não carregados: usa os da máquina)
   customerEmails: string[] | null;
+  // Números de WhatsApp do cliente, herdados do mesmo jeito
+  customerWhatsapp: string[] | null;
   isAgentOnline: boolean;
   nextPingStr: string;
   onCopy: (v: string) => void;
@@ -20,6 +23,7 @@ export default function MachineInfoCards({ machine, customerEmails, isAgentOnlin
 }) {
   const { singular, singularMin } = useRotulos();
   const emails = (machine.email_from_customer && customerEmails) || machine.email_to || [];
+  const whatsapps = ((machine.email_from_customer && customerWhatsapp) || machine.whatsapp_to || []).map(formatWhatsapp);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
 
@@ -43,6 +47,8 @@ export default function MachineInfoCards({ machine, customerEmails, isAgentOnlin
               ? <>{emails.join(", ") || "—"}
                   <span className="text-muted" style={{ fontSize: 12 }}> — definidos pelo {singularMin}, 1 e-mail por rodada</span></>
               : (emails.join(", ") || "—")} />
+          <InfoPill icon={<MessageCircle size={11} />} label={machine.email_from_customer ? `WhatsApp do relatório (do ${singularMin})` : "WhatsApp do relatório"}
+            value={whatsapps.join(", ") || "—"} />
         </div>
       </div>
 

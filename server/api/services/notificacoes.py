@@ -13,6 +13,7 @@ from models import ConfiguracaoNotificacao, Conta, Machine, NotificacaoPersonali
 from services.avisos_conta import destinatarios
 from services.email_service import _smtp_config, _smtp_send
 from services.licenca_unm import licenca_da_config
+from services.whatsapp_relatorios import enviar_aviso_whatsapp
 
 logger = logging.getLogger("trilan.notificacoes")
 
@@ -54,7 +55,7 @@ def resolver(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, def
         existente.resolvido_em = datetime.utcnow()
 
 
-def _enviar_email(db: Session, conta: Conta, assunto: str, texto_puro: str, corpo_html: str, contexto: str) -> bool:
+def _enviar_email_smtp(db: Session, conta: Conta, assunto: str, texto_puro: str, corpo_html: str, contexto: str) -> bool:
     cfg = _smtp_config(db)
     if cfg is None:
         return False
@@ -67,6 +68,16 @@ def _enviar_email(db: Session, conta: Conta, assunto: str, texto_puro: str, corp
     msg.set_content(texto_puro)
     msg.add_alternative(corpo_html, subtype="html")
     return _smtp_send(msg, cfg, para)
+
+
+def _enviar_email(db: Session, conta: Conta, assunto: str, texto_puro: str, corpo_html: str, contexto: str) -> bool:
+    """Envia o aviso por e-mail e, em paralelo, por WhatsApp para o número de contato da conta (se houver).
+    True se saiu por pelo menos um canal (o chamador usa isso para não repetir o aviso no mesmo dia)."""
+    enviado_email = _enviar_email_smtp(db, conta, assunto, texto_puro, corpo_html, contexto)
+    enviado_whatsapp = enviar_aviso_whatsapp(
+        db, [conta.whatsapp_contato] if conta.whatsapp_contato else [], assunto, texto_puro, contexto,
+    )
+    return enviado_email or enviado_whatsapp
 
 
 def _enviar_email_licenca(db: Session, conta: Conta, nvr: NVR, dias_restantes: int) -> bool:

@@ -12,7 +12,7 @@ from schemas import StatsResponse
 from auth import Contexto, get_contexto
 from services.escopo import filtrar_por_conta
 from config import settings
-from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta, notificacoes
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta, notificacoes, whatsapp_router
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -220,6 +220,10 @@ _MIGRACOES_COLUNAS = [
     ("notificacoes", "definicao_id", "ALTER TABLE notificacoes ADD COLUMN definicao_id UUID REFERENCES notificacoes_personalizadas(id) ON DELETE SET NULL;"),
     # Alarmes das centrais Intelbras cadastradas no DEFENSE (API /api/alarm-centrals, enviado pelo agente)
     ("nvrs", "last_alarm_status", "ALTER TABLE nvrs ADD COLUMN last_alarm_status JSON;"),
+    # WhatsApp (container "whatsapp"): números que recebem os mesmos relatórios/avisos do e-mail
+    ("client_groups", "whatsapp_to", "ALTER TABLE client_groups ADD COLUMN whatsapp_to TEXT[] NOT NULL DEFAULT '{}';"),
+    ("clients", "whatsapp_to", "ALTER TABLE clients ADD COLUMN whatsapp_to TEXT[] NOT NULL DEFAULT '{}';"),
+    ("contas", "whatsapp_contato", "ALTER TABLE contas ADD COLUMN whatsapp_contato VARCHAR(30);"),
 ]
 
 _colunas_cache: dict = {}
@@ -371,6 +375,7 @@ app.include_router(nvrs.router, include_in_schema=False)  # mantido para compati
 app.include_router(backups.router)
 app.include_router(agent.router)
 app.include_router(settings_router.router)
+app.include_router(whatsapp_router.router)  # Conexão do WhatsApp por QR code: /api/v1/whatsapp
 app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 app.include_router(storage_admin.router)  # Armazenamento admin: /api/v1/admin/storage

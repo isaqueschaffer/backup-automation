@@ -207,6 +207,8 @@ export interface Machine {
   backup_hour: number;
   backup_minute: number;
   email_to: string[];
+  // Números de WhatsApp (só dígitos com DDI) que recebem o mesmo relatório do e-mail
+  whatsapp_to?: string[];
   zip_password?: string;
   active: boolean;
   last_seen: string | null;
@@ -290,6 +292,8 @@ export interface Customer {
   backup_minute: number;
   // Destinatários do e-mail único por rodada (relatório de todas as máquinas)
   email_to: string[];
+  // Números de WhatsApp que recebem o mesmo relatório da rodada
+  whatsapp_to?: string[];
   created_at: string;
   machines_total: number;
   machines_online: number;
@@ -381,6 +385,8 @@ export interface Renovacao {
 export interface Conta extends ContaResumo {
   documento: string | null;
   email_contato: string | null;
+  // WhatsApp de contato (só dígitos com DDI): recebe os mesmos avisos do e-mail de contato
+  whatsapp_contato?: string | null;
   telefone: string | null;
   observacoes: string | null;
   plano_id: string | null;

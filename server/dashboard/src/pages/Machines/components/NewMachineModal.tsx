@@ -4,13 +4,13 @@ import { Customer } from "../../../api/types";
 import Modal from "../../../components/Modal";
 import { fmtSchedule } from "../../../utils/date";
 import { useRotulos } from "../../../contexts/AuthContext";
-
 export interface NewMachineForm {
   name: string;
   customer_id: string; // "" = sem cliente
   backup_hour: number;
   backup_minute: number;
   email_to: string;
+  whatsapp_to: string; // só vale para máquina sem cliente (com cliente, vale o WhatsApp do cliente)
   zip_password: string;
 }
 
@@ -23,7 +23,7 @@ export default function NewMachineModal({ customers, initialCustomerId, saving, 
 }) {
   const { singular, singularMin } = useRotulos();
   const [form, setForm] = useState<NewMachineForm>({
-    name: "", customer_id: initialCustomerId || "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
+    name: "", customer_id: initialCustomerId || "", backup_hour: 2, backup_minute: 0, email_to: "", whatsapp_to: "", zip_password: "",
   });
   const customer = customers.find(c => c.id === form.customer_id);
 
@@ -69,6 +69,16 @@ export default function NewMachineModal({ customers, initialCustomerId, saving, 
         <input className="form-input" placeholder="ti@empresa.com, gestor@empresa.com"
           value={form.email_to} onChange={e => setForm({ ...form, email_to: e.target.value })} />
       </div>
+      {!customer && (
+        <div className="form-group">
+          <label className="form-label">WhatsApp do relatório (separados por vírgula)</label>
+          <input className="form-input" placeholder="(11) 99999-8888, (21) 98888-7777"
+            value={form.whatsapp_to} onChange={e => setForm({ ...form, whatsapp_to: e.target.value })} />
+          <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+            Opcional. Recebem o mesmo relatório do e-mail, resumido, com as imagens das câmeras offline.
+          </div>
+        </div>
+      )}
       <div className="form-group">
         <label className="form-label">Senha do ZIP (opcional — gerada automaticamente se vazio)</label>
         <input className="form-input" type="password" placeholder="SenhaForte123"

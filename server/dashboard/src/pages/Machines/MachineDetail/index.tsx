@@ -32,6 +32,7 @@ import OltStatusModal from "./components/OltStatusModal";
 import AlarmesModal from "./components/AlarmesModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
 import { useSomenteLeitura } from "../../../contexts/AuthContext";
+import { parseWhatsappList } from "../../../utils/whatsapp";
 
 export default function MachineDetail() {
   const somenteLeitura = useSomenteLeitura();
@@ -74,11 +75,12 @@ export default function MachineDetail() {
   const [eqForm, setEqForm] = useState<EqForm>(emptyEqForm());
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditMachineForm>({
-    name: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
+    name: "", backup_hour: 2, backup_minute: 0, email_to: "", whatsapp_to: "", zip_password: "",
   });
   const [saving, setSaving] = useState(false);
-  // E-mails efetivos quando vêm do cliente (null = ainda não carregados ou máquina sem cliente)
+  // E-mails e WhatsApp efetivos quando vêm do cliente (null = ainda não carregados ou máquina sem cliente)
   const [customerEmails, setCustomerEmails] = useState<string[] | null>(null);
+  const [customerWhatsapp, setCustomerWhatsapp] = useState<string[] | null>(null);
   // Diferença entre relógio do servidor e do navegador, para a contagem do próximo ping andar a cada segundo
   const [serverSkewMs, setServerSkewMs] = useState(0);
 
@@ -157,10 +159,15 @@ export default function MachineDetail() {
   const emailCustomerId = machine?.email_from_customer ? machine.customer_id ?? null : null;
   useEffect(() => {
     setCustomerEmails(null);
+    setCustomerWhatsapp(null);
     if (!emailCustomerId) return;
     let cancelled = false;
     fetchCustomer(emailCustomerId)
-      .then(c => { if (!cancelled) setCustomerEmails(c.email_to || []); })
+      .then(c => {
+        if (cancelled) return;
+        setCustomerEmails(c.email_to || []);
+        setCustomerWhatsapp(c.whatsapp_to || []);
+      })
       .catch(() => { /* mantém null: o card mostra os e-mails da máquina */ });
     return () => { cancelled = true; };
   }, [emailCustomerId]);
@@ -290,6 +297,7 @@ export default function MachineDetail() {
       backup_hour: machine.backup_hour,
       backup_minute: machine.backup_minute,
       email_to: ((machine.email_from_customer && customerEmails) || machine.email_to || []).join(", "),
+      whatsapp_to: ((machine.email_from_customer && customerWhatsapp) || machine.whatsapp_to || []).join(", "),
       zip_password: "",
     });
     setShowEditModal(true);
@@ -305,7 +313,10 @@ export default function MachineDetail() {
         name: editForm.name,
         zip_password: editForm.zip_password || undefined,
       };
-      if (!machine?.email_from_customer) payload.email_to = parseEmails(editForm.email_to);
+      if (!machine?.email_from_customer) {
+        payload.email_to = parseEmails(editForm.email_to);
+        payload.whatsapp_to = parseWhatsappList(editForm.whatsapp_to);
+      }
       if (!machine?.schedule_from_customer) {
         payload.backup_hour = editForm.backup_hour;
         payload.backup_minute = editForm.backup_minute;
@@ -375,7 +386,7 @@ export default function MachineDetail() {
       />
 
       {/* ── Layout de três colunas ── */}
-      <MachineInfoCards machine={machine} customerEmails={customerEmails} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} nowMs={now + serverSkewMs} />
+      <MachineInfoCards machine={machine} customerEmails={customerEmails} customerWhatsapp={customerWhatsapp} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} nowMs={now + serverSkewMs} />
 
       {/* ── Equipamentos ── */}
       <div style={{ marginBottom: 24 }}>

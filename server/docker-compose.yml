@@ -30,6 +30,22 @@ services:
     networks:
       - trilan_net
 
+  # WhatsApp (ponte Baileys, conexão por QR code em Configurações > WhatsApp). Sem porta publicada: só a API acessa,
+  # pela rede interna. A chave vem do .env do Dokploy (WHATSAPP_BRIDGE_KEY, mínimo 16 caracteres); sem ela o
+  # container fica ocioso e o WhatsApp desligado, sem afetar o resto. A sessão fica no volume whatsapp_auth.
+  whatsapp:
+    build:
+      context: ./whatsapp
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      API_KEY: ${WHATSAPP_BRIDGE_KEY:-}
+      INSTANCE_NAME: trilan
+    volumes:
+      - whatsapp_auth:/data
+    networks:
+      - trilan_net
+
   dashboard:
     build:
       context: ./dashboard
@@ -59,6 +75,7 @@ services:
 
 volumes:
   pg_data_local:
+  whatsapp_auth:
 
 networks:
   trilan_net:

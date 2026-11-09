@@ -29,6 +29,8 @@ export default function ContaFormModal({
   const [tipo, setTipo] = useState<TipoConta>(conta?.tipo ?? "INTEGRADOR");
   const [documento, setDocumento] = useState(conta?.documento ?? "");
   const [emailContato, setEmailContato] = useState(conta?.email_contato ?? "");
+  // Em edição mostra o número guardado (só dígitos com DDI); o servidor normaliza ao salvar
+  const [whatsappContato, setWhatsappContato] = useState(conta?.whatsapp_contato ?? "");
   const [telefone, setTelefone] = useState(conta?.telefone ?? "");
   const [observacoes, setObservacoes] = useState(conta?.observacoes ?? "");
 
@@ -83,6 +85,7 @@ export default function ContaFormModal({
         tipo,
         documento: documento.trim() || null,
         email_contato: emailContato.trim() || null,
+        whatsapp_contato: whatsappContato.trim() || null,
         telefone: telefone.trim() || null,
         observacoes: observacoes.trim() || null,
         plano_id: planoId,
@@ -99,6 +102,7 @@ export default function ContaFormModal({
         tipo,
         documento: documento.trim() || null,
         email_contato: emailContato.trim() || null,
+        whatsapp_contato: whatsappContato.trim() || null,
         telefone: telefone.trim() || null,
         observacoes: observacoes.trim() || null,
       };
@@ -254,6 +258,20 @@ export default function ContaFormModal({
           />
           <div className="text-xs text-muted" style={{ marginTop: 4 }}>
             Recebe os avisos de vencimento.
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">WhatsApp de contato</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="(11) 99999-9999"
+            value={whatsappContato}
+            onChange={(e) => setWhatsappContato(e.target.value)}
+          />
+          <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+            Opcional. Recebe os avisos de vencimento do plano e as notificações enviadas por e-mail (licença, personalizadas).
           </div>
         </div>
 
