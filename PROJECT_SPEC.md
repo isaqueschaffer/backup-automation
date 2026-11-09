@@ -1088,6 +1088,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-09] — Merge auditado do ramo `helena` (39a028a): OLT Huawei e alarmes do DEFENSE (agente 1.1.41)
+
+**Tipo:** merge real (`git merge --no-ff`), sem conflitos; mexeu em `agent/`, então nova versão **1.1.41** (updater.py, installer.iss, package.json), build, release e cadastro (fluxo "merge com a Helena").
+
+**Incorporado:** status das OLTs Huawei (`agent/src/olt/huawei_status.py`, integrado a `status_olt.py`); alarmes das centrais Intelbras cadastradas no DEFENSE (`agent/src/vms/defense_alarmes.py`, `status_alarmes_defense.py`, laço no `service.py`, envio no `api_client.py`); servidor: coluna `nvrs.last_alarm_status` (JSON; modelo `NVR` e migração inline em `_MIGRACOES_COLUNAS`), schemas `StatusAlarmeReport`/`EquipamentoStatusAlarme`, rota do agente `POST /api/v1/agent/defense/alarmes/status` e rota do painel `GET /api/v1/machines/{machine_id}/equipamentos/{id}/alarmes`; painel: `AlarmesModal.tsx`, `EqCard.tsx`, formulário de equipamento, tipos; testes `test_huawei_status.py` e `test_defense_alarmes.py`.
+**Verificado e sem problema:** rota do agente filtra pela própria máquina (`machine.id`) e bloqueia conta suspensa; rota do painel recebe `ctx` e usa `_get_machine_or_404` (REGRA-010); `last_alarm_status` gravado em UTC naive (REGRA-001); migração idempotente; compose, nginx, requirements, build.ps1, installer.iss e `.env` intocados; nenhum segredo (só a leitura de `api_key` da configuração do equipamento).
+**Bloqueado:** nada.
+
+**Breaking Change:** Não. **Requer:** deploy do servidor e do painel (push em `isaque` dispara o Dokploy; a coluna nova é criada na subida) e atualização OTA do agente.
+
 ### [2026-11-09] — Merge auditado do ramo `helena` (04a3f9e): status de OLT VSOL e UNM2000 (agente 1.1.40)
 
 **Tipo:** merge real (`git merge --no-ff`), sem conflitos; mexeu em `agent/`, então nova versão **1.1.40** (updater.py, installer.iss, package.json), build, release e cadastro no painel (fluxo "merge com a Helena").
