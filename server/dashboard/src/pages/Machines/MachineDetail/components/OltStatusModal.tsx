@@ -34,25 +34,31 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
   const termo = busca.trim().toLowerCase();
   const onus = (olt.onus || []).filter(o =>
     (!filtro || o.estado === filtro) &&
-    (!termo || `${o.slot}/${o.pon}`.includes(termo) || o.indice.includes(termo) || (o.nome || "").toLowerCase().includes(termo) || (o.serial || "").toLowerCase().includes(termo)));
+    (!termo || `${o.slot}/${o.pon}`.includes(termo) || o.indice.includes(termo) || (o.nome || "").toLowerCase().includes(termo) ||
+      (o.serial || "").toLowerCase().includes(termo) || (o.mac || "").toLowerCase().includes(termo)));
+  const temSerial = (olt.onus || []).some(o => o.tipo || o.serial);
+  const temMac = (olt.onus || []).some(o => o.mac);
+  const temOptico = (olt.onus || []).some(o => o.sinal_olt_dbm != null || o.sinal_onu_dbm != null);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <Tile titulo="ONUs" valor={t?.total ?? "—"} />
-        <Tile titulo="Online" valor={t?.online ?? "—"} cor="var(--ok)" />
-        <Tile titulo="Offline" valor={t?.offline ?? "—"} cor={t && t.offline ? "var(--err)" : undefined} />
-        <Tile titulo="Sem energia" valor={t?.sem_energia ?? "—"} cor={t && t.sem_energia ? "var(--warn)" : undefined} />
-        {t && t.falha > 0 && <Tile titulo="Fibra desconectada" valor={t.falha} cor="var(--err)" />}
-        <Tile titulo="Sinal ruim" valor={t?.sinal_ruim ?? "—"} cor={t && t.sinal_ruim ? "var(--err)" : undefined} />
-        {licenca && (
-          <Tile titulo="Licença UNM2000"
-            valor={licenca.dias_restantes >= 0 ? `${licenca.dias_restantes} dias` : "vencida"}
-            cor={licenca.dias_restantes < 0 ? "var(--err)" : licenca.dias_restantes <= 30 ? "var(--warn)" : undefined} />
-        )}
-        {olt.nomes && <Tile titulo="Sem nome" valor={olt.nomes.sem_nome} cor={olt.nomes.sem_nome ? "var(--warn)" : undefined} />}
-        {olt.temperatura != null && <Tile titulo="Temperatura" valor={`${olt.temperatura} °C`} cor={quente ? "var(--err)" : undefined} />}
-      </div>
+      {(t || licenca || olt.nomes || olt.temperatura != null) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          {t && <Tile titulo="ONUs" valor={t.total} />}
+          {t && <Tile titulo="Online" valor={t.online} cor="var(--ok)" />}
+          {t && <Tile titulo="Offline" valor={t.offline} cor={t.offline ? "var(--err)" : undefined} />}
+          {t && <Tile titulo="Sem energia" valor={t.sem_energia} cor={t.sem_energia ? "var(--warn)" : undefined} />}
+          {t && t.falha > 0 && <Tile titulo="Fibra desconectada" valor={t.falha} cor="var(--warn)" />}
+          {t && <Tile titulo="Sinal ruim" valor={t.sinal_ruim ?? "—"} cor={t.sinal_ruim ? "var(--err)" : undefined} />}
+          {licenca && (
+            <Tile titulo="Licença UNM2000"
+              valor={licenca.dias_restantes >= 0 ? `${licenca.dias_restantes} dias` : "vencida"}
+              cor={licenca.dias_restantes < 0 ? "var(--err)" : licenca.dias_restantes <= 30 ? "var(--warn)" : undefined} />
+          )}
+          {olt.nomes && <Tile titulo="Sem nome" valor={olt.nomes.sem_nome} cor={olt.nomes.sem_nome ? "var(--warn)" : undefined} />}
+          {olt.temperatura != null && <Tile titulo="Temperatura" valor={`${olt.temperatura} °C`} cor={quente ? "var(--err)" : undefined} />}
+        </div>
+      )}
       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
         {olt.nome} · {olt.ip}{olt.modelo && ` · ${olt.modelo}`}{olt.controladora && ` · controladora ${olt.controladora.tipo} ${olt.controladora.software ?? ""}`}{olt.firmware && ` · firmware ${olt.firmware}${olt.hardware ? ` (hardware ${olt.hardware})` : ""}`} · coletado em {fmtDate(olt.coletado_em)}
         {olt.total_onus_olt != null && ` · ${olt.total_onus_olt} ONUs segundo a OLT`}
@@ -115,28 +121,63 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
             <option value="">Todos os estados</option>
             {ESTADOS.map(e => <option key={e} value={e}>{ROTULO_ESTADO[e]}</option>)}
           </select>
-          <input className="form-input" style={{ width: 200 }} placeholder="Buscar nome, slot/PON ou serial"
+          <input className="form-input" style={{ width: 200 }} placeholder={temMac ? "Buscar nome ou MAC" : "Buscar nome, slot/PON ou serial"}
             value={busca} onChange={e => setBusca(e.target.value)} />
           <span style={{ fontSize: 12, color: "var(--text-muted)", alignSelf: "center" }}>{onus.length} ONU(s)</span>
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Nome</th><th>ONU (slot/PON/nº)</th><th>Tipo</th><th>Serial</th><th>Sinal na OLT</th><th>Sinal na ONU</th><th>Estado</th></tr></thead>
-            <tbody>
-              {onus.slice(0, MAX_LINHAS_ONUS).map(o => (
-                <tr key={o.indice}>
-                  <td>{o.nome ?? "—"}</td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.indice}</td>
-                  <td>{o.tipo ?? "—"}</td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.serial ?? "—"}</td>
-                  <td style={{ color: o.qualidade === "RUIM" ? "var(--err)" : o.qualidade === "ATENCAO" ? "var(--warn)" : undefined }}>
-                    {o.sinal_olt_dbm != null ? `${o.sinal_olt_dbm.toFixed(2)} dBm` : "—"}
-                  </td>
-                  <td>{o.sinal_onu_dbm != null ? `${o.sinal_onu_dbm.toFixed(2)} dBm` : "—"}</td>
-                  <td><StatusBadge status={o.estado} /></td>
-                </tr>
-              ))}
-            </tbody>
+            {temMac ? (
+              <>
+                <thead><tr><th>ONU ID</th><th>MAC</th><th>Descrição</th><th>Status</th><th>Temperatura</th><th>RX Power</th></tr></thead>
+                <tbody>
+                  {onus.slice(0, MAX_LINHAS_ONUS).map(o => (
+                    <tr key={o.indice}>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.indice}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.mac ?? "—"}</td>
+                      <td>{o.nome ?? "—"}</td>
+                      <td><StatusBadge status={o.estado} /></td>
+                      <td style={{ color: o.temperatura_onu != null && o.temperatura_onu >= TEMPERATURA_ALERTA ? "var(--err)" : undefined }}>
+                        {o.temperatura_onu != null ? `${o.temperatura_onu.toFixed(1)} °C` : "—"}
+                      </td>
+                      <td style={{ color: o.qualidade === "RUIM" ? "var(--err)" : o.qualidade === "ATENCAO" ? "var(--warn)" : undefined }}>
+                        {o.sinal_onu_dbm != null ? `${o.sinal_onu_dbm.toFixed(2)} dBm` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </>
+            ) : (
+              <>
+                <thead>
+                  <tr>
+                    <th>Nome</th><th>ONU (slot/PON/nº)</th>
+                    {temSerial && <th>Tipo</th>}
+                    {temSerial && <th>Serial</th>}
+                    {temOptico && <th>Sinal na OLT</th>}
+                    {temOptico && <th>Sinal na ONU</th>}
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {onus.slice(0, MAX_LINHAS_ONUS).map(o => (
+                    <tr key={o.indice}>
+                      <td>{o.nome ?? "—"}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.indice}</td>
+                      {temSerial && <td>{o.tipo ?? "—"}</td>}
+                      {temSerial && <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.serial ?? "—"}</td>}
+                      {temOptico && (
+                        <td style={{ color: o.qualidade === "RUIM" ? "var(--err)" : o.qualidade === "ATENCAO" ? "var(--warn)" : undefined }}>
+                          {o.sinal_olt_dbm != null ? `${o.sinal_olt_dbm.toFixed(2)} dBm` : "—"}
+                        </td>
+                      )}
+                      {temOptico && <td>{o.sinal_onu_dbm != null ? `${o.sinal_onu_dbm.toFixed(2)} dBm` : "—"}</td>}
+                      <td><StatusBadge status={o.estado} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </>
+            )}
           </table>
         </div>
         {onus.length > MAX_LINHAS_ONUS && (
