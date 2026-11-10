@@ -126,23 +126,6 @@ export const fetchSettings = () => api.get("/settings").then((r) => r.data);
 export const updateSettings = (data: Record<string, string>) =>
   api.put("/settings", data).then((r) => r.data);
 
-// WhatsApp por QR code (container "whatsapp").
-// configurado=false: falta WHATSAPP_BRIDGE_KEY no servidor. disponivel=false: o container não respondeu.
-export interface WhatsappConexao {
-  configurado: boolean;
-  disponivel: boolean;
-  connected: boolean;
-  numero: string | null;
-  qr: string | null; // data URL PNG
-}
-export const fetchWhatsappConexao = (): Promise<WhatsappConexao> =>
-  api.get("/whatsapp/conexao").then((r) => r.data);
-export const disconnectWhatsapp = (): Promise<{ status: string }> =>
-  api.post("/whatsapp/desconectar").then((r) => r.data);
-// Manda uma mensagem de teste para o número informado
-export const testWhatsapp = (numero: string): Promise<{ status: string }> =>
-  api.post("/whatsapp/teste", { numero }).then((r) => r.data);
-
 // ── OTA Updates ───────────────────────────────────────────────
 export const fetchAgentVersions = () => api.get("/admin/agent-version").then((r) => r.data);
 export const createAgentVersion = (data: Record<string, unknown>) =>
@@ -167,7 +150,6 @@ export const createCustomer = (data: {
   backup_hour: number;
   backup_minute: number;
   email_to: string[];
-  whatsapp_to?: string[];
   active: boolean;
   zip_password?: string;
 }): Promise<Customer> => api.post("/clients", data).then((r) => r.data);
@@ -180,7 +162,6 @@ export const updateCustomer = (
     backup_hour: number;
     backup_minute: number;
     email_to: string[];
-    whatsapp_to: string[];
     active: boolean;
     zip_password: string | null;
   }>

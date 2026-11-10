@@ -145,7 +145,6 @@ trilan-nvr-backup-automation/
 │   ├── .env.example / .env.local.example
 │   ├── docker-compose.yml       <- Referência dos serviços (NÃO é lido pelo Dokploy; ver seção 11)
 │   ├── docker-compose.local.yml <- Desenvolvimento local
-│   ├── whatsapp/                <- Ponte Baileys do WhatsApp (Node; conexão por QR code)
 │   ├── nginx/nginx.conf
 │   ├── api/                     <- Backend FastAPI
 │   │   ├── main.py              <- App + migrações inline (sem Alembic)
@@ -197,7 +196,7 @@ trilan-nvr-backup-automation/
     Frontend (/server/dashboard, React)
 ```
 
-No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta 7001 com `/api/*` -> FastAPI (8000) e `/*` -> Dashboard (80), Postgres na 5432 interna e o container `whatsapp` na 3000 interna.
+No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta 7001 com `/api/*` -> FastAPI (8000) e `/*` -> Dashboard (80), Postgres na 5432 interna.
 
 ### Fluxo do Agente
 
@@ -850,13 +849,13 @@ A produção **não** usa `server/docker-compose.yml`. No Dokploy, o projeto "Si
 
 | Serviço | Tipo no Dokploy | Origem | Build | Observações |
 |---|---|---|---|---|
-| Backend | Application | `projetoswmfa/trilan-backup-automation`, branch `isaque`, caminho `/server/api` | Railpack | Auto-deploy. Variáveis na aba Environment do Application (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`, `WHATSAPP_BRIDGE_KEY`, `RAILPACK_PYTHON_VERSION`...). Bind mount `/opt/trilan/backups` -> `/data/backups` |
+| Backend | Application | `projetoswmfa/trilan-backup-automation`, branch `isaque`, caminho `/server/api` | Railpack | Auto-deploy. Variáveis na aba Environment do Application (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`, `RAILPACK_PYTHON_VERSION`...). Bind mount `/opt/trilan/backups` -> `/data/backups` |
 | Frontend | Application | mesmo repositório e branch, caminho `/server/dashboard` | Railpack | Auto-deploy. Variável `VITE_API_URL` |
 | Banco | Postgres do Dokploy | — | — | O `DATABASE_URL` do Backend aponta para ele pelo nome interno (`appName` do serviço) |
 
 - **Deploy:** cada push na `isaque` refaz Backend e Frontend.
 - **Serviço novo:** precisa ser criado no Dokploy como Application (variáveis, volume e endereço interno configurados lá); alterar o compose não tem efeito em produção. O nome interno de um serviço, usado por outro, é o `appName` dele.
-- **WhatsApp:** o container `server/whatsapp` ainda não existe em produção (09/11/2026); falta criar o Application, ver o changelog.
+- **WhatsApp:** retirado em 10/11/2026 (solução arquivada em `archive/whatsapp/README.md`). As variáveis `WHATSAPP_*` que ainda estejam no Backend são ignoradas; o Application "WhatsApp" do Dokploy foi excluído (ver o changelog de 10/11/2026).
 
 ### Branches Git
 
@@ -915,9 +914,6 @@ Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose 
 | `SMTP_PORT` | `587` | Porta SMTP |
 | `SMTP_EMAIL` | None | E-mail remetente |
 | `SMTP_PASSWORD` | None | Senha do e-mail |
-| `WHATSAPP_BRIDGE_KEY` | None (WhatsApp desligado) | Chave compartilhada entre a API e o container `whatsapp` (mínimo 16 caracteres). Ver o changelog de 09/11/2026 |
-| `WHATSAPP_BRIDGE_URL` | `http://whatsapp:3000` | Endereço do container `whatsapp` na rede do Docker |
-| `WHATSAPP_INSTANCE` | `trilan` | Nome da instância (o container usa o mesmo, em `INSTANCE_NAME`) |
 | `PUBLISH_TOKEN` | `""` (desativado) | Token só para registrar versões do agente (`POST /api/v1/admin/agent-version`), enviado em `X-Publish-Token`; não dá acesso ao painel (REGRA-003) |
 | `MAX_UPLOAD_MB` | `1024` | Tamanho máximo do ZIP enviado pelo agente (413 acima) |
 | `RUN_DEADLINE_HOURS` | `2` | Prazo da rodada de backup do Cliente, a partir do início (horas) |
@@ -1095,6 +1091,12 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-10] — WhatsApp retirado (solução arquivada)
+
+**Decisão do usuário:** tirar tudo o que foi feito para o WhatsApp e guardar a solução documentada, para uso futuro. **Feito:** revertido o commit `9804e4c`: ponte `server/whatsapp/`, `whatsapp_service`, `whatsapp_relatorios`, `whatsapp_numero`, `routers/whatsapp_router.py`, `tests/test_whatsapp.py`; campos `whatsapp_to`/`whatsapp_contato` nos models, schemas e rotas; envios por WhatsApp em `agent.py`, `backups.py`, `backup_runs.py`, `notificacoes.py` e `avisos_conta.py`; variáveis `WHATSAPP_*` no `config.py` e nos `.env*.example`; serviço e volume nos dois compose; cartão em Configurações e campos do painel. O e-mail volta a ser o único canal, como antes de 09/11. **Mantido:** `server/dashboard/.dockerignore` (correção do build, sem relação com o WhatsApp). **Documentação:** `archive/whatsapp/README.md` (como funcionava, decisões, riscos e como trazer de volta).
+
+**Compatibilidade:** as colunas `client_groups.whatsapp_to`, `clients.whatsapp_to` (`TEXT[] NOT NULL DEFAULT '{}'`) e `contas.whatsapp_contato` (`VARCHAR(30)`, nulo) **ficam no banco** (os números já cadastrados ficam guardados) e saíram de `_MIGRACOES_COLUNAS`. Sem o campo no model, os INSERTs dependem do default do banco, e a coluna criada pelo `create_all` nasce NOT NULL **sem** default. Isso foi reproduzido no banco local: o cadastro de um Cliente falhou com "null value in column whatsapp_to". Correção: o startup (`main.py`) roda `ALTER TABLE client_groups|clients ALTER COLUMN whatsapp_to SET DEFAULT '{}'` quando a coluna existe (idempotente). Com ela, Conta, Cliente e Máquina são criados normalmente. As variáveis `WHATSAPP_*` ainda presentes no Backend do Dokploy são ignoradas (`extra = "ignore"`). Nenhuma rota do agente mudou (o agente não sabia do WhatsApp). **Dokploy:** o Application "WhatsApp" (criado em 09/11, Dockerfile `server/whatsapp/Dockerfile`, auto-deploy da `isaque`, volume `whatsapp-auth` em `/data`) foi **excluído** a pedido do usuário antes do push, para o deploy não falhar por falta do Dockerfile. O Backend ainda tem `WHATSAPP_BRIDGE_URL`/`WHATSAPP_BRIDGE_KEY` na aba Environment, agora ignoradas.
 
 ### [2026-11-10] — Versão 1.1.42: merge `helena` (detecção de GPON na OLT Huawei)
 

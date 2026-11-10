@@ -8,7 +8,6 @@ import { apiErrorMessage } from "../../utils/errors";
 import { Plus, Trash2, Eye } from "lucide-react";
 import HealthBadge, { QueueBadge } from "./components/HealthBadge";
 import CustomerFormModal, { CustomerForm, emptyCustomerForm, parseEmailList } from "./components/CustomerFormModal";
-import { parseWhatsappList } from "../../utils/whatsapp";
 import { useRotulos, useSomenteLeitura } from "../../contexts/AuthContext";
 
 // Lista plana de Clientes: um clique abre o detalhe (/clientes/:id)
@@ -49,7 +48,6 @@ export default function CustomersPage() {
         backup_hour: form.backup_hour,
         backup_minute: form.backup_minute,
         email_to: parseEmailList(form.email_to),
-        whatsapp_to: parseWhatsappList(form.whatsapp_to),
         active: true,
         zip_password: form.password_mode === "custom" && form.zip_password?.trim() ? form.zip_password.trim() : undefined,
       });

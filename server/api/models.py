@@ -32,8 +32,6 @@ class Conta(Base):
     tipo = Column(String(20), nullable=False)  # INTEGRADOR | CLIENTE_FINAL
     documento = Column(String(20), nullable=True)  # CNPJ/CPF, só dígitos
     email_contato = Column(String(255), nullable=True)
-    # WhatsApp de contato (só dígitos com DDI, ex.: 5511999998888): recebe os mesmos avisos/notificações do e-mail
-    whatsapp_contato = Column(String(30), nullable=True)
     telefone = Column(String(30), nullable=True)
     plano_id = Column(UUID(as_uuid=True), ForeignKey("planos.id", ondelete="SET NULL"), nullable=True)
     expira_em = Column(DateTime, nullable=True)  # UTC naive; NULL = sem validade
@@ -106,8 +104,6 @@ class Customer(Base):
     queue_current_index = Column(Integer, nullable=True)
     # Destinatários do e-mail único por rodada de backup do Cliente
     email_to = Column(ARRAY(String), default=[], nullable=False)
-    # Números de WhatsApp (só dígitos com DDI) que recebem o mesmo relatório da rodada
-    whatsapp_to = Column(ARRAY(String), default=[], nullable=False)
     # Senha do ZIP do cliente (Fernet-encrypted); None = sem senha
     zip_password = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -175,7 +171,6 @@ class Machine(Base):
     backup_minute = Column(Integer, default=0)
     zip_password = Column(Text, nullable=True)  # Fernet-encrypted
     email_to = Column(ARRAY(String), default=[], nullable=False)
-    whatsapp_to = Column(ARRAY(String), default=[], nullable=False)  # máquina sem Cliente: números do relatório por WhatsApp
     active = Column(Boolean, default=True, nullable=False)
     last_seen = Column(DateTime, nullable=True)
     last_backup_at = Column(DateTime, nullable=True)

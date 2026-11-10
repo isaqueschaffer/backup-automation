@@ -9,7 +9,6 @@ from services.contas import TIPOS_CONTA
 from services.galeria_vms import com_nomes_da_galeria
 from services.segredos_config import mascarar_segredos, tem_segredos
 from services.senhas import validar_senha_nova
-from whatsapp_numero import normalizar_lista, normalizar_numero
 
 
 # ─────────────────────────────────────────────
@@ -187,13 +186,7 @@ class MachineBase(BaseModel):
     backup_hour: int = Field(2, ge=0, le=23)
     backup_minute: int = Field(0, ge=0, le=59)
     email_to: List[str] = []
-    whatsapp_to: List[str] = []
     active: bool = True
-
-    @field_validator("whatsapp_to")
-    @classmethod
-    def _check_whatsapp_to(cls, v):
-        return normalizar_lista(v) or []
 
 
 class MachineCreate(MachineBase):
@@ -208,14 +201,8 @@ class MachineUpdate(BaseModel):
     backup_hour: Optional[int] = Field(None, ge=0, le=23)
     backup_minute: Optional[int] = Field(None, ge=0, le=59)
     email_to: Optional[List[str]] = None
-    whatsapp_to: Optional[List[str]] = None
     active: Optional[bool] = None
     zip_password: Optional[str] = None
-
-    @field_validator("whatsapp_to")
-    @classmethod
-    def _check_whatsapp_to(cls, v):
-        return normalizar_lista(v)
 
 
 class MachineResponse(MachineBase):
@@ -681,14 +668,6 @@ class CustomerCreate(CustomerBase):
     def _check_email_to(cls, v):
         return _clean_email_list(v) or []
 
-    # Números de WhatsApp que recebem o mesmo relatório da rodada
-    whatsapp_to: List[str] = []
-
-    @field_validator("whatsapp_to")
-    @classmethod
-    def _check_whatsapp_to(cls, v):
-        return normalizar_lista(v) or []
-
 
 class CustomerUpdate(BaseModel):
     name: Optional[str] = None
@@ -698,7 +677,6 @@ class CustomerUpdate(BaseModel):
     backup_hour: Optional[int] = Field(None, ge=0, le=23)
     backup_minute: Optional[int] = Field(None, ge=0, le=59)
     email_to: Optional[List[str]] = None
-    whatsapp_to: Optional[List[str]] = None
     # Senha do ZIP do cliente (plaintext); "" ou null remove a senha
     zip_password: Optional[str] = None
 
@@ -706,11 +684,6 @@ class CustomerUpdate(BaseModel):
     @classmethod
     def _check_email_to(cls, v):
         return _clean_email_list(v)
-
-    @field_validator("whatsapp_to")
-    @classmethod
-    def _check_whatsapp_to(cls, v):
-        return normalizar_lista(v)
 
 
 class CustomerResponse(CustomerBase):
@@ -720,7 +693,6 @@ class CustomerResponse(CustomerBase):
     id: UUID
     created_at: datetime
     email_to: List[str] = []
-    whatsapp_to: List[str] = []
     machines_total: int = 0
     machines_online: int = 0
     health: str = "NO_DATA"  # ALL_OK | PARTIAL | ALL_ERROR | NO_DATA
@@ -1054,16 +1026,10 @@ class ContaCreate(BaseModel):
     tipo: str
     documento: Optional[str] = None
     email_contato: Optional[str] = None
-    whatsapp_contato: Optional[str] = None
     telefone: Optional[str] = None
     observacoes: Optional[str] = None
     plano_id: UUID
     admin: AdminInicial
-
-    @field_validator("whatsapp_contato")
-    @classmethod
-    def _check_whatsapp_contato(cls, v: Optional[str]) -> Optional[str]:
-        return normalizar_numero(v)
 
     @field_validator("nome")
     @classmethod
@@ -1091,15 +1057,9 @@ class ContaUpdate(BaseModel):
     tipo: Optional[str] = None
     documento: Optional[str] = None
     email_contato: Optional[str] = None
-    whatsapp_contato: Optional[str] = None
     telefone: Optional[str] = None
     observacoes: Optional[str] = None
     expira_em: Optional[datetime] = None
-
-    @field_validator("whatsapp_contato")
-    @classmethod
-    def _check_whatsapp_contato(cls, v: Optional[str]) -> Optional[str]:
-        return normalizar_numero(v)
 
     @field_validator("nome")
     @classmethod
@@ -1153,7 +1113,6 @@ class RenovacaoResponse(BaseModel):
 class ContaResponse(ContaResumo):
     documento: Optional[str] = None
     email_contato: Optional[str] = None
-    whatsapp_contato: Optional[str] = None
     telefone: Optional[str] = None
     observacoes: Optional[str] = None
     plano_id: Optional[UUID] = None

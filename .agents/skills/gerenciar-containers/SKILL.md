@@ -10,7 +10,7 @@ description: Docker do projeto — ambiente local (server/docker-compose.local.y
 | `server/docker-compose.local.yml` | **Desenvolvimento e testes nesta máquina**: painel em http://localhost:7001, Postgres em `localhost:5433` |
 | `server/docker-compose.yml` | **Não é a produção.** O Dokploy não lê este arquivo: a produção são Applications separados (Backend `/server/api`, Frontend `/server/dashboard`, build Railpack) e um Postgres do Dokploy. O arquivo fica só como referência do conjunto de serviços. Não subir localmente (bind mount em `/opt/trilan/backups`). O `7005:7001` e o volume `pg_data_local` vieram da máquina da Helena; não alterar sem pedido |
 
-Serviços do compose local: `nginx` (proxy, porta 7001), `api` (FastAPI na 8000 interna), `dashboard` (build do Vite servido por nginx), `db` (Postgres 15 com healthcheck) e `whatsapp` (ponte Baileys do WhatsApp; sessão no volume `whatsapp_auth_local`, chave `WHATSAPP_BRIDGE_KEY` no `server/.env`).
+Serviços do compose local: `nginx` (proxy, porta 7001), `api` (FastAPI na 8000 interna), `dashboard` (build do Vite servido por nginx) e `db` (Postgres 15 com healthcheck).
 Manter os nomes `docker-compose*.yml`, mesmo que a skill `docker-compose-patterns` recomende `compose.yaml`.
 
 ## Primeira vez

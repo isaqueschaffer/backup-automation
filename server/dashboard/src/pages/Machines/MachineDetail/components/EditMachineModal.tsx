@@ -8,7 +8,6 @@ export interface EditMachineForm {
   backup_hour: number;
   backup_minute: number;
   email_to: string;
-  whatsapp_to: string;
   zip_password: string;
 }
 
@@ -63,16 +62,6 @@ export default function EditMachineModal({ form, setForm, customerName, emailCus
             para mudar os destinatários, edite o {singularMin}.
           </div>
         )}
-      </div>
-      <div className="form-group">
-        <label className="form-label">WhatsApp do relatório (separados por vírgula)</label>
-        <input className="form-input" placeholder="(11) 99999-8888, (21) 98888-7777" value={form.whatsapp_to} disabled={emailLocked}
-          onChange={e => setForm({ ...form, whatsapp_to: e.target.value })} />
-        <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-          {emailLocked
-            ? `Definido pelo ${singularMin} ${emailCustomerName}. Para mudar os números, edite o ${singularMin}.`
-            : "Opcional. Recebem o mesmo relatório do e-mail, resumido, com as imagens das câmeras offline."}
-        </div>
       </div>
       <div className="form-group">
         <label className="form-label">Nova senha do ZIP <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(vazio = manter atual)</span></label>

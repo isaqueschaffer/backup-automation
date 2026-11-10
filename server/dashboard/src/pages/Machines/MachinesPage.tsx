@@ -8,7 +8,6 @@ import StatusBadge from "../../components/StatusBadge";
 import { useToast } from "../../components/Toast";
 import { fmtDate, fmtSchedule } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
-import { parseWhatsappList } from "../../utils/whatsapp";
 import { Plus, Trash2, Eye, RotateCcw, Play } from "lucide-react";
 import NewMachineModal, { NewMachineForm } from "./components/NewMachineModal";
 import NewMachineKeyModal from "./components/NewMachineKeyModal";
@@ -56,8 +55,6 @@ export default function MachinesPage() {
         backup_hour: customer ? customer.backup_hour : form.backup_hour,
         backup_minute: customer ? customer.backup_minute : form.backup_minute,
         email_to: form.email_to.split(",").map(e => e.trim()).filter(Boolean),
-        // Com cliente, o WhatsApp do relatório é o do cliente
-        whatsapp_to: customer ? [] : parseWhatsappList(form.whatsapp_to),
         zip_password: form.zip_password || undefined,
         active: true,
         ...(customer ? { customer_id: customer.id } : {}),

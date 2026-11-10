@@ -131,7 +131,6 @@ def _to_response(customer: Customer, db: Session, commit: bool = True) -> Custom
         backup_minute=customer.backup_minute,
         created_at=customer.created_at,
         email_to=list(customer.email_to or []),
-        whatsapp_to=list(customer.whatsapp_to or []),
         machines_total=len(customer.machines),
         machines_online=machines_online,
         health=_compute_health(customer.machines),
@@ -164,7 +163,6 @@ def create_customer(body: CustomerCreate, db: Session = Depends(get_db), ctx: Co
         backup_hour=body.backup_hour,
         backup_minute=body.backup_minute,
         email_to=body.email_to,
-        whatsapp_to=body.whatsapp_to,
         zip_password=encrypted_pw,
     )
     db.add(customer)

@@ -12,7 +12,7 @@ from schemas import StatsResponse
 from auth import Contexto, get_contexto
 from services.escopo import filtrar_por_conta
 from config import settings
-from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta, notificacoes, whatsapp_router
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta, notificacoes
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -220,10 +220,6 @@ _MIGRACOES_COLUNAS = [
     ("notificacoes", "definicao_id", "ALTER TABLE notificacoes ADD COLUMN definicao_id UUID REFERENCES notificacoes_personalizadas(id) ON DELETE SET NULL;"),
     # Alarmes das centrais Intelbras cadastradas no DEFENSE (API /api/alarm-centrals, enviado pelo agente)
     ("nvrs", "last_alarm_status", "ALTER TABLE nvrs ADD COLUMN last_alarm_status JSON;"),
-    # WhatsApp (container "whatsapp"): números que recebem os mesmos relatórios/avisos do e-mail
-    ("client_groups", "whatsapp_to", "ALTER TABLE client_groups ADD COLUMN whatsapp_to TEXT[] NOT NULL DEFAULT '{}';"),
-    ("clients", "whatsapp_to", "ALTER TABLE clients ADD COLUMN whatsapp_to TEXT[] NOT NULL DEFAULT '{}';"),
-    ("contas", "whatsapp_contato", "ALTER TABLE contas ADD COLUMN whatsapp_contato VARCHAR(30);"),
 ]
 
 _colunas_cache: dict = {}
@@ -239,6 +235,16 @@ for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
 # Expansão de colunas existentes para acomodar hosts/caminhos longos
 _run_ddl("ALTER TABLE nvrs ALTER COLUMN ip TYPE VARCHAR(255);", "nvrs.ip VARCHAR(255)")
 _run_ddl("ALTER TABLE nvr_cameras ALTER COLUMN ip TYPE VARCHAR(255);", "nvr_cameras.ip VARCHAR(255)")
+
+# WhatsApp retirado em 10/11/2026 (archive/whatsapp/README.md): as colunas whatsapp_to ficaram no banco, NOT NULL e
+# fora do model. Se vieram do create_all, não têm default no banco e todo INSERT de Cliente/Máquina falharia; aqui o
+# default '{}' passa a ser do banco (idempotente). whatsapp_contato (contas) aceita nulo e não precisa disso.
+for _tabela in ("client_groups", "clients"):
+    if "whatsapp_to" in _colunas(_tabela):
+        _run_ddl(
+            f"ALTER TABLE {_tabela} ALTER COLUMN whatsapp_to SET DEFAULT '{{}}';",
+            f"{_tabela}.whatsapp_to DEFAULT '{{}}' (WhatsApp retirado)",
+        )
 
 # Notificações personalizadas: o tipo 'PERSONALIZADA' passou a valer em notificacoes.tipo (idempotente)
 if _tem_tabela("notificacoes"):
@@ -375,7 +381,6 @@ app.include_router(nvrs.router, include_in_schema=False)  # mantido para compati
 app.include_router(backups.router)
 app.include_router(agent.router)
 app.include_router(settings_router.router)
-app.include_router(whatsapp_router.router)  # Conexão do WhatsApp por QR code: /api/v1/whatsapp
 app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 app.include_router(storage_admin.router)  # Armazenamento admin: /api/v1/admin/storage

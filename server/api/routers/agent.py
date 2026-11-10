@@ -42,7 +42,6 @@ from services.galeria_vms import (
 )
 from services.storage_service import save_zip_stream, UploadTooLargeError, _sanitize_name
 from services.email_service import send_backup_report
-from services.whatsapp_relatorios import disparar_em_segundo_plano, enviar_relatorio_maquina
 from services.backup_runs import attach_report_to_run, finish_queue_run
 from services.contas import maquina_bloqueada
 from services.segredos_config import config_extra_para_agente
@@ -759,21 +758,6 @@ def upload_backup_zip(
             nivel="ERROR",
             message=f"Falha no envio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
         ))
-
-    # WhatsApp: mesmo conteúdo do e-mail, em segundo plano (não segura a resposta ao agente)
-    if machine.whatsapp_to:
-        disparar_em_segundo_plano(
-            enviar_relatorio_maquina,
-            descricao=f"relatório da máquina '{machine.name}' para {', '.join(machine.whatsapp_to)}",
-            log_machine_id=machine.id,
-            machine_name=machine.name,
-            nvr_results=nvr_results,
-            numeros=list(machine.whatsapp_to),
-            machine_id=machine.id,
-            backup_id=backup_id,
-            public_url=settings.PUBLIC_URL,
-            base_url=str(request.base_url),
-        )
 
     db.commit()
 

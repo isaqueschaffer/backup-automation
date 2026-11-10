@@ -30,7 +30,6 @@ def montar_conta_detalhe(conta: Conta, db: Session, plataforma_id: Optional[UUID
         **resumo,
         documento=conta.documento,
         email_contato=conta.email_contato,
-        whatsapp_contato=conta.whatsapp_contato,
         telefone=conta.telefone,
         observacoes=conta.observacoes,
         plano_id=conta.plano_id,

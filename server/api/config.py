@@ -43,12 +43,6 @@ class Settings(BaseSettings):
     SMTP_EMAIL: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
 
-    # WhatsApp: container "whatsapp" (ponte Baileys, conexão por QR code no painel). Só a chave precisa ser definida;
-    # sem ela o WhatsApp fica desligado (e-mail e o resto seguem normais).
-    WHATSAPP_BRIDGE_URL: str = "http://whatsapp:3000"
-    WHATSAPP_INSTANCE: str = "trilan"
-    WHATSAPP_BRIDGE_KEY: Optional[str] = None
-
     class Config:
         env_file = ".env"
         extra = "ignore"

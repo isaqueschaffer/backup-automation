@@ -24,7 +24,6 @@ from config import settings
 from models import AgentLog, Backup, Customer, CustomerBackupRun, Machine
 from services.email_service import send_customer_report
 from services.storage_service import get_zip_path, _sanitize_name
-from services.whatsapp_relatorios import disparar_em_segundo_plano, enviar_relatorio_cliente
 
 logger = logging.getLogger(__name__)
 
@@ -277,14 +276,6 @@ def send_run_email(db: Session, run: CustomerBackupRun, base_url: Optional[str] 
     has_zip = any(e["backup"] is not None and e["backup"].zip_filename for e in entries)
     manual_name = entries[0]["name"] if run.trigger == TRIGGER_MANUAL and entries else None
 
-    # Dados simples (sem objetos da sessão): servem ao e-mail e à thread do WhatsApp
-    dados_entries = [{
-        "machine_id": e["machine"].id if e["machine"] is not None else None,
-        "name": e["name"],
-        "status": e["backup"].status if e["backup"] is not None else None,
-        "nvr_results": (e["backup"].nvr_results or []) if e["backup"] is not None else [],
-    } for e in entries]
-
     sent = False
     try:
         sent = send_customer_report(
@@ -292,7 +283,12 @@ def send_run_email(db: Session, run: CustomerBackupRun, base_url: Optional[str] 
             run_id=str(run.id),
             run_trigger=run.trigger,
             started_at=run.started_at,
-            entries=dados_entries,
+            entries=[{
+                "machine_id": e["machine"].id if e["machine"] is not None else None,
+                "name": e["name"],
+                "status": e["backup"].status if e["backup"] is not None else None,
+                "nvr_results": (e["backup"].nvr_results or []) if e["backup"] is not None else [],
+            } for e in entries],
             recipients=(customer.email_to or []) if customer else [],
             db=db,
             has_zip=has_zip,
@@ -307,27 +303,6 @@ def send_run_email(db: Session, run: CustomerBackupRun, base_url: Optional[str] 
     run.email_sent = bool(sent or run.email_sent)
 
     first_machine = next((e["machine"] for e in entries if e["machine"] is not None), None)
-
-    # WhatsApp: mesmo relatório para os números do Cliente, em segundo plano (falha nunca afeta o e-mail)
-    if customer is not None and customer.whatsapp_to:
-        try:
-            disparar_em_segundo_plano(
-                enviar_relatorio_cliente,
-                descricao=f"relatório da rodada do cliente '{customer.name}' para {', '.join(customer.whatsapp_to)}",
-                log_machine_id=first_machine.id if first_machine is not None else None,
-                customer_name=customer.name,
-                run_id=str(run.id),
-                run_trigger=run.trigger,
-                started_at=run.started_at,
-                entries=dados_entries,
-                numeros=list(customer.whatsapp_to),
-                has_zip=has_zip,
-                public_url=settings.PUBLIC_URL,
-                base_url=base_url,
-                manual_machine_name=manual_name,
-            )
-        except Exception:
-            logger.exception("Falha ao disparar o WhatsApp da rodada %s", run.id)
     if first_machine is not None:
         recipients = (customer.email_to if customer else None) or []
         prefixo = "Reenvio do e-mail" if resend else "E-mail"

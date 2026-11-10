@@ -119,7 +119,6 @@ def create_machine(
         backup_minute=backup_minute,
         zip_password=encrypt(body.zip_password) if body.zip_password else None,
         email_to=body.email_to,
-        whatsapp_to=body.whatsapp_to,
         active=body.active,
         customer_id=customer.id if customer else None,
         queue_order=queue_order,
@@ -167,12 +166,6 @@ def update_machine(
         raise HTTPException(
             status_code=400,
             detail=f"E-mails definidos pelo cliente {machine.customer.name}. Altere no cliente.",
-        )
-    # ...e os números de WhatsApp também
-    if machine.customer is not None and "whatsapp_to" in changes and list(changes["whatsapp_to"]) != list(machine.whatsapp_to or []):
-        raise HTTPException(
-            status_code=400,
-            detail=f"WhatsApp definido pelo cliente {machine.customer.name}. Altere no cliente.",
         )
 
     nome_antigo = machine.name

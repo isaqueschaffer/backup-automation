@@ -11,7 +11,6 @@ import { useToast } from "../../../components/Toast";
 import { fmtSchedule } from "../../../utils/date";
 import { apiErrorMessage } from "../../../utils/errors";
 import CustomerFormModal, { CustomerForm, parseEmailList } from "../components/CustomerFormModal";
-import { parseWhatsappList } from "../../../utils/whatsapp";
 import CustomerHeader, { CustomerAction } from "./components/CustomerHeader";
 import QueueSection, { moveItem } from "./components/QueueSection";
 import AddMachineModal from "./components/AddMachineModal";
@@ -195,7 +194,6 @@ export default function CustomerDetail() {
         backup_hour: form.backup_hour,
         backup_minute: form.backup_minute,
         email_to: parseEmailList(form.email_to),
-        whatsapp_to: parseWhatsappList(form.whatsapp_to),
       };
       if (form.password_mode === "default") {
         updatePayload.zip_password = "";
@@ -308,7 +306,6 @@ export default function CustomerDetail() {
           initial={{
             name: c.name, description: c.description || "", backup_hour: c.backup_hour, backup_minute: c.backup_minute,
             email_to: (c.email_to || []).join(", "),
-            whatsapp_to: (c.whatsapp_to || []).join(", "),
             password_mode: c.has_zip_password ? "custom" : "default",
             zip_password: "",
             has_zip_password: c.has_zip_password,
