@@ -4,7 +4,7 @@ pycryptodome>=3.20.0
 pypiwin32>=223
 pystray>=0.19.5
 Pillow>=10.3.0
-paramiko>=3.4.0,<4.0.0
+paramiko==3.4.0  # fixo: versoes mais novas removem ssh-rsa/ssh-dss e quebram SSH com OLTs Huawei antigas
 pyftpdlib>=1.5.8
 imageio-ffmpeg
 psutil>=5.9.0
