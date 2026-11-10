@@ -1096,6 +1096,15 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-10] — Versão 1.1.42: merge `helena` (detecção de GPON na OLT Huawei)
+
+**Incorporado** (`5d23696`, `d5ab86b`, merge `f0c1ea5`):
+- `agent/src/olt/huawei_status.py`: o `interface gpon 0/<slot>` que dá certo não imprime nada além do eco e do prompt novo, e o `comando()` cortava justamente a última linha (o prompt); por isso toda placa era tratada como "sem GPON" e a coleta voltava sem ONUs. Agora o teste é feito contra o prompt guardado em `prompt_atual`.
+- `agent/tests/test_huawei_status.py`: teste de regressão com o diálogo real da MA5800 (eco + prompt).
+- `agent/requirements.txt`: `paramiko` fixado em `3.4.0` (antes `>=3.4.0,<4.0.0`), para manter `ssh-rsa`/`ssh-dss` com OLTs Huawei antigas. Conferido no venv do build: funciona com `cryptography` 50.0.2 (só avisos de depreciação do TripleDES).
+
+**Auditoria:** sem datas com fuso, sem segredos, sem mudança em compose, nginx, models, migrações, build ou instalador. **Bloqueado:** nada.
+
 ### [2026-11-09] — Correção da documentação: a produção são Applications do Dokploy, não o `docker-compose.yml`
 
 **Descoberta:** o WhatsApp em produção respondia "container não está respondendo" e o log do Backend mostrava `Failed to resolve 'whatsapp'`. Consultando o Dokploy (só leitura), o projeto "Sistema de Backup" não tem Compose: são os Applications **Backend** (`/server/api`) e **Frontend** (`/server/dashboard`), ambos com build Railpack a partir da `isaque`, mais um Postgres do próprio Dokploy. O `server/docker-compose.yml` nunca foi lido pela produção; por isso o serviço `whatsapp` adicionado nele (entrada "WhatsApp só por QR code", acima) não foi criado.
