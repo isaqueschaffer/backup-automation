@@ -5,9 +5,10 @@ description: Instruções obrigatórias sobre como realizar push de código, car
 
 # Características do Ambiente
 
-1. **Sem acesso ao Dokploy (Produção)**: O desenvolvedor atual NÃO possui acesso direto ao painel do servidor Dokploy. A única forma de atualizar a produção é através do Git.
-2. **Deploy Automático**: Qualquer código que precise ir para a API/Dashboard em produção deve ser enviado para a branch `isaque` do repositório principal (`projetoswmfa`). O Dokploy rastreia essa branch e realiza o build/deploy automaticamente quando há novos commits.
-3. **Colega de Equipe**: Existe um repositório secundário (`isaqueschaffer/backup-automation`) onde um colega trabalha exclusivamente na branch `integracao-equipamentos`.
+1. **Sem acesso ao Dokploy (Produção)**: Você (Gemini) NÃO tem acesso ao painel do Dokploy. A única forma de levar código à produção é pelo Git.
+2. **Deploy Automático**: Qualquer código que precise ir para a API/Dashboard em produção deve ser enviado para a branch `isaque` do repositório principal (`projetoswmfa`). O Dokploy rastreia essa branch e refaz o build/deploy automaticamente quando há novos commits.
+3. **A produção não usa `server/docker-compose.yml`**: no Dokploy ela são Applications separados (Backend = `/server/api`, Frontend = `/server/dashboard`, build Railpack) mais um Postgres do próprio Dokploy. Mexer no compose não muda a produção; variáveis de ambiente, serviço novo e volumes são configurados pelo dono no Dokploy. Se a tarefa exigir isso, escreva no relatório exatamente o que precisa ser configurado lá.
+4. **Colega de Equipe**: Existe um repositório secundário (`isaqueschaffer/backup-automation`) onde um colega trabalha exclusivamente na branch `integracao-equipamentos`.
 
 # Regra Obrigatória para Commits e Pushes
 

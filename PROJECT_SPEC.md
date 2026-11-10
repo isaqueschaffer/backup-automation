@@ -143,8 +143,9 @@ trilan-nvr-backup-automation/
 ├── server/
 │   ├── .env                     <- Configuração de produção (NAO versionar)
 │   ├── .env.example / .env.local.example
-│   ├── docker-compose.yml       <- Produção (Dokploy)
+│   ├── docker-compose.yml       <- Referência dos serviços (NÃO é lido pelo Dokploy; ver seção 11)
 │   ├── docker-compose.local.yml <- Desenvolvimento local
+│   ├── whatsapp/                <- Ponte Baileys do WhatsApp (Node; conexão por QR code)
 │   ├── nginx/nginx.conf
 │   ├── api/                     <- Backend FastAPI
 │   │   ├── main.py              <- App + migrações inline (sem Alembic)
@@ -191,14 +192,12 @@ trilan-nvr-backup-automation/
          |
          |  HTTPS  ->  Headers: X-Client-ID + X-API-Key
          v
-[Servidor Dokploy - porta 7001]
-    Nginx (reverse proxy)
-         |
-         +-- /api/* -> FastAPI (porta 8000 interna)
-         +-- /*     -> React Dashboard (porta 80 interna)
-              |
-              +-- PostgreSQL (porta 5432 interna)
+[Servidor Dokploy]  (produção: Applications separados, ver seção 11)
+    Backend  (/server/api, FastAPI)  --->  Postgres do Dokploy (nome interno)
+    Frontend (/server/dashboard, React)
 ```
+
+No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta 7001 com `/api/*` -> FastAPI (8000) e `/*` -> Dashboard (80), Postgres na 5432 interna e o container `whatsapp` na 3000 interna.
 
 ### Fluxo do Agente
 
@@ -845,13 +844,19 @@ Quando `config_extra.marca` está definida, ela decide primeiro: `Motorola` vai 
 
 ## 11. Infraestrutura e Deploy
 
-### Producao (Dokploy)
+### Producao (Dokploy) — verificado no painel em 09/11/2026
 
-- **Porta exposta:** `7001` (Nginx)
-- **Proxy:** `/api/*` -> FastAPI (porta 8000), `/*` -> Dashboard (porta 80)
-- **Backups:** Volume bind mount em `/opt/trilan/backups` no host
-- **Banco:** PostgreSQL interno via rede Docker `trilan_net`
-- **Plataforma:** Dokploy (auto-deploy a cada push no ramo `isaque` de `projetoswmfa`)
+A produção **não** usa `server/docker-compose.yml`. No Dokploy, o projeto "Sistema de Backup" (ambiente `production`) tem:
+
+| Serviço | Tipo no Dokploy | Origem | Build | Observações |
+|---|---|---|---|---|
+| Backend | Application | `projetoswmfa/trilan-backup-automation`, branch `isaque`, caminho `/server/api` | Railpack | Auto-deploy. Variáveis na aba Environment do Application (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`, `WHATSAPP_BRIDGE_KEY`, `RAILPACK_PYTHON_VERSION`...). Bind mount `/opt/trilan/backups` -> `/data/backups` |
+| Frontend | Application | mesmo repositório e branch, caminho `/server/dashboard` | Railpack | Auto-deploy. Variável `VITE_API_URL` |
+| Banco | Postgres do Dokploy | — | — | O `DATABASE_URL` do Backend aponta para ele pelo nome interno (`appName` do serviço) |
+
+- **Deploy:** cada push na `isaque` refaz Backend e Frontend.
+- **Serviço novo:** precisa ser criado no Dokploy como Application (variáveis, volume e endereço interno configurados lá); alterar o compose não tem efeito em produção. O nome interno de um serviço, usado por outro, é o `appName` dele.
+- **WhatsApp:** o container `server/whatsapp` ainda não existe em produção (09/11/2026); falta criar o Application, ver o changelog.
 
 ### Branches Git
 
@@ -875,12 +880,12 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 
 O merge de `helena` ou `integracao-equipamentos` em `isaque` e o unico portao da producao. Antes de concluir:
 1. Ver o que entra (`git log isaque..<ramo>`, `git diff --stat isaque...<ramo>`).
-2. Revisar os arquivos sensiveis: `server/docker-compose*.yml` (porta 7001, volume `pg_data`), `server/nginx/nginx.conf`, `server/api/models.py`, migracoes do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, arquivos novos na raiz e binarios.
+2. Revisar os arquivos sensiveis: `server/docker-compose*.yml` (nao regem a producao, mas manter coerentes; local em `7001:7001`), `server/nginx/nginx.conf`, `server/api/models.py`, migracoes do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, arquivos novos na raiz e binarios.
 3. Procurar data com fuso nas linhas adicionadas (REGRA-001): `git diff isaque...<ramo> | grep -nE '^\+.*(datetime\.now|timezone)'`.
 4. Procurar segredos nas linhas adicionadas.
 5. Registrar na secao 16 o que foi incorporado e o que foi bloqueado.
 
-Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria registrada (IC-015).
+Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria registrada (IC-015). Obs. (09/11/2026): a producao nao le esse compose, entao a troca de volume nunca afetou o banco de producao.
 
 ---
 
@@ -1090,6 +1095,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-09] — Correção da documentação: a produção são Applications do Dokploy, não o `docker-compose.yml`
+
+**Descoberta:** o WhatsApp em produção respondia "container não está respondendo" e o log do Backend mostrava `Failed to resolve 'whatsapp'`. Consultando o Dokploy (só leitura), o projeto "Sistema de Backup" não tem Compose: são os Applications **Backend** (`/server/api`) e **Frontend** (`/server/dashboard`), ambos com build Railpack a partir da `isaque`, mais um Postgres do próprio Dokploy. O `server/docker-compose.yml` nunca foi lido pela produção; por isso o serviço `whatsapp` adicionado nele (entrada "WhatsApp só por QR code", acima) não foi criado.
+
+**Corrigido:** seção 11 (tabela dos serviços reais), estrutura de pastas e diagrama da seção 2, auditoria de merge (o compose não rege a produção), `CLAUDE.md` (nova seção "Produção no Dokploy"; acesso do Claude descrito em `CLAUDE.local.md`, fora do git), skill `gerenciar-containers` (cópias do Claude e do Gemini), `.agents/rules/git-deploy.md` e um aviso no topo do `server/docker-compose.yml`. A IC-015 e o incidente de 06/10 perdem a gravidade de "banco vazio": a troca de volume nunca atingiu a produção.
+
+**Pendente para o WhatsApp funcionar em produção (no Dokploy, a pedido do usuário):** criar um Application "WhatsApp" (`/server/whatsapp`, build pelo Dockerfile, volume em `/data`, `API_KEY` igual à `WHATSAPP_BRIDGE_KEY` do Backend, `INSTANCE_NAME=trilan`, sem domínio) e no Backend definir `WHATSAPP_BRIDGE_URL=http://<appName do WhatsApp>:3000`. Atenção: o Backend tem **duas** linhas `WHATSAPP_BRIDGE_KEY` com valores diferentes; deixar só uma.
 
 ### [2026-11-09] — WhatsApp só por QR code: removida a opção de Evolution API externa
 

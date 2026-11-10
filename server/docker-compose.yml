@@ -1,3 +1,7 @@
+# ATENÇÃO: o Dokploy NÃO usa este arquivo. A produção são Applications separados no Dokploy
+# (Backend = /server/api, Frontend = /server/dashboard, build Railpack) e um Postgres do próprio Dokploy;
+# variáveis, volumes e serviços novos são configurados lá. Este arquivo fica só como referência.
+# Ver "Produção no Dokploy" no CLAUDE.md e a seção 11 do PROJECT_SPEC.md.
 services:
   nginx:
     image: nginx:1.25-alpine
@@ -31,8 +35,8 @@ services:
       - trilan_net
 
   # WhatsApp (ponte Baileys, conexão por QR code em Configurações > WhatsApp). Sem porta publicada: só a API acessa,
-  # pela rede interna. A chave vem do .env do Dokploy (WHATSAPP_BRIDGE_KEY, mínimo 16 caracteres); sem ela o
-  # container fica ocioso e o WhatsApp desligado, sem afetar o resto. A sessão fica no volume whatsapp_auth.
+  # pela rede interna. Chave WHATSAPP_BRIDGE_KEY (mínimo 16 caracteres); sem ela o container fica ocioso e o
+  # WhatsApp desligado, sem afetar o resto. A sessão fica no volume whatsapp_auth. (Em produção: Application no Dokploy.)
   whatsapp:
     build:
       context: ./whatsapp
