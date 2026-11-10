@@ -180,6 +180,66 @@ class TestColetarHuawei(unittest.TestCase):
             resultado = h.coletar_huawei("10.11.104.2", "root", "senha")
         self.assertIn("erro", resultado)
 
+    def test_interface_gpon_sem_saida_extra_nao_e_tratada_como_falha(self):
+        # Regressao: numa OLT real (MA5800), o `interface gpon 0/<slot>` que da certo nao imprime nada
+        # alem do eco do comando e do novo prompt -- a mudanca de prompt e a UNICA evidencia de sucesso.
+        # Com eco incluso (como o dispositivo real manda), a resposta bruta tem exatamente 3 linhas
+        # (eco, vazia, prompt), e o `comando()` corta a 1a. e a ultima; se a checagem de GPON usasse esse
+        # retorno cortado (como usava antes), o prompt novo nunca apareceria e a placa seria pulada.
+        por_comando = [
+            ("enable", "enable \r\n\r\nRECANTOREAL#"),
+            ("undo smart", "undo smart \r\n\r\nRECANTOREAL#"),
+            ("display board 0", "display board 0 \r\n" + BOARD + "\r\nRECANTOREAL#"),
+            ("config", "config \r\n\r\nRECANTOREAL(config)#"),
+            ("interface gpon 0/2", "interface gpon 0/2 \r\n\r\nRECANTOREAL(config-if-gpon-0/2)#"),
+            ("display ont info summary 0", "display ont info summary 0 \r\n" + RESUMO_ONT + "\r\nRECANTOREAL(config-if-gpon-0/2)#"),
+            ("quit", "quit \r\n\r\nRECANTOREAL(config)#"),
+        ]
+
+        class FakeShell:
+            def __init__(self):
+                self._pendente = "RECANTOREAL>"
+
+            def send(self, texto, *_a, **_k):
+                cmd = texto.strip()
+                if cmd:
+                    for prefixo, resposta in por_comando:
+                        if cmd.startswith(prefixo):
+                            self._pendente = resposta
+                            break
+
+            def settimeout(self, *_a):
+                pass
+
+            def recv_ready(self):
+                return self._pendente is not None
+
+            def recv(self, *_a):
+                texto, self._pendente = self._pendente, None
+                return texto.encode()
+
+        class FakeSSH:
+            def set_missing_host_key_policy(self, *_a):
+                pass
+
+            def connect(self, *_a, **_k):
+                pass
+
+            def invoke_shell(self):
+                return FakeShell()
+
+            def close(self):
+                pass
+
+        with patch.object(h.paramiko, "SSHClient", return_value=FakeSSH()):
+            with patch.object(h, "parse_board", return_value=[2]), \
+                 patch.object(h, "MAX_PORTA", 1):
+                resultado = h.coletar_huawei("10.11.104.2", "root", "senha")
+
+        self.assertNotIn("erro", resultado)
+        onus = {o["indice"]: o for o in resultado["onus"]}
+        self.assertIn("0/2/0:0", onus)
+
 
 class TestColetarStatusOltsHuawei(unittest.TestCase):
     def test_usa_coletor_huawei_injetado(self):
