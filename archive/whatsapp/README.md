@@ -41,9 +41,9 @@ API (FastAPI) ──HTTP interno, header apikey──> container "whatsapp" (Nod
 - O Baileys **não é oficial**. O número remetente pode ser bloqueado pelo WhatsApp, e a biblioteca precisa ser atualizada quando o protocolo muda. Para um uso sério, avaliar a API oficial do WhatsApp Business (Cloud API), que é paga por conversa e exige modelos de mensagem aprovados.
 - Na produção, o `docker-compose.yml` não vale: o serviço precisou virar um Application próprio no Dokploy. Ver a seção "Produção no Dokploy" do `CLAUDE.md`.
 
-## Banco de dados (as colunas continuam lá)
+## Banco de dados (as colunas foram apagadas)
 
-A migração criou três colunas, e **elas não foram apagadas** na remoção:
+A migração criou três colunas, que **foram apagadas** da produção em 10/11/2026 (`DROP COLUMN IF EXISTS`, num deploy único). Os números de WhatsApp que estavam cadastrados se perderam.
 
 | Tabela | Coluna | Tipo |
 |---|---|---|
@@ -51,14 +51,14 @@ A migração criou três colunas, e **elas não foram apagadas** na remoção:
 | `clients` (Máquina) | `whatsapp_to` | `TEXT[] NOT NULL DEFAULT '{}'` |
 | `contas` | `whatsapp_contato` | `VARCHAR(30)`, aceita nulo |
 
-Sem o campo no model, o SQLAlchemy não as lê nem as escreve. Nos INSERTs, o banco usa o default (`'{}'` ou nulo), e os números já cadastrados ficam guardados para uma volta.
+**Por que apagar:** sem o campo no model, a coluna `whatsapp_to` (NOT NULL) fazia todo INSERT de Cliente ou Máquina falhar quando a tabela vinha do `create_all`, onde o `default=[]` fica só no Python. Isso foi reproduzido no banco local. Deixar as colunas exigiria um `SET DEFAULT '{}'` no código para sempre; apagá-las limpa o código.
 
-**Cuidado que levou a uma correção:** quando a tabela é criada pelo `create_all` (banco novo ou local), o `default=[]` do model fica só no Python e a coluna nasce NOT NULL **sem default no banco**. Sem o campo no model, todo INSERT de Cliente ou Máquina falharia com "null value in column whatsapp_to". Isso foi reproduzido no banco local. Por isso, o `main.py` passou a rodar no startup, para cada tabela que tenha a coluna, `ALTER TABLE <client_groups|clients> ALTER COLUMN whatsapp_to SET DEFAULT '{}'` (idempotente). Ao trazer o WhatsApp de volta, esse passo pode ficar ou sair: ele não atrapalha. Se um dia a solução for descartada de vez, apagar com `ALTER TABLE ... DROP COLUMN` (sem volta: perde os números).
+Para trazer o WhatsApp de volta, a migração inline do commit `9804e4c` (`_MIGRACOES_COLUNAS`) recria as colunas vazias.
 
 ## Como trazer de volta
 
 1. `git revert <commit da remoção>` (ou `git checkout 9804e4c -- <arquivos>`). Resolver os conflitos no `PROJECT_SPEC.md` e nos compose, que mudaram depois.
-2. A migração inline é idempotente: como as colunas já existem, ela não faz nada.
+2. A migração inline é idempotente e recria as colunas apagadas (vazias).
 3. O Application "WhatsApp" do Dokploy foi excluído na remoção, e a sessão (QR já lido) se perdeu com ele. Para voltar, criar de novo um Application "WhatsApp" com estas configurações: build pelo Dockerfile `server/whatsapp/Dockerfile`, branch `isaque`, volume em `/data`, `API_KEY` igual à `WHATSAPP_BRIDGE_KEY` do Backend, `INSTANCE_NAME=trilan` e sem domínio.
 4. No Backend, definir `WHATSAPP_BRIDGE_KEY` (só uma linha) e `WHATSAPP_BRIDGE_URL=http://<appName do WhatsApp>:3000`.
 5. Ler o QR code em Configurações > WhatsApp com o celular do número remetente e fazer o envio de teste.

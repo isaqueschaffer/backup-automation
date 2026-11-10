@@ -236,11 +236,6 @@ for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
 _run_ddl("ALTER TABLE nvrs ALTER COLUMN ip TYPE VARCHAR(255);", "nvrs.ip VARCHAR(255)")
 _run_ddl("ALTER TABLE nvr_cameras ALTER COLUMN ip TYPE VARCHAR(255);", "nvr_cameras.ip VARCHAR(255)")
 
-# WhatsApp retirado em 10/11/2026: apaga as colunas que ficaram fora do model (idempotente). Passo temporário:
-# sai do código no commit seguinte, depois de rodar uma vez na produção.
-for _tabela, _coluna in (("client_groups", "whatsapp_to"), ("clients", "whatsapp_to"), ("contas", "whatsapp_contato")):
-    _run_ddl(f"ALTER TABLE {_tabela} DROP COLUMN IF EXISTS {_coluna};", f"{_tabela}.{_coluna} DROP")
-
 # Notificações personalizadas: o tipo 'PERSONALIZADA' passou a valer em notificacoes.tipo (idempotente)
 if _tem_tabela("notificacoes"):
     _run_ddl("ALTER TABLE notificacoes DROP CONSTRAINT IF EXISTS ck_notificacoes_tipo;", "dropar ck_notificacoes_tipo antigo")
