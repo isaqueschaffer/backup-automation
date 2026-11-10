@@ -113,10 +113,13 @@ def _coletar(ip: str, usuario: str, senha: str, porta: int) -> dict:
                 return buf
         return buf
 
+    prompt_atual = [""]
+
     def comando(cmd, limite_s=TIMEOUT_COMANDO_S):
         shell.send(cmd + "\n")
         bruto = ler_ate(lambda b: bool(_RE_PROMPT.search(b.rstrip())), limite_s)
         linhas = bruto.replace("\r", "").split("\n")
+        prompt_atual[0] = linhas[-1] if linhas else ""  # o prompt novo fica so na ultima linha, cortada abaixo
         return "\n".join(linhas[1:-1]) if len(linhas) > 2 else bruto
 
     onus = []
@@ -129,8 +132,11 @@ def _coletar(ip: str, usuario: str, senha: str, porta: int) -> dict:
         comando("config")
         comando("undo smart")  # o ajuste e por contexto; repete ao entrar no `config`
         for slot in slots:
-            resposta = comando(f"interface gpon 0/{slot}")
-            if "config-if-gpon" not in resposta.lower():
+            comando(f"interface gpon 0/{slot}")
+            # quando o comando da certo ele nao imprime nada: a mudanca de prompt (unica evidencia) fica
+            # so na ultima linha, que `comando()` corta do retorno por ser o prompt; por isso o teste e
+            # contra `prompt_atual`, nao contra o texto que `comando()` devolve.
+            if "config-if-gpon" not in prompt_atual[0].lower():
                 continue  # placa sem suporte a GPON (controladora, alarme...): o prompt nao mudou
             comando("undo smart")  # e de novo dentro da interface, antes do primeiro `display`
             try:
