@@ -1,0 +1,10 @@
+# Build with: docker buildx build --platform linux/arm/v7 -f agent/Dockerfile.mikrotik -t trilan-agent:armv7 ./agent --load
+FROM python:3.11-slim-bookworm
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TRILAN_ENABLE_BACKUPS=false TRILAN_LOG_LEVEL=INFO
+WORKDIR /app
+COPY requirements-linux.txt /app/requirements-linux.txt
+RUN pip install --no-cache-dir -r /app/requirements-linux.txt && mkdir -p /app/data && chmod 700 /app/data
+COPY agent.py service_linux.py /app/
+COPY src/ /app/src/
+# Mount /app/agent.conf securely; never bake credentials into the image.
+CMD ["python", "-u", "service_linux.py"]
