@@ -1092,6 +1092,20 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-11] — Piloto do agente MikroTik (ARMv7): build corrigido, imagem no GHCR e documentação do agente
+
+**Contexto:** avaliar rodar o agente como container no MikroTik RB4011 do cliente (RouterOS 7, ARMv7) em vez de um PC
+Windows. O colega adicionou ao `isaque` (merge `762dd99`) `service_linux.py`, `requirements-linux.txt`,
+`Dockerfile.mikrotik` e `README_MIKROTIK.md`; a versão Windows não mudou. **Build:** o `Dockerfile.mikrotik` original
+falhava no `pip install` (sem `gcc` e sem `make`: o PyPI não tem wheel ARMv7 de `pynacl`, `pycryptodome(x)`, `psutil`,
+`Pillow` e `cffi`). Passou a ter dois estágios (compilação no `builder`, imagem final só com o resultado e
+`libffi8`/`libjpeg62-turbo`/`zlib1g`) e ganhou `agent/.dockerignore`. **Resultado:** imagem `linux/arm/v7` de ~60 MB;
+teste emulado (`armv7l`) importa todas as dependências e os módulos do agente. Build sem cache leva ~1h40 sob QEMU.
+**Publicado:** `ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto1`, para o colega subir no RB4011 de teste. **Não
+validado:** execução contra o servidor, importação no RouterOS, desempenho no roteador, SSH do `paramiko` 3.4.0 com as
+OLTs Huawei antigas. **Docs:** `agent/DOCUMENTACAO_AGENTE.md` (funcionamento completo do agente Windows e do piloto) e
+seção em português no `agent/README_MIKROTIK.md` (build, publicação e configuração do teste).
+
 ### [2026-11-11] — Merge com a Helena e versão 1.1.43 do agente
 
 **Incorporado (ramo `helena`, `f7cca54`):** importação do Digifort com pasta de gravação por câmera e raiz automática; alarmes do Defense movidos para `legacy/defense_alarmes/` (retirada pedida na entrada da Helena; a coluna `nvrs.last_alarm_status` permanece sem uso); OLT Huawei: campo `fabricante` no status e ONT sem estado de `DESCONHECIDO` para `OFFLINE`. **Auditoria:** sem data com fuso, sem segredo novo, nenhuma rota nova sem `ctx`/filtro de conta; compose, nginx, models, migrações, requirements, build.ps1, installer.iss e `.env` intocados. **Bloqueado:** nada. **Observação:** o dashboard continua usando `navarro@123` como senha padrão de câmera (IC-012, já aberto). **Versão:** agente 1.1.43 (agente mexeu em `service.py`, `api_client.py`, `status_olt.py`, `huawei_status.py`).
