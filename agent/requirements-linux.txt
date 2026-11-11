@@ -1,0 +1,12 @@
+# Linux ARMv7 pilot; Windows-only packages intentionally excluded.
+requests>=2.31,<3
+pyzipper>=0.3.6,<1
+pycryptodome>=3.20,<4
+paramiko==3.4.0
+pyftpdlib>=1.5.8,<3
+psutil>=5.9,<8
+pysnmp>=7.1,<8
+openpyxl>=3.1,<4
+pymysql>=1.1,<2
+Pillow>=10.3,<12
+# FFmpeg/RTSP intentionally deferred until verified on ARMv7.
