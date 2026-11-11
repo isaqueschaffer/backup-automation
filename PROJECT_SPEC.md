@@ -143,7 +143,7 @@ trilan-nvr-backup-automation/
 ├── server/
 │   ├── .env                     <- Configuração de produção (NAO versionar)
 │   ├── .env.example / .env.local.example
-│   ├── docker-compose.yml       <- Produção (Dokploy)
+│   ├── docker-compose.yml       <- Referência dos serviços (NÃO é lido pelo Dokploy; ver seção 11)
 │   ├── docker-compose.local.yml <- Desenvolvimento local
 │   ├── nginx/nginx.conf
 │   ├── api/                     <- Backend FastAPI
@@ -191,14 +191,12 @@ trilan-nvr-backup-automation/
          |
          |  HTTPS  ->  Headers: X-Client-ID + X-API-Key
          v
-[Servidor Dokploy - porta 7001]
-    Nginx (reverse proxy)
-         |
-         +-- /api/* -> FastAPI (porta 8000 interna)
-         +-- /*     -> React Dashboard (porta 80 interna)
-              |
-              +-- PostgreSQL (porta 5432 interna)
+[Servidor Dokploy]  (produção: Applications separados, ver seção 11)
+    Backend  (/server/api, FastAPI)  --->  Postgres do Dokploy (nome interno)
+    Frontend (/server/dashboard, React)
 ```
+
+No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta 7001 com `/api/*` -> FastAPI (8000) e `/*` -> Dashboard (80), Postgres na 5432 interna.
 
 ### Fluxo do Agente
 
@@ -845,13 +843,19 @@ Quando `config_extra.marca` está definida, ela decide primeiro: `Motorola` vai 
 
 ## 11. Infraestrutura e Deploy
 
-### Producao (Dokploy)
+### Producao (Dokploy) — verificado no painel em 09/11/2026
 
-- **Porta exposta:** `7001` (Nginx)
-- **Proxy:** `/api/*` -> FastAPI (porta 8000), `/*` -> Dashboard (porta 80)
-- **Backups:** Volume bind mount em `/opt/trilan/backups` no host
-- **Banco:** PostgreSQL interno via rede Docker `trilan_net`
-- **Plataforma:** Dokploy (auto-deploy a cada push no ramo `isaque` de `projetoswmfa`)
+A produção **não** usa `server/docker-compose.yml`. No Dokploy, o projeto "Sistema de Backup" (ambiente `production`) tem:
+
+| Serviço | Tipo no Dokploy | Origem | Build | Observações |
+|---|---|---|---|---|
+| Backend | Application | `projetoswmfa/trilan-backup-automation`, branch `isaque`, caminho `/server/api` | Railpack | Auto-deploy. Variáveis na aba Environment do Application (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`, `RAILPACK_PYTHON_VERSION`...). Bind mount `/opt/trilan/backups` -> `/data/backups` |
+| Frontend | Application | mesmo repositório e branch, caminho `/server/dashboard` | Railpack | Auto-deploy. Variável `VITE_API_URL` |
+| Banco | Postgres do Dokploy | — | — | O `DATABASE_URL` do Backend aponta para ele pelo nome interno (`appName` do serviço) |
+
+- **Deploy:** cada push na `isaque` refaz Backend e Frontend.
+- **Serviço novo:** precisa ser criado no Dokploy como Application (variáveis, volume e endereço interno configurados lá); alterar o compose não tem efeito em produção. O nome interno de um serviço, usado por outro, é o `appName` dele.
+- **WhatsApp:** retirado em 10/11/2026 (solução arquivada em `archive/whatsapp/README.md`). O Application "WhatsApp" do Dokploy e as variáveis `WHATSAPP_*` do Backend foram removidos (ver o changelog de 10/11/2026).
 
 ### Branches Git
 
@@ -875,12 +879,12 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 
 O merge de `helena` ou `integracao-equipamentos` em `isaque` e o unico portao da producao. Antes de concluir:
 1. Ver o que entra (`git log isaque..<ramo>`, `git diff --stat isaque...<ramo>`).
-2. Revisar os arquivos sensiveis: `server/docker-compose*.yml` (porta 7001, volume `pg_data`), `server/nginx/nginx.conf`, `server/api/models.py`, migracoes do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, arquivos novos na raiz e binarios.
+2. Revisar os arquivos sensiveis: `server/docker-compose*.yml` (nao regem a producao, mas manter coerentes; local em `7001:7001`), `server/nginx/nginx.conf`, `server/api/models.py`, migracoes do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, arquivos novos na raiz e binarios.
 3. Procurar data com fuso nas linhas adicionadas (REGRA-001): `git diff isaque...<ramo> | grep -nE '^\+.*(datetime\.now|timezone)'`.
 4. Procurar segredos nas linhas adicionadas.
 5. Registrar na secao 16 o que foi incorporado e o que foi bloqueado.
 
-Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria registrada (IC-015).
+Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria registrada (IC-015). Obs. (09/11/2026): a producao nao le esse compose, entao a troca de volume nunca afetou o banco de producao.
 
 ---
 
@@ -1110,6 +1114,89 @@ server/dashboard/src/api/types.ts, PROJECT_SPEC.md
 **Breaking Change:** Não (a coluna do banco é mantida; agentes antigos que ainda enviarem o status antigo
 recebem 404 na rota removida, sem afetar o resto do ping/backup).
 **Branch:** helena
+
+### [2026-11-10] — WhatsApp retirado (solução arquivada)
+
+**Decisão do usuário:** tirar tudo o que foi feito para o WhatsApp e guardar a solução documentada, para uso futuro. **Feito:** revertido o commit `9804e4c`: ponte `server/whatsapp/`, `whatsapp_service`, `whatsapp_relatorios`, `whatsapp_numero`, `routers/whatsapp_router.py`, `tests/test_whatsapp.py`; campos `whatsapp_to`/`whatsapp_contato` nos models, schemas e rotas; envios por WhatsApp em `agent.py`, `backups.py`, `backup_runs.py`, `notificacoes.py` e `avisos_conta.py`; variáveis `WHATSAPP_*` no `config.py` e nos `.env*.example`; serviço e volume nos dois compose; cartão em Configurações e campos do painel. O e-mail volta a ser o único canal, como antes de 09/11. **Mantido:** `server/dashboard/.dockerignore` (correção do build, sem relação com o WhatsApp). **Documentação:** `archive/whatsapp/README.md` (como funcionava, decisões, riscos e como trazer de volta).
+
+**Banco:** as colunas `client_groups.whatsapp_to`, `clients.whatsapp_to` (`TEXT[] NOT NULL DEFAULT '{}'`) e `contas.whatsapp_contato` (`VARCHAR(30)`) foram **apagadas** (`DROP COLUMN IF EXISTS`, rodado no startup de um deploy único, commit `3723b7b`, e depois retirado do código). Os números cadastrados se perderam. Motivo: sem o campo no model, a coluna NOT NULL sem default (criada pelo `create_all`) fazia o cadastro de Cliente falhar com "null value in column whatsapp_to", reproduzido no banco local. Conta, Cliente e Máquina são criados normalmente depois do DROP (testado no banco local). Nenhuma rota do agente mudou (o agente não sabia do WhatsApp). **Dokploy:** o Application "WhatsApp" (criado em 09/11, Dockerfile `server/whatsapp/Dockerfile`, volume `whatsapp-auth`) foi **excluído** e as variáveis `WHATSAPP_BRIDGE_URL`/`WHATSAPP_BRIDGE_KEY` foram removidas da aba Environment do Backend, a pedido do usuário. Também foram removidos o container e o volume locais e a linha do `server/.env`.
+
+### [2026-11-10] — Versão 1.1.42: merge `helena` (detecção de GPON na OLT Huawei)
+
+**Incorporado** (`5d23696`, `d5ab86b`, merge `f0c1ea5`):
+- `agent/src/olt/huawei_status.py`: o `interface gpon 0/<slot>` que dá certo não imprime nada além do eco e do prompt novo, e o `comando()` cortava justamente a última linha (o prompt); por isso toda placa era tratada como "sem GPON" e a coleta voltava sem ONUs. Agora o teste é feito contra o prompt guardado em `prompt_atual`.
+- `agent/tests/test_huawei_status.py`: teste de regressão com o diálogo real da MA5800 (eco + prompt).
+- `agent/requirements.txt`: `paramiko` fixado em `3.4.0` (antes `>=3.4.0,<4.0.0`), para manter `ssh-rsa`/`ssh-dss` com OLTs Huawei antigas. Conferido no venv do build: funciona com `cryptography` 50.0.2 (só avisos de depreciação do TripleDES).
+
+**Auditoria:** sem datas com fuso, sem segredos, sem mudança em compose, nginx, models, migrações, build ou instalador. **Bloqueado:** nada.
+
+### [2026-11-09] — Correção da documentação: a produção são Applications do Dokploy, não o `docker-compose.yml`
+
+**Descoberta:** o WhatsApp em produção respondia "container não está respondendo" e o log do Backend mostrava `Failed to resolve 'whatsapp'`. Consultando o Dokploy (só leitura), o projeto "Sistema de Backup" não tem Compose: são os Applications **Backend** (`/server/api`) e **Frontend** (`/server/dashboard`), ambos com build Railpack a partir da `isaque`, mais um Postgres do próprio Dokploy. O `server/docker-compose.yml` nunca foi lido pela produção; por isso o serviço `whatsapp` adicionado nele (entrada "WhatsApp só por QR code", acima) não foi criado.
+
+**Corrigido:** seção 11 (tabela dos serviços reais), estrutura de pastas e diagrama da seção 2, auditoria de merge (o compose não rege a produção), `CLAUDE.md` (nova seção "Produção no Dokploy"; acesso do Claude descrito em `CLAUDE.local.md`, fora do git), skill `gerenciar-containers` (cópias do Claude e do Gemini), `.agents/rules/git-deploy.md` e um aviso no topo do `server/docker-compose.yml`. A IC-015 e o incidente de 06/10 perdem a gravidade de "banco vazio": a troca de volume nunca atingiu a produção.
+
+**Pendente para o WhatsApp funcionar em produção (no Dokploy, a pedido do usuário):** criar um Application "WhatsApp" (`/server/whatsapp`, build pelo Dockerfile, volume em `/data`, `API_KEY` igual à `WHATSAPP_BRIDGE_KEY` do Backend, `INSTANCE_NAME=trilan`, sem domínio) e no Backend definir `WHATSAPP_BRIDGE_URL=http://<appName do WhatsApp>:3000`. Atenção: o Backend tem **duas** linhas `WHATSAPP_BRIDGE_KEY` com valores diferentes; deixar só uma.
+
+### [2026-11-09] — WhatsApp só por QR code: removida a opção de Evolution API externa
+
+**Decisão do usuário:** o WhatsApp passa a funcionar apenas pelo container `whatsapp` com QR code; sem Evolution. **Esta entrada substitui o que as duas entradas de WhatsApp de 09/11/2026 dizem sobre `evolution_*`/`EVOLUTION_*`.**
+
+**Removido:** as chaves `evolution_url`/`evolution_instance`/`evolution_apikey` da tabela `settings` e do `GET/PUT /api/v1/settings` (e os campos de URL/instância/chave no painel); `POST /api/v1/settings/whatsapp/teste`; as variáveis `EVOLUTION_*`; o `environment` do compose local. **Como fica a configuração:** `config.py` ganhou `WHATSAPP_BRIDGE_KEY` (sem ela o WhatsApp fica desligado), `WHATSAPP_BRIDGE_URL` (padrão `http://whatsapp:3000`) e `WHATSAPP_INSTANCE` (padrão `trilan`); a API recebe a chave pelo `env_file` (`server/.env`), sem bloco `environment`. `whatsapp_service.whatsapp_config()` não consulta mais o banco. Rotas, todas só do admin global em `routers/whatsapp_router.py`: `GET /api/v1/whatsapp/conexao` (`configurado`, `disponivel`, `connected`, `numero`, `qr`), `POST /api/v1/whatsapp/desconectar` e `POST /api/v1/whatsapp/teste` (antes em `/settings`). **Painel:** Configurações mostra só o cartão WhatsApp (QR, número conectado, Desconectar e envio de teste, que aparece depois de conectar); avisa quando falta a chave ou o container não responde. As rotas de envio da ponte (`/message/sendText|sendMedia/:instance`) mantêm o formato antigo só por conveniência; o Trilan não depende da Evolution.
+
+**Testado:** 26 testes (WhatsApp, e-mail com imagens e avisos da conta) passam em container; `tsc --noEmit` do painel limpo; com a API recriada, a sessão já conectada seguiu ativa (conferido só em leitura). 
+
+**Produção (mesma data):** `server/docker-compose.yml` ganhou o serviço `whatsapp` (build de `./whatsapp`, sem porta publicada, volume nomeado `whatsapp_auth` para a sessão, `API_KEY: ${WHATSAPP_BRIDGE_KEY:-}`). Nada mais do arquivo foi tocado (nginx `7005:7001` e `pg_data_local` ficaram como estavam). A chave usa `:-`, e não `:?`, para o deploy nunca falhar por falta dela; sem a chave o container `whatsapp` fica ocioso com um aviso no log (em vez de reiniciar em loop) e o WhatsApp fica desligado, sem afetar o resto. A API lê a mesma `WHATSAPP_BRIDGE_KEY` do `.env`.
+
+**Breaking Change:** Não. **Requer, depois do deploy:** definir `WHATSAPP_BRIDGE_KEY` (aleatória, mínimo 16 caracteres) nas variáveis de ambiente do Dokploy, reimplantar, e ler o QR code em Configurações > WhatsApp (a sessão local não vai para o servidor).
+
+### [2026-11-09] — WhatsApp sem servidor externo: container `whatsapp` (Baileys) com conexão por QR code no painel
+
+**Motivo:** o usuário não quer instalar/manter uma Evolution API. Modelo tirado do repositório `isaqueschaffer/BotMercadolivre` (Baileys direto no processo, sessão em volume, QR no dashboard).
+
+**Novo serviço `server/whatsapp/`** (Node 22 + `@whiskeysockets/baileys` ^6.7.16 + express): mantém uma sessão do WhatsApp Web e expõe, só na rede interna do Docker (sem porta publicada), as **mesmas rotas de envio da Evolution v2** (`POST /message/sendText|sendMedia/:instance`, header `apikey`), então `services/whatsapp_service.py` não mudou. Extras: `GET /status`, `GET /qr` (PNG em data URL), `POST /logout` (apaga a sessão e volta a gerar QR) e `GET /health`. Resolve o número com `onWhatsApp` (cobre o 9º dígito dos celulares BR; número sem WhatsApp = 404), usa `fetchLatestBaileysVersion` (o WhatsApp recusa versões antigas do protocolo) e reconecta sozinho (inclusive o reinício que o WhatsApp pede logo após ler o QR). A chave `API_KEY` (≥16 caracteres) é obrigatória e comparada em tempo constante. A sessão fica no volume `whatsapp_auth_local` (`/data/auth`): sem volume, pede QR a cada recriação.
+
+**API:** `routers/whatsapp_router.py`, só admin global: `GET /api/v1/whatsapp/conexao` (`configurado`, `suportado`, `connected`, `numero`, `qr`; `suportado=false` quando o envio usa uma Evolution externa, que não tem `/status`/`/qr`) e `POST /api/v1/whatsapp/desconectar`. **Painel:** o cartão de WhatsApp em Configurações mostra o QR (atualiza a cada 3 s), o número conectado e o botão Desconectar; os campos URL/instância/chave só são preenchidos para usar uma Evolution externa (têm prioridade sobre as variáveis `EVOLUTION_*`).
+
+**Compose:** só `server/docker-compose.local.yml` foi alterado (serviço `whatsapp`, volume `whatsapp_auth_local`, e a API recebe `EVOLUTION_API_URL=http://whatsapp:3000`, `EVOLUTION_INSTANCE=trilan`, `EVOLUTION_API_KEY=${WHATSAPP_BRIDGE_KEY}`). A chave `WHATSAPP_BRIDGE_KEY` fica em `server/.env` (exemplo em `.env.local.example`). **`server/docker-compose.yml` (produção) NÃO foi alterado**: para usar em produção é preciso replicar o serviço, o volume e a variável lá (o push na `isaque` dispara o deploy no Dokploy). Também foi criado `server/dashboard/.dockerignore` (o build do painel tentava copiar `node_modules` da pasta do OneDrive).
+
+**Riscos:** a biblioteca não é oficial; o número pode ser bloqueado pelo WhatsApp e a versão do Baileys pode precisar de atualização quando o protocolo mudar. **Testado:** ponte rodando no compose local (gera QR; 401 sem chave, 503 sem conexão, 404 instância errada), ligação API → ponte e rota `/whatsapp/conexao` conferidas por dentro do container da API, `tsc --noEmit` do painel sem erros. **Não testado:** envio real (depende de ler o QR com um celular).
+
+**Breaking Change:** Não. **Requer:** build do novo container no deploy (quando for levado à produção).
+
+### [2026-11-09] — WhatsApp: os mesmos relatórios e avisos do e-mail, pela Evolution API
+
+**Pedido:** poder cadastrar números de WhatsApp para receber o que hoje sai por e-mail. **Decisões (perguntadas ao usuário):** provedor = Evolution API própria; vão por WhatsApp o relatório de backup, as notificações da conta e os avisos da conta; o número é cadastrado ao lado dos e-mails; formato = texto resumido + imagens das câmeras offline.
+
+**Banco (migração inline em `_MIGRACOES_COLUNAS`, idempotente):** `client_groups.whatsapp_to TEXT[]` (Cliente) e `clients.whatsapp_to TEXT[]` (Máquina), ambos `NOT NULL DEFAULT '{}'`; `contas.whatsapp_contato VARCHAR(30)`. Números guardados só com dígitos e DDI (`5511999998888`): `server/api/whatsapp_numero.py` normaliza e valida (10/11 dígitos sem `+` = Brasil, ganha o 55; com `+` ou `00` vale o DDI informado, 8 a 15 dígitos) e é usado nos validadores Pydantic (`whatsapp_to` em Cliente/Máquina, `whatsapp_contato` em Conta). Número inválido = 422.
+
+**Servidor:** `services/whatsapp_service.py` (config em `settings` com fallback para `EVOLUTION_*`; `POST {url}/message/sendText|sendMedia/{instância}` com header `apikey`; 3 tentativas só em falha de rede/5xx; pausas entre mensagens; nunca levanta exceção) e `services/whatsapp_relatorios.py` (monta o texto resumido reaproveitando os helpers do e-mail: status geral, contagens, só os equipamentos com falha, contagem de câmeras, link de download; envia depois as imagens de referência das câmeras offline, no máximo `MAX_OFFLINE_IMAGES`=10; `disparar_em_segundo_plano` roda numa thread com sessão própria e grava `AgentLog` `whatsapp_sent`/`whatsapp_error`). Pontos de envio: upload do ZIP de máquina sem Cliente (`routers/agent.py`), reenvio do relatório (`routers/backups.py`), fechamento/reenvio da rodada do Cliente (`services/backup_runs.send_run_email`, números do Cliente), notificações de licença e personalizadas (`services/notificacoes._enviar_email`) e avisos de vencimento (`services/avisos_conta.enviar_aviso`), estes dois para o `whatsapp_contato` da conta. O e-mail continua igual: falha ou ausência de WhatsApp nunca afeta o e-mail, e o aviso conta como enviado se saiu por pelo menos um canal. Máquina com Cliente herda os números do Cliente (como os e-mails; `PUT /machines` recusa mudar `whatsapp_to` de máquina vinculada). Rotas novas: `GET/PUT /api/v1/settings` ganham `evolution_url`, `evolution_instance`, `evolution_apikey` (a chave não volta; só `evolution_apikey_configurada`) e `POST /api/v1/settings/whatsapp/teste` (admin global; manda uma mensagem de teste).
+
+**Painel:** Configurações ganha o cartão "WhatsApp (Evolution API)" com botão de teste; campo "WhatsApp do relatório" nos formulários de Cliente e de Máquina (travado na máquina vinculada) e no cartão da Máquina; "WhatsApp de contato" no formulário e no detalhe da Conta; o log da máquina mostra "WhatsApp enviado"/"Erro de WhatsApp".
+
+**Atenção:** as notificações personalizadas continuam com a caixa "enviar e-mail"; o WhatsApp acompanha essa caixa (sai para o número da conta se ele existir). Pré-requisito de operação: servidor Evolution API v2 próprio, com uma instância conectada (QR code) ao número remetente; número não oficial pode ser bloqueado pelo WhatsApp. **Testado:** `tests/test_whatsapp.py` (18 testes: normalização, configuração, envio com retentativas, montagem das mensagens e limite de imagens) e as demais suítes da API rodadas uma a uma em container Python 3.12 (todas passam, exceto `test_storage.py` e `test_galeria_pasta_gravacao.py`, que já falham por variável de ambiente ausente nos próprios testes: `ADMIN_PASSWORD`, `DATABASE_URL`, `SECRET_KEY`); `tsc --noEmit` do painel sem erros. **Não testado contra uma Evolution API real.**
+
+**Breaking Change:** Não (colunas novas com padrão vazio). **Requer:** deploy do servidor e do painel; sem mudança no agente nem no compose.
+
+### [2026-11-09] — Merge auditado do ramo `helena` (39a028a): OLT Huawei e alarmes do DEFENSE (agente 1.1.41)
+
+**Tipo:** merge real (`git merge --no-ff`), sem conflitos; mexeu em `agent/`, então nova versão **1.1.41** (updater.py, installer.iss, package.json), build, release e cadastro (fluxo "merge com a Helena").
+
+**Incorporado:** status das OLTs Huawei (`agent/src/olt/huawei_status.py`, integrado a `status_olt.py`); alarmes das centrais Intelbras cadastradas no DEFENSE (`agent/src/vms/defense_alarmes.py`, `status_alarmes_defense.py`, laço no `service.py`, envio no `api_client.py`); servidor: coluna `nvrs.last_alarm_status` (JSON; modelo `NVR` e migração inline em `_MIGRACOES_COLUNAS`), schemas `StatusAlarmeReport`/`EquipamentoStatusAlarme`, rota do agente `POST /api/v1/agent/defense/alarmes/status` e rota do painel `GET /api/v1/machines/{machine_id}/equipamentos/{id}/alarmes`; painel: `AlarmesModal.tsx`, `EqCard.tsx`, formulário de equipamento, tipos; testes `test_huawei_status.py` e `test_defense_alarmes.py`.
+**Verificado e sem problema:** rota do agente filtra pela própria máquina (`machine.id`) e bloqueia conta suspensa; rota do painel recebe `ctx` e usa `_get_machine_or_404` (REGRA-010); `last_alarm_status` gravado em UTC naive (REGRA-001); migração idempotente; compose, nginx, requirements, build.ps1, installer.iss e `.env` intocados; nenhum segredo (só a leitura de `api_key` da configuração do equipamento).
+**Bloqueado:** nada.
+
+**Breaking Change:** Não. **Requer:** deploy do servidor e do painel (push em `isaque` dispara o Dokploy; a coluna nova é criada na subida) e atualização OTA do agente.
+
+### [2026-11-09] — Merge auditado do ramo `helena` (04a3f9e): status de OLT VSOL e UNM2000 (agente 1.1.40)
+
+**Tipo:** merge real (`git merge --no-ff`), sem conflitos; mexeu em `agent/`, então nova versão **1.1.40** (updater.py, installer.iss, package.json), build, release e cadastro no painel (fluxo "merge com a Helena").
+
+**Incorporado:** monitoramento de status de OLT da VSOL (novo `agent/src/olt/vsol_status.py`, por HTTP, usando IP/usuário/senha do cadastro do equipamento) e ajustes no status das ONUs da UNM2000 em `status_olt.py`; testes `agent/tests/test_vsol_status.py`; painel: `OltStatusModal.tsx`, `StatusBadge.tsx` e `api/types.ts`.
+**Verificado e sem problema:** nenhum arquivo sensível (compose, nginx, models, main.py, requirements, build.ps1, installer.iss, .env) nem rota do servidor no diff; nenhuma data com fuso (REGRA-001); sem segredos reais (só credenciais fictícias nos testes).
+**Bloqueado:** nada.
+
+**Breaking Change:** Não. **Requer:** deploy do painel (push em `isaque`) e atualização OTA do agente.
 
 ### [2026-11-06] — Merge auditado do ramo `helena` (66c1dc3): notificações do painel
 

@@ -8,10 +8,10 @@ description: Docker do projeto — ambiente local (server/docker-compose.local.y
 | Arquivo | Uso |
 |---|---|
 | `server/docker-compose.local.yml` | **Desenvolvimento e testes nesta máquina**: painel em http://localhost:7001, Postgres em `localhost:5433` |
-| `server/docker-compose.yml` | **Produção**: o Dokploy faz o deploy a cada push na branch `isaque`. Não subir localmente (bind mount em `/opt/trilan/backups`). A porta de produção é 7001; o `7005:7001` e o volume `pg_data_local` desse arquivo vieram da máquina da Helena e não devem ser tratados como produção nem alterados sem pedido |
+| `server/docker-compose.yml` | **Não é a produção.** O Dokploy não lê este arquivo: a produção são Applications separados (Backend `/server/api`, Frontend `/server/dashboard`, build Railpack) e um Postgres do Dokploy. O arquivo fica só como referência do conjunto de serviços. Não subir localmente (bind mount em `/opt/trilan/backups`). O `7005:7001` e o volume `pg_data_local` vieram da máquina da Helena; não alterar sem pedido |
 
-Serviços: `nginx` (proxy, porta 7001), `api` (FastAPI na 8000 interna), `dashboard` (build do Vite servido por nginx) e `db` (Postgres 15 com healthcheck).
-Manter os nomes `docker-compose*.yml` (o Dokploy usa o de produção), mesmo que a skill `docker-compose-patterns` recomende `compose.yaml`.
+Serviços do compose local: `nginx` (proxy, porta 7001), `api` (FastAPI na 8000 interna), `dashboard` (build do Vite servido por nginx) e `db` (Postgres 15 com healthcheck).
+Manter os nomes `docker-compose*.yml`, mesmo que a skill `docker-compose-patterns` recomende `compose.yaml`.
 
 ## Primeira vez
 
@@ -34,4 +34,4 @@ Criar `server/.env` a partir de `server/.env.local.example` e gerar `SECRET_KEY`
 
 ## Produção
 
-Não há acesso ao Dokploy: produção só muda por git (push na `isaque`). Não rodar o compose de produção nem comandos contra o servidor.
+Você (Gemini) não tem acesso ao Dokploy: código vai para a produção só por git (push na `isaque` redeploya Backend e Frontend). Configuração da produção (variáveis, serviço novo, volumes) é feita pelo dono no próprio Dokploy, não no compose: se a tarefa exigir isso, diga no relatório o que precisa ser configurado lá. Não rodar o compose de produção nem comandos contra o servidor.

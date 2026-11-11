@@ -1,3 +1,7 @@
+# ATENÇÃO: o Dokploy NÃO usa este arquivo. A produção são Applications separados no Dokploy
+# (Backend = /server/api, Frontend = /server/dashboard, build Railpack) e um Postgres do próprio Dokploy;
+# variáveis, volumes e serviços novos são configurados lá. Este arquivo fica só como referência.
+# Ver "Produção no Dokploy" no CLAUDE.md e a seção 11 do PROJECT_SPEC.md.
 services:
   nginx:
     image: nginx:1.25-alpine

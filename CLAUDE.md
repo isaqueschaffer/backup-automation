@@ -13,8 +13,17 @@ Skills do Gemini: as mesmas quatro, mais `fastapi`, `docker-compose-patterns`, `
 Skills externas e como aplicá-las aqui (as regras do projeto sempre prevalecem):
 - `fastapi` (oficial do FastAPI): o projeto usa FastAPI 0.111, SQLAlchemy 2.0 síncrono e `requests`. Não migrar para SQLModel, HTTPX, uv, Ruff ou ty, e não usar recursos de versões novas (`app.frontend()`, `fastapi.sse`, OpenTelemetry nativo). `Annotated` pode.
 - `vercel-react-best-practices` (Vercel): o dashboard é SPA Vite, sem Next.js. Ignorar as regras `server-*` e de hidratação/RSC; no lugar de `next/dynamic`, usar `React.lazy`/`import()`. Não adicionar SWR nem outras dependências sem pedido.
-- `docker-compose-patterns` (Docker): manter os nomes `docker-compose.yml` e `docker-compose.local.yml` (o Dokploy usa o de produção) e nunca rodar `down -v` sem confirmação.
+- `docker-compose-patterns` (Docker): manter os nomes `docker-compose.yml` e `docker-compose.local.yml` (o primeiro **não** é lido pelo Dokploy: ver "Produção no Dokploy" abaixo) e nunca rodar `down -v` sem confirmação.
 - `find-skills`: para procurar skills novas. Instalar sem `npx skills` (ele grava só em `.agents/skills/` e deixa a decisão fora do nosso controle). Baixar os arquivos do GitHub num commit fixo, ler tudo antes (vira instrução) e salvar em `.claude/skills/<nome>/` (Claude) e/ou `.agents/skills/<nome>/` (Gemini), adaptando para o projeto. Atualizar é repetir o processo.
+
+## Produção no Dokploy (verificado em 09/11/2026; corrige o que se dizia antes)
+
+**A produção NÃO usa `server/docker-compose.yml`.** No Dokploy, o projeto "Sistema de Backup" (ambiente `production`) tem:
+- **Backend** (Application): repositório `projetoswmfa/trilan-backup-automation`, branch `isaque`, caminho `/server/api`, build **Railpack**, auto-deploy. Variáveis de ambiente (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`...) ficam na aba Environment do Application, não em `.env` do repositório. Bind mount `/opt/trilan/backups` -> `/data/backups`.
+- **Frontend** (Application): mesmo repositório e branch, caminho `/server/dashboard`, Railpack, auto-deploy, variável `VITE_API_URL`.
+- Um **Postgres do próprio Dokploy** (serviço `sistema-de-backup-database-…`); o `DATABASE_URL` do Backend aponta para ele pelo nome interno. O nome interno de qualquer serviço do Dokploy é o `appName` dele.
+- Cada push na `isaque` redeploya Backend e Frontend. **Alterar `docker-compose.yml` não muda a produção**; um serviço novo precisa ser criado no Dokploy como Application novo, com as variáveis, o volume e o endereço interno ajustados lá. Os compose servem ao ambiente local (`docker-compose.local.yml`) e como referência dos serviços.
+- **Acesso (só para o Claude; nunca passar ao Gemini):** o endereço do painel, o modo de login e onde estão as credenciais ficam em `CLAUDE.local.md` (só nesta máquina, fora do git). Consultar (GET) é livre; criar/editar Application, variáveis ou disparar deploy só a pedido do usuário. Nunca imprimir valores de variáveis nem senhas, e nunca copiar credenciais para arquivos versionados (este repositório é espelhado em um público).
 
 ## Publicação de versões do agente (regra fixa)
 
@@ -57,7 +66,7 @@ Depois da release, informar os links e os hashes e esperar o usuário dizer "pub
 O merge em `isaque` é o único portão da produção (cada push dispara o deploy). Antes de concluir o merge, fazer sempre:
 
 1. `git fetch` e ver o que entra: `git log isaque..<ramo> --oneline` e `git diff --stat isaque...<ramo>`.
-2. Olhar com atenção os arquivos sensíveis: `server/docker-compose*.yml` (porta 7001 e volume `pg_data`), `server/nginx/nginx.conf`, `server/api/models.py`, a parte de migrações do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, além de arquivos novos na raiz e binários.
+2. Olhar com atenção os arquivos sensíveis: `server/docker-compose*.yml` (não regem a produção, mas manter coerentes: local em `7001:7001`), `server/nginx/nginx.conf`, `server/api/models.py`, a parte de migrações do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, além de arquivos novos na raiz e binários.
 3. Procurar data com fuso nas linhas adicionadas (REGRA-001): `git diff isaque...<ramo> | grep -nE '^\+.*(datetime\.now|timezone)'`.
 4. Procurar segredos nas linhas adicionadas (chaves `sk_trilan_`, senhas, tokens, credenciais de equipamentos).
 5. Isolamento por conta (REGRA-010): toda rota nova ou alterada em `server/api/routers` recebe `ctx` (`get_contexto`) e busca Cliente/Máquina por `obter_cliente`/`obter_maquina`/`filtrar_por_conta`; procurar `verify_admin_token` e `db.query(Customer|Machine|NVR|Backup)` sem filtro de conta nas linhas adicionadas: `git diff isaque...<ramo> -- server/api/routers | grep -nE '^\+.*(verify_admin_token|db\.query\((Customer|Machine|NVR|Backup)\))'`.
@@ -75,4 +84,4 @@ O usuário não quer pedir cada etapa de novo. Quando ele pedir o merge com a He
 6. No fim, informar o resumo: o que entrou, o que foi bloqueado, links e hashes, e lembrar que o cadastro libera a versão a todos os agentes (atualizam em até 1 h) e que a senha do painel deve ser forte.
 
 
-Lição: o merge de 06/10 (`538600f`) levou `datetime.now(timezone.utc)`, compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria.
+Lição: o merge de 06/10 (`538600f`) levou `datetime.now(timezone.utc)`, compose `7005`/`pg_data_local` e arquivos soltos; o compose voltou em 13/10 (`7ec3cc4`) sem auditoria. (Obs. de 09/11/2026: a produção não lê esse arquivo, então o risco de "banco vazio" descrito na época não se aplicava; o cuidado com datas e arquivos soltos continua valendo.)

@@ -1,5 +1,6 @@
 import base64
 import binascii
+import html
 import re
 import smtplib
 import logging
@@ -35,6 +36,27 @@ ROTULO_TIPO = {
     "PABX": "PABX",
     "MIXED": "Misto",
 }
+
+
+BARRA = "═" * 58
+LINHA = "─" * 40
+
+
+def _b(texto: str) -> str:
+    """Marca o trecho como negrito (vira <b> no HTML e some no texto puro)."""
+    return f"\x01{texto}\x02"
+
+
+def _set_body(msg: EmailMessage, body: str) -> None:
+    """Define o corpo: texto puro (sem marcas) + versão HTML com os trechos em negrito."""
+    plain = body.replace("\x01", "").replace("\x02", "")
+    html_body = html.escape(body).replace("\x01", "<b>").replace("\x02", "</b>")
+    msg.set_content(plain)
+    msg.add_alternative(
+        "<html><body><div style=\"font-family:Consolas,'Courier New',monospace;font-size:13px;"
+        f'white-space:pre-wrap">{html_body}</div></body></html>',
+        subtype="html",
+    )
 
 
 def _norm_status(r: dict) -> str:
@@ -115,18 +137,16 @@ def _build_backup_section(nvr_results: List[dict], overall: str, numero: int) ->
     icon_map = {"OK": "✅", "PARCIAL": "⚠️", "PARTIAL": "⚠️", "ERRO": "❌", "ERROR": "❌", "SEM_ARQUIVOS": "ℹ️"}
 
     lines = "\n".join(
-        f"  {icon_map.get(_norm_status(r), '❓')} {r.get('nome', '?')}: "
+        f"{icon_map.get(_norm_status(r), '❓')} {r.get('nome', '?')}: "
         f"{'OK' if _norm_status(r) == 'OK' else 'Gravações OK (Backup de config. não suportado)' if _norm_status(r) == 'SEM_ARQUIVOS' else 'FALHA — ' + (_norm_status(r) or 'DESCONHECIDO')}"
         for r in nvr_results
     )
 
     return (
-        f"\n{numero}. {titulo}\n"
-        f"{'─' * 40}\n"
-        f"Backup automático de configurações\n"
-        f"Total de equipamentos: {len(nvr_results)}\n"
-        f"Status geral: {overall}\n\n"
-        f"Resultado por equipamento:\n{lines}\n"
+        f"\n{_b(f'{numero}. {titulo}')}\n"
+        f"{LINHA}\n"
+        f"Backup de configurações de todos os equipamentos:\n"
+        f"{_b('Resultado por equipamento:')}\n{lines}\n"
     )
 
 
@@ -145,7 +165,7 @@ def _build_camera_section(nvr_results: List[dict], numero: int) -> str:
         problemas: list[str] = []
 
         if not cameras and _norm_status(r) == "ERRO":
-            problemas.append("  ❌ Câmeras não verificadas (equipamento sem resposta ou falha no login)")
+            problemas.append("❌ Câmeras não verificadas (equipamento sem resposta ou falha no login)")
 
         for cam in cameras:
             total_cameras += 1
@@ -168,16 +188,16 @@ def _build_camera_section(nvr_results: List[dict], numero: int) -> str:
                 cameras_online += 1
                 if status_gravacao == "SEM_GRAVACAO":
                     cameras_online_sem_gravacao += 1
-                    problemas.append(f"  ⚠️ {cam_nome}: Online, mas sem gravação")
+                    problemas.append(f"⚠️ {cam_nome}: Online, mas sem gravação")
                 elif status_gravacao == "NAO_VERIFICADO":
-                    problemas.append(f"  ⚠️ {cam_nome}: Online, mas falhou ao verificar histórico de gravação")
+                    problemas.append(f"⚠️ {cam_nome}: Online, mas falhou ao verificar histórico de gravação")
             elif status_comunicacao == "NAO_VERIFICADO":
                 # Sem IP para o ping (ex.: câmera do Digifort só com pasta de gravação): não é queda
                 if status_gravacao == "SEM_GRAVACAO":
-                    problemas.append(f"  ⚠️ {cam_nome}: Sem gravação (comunicação não verificada)")
+                    problemas.append(f"⚠️ {cam_nome}: Sem gravação (comunicação não verificada)")
             else:
                 cameras_offline += 1
-                linha_offline = f"  ❌ {cam_nome}: Offline ({status_comunicacao})"
+                linha_offline = f"❌ {cam_nome}: ({status_comunicacao})"
                 if cam.get("offline_desde"):
                     seg, aprox = segundos_offline(cam, datetime.utcnow())
                     if seg is not None:
@@ -187,11 +207,19 @@ def _build_camera_section(nvr_results: List[dict], numero: int) -> str:
         if problemas:
             problemas_por_nvr[nvr_nome] = problemas
 
+    # Uma linha por tipo (NVR/DVR, Digifort...), no lugar de "equipamentos com câmeras"
+    contagem: dict[str, int] = {}
+    for r in cam_results:
+        t = _tipo(r) or "NVR"
+        contagem[t] = contagem.get(t, 0) + 1
+    ordem = [t for t in ORDEM_TIPOS if t in contagem] + sorted(t for t in contagem if t not in ORDEM_TIPOS)
+    linhas_tipos = "".join(f"Total de {ROTULO_TIPO.get(t, t)}: {contagem[t]}\n" for t in ordem)
+
     section = (
-        f"\n{numero}. Verificação de Câmeras dos CFTVs\n"
-        f"{'─' * 40}\n"
+        f"\n{_b(f'{numero}. Verificação de Câmeras dos CFTVs')}\n"
+        f"{LINHA}\n"
         f"Verificação das câmeras dos equipamentos compatíveis\n"
-        f"Total de equipamentos com câmeras: {len(cam_results)}\n"
+        f"{linhas_tipos}"
         f"Total de câmeras: {total_cameras}\n"
         f"Câmeras online: {cameras_online}\n"
         f"Câmeras offline: {cameras_offline}\n"
@@ -199,9 +227,9 @@ def _build_camera_section(nvr_results: List[dict], numero: int) -> str:
     )
 
     if problemas_por_nvr:
-        section += f"\nCâmeras com problemas:\n"
+        section += f"\n{_b('Câmeras com problemas:')}\n"
         for nvr_nome, probs in problemas_por_nvr.items():
-            section += f"\n  {nvr_nome}:\n"
+            section += f"\n{_b(f'{nvr_nome}:')}\n"
             section += "\n".join(probs) + "\n"
     elif total_cameras > 0:
         section += f"\n✅ Todas as câmeras estão online e gravando.\n"
@@ -366,7 +394,7 @@ def _offline_images_note(info: dict) -> str:
             f"(as demais {restantes} imagem(ns) foram enviadas em resposta a este e-mail).\n"
         )
     if info["without_image"]:
-        note += f"  {info['without_image']} câmera(s) offline sem imagem de referência cadastrada.\n"
+        note += f"{info['without_image']} câmera(s) offline sem imagem de referência cadastrada.\n"
     return note
 
 
@@ -403,15 +431,15 @@ def _send_offline_images_replies(
         reply_msg["Message-ID"] = make_msgid()
 
         body = (
-            f"{'═' * 50}\n"
+            f"{BARRA}\n"
             f"  {context_name} - Imagens de Câmeras Offline (Continuação)\n"
-            f"{'═' * 50}\n\n"
+            f"{BARRA}\n\n"
             f"📷 Imagens de referência das câmeras offline: {current_start} a {batch_end} de {total_images} em anexo.\n\n"
-            f"{'═' * 50}\n"
+            f"{BARRA}\n"
             f"  Relatório gerado automaticamente — Trilan\n"
-            f"{'═' * 50}\n"
+            f"{BARRA}\n"
         )
-        reply_msg.set_content(body)
+        _set_body(reply_msg, body)
         _attach_offline_images(reply_msg, batch)
 
         sent = _smtp_send(reply_msg, cfg, clean_recipients)
@@ -556,11 +584,10 @@ def send_backup_report(
 
     # ── Header ──
     body = (
-        f"{'═' * 50}\n"
-        f"  {machine_name} POP - {titulo}\n"
-        f"{'═' * 50}\n\n"
-        f"Máquina: {machine_name}\n"
-        f"Data e hora: {date_hora_str}\n\n"
+        f"{BARRA}\n"
+        f"{_b(f'{machine_name} POP - {titulo}')}\n"
+        f"{BARRA}\n\n"
+        f"Data e hora: {date_hora_str}\n"
         f"Serviço executado:\n"
         f"{_texto_servico(tipos)}\n\n"
     )
@@ -607,12 +634,12 @@ def send_backup_report(
 
     # ── Footer ──
     body += (
-        f"\n{'═' * 50}\n"
+        f"\n{BARRA}\n"
         f"  Relatório gerado automaticamente — Trilan\n"
-        f"{'═' * 50}\n"
+        f"{BARRA}\n"
     )
 
-    msg.set_content(body)
+    _set_body(msg, body)
 
     if attach and zip_path:
         msg.add_attachment(
@@ -725,30 +752,30 @@ def send_customer_report(
 
     # ── Cabeçalho ──
     body = (
-        f"{'═' * 50}\n"
-        f"  {customer_name} - {titulo}\n"
-        f"{'═' * 50}\n\n"
-        f"Cliente: {customer_name}\n"
+        f"{BARRA}\n"
+        f"{_b(f'{customer_name} - {titulo}')}\n"
+        f"{BARRA}\n\n"
         f"Data e hora: {date_hora_str}\n"
-        f"Tipo da rodada: {tipo}\n\n"
         f"Serviço executado:\n"
-        f"{_texto_servico(tipos)}\n\n"
+        f"{_texto_servico(tipos)}\n"
     )
 
-    # ── Resumo por máquina ──
-    body += (
-        f"Resumo ({len(reported)}/{len(entries)} máquina(s) reportaram)\n"
-        f"{'─' * 40}\n"
-    )
-    body += "\n".join(_machine_summary_line(e) for e in entries) + "\n"
+    # ── Só avisa das máquinas que não reportaram ──
+    faltando = [e.get("name") or "?" for e in entries if not e.get("status")]
+    if faltando:
+        body += (
+            f"\n❌ Sem retorno ({len(reported)}/{len(entries)} máquina(s) reportaram): "
+            f"{', '.join(faltando)}\n"
+        )
 
     # ── Bloco por máquina que reportou ──
     for e in reported:
         nvr_results = e.get("nvr_results") or []
+        nome_maquina = e.get("name") or "?"
         body += (
-            f"\n\n{'═' * 50}\n"
-            f"  Máquina: {e.get('name') or '?'}\n"
-            f"{'═' * 50}\n"
+            f"\n{BARRA}\n"
+            f"{_b(f'Máquina: {nome_maquina}')}\n"
+            f"{BARRA}\n"
         )
         numero = 1
         if any(_tem_cameras(r) for r in nvr_results):
@@ -781,12 +808,12 @@ def send_customer_report(
 
     # ── Rodapé ──
     body += (
-        f"\n{'═' * 50}\n"
+        f"\n{BARRA}\n"
         f"  Relatório gerado automaticamente — Trilan\n"
-        f"{'═' * 50}\n"
+        f"{BARRA}\n"
     )
 
-    msg.set_content(body)
+    _set_body(msg, body)
 
     all_attachments = offline_images.get("attachments") or []
     first_batch = all_attachments[:MAX_OFFLINE_IMAGES]

@@ -1,4 +1,5 @@
-import { Plus, Trash2, Video } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, Plus, Trash2, Video } from "lucide-react";
 import { NVR } from "../../../../api/types";
 import { RtspResult } from "../hooks/useRtspTest";
 import { safeFileName } from "../utils";
@@ -22,15 +23,32 @@ export default function CamerasSection({
   onDownloadImages: () => void;
   onTestAll: () => void;
 }) {
+  // Lista recolhida por padrão; abre sozinha ao iniciar um teste para mostrar o andamento.
+  const [aberta, setAberta] = useState(false);
+  useEffect(() => {
+    if (isTesting) setAberta(true);
+  }, [isTesting]);
+
   return (
     <div style={{ marginBottom: 24, marginTop: 24 }}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="section-title mb-0">
+      <div className={`flex items-center justify-between ${aberta ? "mb-4" : ""}`}>
+        <button
+          type="button"
+          aria-expanded={aberta}
+          onClick={() => setAberta((v) => !v)}
+          className="section-title mb-0"
+          style={{ background: "none", border: "none", padding: 0, margin: 0, cursor: "pointer", color: "inherit", font: "inherit", textAlign: "left" }}
+        >
+          {aberta ? (
+            <ChevronDown size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+          ) : (
+            <ChevronRight size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+          )}
           <Video size={15} /> Câmeras da Máquina (Teste RTSP)
           <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
             {cameras.length}
           </span>
-        </div>
+        </button>
         <div className="flex gap-2">
           <input type="file" accept=".csv,.xls,.xlsx" ref={fileInputRef} style={{ display: 'none' }} onChange={onImportFile} />
           <button className="btn btn-secondary" style={{ color: "var(--danger)" }} onClick={onDeleteAll} disabled={loading || isTesting}>
@@ -51,6 +69,7 @@ export default function CamerasSection({
         </div>
       </div>
 
+      {aberta && (
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -107,6 +126,7 @@ export default function CamerasSection({
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
