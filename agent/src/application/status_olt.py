@@ -62,7 +62,7 @@ def coletar_status_olts(
                     {"ip": ip, "erro": "IP, usuario ou senha nao informados"}
                     if not ip or not usuario or not senha else huawei_fn(ip, usuario, senha, porta)
                 )
-                resultado.append({"nome": eq.get("name"), "olts": [{"nome": eq.get("name"), **status}]})
+                resultado.append({"nome": eq.get("name"), "olts": [{"nome": eq.get("name"), "fabricante": "HUAWEI", **status}]})
                 continue
             if "unm" not in fabricante:
                 continue

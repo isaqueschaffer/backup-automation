@@ -1088,6 +1088,29 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-11] — Alarmes do Defense (Intelbras) movidos para legacy/
+
+**Alteração:** retirada "por enquanto" da funcionalidade que lia as centrais de alarme Intelbras de um
+equipamento DEFENSE (`/api/alarm-centrals`) e mostrava status/partições num modal do dashboard. Os quatro
+arquivos (`status_alarmes_defense.py`, `defense_alarmes.py`, `test_defense_alarmes.py`, `AlarmesModal.tsx`)
+foram movidos sem alteração para `legacy/defense_alarmes/` (com um README explicando como reativar); os
+pontos de ligação que continuavam ativos foram apenas removidos (não movidos): a thread `_alarmes_loop` e
+seu start em `agent/service.py`, `send_status_alarmes` em `api_client.py`, a rota `POST
+/defense/alarmes/status` (e o import de `StatusAlarmeReport`) em `routers/agent.py`, a rota `GET
+/{id}/alarmes` em `routers/equipamentos.py`, os schemas `EquipamentoStatusAlarme`/`StatusAlarmeReport`, e no
+dashboard o botão "Alarmes" do `EqCard`, o campo "Porta dos Alarmes" do `EquipamentoFormModal` e os tipos
+`AlarmPartition`/`AlarmCentral`/`AlarmeStatusResponse`/`porta_alarme`. A coluna `last_alarm_status` em `NVR`
+fica no banco sem uso (migração só é aditiva). O cadastro e o backup de equipamentos DEFENSE continuam
+normais; só a tela/coleta de alarmes saiu.
+**Arquivos:** legacy/defense_alarmes/ (novo), agent/service.py, agent/src/application/api_client.py,
+server/api/routers/agent.py, server/api/routers/equipamentos.py, server/api/schemas.py,
+server/dashboard/src/pages/Machines/MachineDetail/components/EqCard.tsx, index.tsx,
+EquipamentoFormModal.tsx, server/dashboard/src/pages/Machines/MachineDetail/utils.ts,
+server/dashboard/src/api/types.ts, PROJECT_SPEC.md
+**Breaking Change:** Não (a coluna do banco é mantida; agentes antigos que ainda enviarem o status antigo
+recebem 404 na rota removida, sem afetar o resto do ping/backup).
+**Branch:** helena
+
 ### [2026-11-06] — Merge auditado do ramo `helena` (66c1dc3): notificações do painel
 
 **Tipo:** merge real (`git merge --no-ff`), sem conflitos; só servidor e painel (nenhum arquivo em `agent/`), então sem nova versão do agente, build ou cadastro.

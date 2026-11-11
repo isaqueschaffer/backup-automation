@@ -69,7 +69,7 @@ def parse_ont_summary(texto: str) -> dict:
     for id_ont, estado, _up, _down, causa in _RE_ESTADO_ONT.findall(texto):
         onts[int(id_ont)] = {"estado": _estado_ont(estado, causa)}
     for id_ont, serial, tipo, distancia, rx, tx, nome in _RE_SN_ONT.findall(texto):
-        item = onts.setdefault(int(id_ont), {"estado": "DESCONHECIDO"})
+        item = onts.setdefault(int(id_ont), {"estado": "OFFLINE"})
         item["serial"] = serial
         if tipo != "-":
             item["tipo"] = tipo
