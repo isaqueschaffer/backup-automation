@@ -21,7 +21,4 @@ RUN mkdir -p /app/data && chmod 700 /app/data
 COPY agent.py service_linux.py /app/
 COPY src/ /app/src/
 # Mount /app/agent.conf securely; never bake credentials into the image.
-# Liga o pacote do GHCR ao repositório público (página do pacote e permissões).
-LABEL org.opencontainers.image.source="https://github.com/isaqueschaffer/backup-automation" \
-      org.opencontainers.image.description="Trilan Agent - piloto RouterOS ARMv7 (so heartbeat; backups desligados)"
 CMD ["python", "-u", "service_linux.py"]

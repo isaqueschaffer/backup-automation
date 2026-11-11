@@ -1101,10 +1101,11 @@ falhava no `pip install` (sem `gcc` e sem `make`: o PyPI não tem wheel ARMv7 de
 `Pillow` e `cffi`). Passou a ter dois estágios (compilação no `builder`, imagem final só com o resultado e
 `libffi8`/`libjpeg62-turbo`/`zlib1g`) e ganhou `agent/.dockerignore`. **Resultado:** imagem `linux/arm/v7` de ~60 MB;
 teste emulado (`armv7l`) importa todas as dependências e os módulos do agente. Build sem cache leva ~1h40 sob QEMU.
-**Publicado:** `ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto1`, para o colega subir no RB4011 de teste. **Não
+**Imagem:** `agent/mikrotik/trilan-agent-armv7.tar` (60,2 MB, SHA-256 `35fbdde5…3433f`), versionada no repositório
+para o colega subir no RB4011 de teste. **Não
 validado:** execução contra o servidor, importação no RouterOS, desempenho no roteador, SSH do `paramiko` 3.4.0 com as
 OLTs Huawei antigas. **Docs:** `agent/DOCUMENTACAO_AGENTE.md` (funcionamento completo do agente Windows e do piloto) e
-seção em português no `agent/README_MIKROTIK.md` (build, publicação e configuração do teste).
+seção em português no `agent/README_MIKROTIK.md` (build, como gerar a imagem e configuração do teste).
 
 ### [2026-11-11] — Merge com a Helena e versão 1.1.43 do agente
 

@@ -63,25 +63,24 @@ compiladas, usar um builder ARM nativo ou o índice piwheels (de terceiros; não
 RB4011. O fuso do container: o agendamento usa `datetime.now()`; sem `TZ` definido o container fica em UTC (irrelevante
 enquanto `TRILAN_ENABLE_BACKUPS=false`, mas definir `TZ=America/Sao_Paulo` antes de ligar os backups).
 
-### Imagem publicada
+### Imagem no repositório
 
-`ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto1` (GitHub Container Registry, ligada a
-`isaqueschaffer/backup-automation`). Pelo RouterOS, com registry `https://ghcr.io`, basta adicionar o container por
-`remote-image`. Sem acesso ao registry, use o `.tar` do `docker save` (`/container add file=...`).
+`agent/mikrotik/trilan-agent-armv7.tar` (60,2 MB, `docker save` de `trilan-agent:armv7`, `linux/arm/v7`), versionada
+como arquivo comum no ramo `isaque`. SHA-256:
+`35fbdde53c9e648258923fafd089cb9c20c35e4fd2033072c698525ac6d3433f`. No RouterOS: enviar o `.tar` ao roteador e
+`/container add file=trilan-agent-armv7.tar ...`.
 
-### Como gerar e publicar de novo
+### Como gerar de novo
 
 ```powershell
 cd agent
 docker buildx build --platform linux/arm/v7 -f Dockerfile.mikrotik -t trilan-agent:armv7 --load .
 docker image inspect trilan-agent:armv7 --format '{{.Os}}/{{.Architecture}}/{{.Variant}}'   # linux/arm/v7
-docker save --platform linux/arm/v7 -o dist/trilan-agent-armv7.tar trilan-agent:armv7        # arquivo para o RouterOS
-docker tag trilan-agent:armv7 ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto<N>
-docker push ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto<N>
+docker save --platform linux/arm/v7 -o mikrotik/trilan-agent-armv7.tar trilan-agent:armv7
 ```
 
-O push exige o login no GHCR com permissão `write:packages` (`gh auth refresh -h github.com -s write:packages` e
-depois `gh auth token | docker login ghcr.io -u isaqueschaffer --password-stdin`).
+Depois, commit e push do `.tar` como qualquer arquivo. O GitHub recusa arquivo acima de 100 MB; se a imagem crescer
+até lá, passar a usar Git LFS ou um registry.
 
 ### Configuração para o teste
 

@@ -320,9 +320,10 @@ RAM, ~479 MB livres), no lugar de um PC Windows no cliente. A versão Windows n�
 | `requirements-linux.txt` | Dependências sem as de Windows (`pypiwin32`, `pystray`, `GPUtil`) e ainda sem o ffmpeg. |
 | `Dockerfile.mikrotik` | Imagem `linux/arm/v7` em dois estágios (compila as bibliotecas e leva só o resultado). |
 | `.dockerignore` | Tira `venv/`, `dist/`, logs e o `agent.conf` do contexto do build. |
-| `README_MIKROTIK.md` | Limites do piloto, build validado, publicação no GHCR e configuração do teste. |
+| `README_MIKROTIK.md` | Limites do piloto, build validado, como gerar a imagem e configuração do teste. |
+| `mikrotik/trilan-agent-armv7.tar` | A imagem pronta (`docker save`, ~60 MB) para importar no RouterOS. |
 
-Imagem publicada: `ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto1` (~60 MB). A configuração entra por um
+Imagem: `agent/mikrotik/trilan-agent-armv7.tar` (~60 MB). A configuração entra por um
 `agent.conf` montado em `/app/agent.conf`; nada de credencial dentro da imagem.
 
 O piloto **só valida a presença** (ping e online no painel). Backups (`TRILAN_ENABLE_BACKUPS=false` por padrão),
