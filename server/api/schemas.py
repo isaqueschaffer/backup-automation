@@ -105,6 +105,9 @@ class NVRCameraConfigItem(BaseModel):
     password: Optional[str] = None
     modelo: str = "Hikvision"
     canal_rtsp: Optional[int] = Field(None, ge=1, le=512)
+    # Vínculo explícito com a subpasta de gravação (coluna "Diretório de gravação" do export do Digifort);
+    # usado quando o nome da pasta não bate com o nome da câmera (ver vincular_cameras_as_pastas no agente).
+    pasta_gravacao: Optional[str] = None
 
 
 class NVRCameraBulkImport(BaseModel):

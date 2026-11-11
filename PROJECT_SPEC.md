@@ -1092,6 +1092,29 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-11] — Importação do Digifort: pasta de gravação por câmera e raiz automática
+
+**Alteração:** a importação da planilha do Digifort (Galeria e formulário do equipamento, mesma função
+`rowsToCameras`) agora lê a coluna "Diretório de gravação" / "pasta de gravação" quando presente. Para cada
+câmera, o último trecho do caminho (qualquer nome: número como "34" ou texto longo como "1 ANDAR - ELEVADOR
+B") é gravado como vínculo explícito (`pasta_gravacao` da `NVRCamera`, enviado por `cameras/import` no campo
+`pasta_gravacao` do item) — assim o agente casa a pasta de gravação com a câmera mesmo que o nome dela não
+tenha nada a ver com o nome da pasta (ex.: câmera "44" com pasta "SALA ADM"), sem depender do
+aprendizado automático por nome igual (`aprender_pastas` em `galeria_vms.py`, que só generaliza quando
+nome da câmera == nome da pasta). A raiz comum dos caminhos da coluna (ex.: "F:\GRAVACAO DIGIFORT") passa a
+preencher sozinho o campo "Local de gravação das câmeras" do formulário do Digifort quando o usuário
+confirma a planilha ("Usar esta planilha" no campo, ou "Importar câmeras" na Galeria de um equipamento
+existente): não precisa mais digitar o caminho manualmente quando a planilha já trouxer essa informação.
+**Arquivos:** server/api/schemas.py (`NVRCameraConfigItem.pasta_gravacao`), server/api/routers/equipamentos.py
+(`import_cameras` grava `pasta_gravacao` quando enviado), server/dashboard/.../hooks/useCameraImport.ts
+(`raizGravacaoDaPlanilha`, `pastaGravacaoDoCaminho`, `raizComumCaminhos`, coluna detectada em
+`rowsToCameras`), server/dashboard/.../planilhaVms.ts, server/dashboard/.../components/
+PlanilhaCamerasCampo.tsx, server/dashboard/.../components/NVRCamerasGalleryModal.tsx, server/dashboard/.../
+index.tsx (`onPastaGravacoesDetectada` grava a raiz no `config_extra` do equipamento ao confirmar import).
+**Breaking Change:** Não (campo novo opcional; comportamento antigo mantido quando a planilha não tem a
+coluna).
+**Branch:** helena
+
 ### [2026-11-11] — Alarmes do Defense (Intelbras) movidos para legacy/
 
 **Alteração:** retirada "por enquanto" da funcionalidade que lia as centrais de alarme Intelbras de um

@@ -606,6 +606,8 @@ def import_cameras(
             camera.nome = item.nome
         if item.canal_rtsp is not None:
             camera.canal_rtsp = item.canal_rtsp
+        if item.pasta_gravacao:
+            camera.pasta_gravacao = item.pasta_gravacao
         camera.ip = item.ip
         camera.username = item.username or "admin"
         camera.modelo = item.modelo or "Hikvision"

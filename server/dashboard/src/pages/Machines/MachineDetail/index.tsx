@@ -528,6 +528,13 @@ export default function MachineDetail() {
           nvrId={showNVRCamerasModal.nvrId}
           nvrName={showNVRCamerasModal.nvrName}
           eqTipo={showNVRCamerasModal.eqTipo}
+          onPastaGravacoesDetectada={async (raiz) => {
+            const atual = equipamentos.find(e => e.id === showNVRCamerasModal.nvrId);
+            await updateEquipamento(id!, showNVRCamerasModal.nvrId, {
+              config_extra: { ...(atual?.config_extra || {}), pasta_gravacoes: raiz },
+            });
+            load(true);
+          }}
           onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "", eqTipo: "NVR" })}
         />
       )}

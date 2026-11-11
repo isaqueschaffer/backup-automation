@@ -107,6 +107,8 @@ export interface CameraLidaPlanilha {
   modelo: string;
   senha: string;
   situacao: "nova" | "atualiza";
+  // Subpasta de gravação desta câmera (coluna "Diretório de gravação" do export do Digifort)
+  pastaGravacao?: string;
 }
 
 // Planilha CSV/XLSX já lida e interpretada, à espera de ser enviada ao equipamento
@@ -121,6 +123,8 @@ export interface PlanilhaPendente {
   exemploNome?: string;
   exemploDescricao?: string;
   cams: CameraLidaPlanilha[];
+  // Raiz comum dos caminhos da coluna "Diretório de gravação" (vazio se a planilha não tiver essa coluna)
+  raizGravacoes?: string;
 }
 
 export interface PlanilhaSalvaInfo {
