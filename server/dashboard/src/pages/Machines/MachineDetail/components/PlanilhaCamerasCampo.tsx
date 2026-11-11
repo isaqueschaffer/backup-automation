@@ -105,7 +105,14 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
           info={`${previa.cams.length} câmera(s) identificada(s)`}
           camerasLidas={previa.cams}
           confirmarLabel="Usar esta planilha"
-          onConfirmar={() => { setEqForm(f => ({ ...f, planilhaNova: previa })); setPrevia(null); }}
+          onConfirmar={() => {
+            setEqForm(f => ({
+              ...f,
+              planilhaNova: previa,
+              ...(previa.raizGravacoes ? { pasta_gravacoes: previa.raizGravacoes } : {}),
+            }));
+            setPrevia(null);
+          }}
           onClose={() => setPrevia(null)}
           temOpcaoNomeDescricao={previa.temOpcaoNomeDescricao}
           opcaoNome={previa.opcaoNome}

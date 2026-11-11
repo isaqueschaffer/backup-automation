@@ -265,7 +265,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Porta da API HTTPS</label>
               <input
@@ -275,19 +275,6 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
                 value={eqForm.porta_api ?? ""}
                 onChange={e => setEqForm({ ...eqForm, porta_api: e.target.value })}
               />
-            </div>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Porta dos Alarmes</label>
-              <input
-                className="form-input"
-                type="number"
-                placeholder="3001"
-                value={eqForm.porta_alarme ?? ""}
-                onChange={e => setEqForm({ ...eqForm, porta_alarme: e.target.value })}
-              />
-              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                Das centrais de alarme Intelbras (botão "Alarmes"). Usa o mesmo usuário e senha da API.
-              </span>
             </div>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Usuário da API *</label>

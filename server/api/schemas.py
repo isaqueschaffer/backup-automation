@@ -105,6 +105,9 @@ class NVRCameraConfigItem(BaseModel):
     password: Optional[str] = None
     modelo: str = "Hikvision"
     canal_rtsp: Optional[int] = Field(None, ge=1, le=512)
+    # Vínculo explícito com a subpasta de gravação (coluna "Diretório de gravação" do export do Digifort);
+    # usado quando o nome da pasta não bate com o nome da câmera (ver vincular_cameras_as_pastas no agente).
+    pasta_gravacao: Optional[str] = None
 
 
 class NVRCameraBulkImport(BaseModel):
@@ -353,17 +356,6 @@ class EquipamentoStatusOlt(BaseModel):
 
 class StatusOltReport(BaseModel):
     equipamentos: List[EquipamentoStatusOlt] = Field(default_factory=list, max_length=50)
-
-
-class EquipamentoStatusAlarme(BaseModel):
-    nome: str
-    ip: Optional[str] = None
-    erro: Optional[str] = None
-    alarmes: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)
-
-
-class StatusAlarmeReport(BaseModel):
-    equipamentos: List[EquipamentoStatusAlarme] = Field(default_factory=list, max_length=50)
 
 
 # ─────────────────────────────────────────────

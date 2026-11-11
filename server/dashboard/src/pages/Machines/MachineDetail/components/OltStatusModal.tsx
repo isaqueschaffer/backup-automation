@@ -39,6 +39,7 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
   const temSerial = (olt.onus || []).some(o => o.tipo || o.serial);
   const temMac = (olt.onus || []).some(o => o.mac);
   const temOptico = (olt.onus || []).some(o => o.sinal_olt_dbm != null || o.sinal_onu_dbm != null);
+  const ehHuawei = (olt.fabricante || "").toUpperCase() === "HUAWEI";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -154,7 +155,7 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
                     <th>Nome</th><th>ONU (slot/PON/nº)</th>
                     {temSerial && <th>Tipo</th>}
                     {temSerial && <th>Serial</th>}
-                    {temOptico && <th>Sinal na OLT</th>}
+                    {temOptico && !ehHuawei && <th>Sinal na OLT</th>}
                     {temOptico && <th>Sinal na ONU</th>}
                     <th>Estado</th>
                   </tr>
@@ -166,7 +167,7 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
                       <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.indice}</td>
                       {temSerial && <td>{o.tipo ?? "—"}</td>}
                       {temSerial && <td style={{ fontFamily: "monospace", fontSize: 12 }}>{o.serial ?? "—"}</td>}
-                      {temOptico && (
+                      {temOptico && !ehHuawei && (
                         <td style={{ color: o.qualidade === "RUIM" ? "var(--err)" : o.qualidade === "ATENCAO" ? "var(--warn)" : undefined }}>
                           {o.sinal_olt_dbm != null ? `${o.sinal_olt_dbm.toFixed(2)} dBm` : "—"}
                         </td>

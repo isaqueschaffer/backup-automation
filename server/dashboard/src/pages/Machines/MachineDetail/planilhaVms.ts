@@ -7,6 +7,7 @@ import {
   linhaDoCabecalho,
   linhasParaTexto,
   planilhaTemNomeEDescricao,
+  raizGravacaoDaPlanilha,
   readRowsFromFile,
   rowsToCameras,
 } from "./hooks/useCameraImport";
@@ -19,7 +20,10 @@ function marcarSituacao(rows: unknown[][], opcao: DigifortNameOption, existentes
     const ip = (c.ip || "").trim();
     const jaExiste = existentes.some(e =>
       (nome !== "" && (e.nome || "").trim().toLowerCase() === nome) || (ip !== "" && (e.ip || "").trim() === ip));
-    return { nome: c.name, ip: c.ip, modelo: c.modelo, senha: c.password, situacao: jaExiste ? "atualiza" : "nova" };
+    return {
+      nome: c.name, ip: c.ip, modelo: c.modelo, senha: c.password,
+      situacao: jaExiste ? "atualiza" : "nova", pastaGravacao: c.pastaGravacao,
+    };
   });
 }
 
@@ -42,6 +46,7 @@ export async function lerPlanilhaVms(file: File, existentes: NvrCamera[]): Promi
     exemploNome: nome,
     exemploDescricao: descricao,
     cams,
+    raizGravacoes: raizGravacaoDaPlanilha(rows),
   };
 }
 
@@ -53,7 +58,10 @@ export function aplicarOpcaoNome(p: PlanilhaPendente, opcao: DigifortNameOption,
 /** Envia a planilha à Galeria do equipamento: importa as câmeras e guarda a planilha (mesmos endpoints da Galeria). */
 export async function enviarPlanilhaVms(machineId: string, nvrId: string, p: PlanilhaPendente): Promise<void> {
   await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/import`, {
-    cameras: p.cams.map(c => ({ nome: c.nome, ip: c.ip, username: "admin", password: c.senha, modelo: c.modelo })),
+    cameras: p.cams.map(c => ({
+      nome: c.nome, ip: c.ip, username: "admin", password: c.senha, modelo: c.modelo,
+      pasta_gravacao: c.pastaGravacao || undefined,
+    })),
   });
   await api.put(`/machines/${machineId}/equipamentos/${nvrId}/planilha`, {
     nome_arquivo: p.nomeArquivo,

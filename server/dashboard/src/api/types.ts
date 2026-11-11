@@ -56,7 +56,6 @@ export interface EquipamentoConfig {
   marca?: string;
   modelo?: string;
   porta_api?: number;
-  porta_alarme?: number;
   olts?: string;
   telnet_usuario?: string;
   telnet_senha_definida?: boolean;
@@ -85,7 +84,6 @@ export interface EqForm {
   caminho_log_csv?: string;
   pasta_gravacoes?: string;
   porta_api?: number | string;
-  porta_alarme?: number | string;
   olts?: string;
   telnet_usuario?: string;
   telnet_senha?: string;
@@ -109,6 +107,8 @@ export interface CameraLidaPlanilha {
   modelo: string;
   senha: string;
   situacao: "nova" | "atualiza";
+  // Subpasta de gravação desta câmera (coluna "Diretório de gravação" do export do Digifort)
+  pastaGravacao?: string;
 }
 
 // Planilha CSV/XLSX já lida e interpretada, à espera de ser enviada ao equipamento
@@ -123,6 +123,8 @@ export interface PlanilhaPendente {
   exemploNome?: string;
   exemploDescricao?: string;
   cams: CameraLidaPlanilha[];
+  // Raiz comum dos caminhos da coluna "Diretório de gravação" (vazio se a planilha não tiver essa coluna)
+  raizGravacoes?: string;
 }
 
 export interface PlanilhaSalvaInfo {
@@ -453,6 +455,7 @@ export interface OltStatus {
   nome: string;
   ip: string;
   erro?: string;
+  fabricante?: string | null;
   coletado_em?: string;
   firmware?: string | null;
   hardware?: string | null;
@@ -472,25 +475,6 @@ export interface OltStatusResponse {
   atualizado_em: string | null;
   olts: OltStatus[];
   licenca?: { inicio: string | null; fim: string; dias_restantes: number } | null;
-}
-
-// ─── Alarmes (DEFENSE) ────────────────────────────────────────────────────
-export interface AlarmPartition {
-  nome: string;
-  armada: boolean;
-}
-
-export interface AlarmCentral {
-  nome: string;
-  status?: number | null;
-  particoes: AlarmPartition[];
-}
-
-export interface AlarmeStatusResponse {
-  atualizado_em: string | null;
-  ip?: string | null;
-  erro?: string | null;
-  alarmes: AlarmCentral[];
 }
 
 // ─── Notificações ───────────────────────────────────────────────────────────

@@ -1092,6 +1092,52 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-11] — Importação do Digifort: pasta de gravação por câmera e raiz automática
+
+**Alteração:** a importação da planilha do Digifort (Galeria e formulário do equipamento, mesma função
+`rowsToCameras`) agora lê a coluna "Diretório de gravação" / "pasta de gravação" quando presente. Para cada
+câmera, o último trecho do caminho (qualquer nome: número como "34" ou texto longo como "1 ANDAR - ELEVADOR
+B") é gravado como vínculo explícito (`pasta_gravacao` da `NVRCamera`, enviado por `cameras/import` no campo
+`pasta_gravacao` do item) — assim o agente casa a pasta de gravação com a câmera mesmo que o nome dela não
+tenha nada a ver com o nome da pasta (ex.: câmera "44" com pasta "SALA ADM"), sem depender do
+aprendizado automático por nome igual (`aprender_pastas` em `galeria_vms.py`, que só generaliza quando
+nome da câmera == nome da pasta). A raiz comum dos caminhos da coluna (ex.: "F:\GRAVACAO DIGIFORT") passa a
+preencher sozinho o campo "Local de gravação das câmeras" do formulário do Digifort quando o usuário
+confirma a planilha ("Usar esta planilha" no campo, ou "Importar câmeras" na Galeria de um equipamento
+existente): não precisa mais digitar o caminho manualmente quando a planilha já trouxer essa informação.
+**Arquivos:** server/api/schemas.py (`NVRCameraConfigItem.pasta_gravacao`), server/api/routers/equipamentos.py
+(`import_cameras` grava `pasta_gravacao` quando enviado), server/dashboard/.../hooks/useCameraImport.ts
+(`raizGravacaoDaPlanilha`, `pastaGravacaoDoCaminho`, `raizComumCaminhos`, coluna detectada em
+`rowsToCameras`), server/dashboard/.../planilhaVms.ts, server/dashboard/.../components/
+PlanilhaCamerasCampo.tsx, server/dashboard/.../components/NVRCamerasGalleryModal.tsx, server/dashboard/.../
+index.tsx (`onPastaGravacoesDetectada` grava a raiz no `config_extra` do equipamento ao confirmar import).
+**Breaking Change:** Não (campo novo opcional; comportamento antigo mantido quando a planilha não tem a
+coluna).
+**Branch:** helena
+
+### [2026-11-11] — Alarmes do Defense (Intelbras) movidos para legacy/
+
+**Alteração:** retirada "por enquanto" da funcionalidade que lia as centrais de alarme Intelbras de um
+equipamento DEFENSE (`/api/alarm-centrals`) e mostrava status/partições num modal do dashboard. Os quatro
+arquivos (`status_alarmes_defense.py`, `defense_alarmes.py`, `test_defense_alarmes.py`, `AlarmesModal.tsx`)
+foram movidos sem alteração para `legacy/defense_alarmes/` (com um README explicando como reativar); os
+pontos de ligação que continuavam ativos foram apenas removidos (não movidos): a thread `_alarmes_loop` e
+seu start em `agent/service.py`, `send_status_alarmes` em `api_client.py`, a rota `POST
+/defense/alarmes/status` (e o import de `StatusAlarmeReport`) em `routers/agent.py`, a rota `GET
+/{id}/alarmes` em `routers/equipamentos.py`, os schemas `EquipamentoStatusAlarme`/`StatusAlarmeReport`, e no
+dashboard o botão "Alarmes" do `EqCard`, o campo "Porta dos Alarmes" do `EquipamentoFormModal` e os tipos
+`AlarmPartition`/`AlarmCentral`/`AlarmeStatusResponse`/`porta_alarme`. A coluna `last_alarm_status` em `NVR`
+fica no banco sem uso (migração só é aditiva). O cadastro e o backup de equipamentos DEFENSE continuam
+normais; só a tela/coleta de alarmes saiu.
+**Arquivos:** legacy/defense_alarmes/ (novo), agent/service.py, agent/src/application/api_client.py,
+server/api/routers/agent.py, server/api/routers/equipamentos.py, server/api/schemas.py,
+server/dashboard/src/pages/Machines/MachineDetail/components/EqCard.tsx, index.tsx,
+EquipamentoFormModal.tsx, server/dashboard/src/pages/Machines/MachineDetail/utils.ts,
+server/dashboard/src/api/types.ts, PROJECT_SPEC.md
+**Breaking Change:** Não (a coluna do banco é mantida; agentes antigos que ainda enviarem o status antigo
+recebem 404 na rota removida, sem afetar o resto do ping/backup).
+**Branch:** helena
+
 ### [2026-11-10] — WhatsApp retirado (solução arquivada)
 
 **Decisão do usuário:** tirar tudo o que foi feito para o WhatsApp e guardar a solução documentada, para uso futuro. **Feito:** revertido o commit `9804e4c`: ponte `server/whatsapp/`, `whatsapp_service`, `whatsapp_relatorios`, `whatsapp_numero`, `routers/whatsapp_router.py`, `tests/test_whatsapp.py`; campos `whatsapp_to`/`whatsapp_contato` nos models, schemas e rotas; envios por WhatsApp em `agent.py`, `backups.py`, `backup_runs.py`, `notificacoes.py` e `avisos_conta.py`; variáveis `WHATSAPP_*` no `config.py` e nos `.env*.example`; serviço e volume nos dois compose; cartão em Configurações e campos do painel. O e-mail volta a ser o único canal, como antes de 09/11. **Mantido:** `server/dashboard/.dockerignore` (correção do build, sem relação com o WhatsApp). **Documentação:** `archive/whatsapp/README.md` (como funcionava, decisões, riscos e como trazer de volta).
