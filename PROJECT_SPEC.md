@@ -1092,6 +1092,10 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-11] — Merge com a Helena e versão 1.1.43 do agente
+
+**Incorporado (ramo `helena`, `f7cca54`):** importação do Digifort com pasta de gravação por câmera e raiz automática; alarmes do Defense movidos para `legacy/defense_alarmes/` (retirada pedida na entrada da Helena; a coluna `nvrs.last_alarm_status` permanece sem uso); OLT Huawei: campo `fabricante` no status e ONT sem estado de `DESCONHECIDO` para `OFFLINE`. **Auditoria:** sem data com fuso, sem segredo novo, nenhuma rota nova sem `ctx`/filtro de conta; compose, nginx, models, migrações, requirements, build.ps1, installer.iss e `.env` intocados. **Bloqueado:** nada. **Observação:** o dashboard continua usando `navarro@123` como senha padrão de câmera (IC-012, já aberto). **Versão:** agente 1.1.43 (agente mexeu em `service.py`, `api_client.py`, `status_olt.py`, `huawei_status.py`).
+
 ### [2026-11-11] — Importação do Digifort: pasta de gravação por câmera e raiz automática
 
 **Alteração:** a importação da planilha do Digifort (Galeria e formulário do equipamento, mesma função
