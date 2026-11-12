@@ -246,6 +246,7 @@ export interface Machine {
   restart_requested?: boolean;
   backup_requested?: boolean;
   telemetry?: Record<string, any> | null;
+  agent_version?: string | null; // informada pelo agente no ping (>= 1.1.49)
   api_key?: string; // only on create/rotate
   // Campos calculados no servidor (fonte única da verdade para status online)
   is_online?: boolean;

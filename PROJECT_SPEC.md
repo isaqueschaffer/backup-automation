@@ -656,7 +656,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | Metodo | Path | Descricao |
 |---|---|---|
 | GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente (`client_name` = nome da máquina; `customer_name` = nome do Cliente da máquina, opcional) |
-| POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup`. A telemetria do agente >= 1.1.34 traz `utc_offset_min` (fuso local em minutos, ex.: -180), usado na recuperação de backup perdido (inteiro de -720 a 840; ausente ou inválido = -180) |
+| POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup`. A telemetria do agente >= 1.1.34 traz `utc_offset_min` (fuso local em minutos, ex.: -180), usado na recuperação de backup perdido (inteiro de -720 a 840; ausente ou inválido = -180). O agente >= 1.1.49 manda `versao` (ex.: `"1.1.49"`), gravada em `clients.agent_version` (cortada em 20 caracteres; ausente = mantém a anterior) e devolvida como `agent_version` nas respostas de máquina |
 | POST | `/api/v1/agent/logs` | Agente envia lote (até 100) de avisos/erros e marcos do backup: `{"logs": [{"nivel": "INFO\|WARNING\|ERROR", "mensagem", "equipamento", "segundos_atras"}]}`; o servidor calcula `created_at` (REGRA-005); aceita também conta bloqueada |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup. Equipamento com `status` ERRO e `cameras` nulo ou vazio (agente >= 1.1.34 manda `null` quando o equipamento não informou câmeras; os antigos mandam `[]`) não apaga `last_recording_status`: as câmeras conhecidas ficam com `status_comunicacao`/`status_gravacao` = `NAO_VERIFICADO` e `online` nulo |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
@@ -1097,6 +1097,15 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-12] — Versão do agente no ping e no painel (agente 1.1.49)
+
+O agente passa a mandar `versao` (`CURRENT_VERSION`) no corpo do `POST /api/v1/agent/ping` (`api_client.ping_server`).
+O servidor grava em `clients.agent_version` (coluna nova `VARCHAR(20)`, migração inline em `main.py`) e o
+`MachineResponse` devolve `agent_version`. O card "Configuração da Máquina" (`MachineInfoCards.tsx`) ganhou a linha
+"Versão" (`v1.1.49`; sem valor: "— (agente anterior à 1.1.49)"). Campo opcional: agentes antigos continuam pingando
+sem ele e a versão gravada não é apagada. Arquivos: `server/api/{models,schemas,main}.py`, `server/api/routers/agent.py`,
+`server/dashboard/src/api/types.ts`, `agent/src/application/api_client.py`. Sem breaking change. Branch `isaque`.
 
 ### [2026-11-12] — Gravação do Digifort por faixas de cobertura (agente 1.1.48)
 

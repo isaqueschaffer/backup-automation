@@ -223,6 +223,8 @@ class MachineResponse(MachineBase):
     restart_requested: bool = False
     backup_requested: bool = False
     telemetry: Optional[Dict[str, Any]] = None
+    # Versão do agente informada no último ping (None = agente < 1.1.49 ou nunca pingou)
+    agent_version: Optional[str] = None
     # Calculado no servidor — nunca depende do relógio do navegador
     is_online: bool = False
     current_server_time: Optional[datetime] = None
@@ -364,6 +366,9 @@ class PingRequest(BaseModel):
     # O que o agente sabe executar (>= 1.1.44: "teste_conexao"). Agentes antigos não mandam: o servidor não lhes
     # entrega o `conexao_task` (eles registrariam a senha no log do ping).
     recursos: Optional[List[str]] = None
+    # Versão do agente (>= 1.1.49). Agentes antigos não mandam: o servidor mantém o que já tinha gravado.
+    # Sem max_length: um valor estranho não pode derrubar o ping (422); o router corta em 20 caracteres.
+    versao: Optional[str] = None
 
 
 class CameraPresenca(BaseModel):

@@ -261,6 +261,8 @@ async def ping_agent(
     machine.last_seen = datetime.utcnow()
     if body and body.telemetry:
         machine.telemetry = body.telemetry
+    if body and body.versao and body.versao.strip():
+        machine.agent_version = body.versao.strip()[:20]
     db.commit()
     machine_id = machine.id
     machine_id_str = str(machine_id)

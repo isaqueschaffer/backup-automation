@@ -188,6 +188,7 @@ _MIGRACOES_COLUNAS = [
     ("clients", "restart_requested", "ALTER TABLE clients ADD COLUMN restart_requested BOOLEAN NOT NULL DEFAULT FALSE;"),
     ("clients", "backup_requested", "ALTER TABLE clients ADD COLUMN backup_requested BOOLEAN NOT NULL DEFAULT FALSE;"),
     ("clients", "telemetry", "ALTER TABLE clients ADD COLUMN telemetry JSON;"),
+    ("clients", "agent_version", "ALTER TABLE clients ADD COLUMN agent_version VARCHAR(20);"),
     ("clients", "group_id", "ALTER TABLE clients ADD COLUMN group_id UUID REFERENCES client_groups(id) ON DELETE SET NULL;"),
     ("clients", "queue_order", "ALTER TABLE clients ADD COLUMN queue_order INTEGER NOT NULL DEFAULT 0;"),
     ("nvrs", "last_recording_status", "ALTER TABLE nvrs ADD COLUMN last_recording_status JSON;"),

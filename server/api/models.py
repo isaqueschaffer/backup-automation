@@ -179,6 +179,7 @@ class Machine(Base):
     restart_requested = Column(Boolean, default=False, nullable=False)
     backup_requested = Column(Boolean, default=False, nullable=False)
     telemetry = Column(JSON, nullable=True)  # Hardware stats (CPU, RAM, Disk, GPU)
+    agent_version = Column(String(20), nullable=True)  # Versão informada pelo agente no ping (>= 1.1.49)
     # Cliente ao qual a máquina pertence (coluna 'group_id' mantida no BD)
     customer_id = Column("group_id", UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
     queue_order = Column(Integer, default=0, nullable=False)

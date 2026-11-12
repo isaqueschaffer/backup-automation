@@ -166,7 +166,9 @@ def ping_server(conf: dict) -> dict:
         logging.error(f"Telemetria ignorada neste ping: {e}")
         telemetry = None
     # "recursos": o servidor só entrega o "Testar conexão" a quem declara saber executá-lo (agente >= 1.1.44)
-    payload = {"telemetry": telemetry, "recursos": ["teste_conexao"]}
+    # "versao": o servidor guarda e o painel mostra em Configuração da Máquina (agente >= 1.1.49)
+    from src.application.updater import CURRENT_VERSION
+    payload = {"telemetry": telemetry, "recursos": ["teste_conexao"], "versao": CURRENT_VERSION}
     r = requests.post(
         f"{conf['server_url']}/api/v1/agent/ping",
         headers=headers, timeout=40, verify=False, json=payload
