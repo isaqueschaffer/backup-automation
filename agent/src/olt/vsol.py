@@ -147,6 +147,19 @@ def _parece_config(conteudo: bytes) -> bool:
     return True
 
 
+def _parece_tela_login(texto: str) -> bool:
+    """Reconhece a tela de login do VSOL (varias linguas: algumas OLTs so tem o texto em ingles, sem
+    "senha") ou o redirect de sessao invalida ('window.top.location.href="login.html"') que a OLT devolve
+    quando a pagina pedida precisa de autenticacao."""
+    if not texto:
+        return False
+    if "location.href=\"login.html\"" in texto or "location.href='login.html'" in texto:
+        return True
+    tem_campo_usuario = "login" in texto or "username" in texto
+    tem_campo_senha = "password" in texto or "senha" in texto
+    return tem_campo_usuario and tem_campo_senha
+
+
 def _mostrar_cookies(session: requests.Session) -> None:
     """Mostra no log os cookies obtidos após o login.
 
@@ -228,12 +241,7 @@ def _fazer_login(
                     and "wrong password" not in texto
                 ):
                     # Verifica se a resposta parece ser uma página de login persistente.
-                    indicadores_login = ("login", "password", "senha")
-                    possui_tela_login = all(
-                        palavra in texto for palavra in indicadores_login
-                    )
-
-                    if not possui_tela_login:
+                    if not _parece_tela_login(texto):
                         logging.info(f"   [VSOL] Login aceito via: {url}")
                         _mostrar_cookies(session)
                         return True

@@ -15,7 +15,7 @@ import requests
 import urllib3
 
 from .unm_telnet import qualidade_sinal, resumir_onus
-from .vsol import LegacySSLAdapter, TIMEOUT, _fazer_login, _montar_base_url, _obter_config_extra
+from .vsol import LegacySSLAdapter, TIMEOUT, _fazer_login, _montar_base_url, _obter_config_extra, _parece_tela_login
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -100,7 +100,12 @@ def _pedir(session: requests.Session, base_url: str, pagina: str, **dados) -> st
     if resposta.status_code != 200:
         resposta = session.get(url, params={"select": "255", **dados}, timeout=TIMEOUT)
     resposta.raise_for_status()
-    return resposta.text
+    texto = resposta.text
+    if _parece_tela_login(texto):
+        # a sessao criada no login nao fica valida para essa pagina (ex.: endpoint de login errado) —
+        # sem isso, o parser so acha 0 ONUs e o log nao mostra motivo nenhum.
+        raise requests.RequestException(f"sessao nao autenticada ao acessar {pagina} (OLT redirecionou para login)")
+    return texto
 
 
 def coletar_vsol(equipamento: dict) -> dict:

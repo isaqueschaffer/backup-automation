@@ -1098,6 +1098,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-12] — Merge com a Helena (3ª rodada): login da OLT VSOL e versão 1.1.47 do agente
+
+**Incorporado (ramo `helena`, `e1e7126`):** `_parece_tela_login` em `agent/src/olt/vsol.py` reconhece a tela de login da
+VSOL em qualquer idioma (algumas só têm o texto em inglês, sem "senha") e o redirect de sessão inválida
+(`location.href="login.html"`); o status (`vsol_status._pedir`) passa a falhar com o motivo "sessão não autenticada" em
+vez de devolver 0 ONUs sem explicação. Testes em `agent/tests/test_vsol_login.py`. **Auditoria:** sem data com fuso, sem
+segredo, nenhuma rota de servidor, compose, nginx, models, migrações, requirements, build.ps1, installer.iss ou `.env`
+tocados. **Bloqueado:** `fiberhome_out.txt` (despejo binário de depuração da tela do Telnet da FiberHome, solto na
+raiz do repositório). **Conflitos:** nenhum. **Versão:** agente 1.1.47.
+
 ### [2026-11-12] — Erro de SSH da OLT Huawei explicado no painel (agente 1.1.46)
 
 **Problema:** a falha do login SSH chegava ao painel com o texto cru do paramiko ("Authentication failed: transport
