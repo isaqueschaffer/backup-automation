@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { AgentLog, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedBackups, TipoNotificacao } from "./types";
+import { AgentLog, CameraNotificacao, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoCamerasNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedBackups, TipoNotificacao } from "./types";
 import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -241,5 +241,11 @@ export const atualizarNotificacaoPersonalizada = (id: string, data: NotificacaoP
 
 export const apagarNotificacaoPersonalizada = (id: string) =>
   api.delete(`/notificacoes/personalizadas/${id}`);
+
+export const fetchCamerasNotificacao = (): Promise<EquipamentoCamerasNotificacao[]> =>
+  api.get("/notificacoes/cameras").then((r) => r.data);
+
+export const atualizarCameraNotificacao = (cameraId: string, notificarOffline: boolean): Promise<CameraNotificacao> =>
+  api.put(`/notificacoes/cameras/${cameraId}`, { notificar_offline: notificarOffline }).then((r) => r.data);
 
 export default api;

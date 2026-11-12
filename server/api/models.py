@@ -240,6 +240,8 @@ class NVRCamera(Base):
     perfect_image_base64 = Column(Text, nullable=True)
     night_image_base64 = Column(Text, nullable=True)
     night_image_date = Column(DateTime, nullable=True)
+    # Notificação de câmera offline (CAMERA_OFFLINE): opt-in por câmera, desativado até o usuário marcar
+    notificar_offline = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     nvr = relationship("NVR", back_populates="cameras_status")
@@ -323,7 +325,7 @@ class Notificacao(Base):
     __tablename__ = "notificacoes"
     __table_args__ = (
         CheckConstraint(
-            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA')",
+            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE')",
             name="ck_notificacoes_tipo",
         ),
     )
@@ -335,6 +337,8 @@ class Notificacao(Base):
     mensagem = Column(Text, nullable=False)
     machine_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=True)
     nvr_id = Column(UUID(as_uuid=True), ForeignKey("nvrs.id", ondelete="CASCADE"), nullable=True)
+    # Câmera do alerta (tipo CAMERA_OFFLINE); mesmo CASCADE do equipamento, para não deixar notificação órfã
+    camera_id = Column(UUID(as_uuid=True), ForeignKey("nvr_cameras.id", ondelete="CASCADE"), nullable=True)
     # Definição que gerou o alerta (tipo PERSONALIZADA); SET NULL ao apagar a definição para preservar o histórico
     definicao_id = Column(UUID(as_uuid=True), ForeignKey("notificacoes_personalizadas.id", ondelete="SET NULL"), nullable=True)
     criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)

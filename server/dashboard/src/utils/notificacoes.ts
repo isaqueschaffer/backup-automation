@@ -1,4 +1,4 @@
-import { AlertTriangle, AlertOctagon, WifiOff, Sparkles } from "lucide-react";
+import { AlertTriangle, AlertOctagon, VideoOff, WifiOff, Sparkles } from "lucide-react";
 import { TipoNotificacao } from "../api/types";
 
 // Cor e ícone por tipo (usados no pop-up de login e na aba Notificações)
@@ -7,6 +7,7 @@ export const ICONE_NOTIFICACAO: Record<TipoNotificacao, typeof AlertTriangle> = 
   BACKUP_FALHOU: AlertOctagon,
   AGENTE_OFFLINE: WifiOff,
   PERSONALIZADA: Sparkles,
+  CAMERA_OFFLINE: VideoOff,
 };
 
 export const COR_NOTIFICACAO: Record<TipoNotificacao, string> = {
@@ -14,6 +15,7 @@ export const COR_NOTIFICACAO: Record<TipoNotificacao, string> = {
   BACKUP_FALHOU: "var(--err)",
   AGENTE_OFFLINE: "var(--accent)",
   PERSONALIZADA: "var(--ok)",
+  CAMERA_OFFLINE: "var(--err)",
 };
 
 export const LABEL_NOTIFICACAO: Record<TipoNotificacao, string> = {
@@ -21,4 +23,5 @@ export const LABEL_NOTIFICACAO: Record<TipoNotificacao, string> = {
   BACKUP_FALHOU: "Backup com falha",
   AGENTE_OFFLINE: "Agente offline",
   PERSONALIZADA: "Personalizada",
+  CAMERA_OFFLINE: "Câmera offline",
 };

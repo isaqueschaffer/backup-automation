@@ -221,6 +221,9 @@ _MIGRACOES_COLUNAS = [
     # Alarmes das centrais Intelbras cadastradas no DEFENSE (API /api/alarm-centrals, enviado pelo agente)
     ("nvrs", "last_alarm_status", "ALTER TABLE nvrs ADD COLUMN last_alarm_status JSON;"),
     ("nvrs", "conexao_status", "ALTER TABLE nvrs ADD COLUMN conexao_status JSON;"),
+    # Notificação de câmera offline: opt-in por câmera e o vínculo com o alerta gerado
+    ("nvr_cameras", "notificar_offline", "ALTER TABLE nvr_cameras ADD COLUMN notificar_offline BOOLEAN NOT NULL DEFAULT FALSE;"),
+    ("notificacoes", "camera_id", "ALTER TABLE notificacoes ADD COLUMN camera_id UUID REFERENCES nvr_cameras(id) ON DELETE CASCADE;"),
 ]
 
 _colunas_cache: dict = {}
@@ -237,13 +240,13 @@ for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
 _run_ddl("ALTER TABLE nvrs ALTER COLUMN ip TYPE VARCHAR(255);", "nvrs.ip VARCHAR(255)")
 _run_ddl("ALTER TABLE nvr_cameras ALTER COLUMN ip TYPE VARCHAR(255);", "nvr_cameras.ip VARCHAR(255)")
 
-# Notificações personalizadas: o tipo 'PERSONALIZADA' passou a valer em notificacoes.tipo (idempotente)
+# Notificações personalizadas e de câmera offline: tipos que passaram a valer em notificacoes.tipo (idempotente)
 if _tem_tabela("notificacoes"):
     _run_ddl("ALTER TABLE notificacoes DROP CONSTRAINT IF EXISTS ck_notificacoes_tipo;", "dropar ck_notificacoes_tipo antigo")
     _run_ddl(
         "ALTER TABLE notificacoes ADD CONSTRAINT ck_notificacoes_tipo "
-        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA'));",
-        "recriar ck_notificacoes_tipo com PERSONALIZADA",
+        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE'));",
+        "recriar ck_notificacoes_tipo com PERSONALIZADA e CAMERA_OFFLINE",
     )
 
 

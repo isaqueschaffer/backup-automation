@@ -10,16 +10,21 @@ from sqlalchemy.orm import Session
 
 from auth import Contexto, exigir_admin_conta, get_contexto
 from database import get_db
-from models import ConfiguracaoNotificacao, Notificacao, NotificacaoPersonalizada
+from models import ConfiguracaoNotificacao, Machine, NVR, NVRCamera, Notificacao, NotificacaoPersonalizada
 from schemas import (
+    CameraNotificacaoResponse,
+    CameraNotificarUpdate,
     ConfiguracaoNotificacaoResponse,
     ConfiguracaoNotificacaoUpdate,
+    EquipamentoCamerasNotificacaoResponse,
     NotificacaoPersonalizadaCreate,
     NotificacaoPersonalizadaResponse,
     NotificacaoPersonalizadaUpdate,
     NotificacaoResponse,
 )
+from services.camera_offline import segundos_offline
 from services.escopo import filtrar_por_conta
+from services.galeria_vms import status_por_camera
 from services.notificacoes import TIPOS
 
 router = APIRouter(prefix="/api/v1/notificacoes", tags=["Notificações"])
@@ -80,6 +85,73 @@ def atualizar_config(
     db.commit()
     db.refresh(row)
     return row
+
+
+# ─── Câmeras offline (NVR, DIGIFORT, DEFENSE) ───────────────────────────────────────────────
+# Opt-in por câmera (NVRCamera.notificar_offline); ver services/notificacoes.py para a verificação periódica.
+
+def _camera_para_resposta(camera: NVRCamera, status_por_camera_id: dict, agora: datetime) -> dict:
+    st = status_por_camera_id.get(camera.id)
+    seg, aprox = segundos_offline(st, agora) if st else (None, False)
+    return {
+        "id": camera.id, "nome": camera.nome, "notificar_offline": camera.notificar_offline,
+        "status_comunicacao": (st or {}).get("status_comunicacao"),
+        "offline_segundos": seg, "offline_aprox": aprox,
+    }
+
+
+@router.get("/cameras", response_model=List[EquipamentoCamerasNotificacaoResponse])
+def listar_cameras_notificacao(
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Equipamentos ativos com câmeras (NVR, DIGIFORT, DEFENSE), para escolher quais notificar quando
+    ficarem offline. Agrupado por máquina e equipamento (`machine_id`/`nvr_id` em cada item)."""
+    consulta = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
+        NVR.tipo.in_(("NVR", "DIGIFORT", "DEFENSE")), NVR.active == True, Machine.active == True
+    )
+    consulta = filtrar_por_conta(consulta, Machine.conta_id, ctx)
+    agora = datetime.utcnow()
+    saida = []
+    for nvr in consulta.order_by(Machine.name, NVR.name).all():
+        cameras = list(nvr.cameras_status)
+        if not cameras:
+            continue
+        status_por_camera_id = status_por_camera(cameras, nvr.tipo, nvr.last_recording_status or [])
+        saida.append({
+            "nvr_id": nvr.id, "nvr_nome": nvr.name, "nvr_tipo": nvr.tipo,
+            "machine_id": nvr.machine_id, "machine_nome": nvr.machine.name,
+            "cameras": [
+                _camera_para_resposta(c, status_por_camera_id, agora)
+                for c in sorted(cameras, key=lambda c: (c.nome or "").lower())
+            ],
+        })
+    return saida
+
+
+@router.put("/cameras/{camera_id}", response_model=CameraNotificacaoResponse)
+def atualizar_camera_notificacao(
+    camera_id: UUID,
+    body: CameraNotificarUpdate,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(exigir_admin_conta),
+):
+    """Liga/desliga a notificação de offline de uma câmera (admin da conta ou super admin)."""
+    consulta = (
+        db.query(NVRCamera).join(NVR, NVRCamera.nvr_id == NVR.id).join(Machine, NVR.machine_id == Machine.id)
+        .filter(NVRCamera.id == camera_id)
+    )
+    camera = filtrar_por_conta(consulta, Machine.conta_id, ctx).first()
+    if not camera:
+        raise HTTPException(status_code=404, detail="Câmera não encontrada")
+    camera.notificar_offline = body.notificar_offline
+    db.commit()
+    db.refresh(camera)
+
+    agora = datetime.utcnow()
+    nvr = camera.nvr
+    status_por_camera_id = status_por_camera(list(nvr.cameras_status), nvr.tipo, nvr.last_recording_status or [])
+    return _camera_para_resposta(camera, status_por_camera_id, agora)
 
 
 # ─── Notificações personalizadas (criadas pelo usuário) ───────────────────────────────────────

@@ -160,3 +160,22 @@ def parear_cameras(cameras_db: list, relatorio: list) -> List[Tuple[Optional[int
         if c.id not in usadas:
             resultado.append((None, None, c, c.canal))
     return resultado
+
+
+TIPOS_VMS = ("DIGIFORT", "DEFENSE")  # pareadas por nome/pasta (parear_cameras); NVR tradicional e por canal
+
+
+def status_por_camera(cameras_db: list, tipo: str, relatorio: list) -> dict:
+    """{camera_id: entrada do relatorio ou None} pareando cada camera da Galeria com o `last_recording_status`
+    do agente, pela mesma regra do tipo do equipamento: nome/pasta (`parear_cameras`) para DIGIFORT/DEFENSE,
+    canal fisico para NVR tradicional. Usado pela Galeria e pela notificacao de camera offline."""
+    if (tipo or "NVR").upper() in TIPOS_VMS:
+        pares = parear_cameras(cameras_db, relatorio)
+        return {c.id: st for _, st, c, _ch in pares if c is not None}
+    por_canal = {}
+    for st in (relatorio or []):
+        if isinstance(st, dict):
+            ch = canal_int(st.get("canal"))
+            if ch is not None:
+                por_canal[ch] = st
+    return {c.id: por_canal.get(c.canal) for c in cameras_db}

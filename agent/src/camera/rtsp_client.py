@@ -42,6 +42,15 @@ def _capturar_frame_ffmpeg(ffmpeg_exe: str, rtsp_url: str, transport: str = "tcp
         return None, _mascarar(str(e))
 
 
+def _porta_rtsp_aberta(ip: str) -> bool:
+    """A porta RTSP (554) aceita conexão? Usar só depois de uma captura falhar (ver test_rtsp_camera)."""
+    try:
+        socket.create_connection((ip, 554), timeout=5).close()
+        return True
+    except OSError:
+        return False
+
+
 def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     """Testa a conexão RTSP da câmera localmente pelo agente e retorna a imagem em base64.
     Tenta até 4 URLs candidatas via TCP (com fallback seletivo para UDP em falhas de conexão/tempo)
@@ -111,11 +120,10 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     import imageio_ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
-    # Sem esta checagem, IP errado ou câmera desligada só falha depois de esgotar todas as tentativas
-    try:
-        socket.create_connection((ip, 554), timeout=5).close()
-    except OSError:
-        return {"success": False, "error_message": f"Porta RTSP 554 inacessível em {ip} (IP incorreto, câmera desligada ou bloqueio de rede)"}
+    # A porta 554 só é conferida depois que a 1ª tentativa falha, nunca antes do ffmpeg: Hikvision antigas
+    # (ex.: DS-2CD2012-I) ficam ~18s sem atender o RTSP depois de uma conexão TCP aberta e fechada sem
+    # requisição, e a captura estourava o tempo (medido na CFTV 01 - Navarro: 0,06s sem a sonda, 18,4s com ela).
+    porta_conferida = False
 
     # Limite rigoroso de segurança: no máximo 4 URLs diferentes
     urls = urls_candidatas[:4]
@@ -142,6 +150,12 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
             logging.warning(f"Câmera {ip} retornou 401 Unauthorized. Abortando imediatamente para prevenir lockout.")
             motivos.append(f"TCP {caminho_curto}: Usuário ou senha RTSP recusados pela câmera (interrompido na 1ª tentativa para evitar bloqueio)")
             break
+
+        # IP errado ou câmera desligada: para aqui em vez de esgotar todas as tentativas
+        if not porta_conferida:
+            porta_conferida = True
+            if not _porta_rtsp_aberta(ip):
+                return {"success": False, "error_message": f"Porta RTSP 554 inacessível em {ip} (IP incorreto, câmera desligada ou bloqueio de rede)"}
 
         motivo = stderr_txt if "Tempo esgotado" in stderr_txt else _motivo_ao_vivo(stderr_txt)
         if motivo.startswith("Caminho RTSP não encontrado"):
