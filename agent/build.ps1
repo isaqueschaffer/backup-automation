@@ -35,6 +35,9 @@ Write-Host "Compilando aplicativo da bandeja (tray.exe)..."
     --name TrilanAgentTray `
     tray.py
 
+Write-Host "Gerando o pacote de código do agente Linux (Mikrotik, OTA)..."
+.\venv\Scripts\python.exe pacote_linux.py
+
 Write-Host "Limpando arquivos temporários..."
 Remove-Item -Recurse -Force build
 Remove-Item TrilanAgentService.spec

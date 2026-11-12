@@ -319,6 +319,8 @@ class AgentVersion(Base):
     url_tray = Column(Text, nullable=True)                           # URL do TrilanAgentTray.exe
     sha256_service = Column(String(64), nullable=False)              # hash SHA256 do service exe
     sha256_tray = Column(String(64), nullable=True)                  # hash SHA256 do tray exe
+    url_linux = Column(Text, nullable=True)                          # URL do TrilanAgentLinux.tar.gz (código do agente Linux/Mikrotik, >= 1.1.52)
+    sha256_linux = Column(String(64), nullable=True)                 # hash SHA256 do pacote Linux
     active = Column(Boolean, default=True, nullable=False)           # se False, não será distribuída
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

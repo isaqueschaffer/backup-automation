@@ -184,6 +184,8 @@ export interface AgentVersion {
   sha256_service: string;
   url_tray?: string | null;
   sha256_tray?: string | null;
+  url_linux?: string | null;     // pacote do agente Linux/Mikrotik (>= 1.1.52)
+  sha256_linux?: string | null;
   active: boolean;
 }
 

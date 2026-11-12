@@ -133,10 +133,12 @@ function OtaManager() {
                     <td style={{ fontSize: 11, fontFamily: "monospace", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}>
                       S: {v.sha256_service}<br/>
                       {v.sha256_tray && <span>T: {v.sha256_tray}</span>}
+                      {v.sha256_linux && <><br/><span>L: {v.sha256_linux}</span></>}
                     </td>
                     <td style={{ fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       <a href={v.url_service} target="_blank" rel="noreferrer" title={v.url_service}>⬇ Service</a>
                       {v.url_tray && <><br/><a href={v.url_tray} target="_blank" rel="noreferrer" title={v.url_tray}>⬇ Tray</a></>}
+                      {v.url_linux && <><br/><a href={v.url_linux} target="_blank" rel="noreferrer" title={v.url_linux}>⬇ Linux</a></>}
                     </td>
                     <td>
                       <span className={`badge ${v.active ? 'badge-success' : 'badge-danger'}`}>

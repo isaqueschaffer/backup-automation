@@ -660,7 +660,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | POST | `/api/v1/agent/logs` | Agente envia lote (até 100) de avisos/erros e marcos do backup: `{"logs": [{"nivel": "INFO\|WARNING\|ERROR", "mensagem", "equipamento", "segundos_atras"}]}`; o servidor calcula `created_at` (REGRA-005); aceita também conta bloqueada |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup. Equipamento com `status` ERRO e `cameras` nulo ou vazio (agente >= 1.1.34 manda `null` quando o equipamento não informou câmeras; os antigos mandam `[]`) não apaga `last_recording_status`: as câmeras conhecidas ficam com `status_comunicacao`/`status_gravacao` = `NAO_VERIFICADO` e `online` nulo |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
-| GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera). Com `OTA_PILOTO_MAQUINAS` preenchido, só essas máquinas recebem. Para `current_version` < 1.1.35, `version` leva também os comandos que encerram o processo antigo (ver changelog de 30/10/2026) |
+| GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera). Com `OTA_PILOTO_MAQUINAS` preenchido, só essas máquinas recebem. Para `current_version` < 1.1.35, `version` leva também os comandos que encerram o processo antigo (ver changelog de 30/10/2026). `plataforma=linux` (agente do Mikrotik, >= 1.1.52): só versões com `url_linux`/`sha256_linux`, e a resposta traz só esses campos |
 | POST | `/api/v1/agent/rtsp-result` | Agente devolve o resultado da tarefa RTSP do dashboard |
 | POST | `/api/v1/agent/conexao-progresso` | Agente (>= 1.1.44) envia o estado inteiro do "Testar conexão" a cada etapa: `{"task_id", "etapas": [...], "concluido", "ok", "mensagem"}`; ao concluir grava `nvrs.conexao_status` (só equipamento DA máquina). O pedido chega no ping como `conexao_task` (o equipamento como em `/agent/config` + `task_id`) e só para o agente que manda `"recursos": ["teste_conexao"]` no corpo do ping |
 | POST | `/api/v1/agent/nvr-cameras/night-image` | Agente envia a imagem da noite de um canal |
@@ -845,6 +845,19 @@ Quando `config_extra.marca` está definida, ela decide primeiro: `Motorola` vai 
 | `sha256_service` | Sim | Hash SHA-256 em lowercase |
 | `url_tray` | Nao | Se null, o Tray nao e atualizado |
 | `sha256_tray` | Nao | Obrigatorio se url_tray for preenchido |
+| `url_linux` | Nao | `TrilanAgentLinux.tar.gz` (código do agente Linux/Mikrotik, >= 1.1.52). Sem ele o agente Linux não recebe a versão |
+| `sha256_linux` | Nao | Obrigatorio se url_linux for preenchido |
+
+### OTA do agente Linux (Mikrotik, >= 1.1.52)
+
+O container roda `launcher_linux.py` (só na imagem), que sobe o `service_linux.py` da pasta da OTA
+(`/app/data/code/atual`) quando ela é mais nova que a imagem, ou o da imagem. O agente consulta
+`update-check?plataforma=linux` 2 min após subir e depois a cada hora, baixa o pacote, confere SHA-256, recusa
+caminho absoluto/`..`/links, confere que a versão do pacote é a oferecida, que o `requirements-linux.txt` é igual ao da
+imagem (biblioteca nova exige imagem nova) e a sintaxe; troca `atual` -> `anterior`, `novo` -> `atual`, grava
+`pendente` e encerra. O launcher sobe o código novo; o 1º ping bem-sucedido apaga `pendente`. Versão que cai 3 vezes
+(ou não pinga em 10 min) é desfeita para a anterior (ou a imagem) e fica bloqueada 24 h (`falhou`). O "Reiniciar
+agente" do painel passa a funcionar (o launcher religa o processo). Detalhes em `agent/README_MIKROTIK.md`.
 
 ### Compatibilidade de Versoes
 
@@ -1103,6 +1116,23 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-12] — Atualização automática (OTA) do agente Linux no Mikrotik (agente 1.1.52)
+
+O agente Linux do container RouterOS não tinha OTA (o do Windows troca `.exe` com `.bat`/`sc`), então ficava na
+versão da imagem; o painel mostrava "— (agente anterior à 1.1.49)" para a máquina `teste-mk-maquina`. Agora a OTA
+troca só o código Python (`dist/TrilanAgentLinux.tar.gz`, gerado por `agent/pacote_linux.py` no `build.ps1` e anexado à
+release); as bibliotecas compiladas para ARM ficam na imagem. Novo `agent/launcher_linux.py` (CMD da imagem: escolhe o
+código, religa o agente ao encerrar, desfaz versão que não sobe) e `agent/src/application/updater_linux.py`
+(verificação, download, SHA-256, extração segura, checagens, troca de pastas). `service_linux.py` verifica a OTA a cada
+hora, confirma a versão no 1º ping e sai com código 3 se a versão nova não pingar em 10 min. `src/core/config.py`:
+`DIR_AGENT` aceita `TRILAN_AGENT_DIR` (a imagem define `/app`, onde ficam `agent.conf`, logs e temporários).
+**Servidor:** colunas `agent_versions.url_linux` (TEXT) e `sha256_linux` (VARCHAR(64)), migração inline; schemas de
+criar/editar/listar versão e `UpdateCheckResponse` com os dois campos; `GET /agent/update-check` aceita
+`plataforma=linux` (só versões com pacote Linux; resposta só com `url_linux`/`sha256_linux`). Painel (Configurações ->
+OTA) mostra hash e link do pacote Linux. `publish_version.ps1` ganhou `-UrlLinux`. Testes: `agent/tests/test_ota_linux.py`.
+**Limite:** a imagem precisa ser trocada à mão uma vez (a anterior não tem launcher nem OTA); depois, só quando o
+`requirements-linux.txt` mudar. Sem breaking change (Windows segue igual; campos opcionais). Branch `isaque`.
 
 ### [2026-11-12] — Merge com a Helena (5ª rodada): tela de Auditoria
 

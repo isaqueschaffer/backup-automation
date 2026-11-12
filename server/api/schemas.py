@@ -678,6 +678,8 @@ class AgentVersionCreate(BaseModel):
     url_tray: Optional[str] = None
     sha256_service: str                      # SHA256 do service.exe (64 chars hex)
     sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None          # pacote do agente Linux/Mikrotik (>= 1.1.52)
+    sha256_linux: Optional[str] = None
 
     @field_validator("version")
     @classmethod
@@ -689,12 +691,12 @@ class AgentVersionCreate(BaseModel):
     def _check_sha256_service(cls, v):
         return _validate_sha256(v, obrigatorio=True)
 
-    @field_validator("sha256_tray")
+    @field_validator("sha256_tray", "sha256_linux")
     @classmethod
     def _check_sha256_tray(cls, v):
         return _validate_sha256(v)
 
-    @field_validator("url_tray")
+    @field_validator("url_tray", "url_linux")
     @classmethod
     def _check_url_tray(cls, v):
         return _blank_to_none(v)
@@ -706,18 +708,20 @@ class AgentVersionUpdate(BaseModel):
     sha256_service: Optional[str] = None
     url_tray: Optional[str] = None
     sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None
+    sha256_linux: Optional[str] = None
 
     @field_validator("version")
     @classmethod
     def _check_version(cls, v):
         return _validate_version(v)
 
-    @field_validator("sha256_service", "sha256_tray")
+    @field_validator("sha256_service", "sha256_tray", "sha256_linux")
     @classmethod
     def _check_sha256(cls, v):
         return _validate_sha256(v)
 
-    @field_validator("url_tray")
+    @field_validator("url_tray", "url_linux")
     @classmethod
     def _check_url_tray(cls, v):
         return _blank_to_none(v)
@@ -731,6 +735,8 @@ class AgentVersionResponse(BaseModel):
     url_tray: Optional[str]
     sha256_service: str
     sha256_tray: Optional[str]
+    url_linux: Optional[str] = None
+    sha256_linux: Optional[str] = None
     active: bool
     created_at: datetime
 
@@ -745,6 +751,8 @@ class UpdateCheckResponse(BaseModel):
     url_tray: Optional[str] = None
     sha256_service: Optional[str] = None
     sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None      # só para o agente Linux (plataforma=linux)
+    sha256_linux: Optional[str] = None
     notes: Optional[str] = None
 
 

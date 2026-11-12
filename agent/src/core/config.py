@@ -1,9 +1,15 @@
 import json
+import os
 import sys
 import configparser
 from pathlib import Path
 
-DIR_AGENT = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent.parent
+# TRILAN_AGENT_DIR: o agente Linux (>= 1.1.52) pode rodar o código atualizado pela OTA a partir de
+# /app/data/code/atual, mas o agent.conf, os logs e as pastas temporárias continuam em /app (a imagem define a variável).
+if os.getenv("TRILAN_AGENT_DIR"):
+    DIR_AGENT = Path(os.environ["TRILAN_AGENT_DIR"])
+else:
+    DIR_AGENT = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent.parent
 CONF_FILE = DIR_AGENT / "agent.conf"
 
 class ConfigError(Exception):
