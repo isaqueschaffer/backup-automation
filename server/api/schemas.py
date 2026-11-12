@@ -567,6 +567,26 @@ class LogsAgenteReport(BaseModel):
     logs: List[LogAgenteItem] = Field(default_factory=list, max_length=100)
 
 
+class AuditoriaItem(BaseModel):
+    id: UUID
+    created_at: datetime
+    usuario: str
+    message: str
+    equipamento: Optional[str] = None
+    machine_id: UUID
+    machine_name: Optional[str] = None
+    customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
+
+
+class PaginatedAuditoria(BaseModel):
+    items: List[AuditoriaItem]
+    total: int
+    page: int
+    pages: int
+    dias_retencao: int
+
+
 class AgentLogResponse(BaseModel):
     id: UUID
     machine_id: UUID

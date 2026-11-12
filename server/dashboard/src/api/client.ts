@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedBackups, TipoNotificacao } from "./types";
+import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedAuditoria, PaginatedBackups, TipoNotificacao } from "./types";
 import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -112,6 +112,21 @@ export interface BackupQuery {
   machine_id?: string;
   customer_id?: string;
 }
+export interface AuditoriaQuery {
+  page?: number;
+  size?: number;
+  machine_id?: string;
+  customer_id?: string;
+  usuario?: string;
+  q?: string;
+  date_from?: string;
+  date_to?: string;
+}
+export const fetchAuditoria = (params?: AuditoriaQuery): Promise<PaginatedAuditoria> =>
+  api.get("/auditoria", { params }).then((r) => r.data);
+export const fetchUsuariosAuditoria = (): Promise<string[]> =>
+  api.get("/auditoria/usuarios").then((r) => r.data);
+
 export const fetchBackups = (params?: BackupQuery): Promise<PaginatedBackups> =>
   api.get("/backups", { params }).then((r) => r.data);
 export const downloadBackupZip = (backupId: string, options?: { direct_machine?: boolean }) => {

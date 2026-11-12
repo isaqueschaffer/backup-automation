@@ -1172,6 +1172,21 @@ vindos de `eqTipos.tsx`, o mesmo usado nos cards de equipamento), com um botão 
 volta a ficar online, e o pareamento por canal físico (NVR tradicional) separado do pareamento por nome.
 **Arquivos:** server/api/{models.py,main.py,schemas.py,routers/notificacoes.py,services/{notificacoes.py,galeria_vms.py},tests/test_cameras_offline_notificacao.py}, server/dashboard/src/{api/{client.ts,types.ts},utils/notificacoes.ts,pages/Notificacoes/NotificacoesPage.tsx}, PROJECT_SPEC.md.
 
+### [2026-11-12] — Tela de Auditoria na barra lateral
+
+- **Tela**: `/auditoria` ("Auditoria", ícone de relógio, entre Notificações e Minha conta). Tabela com data/hora, usuário, máquina (com o cliente) e o que mudou, filtros por cliente, máquina, usuário, período e texto, paginada de 30 em 30. Só ADMIN da conta e super admin veem; o perfil LEITURA não vê o item e a API responde 403.
+- **Dados**: lê os eventos de `agent_logs` com `usuario` preenchido (nova coluna `agent_logs.usuario`, migração inline em `main.py`, índice parcial por data). `registrar_alteracao()` grava o `usuario`; o pedido de armar/desarmar central de alarme também (o resultado do comando, que vem do agente, não). Eventos anteriores a esta versão não têm `usuario` e não aparecem na tela (continuam em "Eventos do Agente").
+- **API**: `GET /api/v1/auditoria` (filtros `machine_id`, `customer_id`, `usuario`, `q`, `date_from`, `date_to`, `page`, `size`) e `GET /api/v1/auditoria/usuarios`. Sempre limitada às máquinas da conta do contexto (REGRA-010). O filtro de datas usa o dia no horário do Brasil (UTC-3), como a lista de Backups.
+- **Retenção**: eventos com `usuario` não entram na poda de 30 dias / 5000 por máquina; ficam 365 dias (`DIAS_RETENCAO_AUDITORIA` em `services/agent_logs.py`, podados junto com os pings da máquina).
+- **Fora do escopo**: o histórico é por máquina; alterações de Cliente, usuários, contas e dashboards (sem máquina) não entram. E apagar a máquina apaga os eventos dela.
+
+### [2026-11-12] — Eventos do Agente: alterações feitas por usuários e admins no painel
+
+- **O que**: toda alteração feita pelo painel numa máquina ou nos equipamentos dela vira um evento `alteracao_usuario` (etiqueta roxa "Alteração") em "Eventos do Agente", como já era feito com os comandos de alarme (`alarme_comando`). A mensagem traz quem fez (`ctx.feito_por`: e-mail do usuário ou "admin") e o horário é o `created_at` do evento, mostrado na linha.
+- **Onde**: `registrar_alteracao()` em `services/agent_logs.py`, chamada na mesma sessão da alteração (o evento só existe se a alteração foi gravada). Cobre: cadastro/alteração/remoção de equipamento; importação, edição, remoção e imagem de referência de câmeras da Galeria; planilha importada, removida ou limpa; cadastro e alteração da máquina; nova chave de API; pedido de backup e de reinício do agente (um a um e "em todas as máquinas online").
+- **Alterar mostra só os nomes dos campos** ("nome, IP, senha, configurações (pasta_gravacoes)"), nunca os valores, para não gravar senha nem segredo no evento. Salvar sem mudar nada não gera evento.
+- **Fora do escopo**: o evento pertence a uma máquina (`agent_logs.client_id`), então alterações de Cliente, usuários, contas e dashboards não aparecem aqui; remover a máquina apaga os eventos dela junto. A retenção é a dos outros eventos (30 dias / 5000 por máquina).
+
 ### [2026-11-12] — Digifort/Defense: botão "Limpar planilha" e câmera de mesmo IP é substituída na importação
 
 - **Limpar planilha**: botão na Galeria (DIGIFORT/DEFENSE) e no campo "Planilha das câmeras" do formulário do Digifort. Pede confirmação e chama `DELETE /machines/{id}/equipamentos/{nvr_id}/cameras`, que apaga todas as câmeras da Galeria (com as imagens de referência e da noite) e a planilha guardada. No formulário, se há planilha carregada e ainda não salva, o botão só a descarta.

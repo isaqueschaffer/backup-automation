@@ -13,6 +13,7 @@ import {
   UserCircle,
   Building2,
   Bell,
+  History,
 } from "lucide-react";
 import pkg from "../../package.json";
 
@@ -55,6 +56,8 @@ export default function Sidebar() {
     { to: "/maquinas", icon: Server, label: "Máquinas" },
     { to: "/backups", icon: Archive, label: "Backups" },
     { to: "/notificacoes", icon: Bell, label: "Notificações" },
+    // Quem alterou o quê: perfil somente leitura não vê
+    ...(me?.usuario.papel === "LEITURA" ? [] : [{ to: "/auditoria", icon: History, label: "Auditoria" }]),
     { to: "/minha-conta", icon: UserCircle, label: "Minha conta" },
   ];
 

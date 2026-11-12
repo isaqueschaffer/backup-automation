@@ -11,6 +11,7 @@ from auth import generate_api_key, Contexto, get_contexto
 from database import get_db
 from models import Machine, Customer, Backup, AgentLog
 from schemas import MachineCreate, MachineUpdate, MachineResponse, MachineWithKey, AgentLogResponse
+from services.agent_logs import registrar_alteracao
 from services.crypto_service import encrypt
 from services.escopo import (
     filtrar_por_conta,
@@ -124,6 +125,8 @@ def create_machine(
         queue_order=queue_order,
     )
     db.add(machine)
+    db.flush()  # gera o id da máquina para o evento
+    registrar_alteracao(db, machine.id, ctx.feito_por, f"cadastrou a máquina '{body.name}'.")
     db.commit()
     db.refresh(machine)
 
@@ -139,6 +142,13 @@ def get_machine(
     ctx: Contexto = Depends(get_contexto),
 ):
     return machine_to_response(_get_machine_or_404(machine_id, db, ctx))
+
+
+# Campos da máquina que entram no evento de alteração (só o nome do campo, nunca o valor: a senha do ZIP é segredo)
+_ROTULOS_MAQUINA = {
+    "name": "nome", "backup_hour": "horário do backup", "backup_minute": "horário do backup",
+    "email_to": "e-mails do relatório", "active": "ativa/inativa", "zip_password": "senha do ZIP",
+}
 
 
 @router.put("/{machine_id}", response_model=MachineResponse)
@@ -169,6 +179,7 @@ def update_machine(
         )
 
     nome_antigo = machine.name
+    antes = {c: getattr(machine, c) for c in _ROTULOS_MAQUINA}
     time_changed = False
     for field, value in changes.items():
         if field in ("backup_hour", "backup_minute") and getattr(machine, field) != value:
@@ -182,6 +193,12 @@ def update_machine(
     if time_changed:
         machine.restart_requested = True
 
+    alterados = list(dict.fromkeys(r for c, r in _ROTULOS_MAQUINA.items() if getattr(machine, c) != antes[c]))
+    if alterados:
+        renomeou = f" (antes '{nome_antigo}')" if machine.name != nome_antigo else ""
+        registrar_alteracao(
+            db, machine.id, ctx.feito_por, f"alterou a máquina '{machine.name}'{renomeou}: {', '.join(alterados)}.",
+        )
     db.commit()
     db.refresh(machine)
 
@@ -239,6 +256,7 @@ def rotate_api_key(
     raw_key, key_hash = generate_api_key()
     machine.api_key_hash = key_hash
     machine.api_key_prefix = raw_key[:16]
+    registrar_alteracao(db, machine.id, ctx.feito_por, "gerou uma nova chave de API da máquina.")
     db.commit()
     db.refresh(machine)
 
@@ -247,13 +265,14 @@ def rotate_api_key(
     return machine_to_response(machine, MachineWithKey)
 
 
-def _flag_all_online(db: Session, flag: str, ctx: Contexto) -> dict:
+def _flag_all_online(db: Session, flag: str, ctx: Contexto, descricao: str) -> dict:
     """Marca `flag` em todas as máquinas ativas e online; offline ficam de fora."""
     machines = filtrar_por_conta(db.query(Machine).filter(Machine.active == True), Machine.conta_id, ctx).all()
     queued = skipped = 0
     for m in machines:
         if check_machine_online(m):
             setattr(m, flag, True)
+            registrar_alteracao(db, m.id, ctx.feito_por, f"{descricao} (em todas as máquinas online).")
             queued += 1
         else:
             skipped += 1
@@ -267,7 +286,7 @@ def trigger_backup_all(
     ctx: Contexto = Depends(get_contexto),
 ):
     """Solicita backup em todas as máquinas online."""
-    return _flag_all_online(db, "backup_requested", ctx)
+    return _flag_all_online(db, "backup_requested", ctx, "solicitou o backup")
 
 
 @router.post("/restart-agent-all")
@@ -276,7 +295,7 @@ def restart_agent_all(
     ctx: Contexto = Depends(get_contexto),
 ):
     """Solicita reinício do agente em todas as máquinas online."""
-    return _flag_all_online(db, "restart_requested", ctx)
+    return _flag_all_online(db, "restart_requested", ctx, "solicitou o reinício do agente")
 
 
 @router.post("/{machine_id}/trigger-backup")
@@ -287,6 +306,7 @@ def trigger_backup(
 ):
     machine = _get_machine_or_404(machine_id, db, ctx)
     machine.backup_requested = True
+    registrar_alteracao(db, machine.id, ctx.feito_por, "solicitou o backup da máquina pelo painel.")
     db.commit()
     return {"status": "ok", "message": "Backup da máquina solicitado via dashboard"}
 
@@ -300,6 +320,7 @@ def request_agent_restart(
     """Solicita o reinício do agente da máquina no próximo ping."""
     machine = _get_machine_or_404(machine_id, db, ctx)
     machine.restart_requested = True
+    registrar_alteracao(db, machine.id, ctx.feito_por, "solicitou o reinício do agente pelo painel.")
     db.commit()
     return {"queued": True}
 

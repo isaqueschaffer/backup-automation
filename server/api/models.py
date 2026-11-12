@@ -291,6 +291,9 @@ class AgentLog(Base):
     message = Column(Text, nullable=False)
     nivel = Column(String(10), nullable=False, default="INFO", server_default="INFO")
     equipamento = Column(String(255), nullable=True)
+    # Quem fez, quando o evento é uma ação de usuário/admin no painel (e-mail ou "admin"); NULL = evento do agente.
+    # É o que a tela de Auditoria lista.
+    usuario = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     machine = relationship("Machine", back_populates="logs")

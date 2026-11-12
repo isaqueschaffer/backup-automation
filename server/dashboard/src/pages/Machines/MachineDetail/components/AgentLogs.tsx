@@ -32,6 +32,8 @@ const TIPO_LABELS: Record<string, string> = {
   email_sent: "E-mail enviado",
   email_error: "Erro de e-mail",
   agent_log: "Agente",
+  alarme_comando: "Alarme",
+  alteracao_usuario: "Alteração",
 };
 
 function tipoStyle(tipo: string, nivel?: string): { background: string; color: string } {
@@ -43,6 +45,10 @@ function tipoStyle(tipo: string, nivel?: string): { background: string; color: s
       return { background: "rgba(245, 158, 11, 0.15)", color: "#f59e0b" };
     }
     return { background: "rgba(59, 130, 246, 0.15)", color: "#3b82f6" };
+  }
+  // Alteração feita por um usuário/admin no painel: roxo, para se destacar dos eventos do agente
+  if (tipo === "alteracao_usuario") {
+    return { background: "rgba(139, 92, 246, 0.15)", color: "#8b5cf6" };
   }
   if (tipo === "ping" || tipo === "email_sent") {
     return { background: "rgba(16, 185, 129, 0.15)", color: "#10b981" };
