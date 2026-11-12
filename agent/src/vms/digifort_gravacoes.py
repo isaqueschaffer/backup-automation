@@ -32,7 +32,10 @@ MARCADOR = b"-REG-"
 TOLERANCIA_S = 30       # salto maior que isso entre dois quadros = interrupcao
 PASSO_AMOSTRA = 600     # 1 registro a cada 600 (~20 s a 30 fps): so le tudo onde ha salto
 DIAS_PADRAO = 15
-LIMIAR_PARCIAL = 0.9    # abaixo de 90% do dia (ou do tempo ja decorrido, no dia de hoje) = parcial
+# Faixas de cobertura do dia (ou do tempo ja decorrido, no dia de hoje):
+#   40% a 100% = gravou (verde) | 11% a 39% = parcial (amarelo) | 0% a 10% = nao gravou (vermelho)
+LIMIAR_GRAVOU = 0.40
+LIMIAR_PARCIAL = 0.11   # abaixo de 11% (0 a 10%) o dia conta como sem gravacao
 LIMITE_TOTAL_S = 900    # tempo maximo de leitura por execucao; o que sobrar fica no cache para a proxima
 VERSAO_CACHE = 1
 
@@ -217,24 +220,28 @@ def calcular_gravacoes(raiz, hoje=None, dias=DIAS_PADRAO, cache=None, limite_s=L
     return resultado
 
 
-def resumir_camera(por_dia, hoje, agora=None, dias=DIAS_PADRAO, limiar=LIMIAR_PARCIAL):
+def resumir_camera(por_dia, hoje, agora=None, dias=DIAS_PADRAO, limiar_gravou=LIMIAR_GRAVOU, limiar_parcial=LIMIAR_PARCIAL):
     """Resume os segundos por dia de uma camera nos campos do relatorio:
     mapa de `dias` caracteres (o ultimo e hoje), dias_com_gravacao, total_dias e status_gravacao.
-    Dia com algum tempo gravado conta como gravado; abaixo de `limiar` do dia (hoje: do tempo ja decorrido) e parcial."""
+    Cobertura do dia (hoje: do tempo ja decorrido): >= `limiar_gravou` = gravou; entre `limiar_parcial` e
+    `limiar_gravou` = parcial; abaixo de `limiar_parcial` = nao gravou (nao entra em dias_com_gravacao)."""
     agora = agora or datetime.now()
     inicio_hoje = datetime.combine(hoje, datetime.min.time())
     decorrido_hoje = max((agora - inicio_hoje).total_seconds(), 1.0)
     lista = [hoje - timedelta(days=dias - 1 - i) for i in range(dias)]
-    com_gravacao = [d for d in lista if por_dia.get(d, 0) > 0]
+
+    def cobertura(d):
+        return por_dia.get(d, 0.0) / (decorrido_hoje if d == hoje else 86400.0)
+
+    com_gravacao = [d for d in lista if cobertura(d) >= limiar_parcial]
     primeiro_dia = min(com_gravacao) if com_gravacao else None
 
     mapa = []
     for d in lista:
-        segundos = por_dia.get(d, 0.0)
-        esperado = decorrido_hoje if d == hoje else 86400.0
-        if segundos <= 0:
+        c = cobertura(d)
+        if c < limiar_parcial:
             mapa.append(MAPA_SEM_HISTORICO if primeiro_dia and d < primeiro_dia else MAPA_SEM_GRAVACAO)
-        elif segundos >= limiar * esperado:
+        elif c >= limiar_gravou:
             mapa.append(MAPA_GRAVOU)
         else:
             mapa.append(MAPA_PARCIAL)
@@ -244,6 +251,7 @@ def resumir_camera(por_dia, hoje, agora=None, dias=DIAS_PADRAO, limiar=LIMIAR_PA
         "total_dias": len(com_gravacao),
         "status_gravacao": "COM_GRAVACAO" if hoje in com_gravacao else "SEM_GRAVACAO",
         "segundos_hoje": round(por_dia.get(hoje, 0.0)),
+        "percentual_hoje": round(min(cobertura(hoje), 1.0) * 100),
     }
 
 

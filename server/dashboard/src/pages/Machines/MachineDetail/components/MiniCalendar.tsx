@@ -1,8 +1,8 @@
-// Caracteres do mapa de 15 dias (o último é o dia do relatório): █ gravou, ▒ gravou parcialmente (Digifort),
-// ░ não gravou, · sem histórico (dia anterior à primeira gravação encontrada)
+// Caracteres do mapa de 15 dias (o último é o dia do relatório): █ gravou (40% a 100%), ▒ parcial (11% a 39%, Digifort),
+// ░ não gravou (0% a 10%), · sem histórico (dia anterior à primeira gravação encontrada)
 const DIA = {
-  "█": { rotulo: "Gravou", cor: "var(--ok)" },
-  "▒": { rotulo: "Gravou parcialmente (menos de 90% do dia)", cor: "var(--warn)" },
+  "█": { rotulo: "Gravou (40% ou mais do dia)", cor: "var(--ok)" },
+  "▒": { rotulo: "Gravou parcialmente (11% a 39% do dia)", cor: "var(--warn)" },
   "·": { rotulo: "Sem histórico (anterior à primeira gravação)", cor: "rgba(100,116,139,0.55)" },
 } as const;
 const DIA_FALHOU = { rotulo: "Falhou", cor: "var(--err)" };

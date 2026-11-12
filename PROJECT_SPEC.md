@@ -1098,6 +1098,15 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-12] — Gravação do Digifort por faixas de cobertura (agente 1.1.48)
+
+`resumir_camera` (`agent/src/vms/digifort_gravacoes.py`) deixou de tratar qualquer gravação abaixo de 90% como parcial.
+Cobertura do dia (hoje: do tempo já decorrido): 40% a 100% = gravou (`█`, verde); 11% a 39% = parcial (`▒`, amarelo);
+0% a 10% = não gravou (`░`, vermelho). Dia com 10% ou menos não entra em `dias_com_gravacao`/`total_dias` e não conta como
+"gravou hoje" (`status_gravacao`), o que também corrige o e-mail e o `RecordingModal`. Novo campo `percentual_hoje` no
+resumo da câmera (ainda sem uso no painel). Textos do `MiniCalendar` atualizados. Constantes `LIMIAR_GRAVOU` e
+`LIMIAR_PARCIAL`. Só agente e texto do painel; nenhuma rota nem migração.
+
 ### [2026-11-12] — Merge com a Helena (3ª rodada): login da OLT VSOL e versão 1.1.47 do agente
 
 **Incorporado (ramo `helena`, `e1e7126`):** `_parece_tela_login` em `agent/src/olt/vsol.py` reconhece a tela de login da

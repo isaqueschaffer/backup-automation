@@ -181,7 +181,7 @@ class TestResumo(unittest.TestCase):
     def test_mapa_com_todos_os_estados(self):
         por_dia = {
             self.dia(3): 86400 * 0.95,   # gravou
-            self.dia(2): 3600,           # parcial
+            self.dia(2): 86400 * 0.25,   # parcial (11% a 39%)
             self.dia(0): 43200 * 0.95,   # hoje: 95% do que ja passou
         }                                # dia(1) sem nada
         r = g.resumir_camera(por_dia, self.HOJE, self.AGORA)
@@ -192,11 +192,24 @@ class TestResumo(unittest.TestCase):
         self.assertEqual(r["dias_com_gravacao"], [self.dia(3).isoformat(), self.dia(2).isoformat(), self.HOJE.isoformat()])
 
     def test_hoje_e_medido_contra_o_tempo_decorrido(self):
-        # 1 h gravada as 02:00: 50% do que passou = parcial; as 12:00 seria so 8% = parcial tambem
+        # 1 h gravada as 02:00: 50% do que passou = gravou; as 06:00 seria 17% = parcial; as 12:00 so 8% = nao gravou
         r = g.resumir_camera({self.HOJE: 3600}, self.HOJE, datetime(2026, 10, 29, 1, 0))
         self.assertTrue(r["mapa"].endswith("█"))
-        r = g.resumir_camera({self.HOJE: 3600}, self.HOJE, datetime(2026, 10, 29, 12, 0))
+        r = g.resumir_camera({self.HOJE: 3600}, self.HOJE, datetime(2026, 10, 29, 6, 0))
         self.assertTrue(r["mapa"].endswith("▒"))
+        r = g.resumir_camera({self.HOJE: 3600}, self.HOJE, datetime(2026, 10, 29, 12, 0))
+        self.assertTrue(r["mapa"].endswith("░"))
+        self.assertEqual(r["status_gravacao"], "SEM_GRAVACAO")
+
+    def test_faixas_de_cobertura(self):
+        def mapa(frac):
+            return g.resumir_camera({self.dia(1): 86400 * frac}, self.HOJE, self.AGORA)["mapa"][-2]
+        self.assertEqual(mapa(0.01), "░")    # 1% = nao gravou
+        self.assertEqual(mapa(0.10), "░")    # 10% = nao gravou
+        self.assertEqual(mapa(0.11), "▒")    # 11% = parcial
+        self.assertEqual(mapa(0.39), "▒")    # 39% = parcial
+        self.assertEqual(mapa(0.40), "█")    # 40% = gravou
+        self.assertEqual(mapa(1.0), "█")
 
     def test_sem_nenhuma_gravacao_nao_marca_sem_historico(self):
         r = g.resumir_camera({}, self.HOJE, self.AGORA)
@@ -258,8 +271,10 @@ class TestCamerasEmQualquerDesfechoDoBackup(unittest.TestCase):
         self.dir = Path(self.tmp.name)
         hoje = date.today()
         self.raiz = self.dir / "gravacoes"
-        escrever_indice(self.raiz / "Cliente" / "Indices" / f"{hoje:%Y%m%d}_01.dix",
-                        segundos(datetime.combine(hoje, datetime.min.time()), datetime.combine(hoje, datetime.min.time()) + timedelta(minutes=10)))
+        # grava da meia-noite ate agora (minimo 2 min): a cobertura de hoje fica alta a qualquer hora do dia
+        meia_noite = datetime.combine(hoje, datetime.min.time())
+        fim = max(datetime.now(), meia_noite + timedelta(minutes=2))
+        escrever_indice(self.raiz / "Cliente" / "Indices" / f"{hoje:%Y%m%d}_01.dix", segundos(meia_noite, fim))
         self.backup = self.dir / "bk"
         self.backup.mkdir()
         # o cache de leituras vai para a pasta temporaria, nao para a pasta do agente
