@@ -1104,6 +1104,17 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-12] — Gravação do Digifort: novas faixas para câmeras por movimento (agente 1.1.51)
+
+Caso real: no CFTV 01 do Navarro, a maioria das câmeras grava por movimento e ficava amarela nos dias úteis e vermelha
+nos fins de semana e feriados. A "CATRACA (A) - SUBSOLO 3", com pouco movimento, mostrava 12 dias cinza ("sem
+histórico") mesmo tendo gravação, porque nenhum dia passava de 11%. Novas faixas em `resumir_camera`
+(`agent/src/vms/digifort_gravacoes.py`): acima de 20% = gravou (`█`); acima de 0% até 20% = parcial (`▒`); 0% (nenhum
+segundo gravado) = não gravou (`░`). Qualquer gravação no dia agora entra em `dias_com_gravacao`/`total_dias` e conta
+como "gravou hoje". O cinza `·` fica só para dias sem nenhuma gravação antes da primeira gravação da janela (retenção ou
+câmera nova). `LIMIAR_GRAVOU = 0.20` e `LIMIAR_PARCIAL = 0.0`, os dois com comparação "acima de". Textos do
+`MiniCalendar` atualizados. Só agente e texto do painel; nenhuma rota nem migração.
+
 ### [2026-11-12] — Merge com a Helena (4ª rodada): alarmes do DEFENSE, notificação ALARME e versão 1.1.50 do agente
 
 **Incorporado (ramo `helena`, `2af33d4` e `4d8e355`):** alarmes das centrais Intelbras do DEFENSE reativados (saem de
