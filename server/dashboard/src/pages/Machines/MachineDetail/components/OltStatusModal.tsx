@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import api from "../../../../api/client";
-import { OltStatus, OltStatusResponse } from "../../../../api/types";
+import { ConexaoTeste, OltStatus, OltStatusResponse } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import StatusBadge from "../../../../components/StatusBadge";
+import { useToast } from "../../../../components/Toast";
 import { fmtDate } from "../../../../utils/date";
+import { fmtCronometro, percentualTeste, useTesteConexao } from "../useTesteConexao";
+import { serverUtcMs } from "../utils";
+
+const INTERVALO_COLETA_S = 300; // o agente lê as OLTs a cada 5 min (INTERVALO_OLT_S no agente)
+
+// "há 3 min" / "há 1 h 05 min", a partir de segundos
+function fmtIdade(seg: number): string {
+  const s = Math.max(0, Math.floor(seg));
+  if (s < 60) return "agora há pouco";
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`;
+  return `há ${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
+}
 
 const TEMPERATURA_ALERTA = 48;
 const MAX_LINHAS_ONUS = 300;
@@ -201,6 +214,8 @@ export default function OltStatusModal({ machineId, nvrId, nvrName, onClose }: {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [ativa, setAtiva] = useState(0);
+  const [agoraMs, setAgoraMs] = useState(() => Date.now());
+  const { toast } = useToast();
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -221,6 +236,25 @@ export default function OltStatusModal({ machineId, nvrId, nvrName, onClose }: {
     return () => clearInterval(t);
   }, [carregar]);
 
+  // "Atualizar" pede ao agente uma leitura nova da OLT agora (antes só relia o último status salvo, o que
+  // era instantâneo e deixava a tela igual, sem nenhum sinal de que algo aconteceu)
+  const aoConcluir = useCallback((t: ConexaoTeste | null) => {
+    carregar();
+    if (!t) toast("Não foi possível acompanhar a atualização.", "error");
+    else if (t.ok) toast(`Status atualizado em ${t.segundos} s.`, "success");
+    else toast(t.mensagem || "A atualização falhou.", "error");
+  }, [carregar, toast]);
+  const leitura = useTesteConexao(machineId, nvrId, { onConcluido: aoConcluir });
+
+  // relógio para a idade do dado e a contagem até a próxima coleta automática
+  useEffect(() => {
+    const t = setInterval(() => setAgoraMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const idadeS = dados?.atualizado_em ? (agoraMs - serverUtcMs(dados.atualizado_em)) / 1000 : null;
+  const proximaS = idadeS === null ? null : INTERVALO_COLETA_S - idadeS;
+  const rotuloLeitura = leitura.teste?.etapas.find(e => e.estado === "andamento")?.rotulo || "Pedindo ao agente da máquina...";
+
   const olts = dados?.olts || [];
   const olt = olts[Math.min(ativa, olts.length - 1)];
 
@@ -233,10 +267,40 @@ export default function OltStatusModal({ machineId, nvrId, nvrName, onClose }: {
           </button>
         ))}
         <button className="btn btn-secondary btn-sm" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}
-          onClick={carregar} disabled={carregando}>
-          <RefreshCw size={13} /> Atualizar
+          onClick={leitura.iniciar} disabled={leitura.emAndamento}
+          title="Pede ao agente da máquina uma leitura nova da OLT agora">
+          <RefreshCw size={13} style={leitura.emAndamento ? { animation: "spin 0.9s linear infinite" } : undefined} />
+          {leitura.emAndamento ? "Atualizando..." : "Atualizar"}
         </button>
       </div>
+      {leitura.emAndamento ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6, gap: 12 }}>
+            <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{rotuloLeitura}</span>
+            <span style={{ fontFamily: "monospace", color: "var(--text-muted)" }}>{fmtCronometro(leitura.segundos)}</span>
+          </div>
+          <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percentualTeste(leitura.teste))}
+            style={{ height: 8, borderRadius: 999, background: "var(--surface-2, rgba(255,255,255,0.06))", border: "1px solid var(--border)", overflow: "hidden" }}>
+            <div className="barra-progresso-ativa"
+              style={{ width: `${percentualTeste(leitura.teste)}%`, height: "100%", background: "var(--accent)", borderRadius: 999, transition: "width 0.5s ease" }} />
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 5 }}>
+            O agente está lendo a OLT agora; com muitas ONUs pode levar alguns minutos. Pode fechar esta janela, a leitura continua.
+          </div>
+        </div>
+      ) : leitura.terminado && (leitura.erro || (leitura.teste && !leitura.teste.ok)) ? (
+        <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: "var(--radius-sm)", fontSize: 12, background: "var(--err-bg)", color: "var(--err)" }}>
+          Não foi possível atualizar: {leitura.erro || leitura.teste?.mensagem}
+        </div>
+      ) : (
+        <div style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+          {idadeS === null
+            ? "Ainda não há leitura desta OLT."
+            : `Última leitura: ${fmtDate(dados?.atualizado_em, { short: true })} (${fmtIdade(idadeS)})`
+              + (proximaS !== null && proximaS > 0 ? ` · próxima automática em ${fmtCronometro(proximaS)}` : " · próxima leitura automática a qualquer momento")}
+          {leitura.terminado && leitura.teste?.ok && <span style={{ color: "var(--ok)" }}> · atualizado em {leitura.teste.segundos} s</span>}
+        </div>
+      )}
       {erro ? (
         <div className="empty-state" style={{ color: "var(--err)" }}>{erro}</div>
       ) : !olt ? (

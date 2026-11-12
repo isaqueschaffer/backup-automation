@@ -1098,6 +1098,17 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-12] — Botão "Atualizar" do modal de ONUs da OLT passa a ler a OLT e mostrar o andamento
+
+**Problema:** o "Atualizar" só relia do servidor o último status salvo (instantâneo e, sem mudança, a tela ficava igual:
+nenhum sinal de que algo aconteceu). **Alteração:** o botão pede ao agente uma leitura nova da OLT pelo mesmo fluxo do
+"Testar conexão" (`POST .../testar-conexao`, exige agente >= 1.1.44) e mostra barra de progresso, etapa atual e
+cronômetro; ao terminar recarrega os dados e avisa por toast ("Status atualizado em N s." ou o motivo da falha); em
+falha o motivo fica na tela. Sem clique, o modal mostra "Última leitura: data (há N min) · próxima automática em mm:ss".
+Fechar a janela não interrompe a leitura. A lógica de acompanhar o teste virou o hook `MachineDetail/useTesteConexao.ts`,
+usado também por `ConexaoTesteModal.tsx`. **Arquivos:** `server/dashboard/src/pages/Machines/MachineDetail/{useTesteConexao.ts,
+components/{OltStatusModal,ConexaoTesteModal}.tsx}`. **Breaking change:** nenhum; só painel (sem versão nova do agente).
+
 ### [2026-11-12] — Merge com a Helena (2ª rodada): limpar planilha e importação por IP, sem versão nova do agente
 
 **Incorporado (ramo `helena`, `bff8c37`):** botão "Limpar planilha" da Galeria e do formulário do Digifort

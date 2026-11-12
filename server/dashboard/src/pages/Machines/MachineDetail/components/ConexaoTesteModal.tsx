@@ -1,28 +1,7 @@
-import { useEffect, useRef, useState } from "react";
 import { Cable, CheckCircle2, Circle, Loader2, MinusCircle, RotateCw, XCircle } from "lucide-react";
 import Modal from "../../../../components/Modal";
-import { iniciarTesteConexao, obterTesteConexao } from "../../../../api/client";
-import { ConexaoTeste, EtapaConexao } from "../../../../api/types";
-
-const INTERVALO_CONSULTA_MS = 1000;
-
-function fmtCronometro(seg: number): string {
-  const s = Math.max(0, Math.floor(seg));
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
-
-function erroDaApi(e: unknown): string {
-  const detalhe = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-  return typeof detalhe === "string" ? detalhe : "Falha ao falar com o servidor.";
-}
-
-// Etapa feita conta 1; a em andamento conta meia, para a barra andar assim que ela começa
-function percentual(t: ConexaoTeste | null): number {
-  if (!t || t.etapas.length === 0) return 3;
-  if (t.concluido) return 100;
-  const feitas = t.etapas.reduce((soma, e) => soma + (e.estado === "andamento" ? 0.5 : e.estado === "pendente" ? 0 : 1), 0);
-  return Math.max(3, Math.min(97, (feitas / t.etapas.length) * 100));
-}
+import { EtapaConexao } from "../../../../api/types";
+import { fmtCronometro, percentualTeste, useTesteConexao } from "../useTesteConexao";
 
 function IconeEtapa({ estado }: { estado: EtapaConexao["estado"] }) {
   if (estado === "ok") return <CheckCircle2 size={15} color="var(--ok)" />;
@@ -43,54 +22,15 @@ export default function ConexaoTesteModal({ machineId, eqId, eqNome, eqTipo, ori
   onVerOnus?: () => void;
   onClose: () => void;
 }) {
-  const [teste, setTeste] = useState<ConexaoTeste | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
-  const [rodada, setRodada] = useState(0);
-  const [inicioMs, setInicioMs] = useState(() => Date.now());
-  const [agoraMs, setAgoraMs] = useState(() => Date.now());
-  const concluidoRef = useRef(onConcluido);
-  concluidoRef.current = onConcluido;
+  const { teste, erro, terminado, segundos, iniciar } = useTesteConexao(machineId, eqId, {
+    automatico: true, onConcluido: () => onConcluido?.(),
+  });
 
-  // Dispara o teste e consulta o andamento até terminar (nova rodada em "Testar de novo")
-  useEffect(() => {
-    let cancelado = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    setTeste(null); setErro(null);
-    setInicioMs(Date.now()); setAgoraMs(Date.now());
-
-    const acompanhar = (atual: ConexaoTeste) => {
-      if (cancelado) return;
-      setTeste(atual);
-      if (atual.concluido || !atual.task_id) {
-        concluidoRef.current?.();
-        return;
-      }
-      timer = setTimeout(async () => {
-        try {
-          acompanhar(await obterTesteConexao(machineId, eqId, atual.task_id!));
-        } catch (e) {
-          if (!cancelado) setErro(erroDaApi(e));
-        }
-      }, INTERVALO_CONSULTA_MS);
-    };
-
-    iniciarTesteConexao(machineId, eqId).then(acompanhar).catch(e => { if (!cancelado) setErro(erroDaApi(e)); });
-    return () => { cancelado = true; if (timer) clearTimeout(timer); };
-  }, [machineId, eqId, rodada]);
-
-  const terminado = !!erro || !!teste?.concluido;
-  useEffect(() => {
-    if (terminado) return;
-    const t = setInterval(() => setAgoraMs(Date.now()), 250);
-    return () => clearInterval(t);
-  }, [terminado]);
-
-  const segundos = teste?.concluido ? teste.segundos : (agoraMs - inicioMs) / 1000;
   const sucesso = !erro && teste?.concluido && teste.ok;
   const falhou = !!erro || (teste?.concluido && !teste.ok);
   const corBarra = sucesso ? "var(--ok)" : falhou ? "var(--err)" : "var(--accent)";
   const etapaAtual = teste?.etapas.find(e => e.estado === "andamento");
-  const pct = erro ? 100 : percentual(teste);
+  const pct = erro ? 100 : percentualTeste(teste);
 
   const legenda = erro
     ? "Não foi possível concluir o teste"
@@ -161,7 +101,7 @@ export default function ConexaoTesteModal({ machineId, eqId, eqNome, eqTipo, ori
             </button>
           )}
           {terminado && (
-            <button className="btn btn-secondary" onClick={() => setRodada(r => r + 1)} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button className="btn btn-secondary" onClick={iniciar} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <RotateCw size={14} /> Testar de novo
             </button>
           )}
