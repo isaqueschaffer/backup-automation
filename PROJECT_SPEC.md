@@ -1161,6 +1161,13 @@ vindos de `eqTipos.tsx`, o mesmo usado nos cards de equipamento), com um botão 
 volta a ficar online, e o pareamento por canal físico (NVR tradicional) separado do pareamento por nome.
 **Arquivos:** server/api/{models.py,main.py,schemas.py,routers/notificacoes.py,services/{notificacoes.py,galeria_vms.py},tests/test_cameras_offline_notificacao.py}, server/dashboard/src/{api/{client.ts,types.ts},utils/notificacoes.ts,pages/Notificacoes/NotificacoesPage.tsx}, PROJECT_SPEC.md.
 
+### [2026-11-12] — Digifort/Defense: botão "Limpar planilha" e câmera de mesmo IP é substituída na importação
+
+- **Limpar planilha**: botão na Galeria (DIGIFORT/DEFENSE) e no campo "Planilha das câmeras" do formulário do Digifort. Pede confirmação e chama `DELETE /machines/{id}/equipamentos/{nvr_id}/cameras`, que apaga todas as câmeras da Galeria (com as imagens de referência e da noite) e a planilha guardada. No formulário, se há planilha carregada e ainda não salva, o botão só a descarta.
+- **Mesmo IP substitui**: `POST .../cameras/import` casava pelo nome antes do IP; se o nome da planilha nova era de uma câmera e o IP era de outra, a primeira recebia o IP da segunda e as duas ficavam com o mesmo IP (câmeras em dobro). Agora `casar_cameras_por_ip` (`services/planilha_vms.py`) dá prioridade ao IP: IP que aparece uma só vez na planilha e em uma só câmera da Galeria é a mesma câmera (renomeia e atualiza, preservando as imagens). IP repetido (equipamento com vários canais) continua casando pelo nome. Cada câmera antiga casa com no máximo uma linha.
+- Câmera nova não toma mais o canal de uma câmera que continua na Galeria (antes podia haver dois itens com o mesmo canal).
+- Testes em `server/api/tests/test_planilha_vms.py`.
+
 ### [2026-11-11] — Captura RTSP: porta 554 conferida só depois da 1ª falha (Hikvision antigas davam timeout)
 
 - **Sintoma**: na CFTV 01 - Navarro, as câmeras Hikvision DS-2CD2012-I (e a 2 ANDAR, DS-2CD2020-I) falhavam na captura do painel com "Tempo esgotado (18s) via TCP" em todas as URLs, com IP, usuário e senha certos; Grandstream e a DS-2CD1001-I funcionavam.

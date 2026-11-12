@@ -36,6 +36,7 @@ from services.galeria_vms import (
     bloqueada_por_ip_compartilhado,
 )
 from services.planilha_vms import (
+    casar_cameras_por_ip,
     colunas_senha,
     mascarar_senhas,
     empacotar,
@@ -610,28 +611,19 @@ def import_cameras(
             raise HTTPException(status_code=400, detail="Nenhuma câmera para importar.")
 
     cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).all()
-    by_canal = {c.canal: c for c in cameras_db}
-    by_nome = {(c.nome or "").strip().lower(): c for c in cameras_db}
-    by_ip = {(c.ip or "").strip(): c for c in cameras_db if c.ip}
+    # Mesmo IP = mesma câmera: a da planilha nova substitui a antiga (ver casar_cameras_por_ip)
+    existentes_casadas = casar_cameras_por_ip(itens, cameras_db)
+
+    # Canais das câmeras que continuam na galeria: uma câmera nova não pode tomar o canal de uma delas
+    mantidas = [c for c in cameras_db if c in existentes_casadas] if payload.replace_existing else cameras_db
+    reservados = {c.canal for c in mantidas}
 
     usados = set()
     atualizadas = []
     cams_renomeadas = []
-    for idx, item in enumerate(itens, start=1):
-        nome_key = (item.nome or "").strip().lower()
-        ip_key = (item.ip or "").strip()
-
-        # Prioriza encontrar a câmera existente pelo nome ou pelo IP!
-        camera = None
-        if nome_key and nome_key in by_nome:
-            camera = by_nome[nome_key]
-        elif ip_key and ip_key in by_ip:
-            camera = by_ip[ip_key]
-        elif item.canal and item.canal in by_canal:
-            camera = by_canal[item.canal]
-
+    for idx, (item, camera) in enumerate(zip(itens, existentes_casadas), start=1):
         canal = camera.canal if camera else (item.canal or idx)
-        while canal in usados:
+        while canal in usados or (camera is None and canal in reservados):
             canal += 1
         usados.add(canal)
 
@@ -716,6 +708,28 @@ def set_camera_rtsp(
             logger.exception("Falha ao renomear imagem de referência em disco para a câmera %s", camera.id)
 
     return _camera_response_dict(camera)
+
+
+@router.delete("/{id}/cameras", status_code=status.HTTP_204_NO_CONTENT)
+def limpar_planilha_vms(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Limpa a planilha do equipamento DIGIFORT/DEFENSE: apaga todas as câmeras da galeria (com as imagens
+    salvas) e a planilha guardada, para importar uma nova do zero."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Limpar a planilha só é suportado para DIGIFORT e DEFENSE.")
+
+    db.query(NVRCamera).filter(NVRCamera.nvr_id == id).delete(synchronize_session=False)
+    db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).delete(synchronize_session=False)
+    db.commit()
+    return None
 
 
 @router.delete("/{id}/cameras/{canal}", status_code=status.HTTP_204_NO_CONTENT)

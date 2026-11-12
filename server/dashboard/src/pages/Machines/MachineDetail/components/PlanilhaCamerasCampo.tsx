@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Upload } from "lucide-react";
+import { Trash2, Upload } from "lucide-react";
 import api from "../../../../api/client";
 import { EqForm, NvrCamera, PlanilhaPendente, PlanilhaVms } from "../../../../api/types";
 import { aplicarOpcaoNome, lerPlanilhaVms, mensagemDeErro } from "../planilhaVms";
@@ -66,6 +66,29 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
     }
   };
 
+  // Descarta a planilha ainda não enviada; a já guardada (com as câmeras da Galeria) é apagada no servidor
+  const limpar = async () => {
+    if (eqForm.planilhaNova) {
+      setEqForm(f => ({ ...f, planilhaNova: null }));
+      return;
+    }
+    if (!nvrId) return;
+    if (!window.confirm(
+      `Limpar a planilha deste equipamento?\n\nIsso apaga a planilha guardada e as ${existentes.length} câmera(s) da Galeria, ` +
+      "com as imagens de referência e da noite. Não dá para desfazer.",
+    )) return;
+    setLendo(true);
+    try {
+      await api.delete(`/machines/${machineId}/equipamentos/${nvrId}/cameras`);
+      setExistentes([]);
+      setEqForm(f => ({ ...f, planilhaSalva: null }));
+    } catch (err) {
+      onErro(mensagemDeErro(err, "Erro ao limpar a planilha."));
+    } finally {
+      setLendo(false);
+    }
+  };
+
   const nova = eqForm.planilhaNova;
   const salva = eqForm.planilhaSalva;
   const textoEstado = nova
@@ -85,6 +108,12 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
         {nova && (
           <button type="button" className="btn btn-secondary" onClick={() => { setMostrarSenhas(false); setPrevia(nova); }}>
             Ver prévia
+          </button>
+        )}
+        {(nova || salva) && (
+          <button type="button" className="btn btn-secondary" disabled={lendo} onClick={limpar}
+            style={{ color: "var(--danger)" }} title="Remove a planilha para carregar uma nova do zero">
+            <Trash2 size={14} /> Limpar planilha
           </button>
         )}
         <span style={{ fontSize: 12, color: nova || salva ? "var(--text-muted)" : "var(--warn)" }}>{textoEstado}</span>
