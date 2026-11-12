@@ -296,6 +296,26 @@ export interface PaginatedBackups {
   pages: number;
 }
 
+export interface AuditoriaItem {
+  id: string;
+  created_at: string;
+  usuario: string;
+  message: string;
+  equipamento: string | null;
+  machine_id: string;
+  machine_name: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+}
+
+export interface PaginatedAuditoria {
+  items: AuditoriaItem[];
+  total: number;
+  page: number;
+  pages: number;
+  dias_retencao: number;
+}
+
 export interface Stats {
   machines_total: number;
   machines_active: number;

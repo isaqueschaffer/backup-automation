@@ -4,6 +4,7 @@ Substitui o antigo router de NVRs, agora suportando múltiplos tipos:
 NVR, OLT, ONU, PABX (e futuros).
 """
 import asyncio
+import copy
 import logging
 from datetime import datetime
 from typing import List, Optional
@@ -23,6 +24,7 @@ from schemas import (
     NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
     NVRPlanilhaEntrada, NVRPlanilhaResposta, ConexaoTesteResponse, ComandoAlarmeRequest, ComandoAlarmeResultado,
 )
+from services.agent_logs import registrar_alteracao
 from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
 from services.segredos_config import proteger_segredos
@@ -57,6 +59,21 @@ router = APIRouter(prefix="/api/v1/machines/{machine_id}/equipamentos", tags=["E
 
 def _get_machine_or_404(machine_id: UUID, db: Session, ctx: Contexto) -> Machine:
     return obter_maquina(db, ctx, machine_id)
+
+
+_ROTULOS_CAMPOS = {
+    "tipo": "tipo", "name": "nome", "ip": "IP", "username": "usuário", "password": "senha", "active": "ativo/inativo",
+}
+
+
+def _campos_alterados(antes: dict, eq: NVR) -> List[str]:
+    """Nomes dos campos do equipamento que mudaram (nunca os valores: senhas e segredos ficam fora do evento)."""
+    alterados = [rotulo for campo, rotulo in _ROTULOS_CAMPOS.items() if getattr(eq, campo) != antes[campo]]
+    antigo, novo = antes["config_extra"] or {}, eq.config_extra or {}
+    chaves = sorted(k for k in set(antigo) | set(novo) if antigo.get(k) != novo.get(k))
+    if chaves:
+        alterados.append(f"configurações ({', '.join(chaves)})")
+    return alterados
 
 
 @router.get("", response_model=List[NVRResponse])
@@ -111,6 +128,7 @@ def create_equipamento(
         active=body.active,
     )
     db.add(equipamento)
+    registrar_alteracao(db, machine_id, ctx.feito_por, f"cadastrou o equipamento '{body.name}' ({tipo}).", body.name)
     db.commit()
     db.refresh(equipamento)
     return equipamento
@@ -134,6 +152,7 @@ def update_equipamento(
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
 
     nome_antigo = eq.name
+    antes = {c: copy.deepcopy(getattr(eq, c)) for c in ("tipo", "name", "ip", "username", "password", "active", "config_extra")}
 
     for field, value in body.model_dump(exclude_none=True).items():
         if field == "password" and value:
@@ -150,6 +169,13 @@ def update_equipamento(
         else:
             setattr(eq, field, value)
 
+    alterados = _campos_alterados(antes, eq)
+    if alterados:
+        renomeou = f" (antes '{nome_antigo}')" if eq.name != nome_antigo else ""
+        registrar_alteracao(
+            db, machine_id, ctx.feito_por,
+            f"alterou o equipamento '{eq.name}'{renomeou}: {', '.join(alterados)}.", eq.name,
+        )
     db.commit()
     db.refresh(eq)
 
@@ -181,6 +207,7 @@ def delete_equipamento(
     eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    registrar_alteracao(db, machine_id, ctx.feito_por, f"removeu o equipamento '{eq.name}' ({eq.tipo}).", eq.name)
     db.delete(eq)
     db.commit()
 
@@ -460,11 +487,12 @@ def get_alarmes_status(
 ESPERA_COMANDO_ALARME_S = 75.0  # ping a cada 15s + login + comando no painel (o agente espera até 30s pela central)
 
 
-def _registrar_comando_alarme(machine_id: UUID, nvr_nome: str, mensagem: str, nivel: str) -> None:
+def _registrar_comando_alarme(machine_id: UUID, nvr_nome: str, mensagem: str, nivel: str, usuario: Optional[str] = None) -> None:
+    """`usuario` só no pedido (quem clicou): é o que faz o comando aparecer na tela de Auditoria."""
     from database import SessionLocal
     with SessionLocal() as sessao:
         sessao.add(AgentLog(machine_id=machine_id, event_type="alarme_comando", message=mensagem, nivel=nivel,
-                            equipamento=nvr_nome))
+                            equipamento=nvr_nome, usuario=usuario))
         sessao.commit()
 
 
@@ -514,7 +542,7 @@ async def comandar_central_alarme(
     pending_alarme_tasks[machine_id_str] = entry
     db.close()  # não segura a conexão do banco durante a espera
 
-    _registrar_comando_alarme(machine_id, nvr_nome, f"{ctx.feito_por} pediu para {acao_texto} a central '{nome_central}'.", "INFO")
+    _registrar_comando_alarme(machine_id, nvr_nome, f"{ctx.feito_por} pediu para {acao_texto} a central '{nome_central}'.", "INFO", ctx.feito_por)
     try:
         await asyncio.wait_for(entry["event"].wait(), timeout=ESPERA_COMANDO_ALARME_S)
         resultado = entry["result"] or ComandoAlarmeResultado(sucesso=False, mensagem="O agente respondeu sem resultado.")
@@ -744,11 +772,21 @@ def import_cameras(
             camera.password = encrypt("navarro@123")
         atualizadas.append(camera)
 
+    removidas = 0
     if payload.replace_existing:
         for c in cameras_db:
             if c not in atualizadas:
                 db.delete(c)
+                removidas += 1
 
+    novas = sum(1 for c in existentes_casadas if c is None)
+    origem = "sincronizou as câmeras da máquina" if payload.sync_from_machine else "importou câmeras"
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        f"{origem} no equipamento '{nvr.name}': {novas} nova(s), {len(atualizadas) - novas} atualizada(s)"
+        + (f", {removidas} removida(s)." if removidas else "."),
+        nvr.name,
+    )
     db.commit()
     for c in atualizadas:
         db.refresh(c)
@@ -794,6 +832,12 @@ def set_camera_rtsp(
     elif not camera.password:
         camera.password = encrypt("navarro@123")
 
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        (f"alterou a câmera '{camera.nome}'" + (f" (antes '{nome_antigo}')" if nome_antigo and nome_antigo != camera.nome else "")
+         if nome_antigo is not None else f"adicionou a câmera '{camera.nome}'") + f" no equipamento '{nvr.name}'.",
+        nvr.name,
+    )
     db.commit()
     db.refresh(camera)
 
@@ -822,8 +866,12 @@ def limpar_planilha_vms(
     if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
         raise HTTPException(status_code=400, detail="Limpar a planilha só é suportado para DIGIFORT e DEFENSE.")
 
-    db.query(NVRCamera).filter(NVRCamera.nvr_id == id).delete(synchronize_session=False)
+    total = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).delete(synchronize_session=False)
     db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).delete(synchronize_session=False)
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        f"limpou a planilha do equipamento '{nvr.name}' ({total} câmera(s) removida(s) da Galeria).", nvr.name,
+    )
     db.commit()
     return None
 
@@ -844,6 +892,9 @@ def delete_camera(
     camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == canal).first()
     if not camera:
         raise HTTPException(status_code=404, detail="Câmera não encontrada")
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por, f"removeu a câmera '{camera.nome}' do equipamento '{nvr.name}'.", nvr.name,
+    )
     db.delete(camera)
     db.commit()
 
@@ -876,6 +927,10 @@ def set_perfect_image(
         camera.nome = payload.nome
         camera.perfect_image_base64 = payload.image_base64
 
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        f"definiu a imagem de referência da câmera '{camera.nome}' no equipamento '{nvr.name}'.", nvr.name,
+    )
     db.commit()
     db.refresh(camera)
 
@@ -928,6 +983,10 @@ def salvar_planilha(
         planilha.dados = dados_enc
         planilha.importado_em = agora
 
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        f"importou a planilha '{payload.nome_arquivo}' ({total} linha(s)) no equipamento '{nvr.name}'.", nvr.name,
+    )
     db.commit()
     db.refresh(planilha)
 
@@ -1001,6 +1060,9 @@ def remover_planilha(
     if not planilha:
         raise HTTPException(status_code=404, detail="Nenhuma planilha importada neste equipamento.")
 
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por, f"removeu a planilha guardada do equipamento '{nvr.name}'.", nvr.name,
+    )
     db.delete(planilha)
     db.commit()
     return None

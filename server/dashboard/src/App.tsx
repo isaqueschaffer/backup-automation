@@ -17,6 +17,7 @@ import ContasPage from "./pages/Contas/ContasPage";
 import ContaDetalhePage from "./pages/Contas/ContaDetalhePage";
 import MinhaConta from "./pages/MinhaConta";
 import NotificacoesPage from "./pages/Notificacoes/NotificacoesPage";
+import AuditoriaPage from "./pages/Auditoria/AuditoriaPage";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, me } = useAuth();
@@ -40,6 +41,17 @@ function SuperAdminRoute({ children }: { children: ReactNode }) {
   const { me } = useAuth();
 
   if (me && me.usuario.papel !== "SUPER_ADMIN") {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+// Auditoria: só ADMIN e super admin (perfil somente leitura volta para a visão geral)
+function SemLeituraRoute({ children }: { children: ReactNode }) {
+  const { me } = useAuth();
+
+  if (me && me.usuario.papel === "LEITURA") {
     return <Navigate to="/" replace />;
   }
 
@@ -73,6 +85,7 @@ function AppRoutes() {
       <Route path="/backups" element={<ProtectedRoute><Layout><Backups /></Layout></ProtectedRoute>} />
       <Route path="/minha-conta" element={<ProtectedRoute><Layout><MinhaConta /></Layout></ProtectedRoute>} />
       <Route path="/notificacoes" element={<ProtectedRoute><Layout><NotificacoesPage /></Layout></ProtectedRoute>} />
+      <Route path="/auditoria" element={<ProtectedRoute><SemLeituraRoute><Layout><AuditoriaPage /></Layout></SemLeituraRoute></ProtectedRoute>} />
       <Route
         path="/contas"
         element={

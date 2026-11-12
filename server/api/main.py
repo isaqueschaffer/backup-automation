@@ -12,7 +12,7 @@ from schemas import StatsResponse
 from auth import Contexto, get_contexto
 from services.escopo import filtrar_por_conta
 from config import settings
-from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta, notificacoes
+from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta, notificacoes, auditoria
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
 
 # ─── Create tables on startup ──────────────────────────────────────────────
@@ -217,6 +217,8 @@ _MIGRACOES_COLUNAS = [
     # Logs do agente no painel: nível e equipamento
     ("agent_logs", "nivel", "ALTER TABLE agent_logs ADD COLUMN nivel VARCHAR(10) NOT NULL DEFAULT 'INFO';"),
     ("agent_logs", "equipamento", "ALTER TABLE agent_logs ADD COLUMN equipamento VARCHAR(255);"),
+    # Auditoria: quem fez a ação no painel (NULL = evento do agente)
+    ("agent_logs", "usuario", "ALTER TABLE agent_logs ADD COLUMN usuario VARCHAR(255);"),
     # Notificações personalizadas: liga o alerta gerado (notificacoes) à definição que o criou
     ("notificacoes", "definicao_id", "ALTER TABLE notificacoes ADD COLUMN definicao_id UUID REFERENCES notificacoes_personalizadas(id) ON DELETE SET NULL;"),
     # Alarmes das centrais Intelbras cadastradas no DEFENSE (API /api/alarm-centrals, enviado pelo agente)
@@ -283,6 +285,7 @@ _INDICES = [
     "CREATE INDEX IF NOT EXISTS ix_usuarios_conta_id ON usuarios (conta_id);",
     "CREATE INDEX IF NOT EXISTS ix_conta_renovacoes_conta_id ON conta_renovacoes (conta_id);",
     "CREATE INDEX IF NOT EXISTS ix_agent_logs_client_created ON agent_logs (client_id, created_at);",
+    "CREATE INDEX IF NOT EXISTS ix_agent_logs_usuario_created ON agent_logs (created_at) WHERE usuario IS NOT NULL;",
 ]
 for _ddl in _INDICES:
     _run_ddl(_ddl, _ddl.split(" ON ")[0])
@@ -383,6 +386,7 @@ app.include_router(update_agent_router)   # OTA: /api/v1/agent/update-check
 app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 app.include_router(storage_admin.router)  # Armazenamento admin: /api/v1/admin/storage
 app.include_router(notificacoes.router)   # Notificações: /api/v1/notificacoes
+app.include_router(auditoria.router)      # Auditoria: /api/v1/auditoria
 
 
 # ─── Tarefa de fundo: fechamento das rodadas de backup do Cliente ──────────
