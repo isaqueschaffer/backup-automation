@@ -14,7 +14,10 @@ os.environ["FERNET_KEY"] = Fernet.generate_key().decode()
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ.setdefault("ADMIN_PASSWORD", "senha_de_teste")
 
+from types import SimpleNamespace as NS
+
 from services.planilha_vms import (
+    casar_cameras_por_ip,
     colunas_senha,
     mascarar_senhas,
     empacotar,
@@ -120,3 +123,31 @@ def run_all():
 
 if __name__ == "__main__":
     run_all()
+
+
+def _cam(nome, ip, canal):
+    return NS(nome=nome, ip=ip, canal=canal)
+
+
+def test_mesmo_ip_substitui_a_camera_antiga_mesmo_com_nome_diferente():
+    antigas = [_cam("CAM 01", "10.0.0.1", 1), _cam("CAM 02", "10.0.0.2", 2)]
+    itens = [_cam("Entrada Principal", "10.0.0.1", None), _cam("CAM 02", "10.0.0.2", None)]
+    assert casar_cameras_por_ip(itens, antigas) == [antigas[0], antigas[1]]
+
+
+def test_ip_novo_com_nome_de_outra_camera_nao_rouba_a_camera_do_outro_ip():
+    # O nome "CAM 01" já é da câmera do IP .1; a linha com IP .9 e esse nome não pode apagar o IP da .1
+    antigas = [_cam("CAM 01", "10.0.0.1", 1)]
+    itens = [_cam("CAM 01", "10.0.0.1", None), _cam("CAM 01", "10.0.0.9", None)]
+    assert casar_cameras_por_ip(itens, antigas) == [antigas[0], None]
+
+
+def test_ip_repetido_no_equipamento_casa_pelo_nome():
+    # Gravador de vídeo com vários canais no mesmo IP: o IP não serve de chave
+    antigas = [_cam("Canal A", "10.0.0.5", 1), _cam("Canal B", "10.0.0.5", 2)]
+    itens = [_cam("Canal B", "10.0.0.5", None), _cam("Canal C", "10.0.0.5", None)]
+    assert casar_cameras_por_ip(itens, antigas) == [antigas[1], None]
+
+
+def test_camera_sem_correspondencia_e_nova():
+    assert casar_cameras_por_ip([_cam("Nova", "10.0.0.7", None)], [_cam("CAM 01", "10.0.0.1", 1)]) == [None]

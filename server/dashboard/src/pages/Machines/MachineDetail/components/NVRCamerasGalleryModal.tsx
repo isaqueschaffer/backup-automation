@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Edit2, FileSpreadsheet, Image, Moon, Plus, RefreshCw, Upload, Video } from "lucide-react";
+import { AlertTriangle, Edit2, FileSpreadsheet, Image, Moon, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 import api from "../../../../api/client";
 import { NvrCamera, PlanilhaVms, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
@@ -335,6 +335,27 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     }
   };
 
+  // Apaga a planilha guardada e todas as câmeras da galeria, para importar uma nova do zero
+  const limparPlanilha = async () => {
+    const total = cameras.length;
+    if (!confirm(
+      `Limpar a planilha deste equipamento?\n\nIsso apaga a planilha guardada e as ${total} câmera(s) da galeria, ` +
+      "com as imagens de referência e da noite. Não dá para desfazer.",
+    )) return;
+    setVmsBusy(true);
+    try {
+      await api.delete(`/machines/${machineId}/equipamentos/${nvrId}/cameras`);
+      setPlanilhaSalva(null);
+      setSelectedCanal(null);
+      toast("Planilha limpa. Importe a nova planilha.", "success");
+      await recarregarCameras();
+    } catch (err) {
+      toast(erroDaApi(err, "Erro ao limpar a planilha."), "error");
+    } finally {
+      setVmsBusy(false);
+    }
+  };
+
   // Copia as câmeras já importadas em "Câmeras da Máquina" (tipo CAMERA) para a galeria deste equipamento
   const sincronizarDaMaquina = async () => {
     setVmsBusy(true);
@@ -563,6 +584,11 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
       <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={abrirPlanilhaSalva}
         style={{ display: "flex", alignItems: "center", gap: 6 }} title="Mostra a última planilha importada nesta galeria">
         <FileSpreadsheet size={13} /> Planilha importada
+      </button>
+      <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={limparPlanilha}
+        style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--danger)" }}
+        title="Apaga a planilha guardada e todas as câmeras desta galeria, para importar uma nova do zero">
+        <Trash2 size={13} /> Limpar planilha
       </button>
       <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={sincronizarDaMaquina}
         style={{ display: "flex", alignItems: "center", gap: 6 }} title="Copia as câmeras já importadas em 'Câmeras da Máquina' para esta galeria">
