@@ -66,9 +66,9 @@ enquanto `TRILAN_ENABLE_BACKUPS=false`, mas definir `TZ=America/Sao_Paulo` antes
 
 ### Imagem no repositório
 
-`agent/mikrotik/trilan-agent-armv7.tar` (60,2 MB, `docker save` de `trilan-agent:armv7`, `linux/arm/v7`), versionada
-como arquivo comum no ramo `isaque`. SHA-256:
-`35fbdde53c9e648258923fafd089cb9c20c35e4fd2033072c698525ac6d3433f`. No RouterOS: enviar o `.tar` ao roteador e
+`agent/mikrotik/trilan-agent-armv7.tar` (57,4 MB, `docker save` de `trilan-agent:armv7`, `linux/arm/v7`, agente
+1.1.52 com launcher e OTA, gerada em 12/11/2026), versionada como arquivo comum no ramo `isaque`. SHA-256:
+`567590623c0c865e9c637f649807bf2132b6f327174dcc7c03ae874fb900674d`. No RouterOS: enviar o `.tar` ao roteador e
 `/container add file=trilan-agent-armv7.tar ...`.
 
 ### Como gerar de novo
