@@ -15,11 +15,13 @@ from sqlalchemy.orm import Session
 from auth import Contexto, get_contexto
 from database import get_db
 from models import Machine, NVR, NVRCamera, NVRPlanilha
-from routers.agent import mascarar_credenciais, pending_rtsp_tasks
+from routers.agent import equipamento_para_agente, mascarar_credenciais, pending_rtsp_tasks
+from routers.machines import check_machine_online
+from services import teste_conexao
 from schemas import (
     NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse,
     NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
-    NVRPlanilhaEntrada, NVRPlanilhaResposta,
+    NVRPlanilhaEntrada, NVRPlanilhaResposta, ConexaoTesteResponse,
 )
 from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
@@ -383,6 +385,43 @@ def _marcar_imagem_noite(db: Session, nvr: NVR, canal: int, info: dict, nome: Op
 
 
 # ─── Status das OLTs (UNM2000) ─────────────────────────────────────────────
+
+@router.post("/{equipamento_id}/testar-conexao", response_model=ConexaoTesteResponse)
+def testar_conexao(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Pede ao agente da máquina que teste a conexão com o equipamento (alcance do IP, login e leitura; na OLT, já
+    lê e envia o status das ONUs). Volta na hora com o `task_id`; o andamento sai em GET .../testar-conexao/{task_id}.
+    Pedido repetido com um teste em andamento devolve o mesmo teste."""
+    machine = _get_machine_or_404(machine_id, db, ctx)
+    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
+    if not eq:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if not check_machine_online(machine):
+        return teste_conexao.falha_imediata(
+            str(eq.id), "A máquina está offline: o agente precisa estar em comunicação com o servidor para testar.")
+    task = equipamento_para_agente(machine, eq).model_dump()
+    return teste_conexao.criar(str(machine_id), str(eq.id), task)
+
+
+@router.get("/{equipamento_id}/testar-conexao/{task_id}", response_model=ConexaoTesteResponse)
+def andamento_teste_conexao(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    task_id: str,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Andamento do "Testar conexão" (o painel consulta a cada segundo)."""
+    _get_machine_or_404(machine_id, db, ctx)
+    estado = teste_conexao.estado(str(machine_id), task_id)
+    if estado is None or estado["equipamento_id"] != str(equipamento_id):
+        raise HTTPException(status_code=404, detail="Teste não encontrado (expirou ou o servidor reiniciou).")
+    return estado
+
 
 @router.get("/{id}/olt-status")
 def get_olt_status(

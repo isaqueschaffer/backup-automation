@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { AgentLog, ConfiguracaoNotificacao, Customer, CustomerRun, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedBackups, TipoNotificacao } from "./types";
+import { AgentLog, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedBackups, TipoNotificacao } from "./types";
 import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -101,6 +101,11 @@ export const updateEquipamento = (machineId: string, eqId: string, data: Record<
   api.put(`/machines/${machineId}/equipamentos/${eqId}`, data).then((r) => r.data);
 export const deleteEquipamento = (machineId: string, eqId: string) =>
   api.delete(`/machines/${machineId}/equipamentos/${eqId}`);
+// "Testar conexão": o agente testa e informa o andamento; o painel consulta a cada segundo
+export const iniciarTesteConexao = (machineId: string, eqId: string): Promise<ConexaoTeste> =>
+  api.post(`/machines/${machineId}/equipamentos/${eqId}/testar-conexao`).then((r) => r.data);
+export const obterTesteConexao = (machineId: string, eqId: string, taskId: string): Promise<ConexaoTeste> =>
+  api.get(`/machines/${machineId}/equipamentos/${eqId}/testar-conexao/${taskId}`).then((r) => r.data);
 
 // ── Backups ───────────────────────────────────────────────────
 export interface BackupQuery {

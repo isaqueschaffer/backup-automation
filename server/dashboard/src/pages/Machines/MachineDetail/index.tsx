@@ -29,6 +29,7 @@ import RecordingModal from "./components/RecordingModal";
 import NVRCamerasGalleryModal from "./components/NVRCamerasGalleryModal";
 import NVRTelemetryModal from "./components/NVRTelemetryModal";
 import OltStatusModal from "./components/OltStatusModal";
+import ConexaoTesteModal from "./components/ConexaoTesteModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
 import { useSomenteLeitura } from "../../../contexts/AuthContext";
 
@@ -70,6 +71,8 @@ export default function MachineDetail() {
   const [showOltModal, setShowOltModal] = useState<{ nvrId: string, nvrName: string } | null>(null);
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState<EqForm>(emptyEqForm());
+  // "Testar conexão" aberto (depois de salvar o equipamento ou pelo botão do card)
+  const [testeConexao, setTesteConexao] = useState<{ eqId: string; eqNome: string; eqTipo: string; origem: "salvar" | "card" } | null>(null);
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditMachineForm>({
     name: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
@@ -259,6 +262,11 @@ export default function MachineDetail() {
       setEqForm(emptyEqForm());
       setEditingEqId(null);
       load(true);
+      // Logo depois de salvar, o agente confere IP e login (feedback do cadastro)
+      const eqSalvoId = editingEqId || salvo?.id;
+      if (eqSalvoId) {
+        setTesteConexao({ eqId: eqSalvoId, eqNome: eqForm.name, eqTipo: eqForm.tipo, origem: "salvar" });
+      }
     } catch { toast("Erro ao salvar equipamento.", "error"); }
     finally { setSaving(false); }
   };
@@ -438,6 +446,7 @@ export default function MachineDetail() {
                           onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}
                           onViewTelemetry={() => setShowTelemetryModal({ show: true, nvrName: eq.name, telemetry: eq.last_telemetry_status })}
                           onViewOlt={() => setShowOltModal({ nvrId: eq.id, nvrName: eq.name })}
+                          onTestConexao={() => setTesteConexao({ eqId: eq.id, eqNome: eq.name, eqTipo: eq.tipo, origem: "card" })}
                           onEdit={() => openEqModal(eqToForm(eq), eq.id)}
                           onToggleActive={() => handleToggleEquipamento(eq)}
                         />
@@ -536,6 +545,23 @@ export default function MachineDetail() {
             load(true);
           }}
           onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "", eqTipo: "NVR" })}
+        />
+      )}
+
+      {testeConexao && (
+        <ConexaoTesteModal
+          key={testeConexao.eqId}
+          machineId={id!}
+          eqId={testeConexao.eqId}
+          eqNome={testeConexao.eqNome}
+          eqTipo={testeConexao.eqTipo}
+          origem={testeConexao.origem}
+          onConcluido={() => load(true)}
+          onVerOnus={() => {
+            setShowOltModal({ nvrId: testeConexao.eqId, nvrName: testeConexao.eqNome });
+            setTesteConexao(null);
+          }}
+          onClose={() => setTesteConexao(null)}
         />
       )}
 

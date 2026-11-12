@@ -213,6 +213,7 @@ class NVR(Base):
     last_telemetry_status = Column(JSON, nullable=True)  # CPU/RAM/discos (NVR Hikvision)
     olt_status = Column(JSON, nullable=True)  # OLT UNM2000: status das OLTs/ONUs por SNMP (enviado pelo agente a cada 5 min)
     last_alarm_status = Column(JSON, nullable=True)  # DEFENSE: centrais de alarme Intelbras (enviado pelo agente a cada 5 min)
+    conexao_status = Column(JSON, nullable=True)  # último "Testar conexão" feito pelo agente: ok, mensagem, etapas, testado_em (UTC naive)
     active = Column(Boolean, default=True, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

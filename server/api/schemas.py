@@ -44,6 +44,7 @@ class NVRResponse(NVRBase):
     machine_id: UUID
     last_recording_status: Optional[Any] = None
     last_telemetry_status: Optional[Any] = None
+    conexao_status: Optional[Any] = None
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
@@ -328,10 +329,41 @@ class PingResponse(BaseModel):
     restart: bool = False
     backup: bool = False
     rtsp_task: Optional[dict] = None
+    # "Testar conexão" do painel (agente >= 1.1.44; os antigos ignoram o campo)
+    conexao_task: Optional[dict] = None
+
+
+class EtapaConexao(BaseModel):
+    id: str
+    rotulo: str
+    estado: str = "pendente"  # pendente | andamento | ok | erro | pulado
+    detalhe: Optional[str] = None
+
+
+class ConexaoProgresso(BaseModel):
+    """Estado de um "Testar conexão": o agente envia o estado inteiro a cada etapa (idempotente)."""
+    task_id: str
+    etapas: List[EtapaConexao] = []
+    concluido: bool = False
+    ok: Optional[bool] = None
+    mensagem: Optional[str] = None
+
+
+class ConexaoTesteResponse(BaseModel):
+    task_id: Optional[str] = None
+    equipamento_id: str
+    etapas: List[EtapaConexao] = []
+    concluido: bool = False
+    ok: Optional[bool] = None
+    mensagem: Optional[str] = None
+    segundos: int = 0
 
 
 class PingRequest(BaseModel):
     telemetry: Optional[Dict[str, Any]] = None
+    # O que o agente sabe executar (>= 1.1.44: "teste_conexao"). Agentes antigos não mandam: o servidor não lhes
+    # entrega o `conexao_task` (eles registrariam a senha no log do ping).
+    recursos: Optional[List[str]] = None
 
 
 class CameraPresenca(BaseModel):

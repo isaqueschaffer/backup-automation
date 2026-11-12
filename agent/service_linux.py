@@ -45,6 +45,16 @@ def run_backup(trigger):
     finally:
         BACKUP_LOCK.release()
 
+def run_connection_test(conf, task):
+    """Teste de conexão pedido pelo painel (mesma rotina do agente Windows)."""
+    try:
+        from src.application.api_client import send_conexao_progresso
+        from src.application.teste_conexao import executar_teste_conexao
+        result = executar_teste_conexao(task, conf, lambda state: send_conexao_progresso(conf, state))
+        LOG.info("Connection test for %s: ok=%s", task.get("name"), result["ok"])
+    except Exception:
+        LOG.exception("Connection test failed")
+
 def heartbeat(conf, pending):
     while not STOP.is_set():
         started = time.monotonic()
@@ -59,6 +69,8 @@ def heartbeat(conf, pending):
                     pending.set()
                 if response.get("rtsp_task"):
                     LOG.warning("RTSP tasks not yet implemented for ARMv7 pilot")
+                if isinstance(response.get("conexao_task"), dict):
+                    threading.Thread(target=run_connection_test, args=(conf, response["conexao_task"]), daemon=True).start()
         except Exception as exc:
             LOG.warning("Heartbeat failed: %s", exc)
         STOP.wait(max(0, 15 - (time.monotonic() - started)))

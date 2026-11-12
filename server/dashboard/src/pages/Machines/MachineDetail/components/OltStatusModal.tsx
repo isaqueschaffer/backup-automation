@@ -241,7 +241,7 @@ export default function OltStatusModal({ machineId, nvrId, nvrName, onClose }: {
         <div className="empty-state" style={{ color: "var(--err)" }}>{erro}</div>
       ) : !olt ? (
         <div className="empty-state">
-          {carregando ? "Carregando..." : "Ainda sem dados. O agente envia o status a cada 5 minutos; confira se os IPs das OLTs e o usuário e a senha do Telnet estão preenchidos no equipamento."}
+          {carregando ? "Carregando..." : "Ainda sem dados. O agente envia o status a cada 5 minutos; para ler agora e ver onde a conexão falha, use \"Testar\" no card do equipamento."}
         </div>
       ) : (
         <OltPainel key={olt.ip} olt={olt} licenca={dados?.licenca} />

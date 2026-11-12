@@ -716,6 +716,16 @@ tbody td {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Barra de progresso em andamento ("Testar conexão"): listras em movimento */
+.barra-progresso-ativa {
+  background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%,
+    rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent) !important;
+  background-size: 16px 16px !important;
+  animation: barra-listras 0.8s linear infinite;
+}
+@keyframes barra-listras { from { background-position: 0 0; } to { background-position: 16px 0; } }
+@media (prefers-reduced-motion: reduce) { .barra-progresso-ativa { animation: none; } }
+
 .loading-state {
   display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 16px;

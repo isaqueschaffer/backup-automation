@@ -157,7 +157,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
                   onChange={e => setEqForm({ ...eqForm, olts: e.target.value })}
                 />
                 <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                  Uma OLT por equipamento. O agente precisa alcançar esse IP pela rede da máquina. A cada 5 minutos ele lê o estado das ONUs e o sinal óptico.
+                  Uma OLT por equipamento. O agente precisa alcançar esse IP pela rede da máquina. Ao salvar, o agente testa a conexão e já lê o estado das ONUs e o sinal óptico; depois, a cada 5 minutos.
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>

@@ -272,6 +272,7 @@ No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta
 | last_recording_status | JSON | list | NULL | — |
 | last_telemetry_status | JSON | dict | NULL | — |
 | olt_status | JSON | dict | NULL | OLT UNM2000: `{"atualizado_em", "olts": [...]}` enviado pelo agente a cada 5 min (Telnet) |
+| conexao_status | JSON | dict | NULL | Último "Testar conexão": `{"ok", "mensagem", "etapas": [{"id", "rotulo", "estado", "detalhe"}], "segundos", "testado_em"}` (`testado_em` naive em UTC) |
 | active | BOOLEAN | bool | NOT NULL | TRUE |
 | updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | NOW() |
 
@@ -661,6 +662,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
 | GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera). Com `OTA_PILOTO_MAQUINAS` preenchido, só essas máquinas recebem. Para `current_version` < 1.1.35, `version` leva também os comandos que encerram o processo antigo (ver changelog de 30/10/2026) |
 | POST | `/api/v1/agent/rtsp-result` | Agente devolve o resultado da tarefa RTSP do dashboard |
+| POST | `/api/v1/agent/conexao-progresso` | Agente (>= 1.1.44) envia o estado inteiro do "Testar conexão" a cada etapa: `{"task_id", "etapas": [...], "concluido", "ok", "mensagem"}`; ao concluir grava `nvrs.conexao_status` (só equipamento DA máquina). O pedido chega no ping como `conexao_task` (o equipamento como em `/agent/config` + `task_id`) e só para o agente que manda `"recursos": ["teste_conexao"]` no corpo do ping |
 | POST | `/api/v1/agent/nvr-cameras/night-image` | Agente envia a imagem da noite de um canal |
 | POST | `/api/v1/agent/olt/status` | Agente (>= 1.1.38) envia o status das OLTs das UNM2000 da máquina: `{"equipamentos": [{"nome", "olts": [...]}]}` (até 50 equipamentos e 100 OLTs); grava `nvrs.olt_status` só em equipamento OLT ativo DA máquina; 403 com conta bloqueada |
 
@@ -691,6 +693,8 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 | GET/POST | `/api/v1/machines/{id}/equipamentos` | Listar/criar equipamentos da máquina |
 | GET/PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{eq_id}` | Gerenciar equipamento |
 | POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/test-rtsp` | Tarefa RTSP via agente (409 se já houver uma pendente) |
+| POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/testar-conexao` | "Testar conexão": volta na hora com `{task_id, etapas, concluido, ok, mensagem, segundos}`; máquina offline = `concluido` com erro e `task_id` nulo; teste em andamento do mesmo equipamento é reaproveitado |
+| GET | `/api/v1/machines/{id}/equipamentos/{eq_id}/testar-conexao/{task_id}` | Andamento do teste (o painel consulta a cada 1 s); 404 se expirou (10 min) ou a API reiniciou. Prazos: 45 s para o agente buscar o pedido, 25 s para a primeira resposta, 5 min no total |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras` | Galeria do NVR (une `nvr_cameras` + `last_recording_status`) |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/olt-status` | Último status das OLTs/ONUs de uma UNM2000 (`olt_status`; vazio `{"atualizado_em": null, "olts": []}` se ainda não chegou) |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/perfect-image` | Salvar imagem de referência |
@@ -1091,6 +1095,30 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-12] — "Testar conexão" dos equipamentos com barra de progresso (agente 1.1.44)
+
+**Contexto:** depois de cadastrar um equipamento não havia como saber se o IP e as credenciais estavam certos antes do
+backup da madrugada (na OLT, o painel só dizia que as ONUs podiam levar 5 min). **Alteração:** (1) Ao salvar um
+equipamento (cadastro ou edição), o painel abre o modal "Testando conexão" (`ConexaoTesteModal.tsx`): barra de
+progresso por etapa, cronômetro, lista de etapas (✓/girando/✗ com detalhe) e a mensagem final; o card ganha o botão
+"Testar" e o selo do último teste (Conectado / Falha na conexão / Conexão não testada + data), guardado em
+`nvrs.conexao_status` (migração inline). (2) Rotas `POST .../testar-conexao` e `GET .../testar-conexao/{task_id}`
+(isoladas por conta, `obter_maquina`) e `POST /agent/conexao-progresso`. Estado em memória em
+`services/teste_conexao.py` (mesma limitação de 1 worker do teste RTSP). (3) Agente (`src/application/teste_conexao.py`):
+roda na thread do ping (funciona durante um backup) com as mesmas rotinas do backup: NVR (porta HTTP, login
+Hikvision ISAPI / Intelbras CGI / Motorola NVMS, contagem de câmeras), OLT (pasta de origem da UNM2000, porta de cada
+OLT, login e leitura das ONUs pelo `coletar_status_olts` e **envio imediato** do status ao painel, sem esperar o ciclo
+de 5 min), PABX Issabel (login e acesso ao backup), Mikrotik (SSH e identidade), Defense IA (API e câmeras), Digifort
+(pasta de origem) e demais tipos (porta TCP). A senha é mascarada nas mensagens e o pedido não aparece no log do ping.
+(4) **Segurança com agentes antigos:** o pedido leva a senha do equipamento e os agentes até 1.1.43 gravam a resposta
+do ping no log; por isso o agente novo declara `"recursos": ["teste_conexao"]` no ping e o servidor só entrega a quem
+declara (os demais recebem na hora "agente anterior à 1.1.44"). **Arquivos:** `server/api/{models,main,schemas}.py`,
+`routers/{agent,equipamentos}.py`, `services/teste_conexao.py`, `tests/test_teste_conexao.py`,
+`tests/test_isolamento_contas.py`; `agent/service.py`, `service_linux.py`, `src/application/{api_client,teste_conexao}.py`,
+`tests/test_teste_conexao.py`; dashboard `api/{client,types}.ts`, `index.css`, `MachineDetail/index.tsx`,
+`components/{EqCard,ConexaoTesteModal,EquipamentoFormModal,OltStatusModal}.tsx`. **Breaking change:** nenhum (campos
+novos opcionais). **Branch:** `isaque`. **Versão:** agente 1.1.44.
 
 ### [2026-11-11] — Piloto do agente MikroTik (ARMv7): build corrigido, imagem no GHCR e documentação do agente
 
