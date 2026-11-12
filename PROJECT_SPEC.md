@@ -1098,6 +1098,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-12] — Merge com a Helena (2ª rodada): limpar planilha e importação por IP, sem versão nova do agente
+
+**Incorporado (ramo `helena`, `bff8c37`):** botão "Limpar planilha" da Galeria e do formulário do Digifort
+(`DELETE /machines/{id}/equipamentos/{nvr_id}/cameras`, só DIGIFORT/DEFENSE) e importação que substitui a câmera de mesmo
+IP (`casar_cameras_por_ip`); detalhes na entrada de 12/11 da Helena abaixo. **Auditoria:** sem data com fuso, sem
+segredo, rota nova isolada por conta (`obter_maquina` e equipamento filtrado pela máquina), sem alteração em compose,
+nginx, models, migrações, requirements, build.ps1, installer.iss, `.env` ou `agent/`. **Conflitos:** nenhum.
+**Bloqueado:** nada. **Versão:** o ramo não mexeu em `agent/`; nenhum executável novo, a 1.1.45 continua a vigente e
+não houve cadastro no painel. Só o servidor e o painel mudam, via deploy do push na `isaque`.
+
 ### [2026-11-12] — Merge com a Helena e versão 1.1.45 do agente
 
 **Incorporado (ramo `helena`, `52d3610`):** notificação de câmera offline (`CAMERA_OFFLINE`, opt-in por câmera:
