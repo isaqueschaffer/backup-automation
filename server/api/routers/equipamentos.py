@@ -14,12 +14,13 @@ from sqlalchemy.orm import Session
 
 from auth import Contexto, get_contexto
 from database import get_db
-from models import Machine, NVR, NVRCamera, NVRPlanilha
-from routers.agent import mascarar_credenciais, pending_rtsp_tasks
+from models import AgentLog, Machine, NVR, NVRCamera, NVRPlanilha
+from routers.agent import mascarar_credenciais, pending_alarme_tasks, pending_rtsp_tasks
+from routers.machines import check_machine_online
 from schemas import (
     NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse,
     NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
-    NVRPlanilhaEntrada, NVRPlanilhaResposta,
+    NVRPlanilhaEntrada, NVRPlanilhaResposta, ComandoAlarmeRequest, ComandoAlarmeResultado,
 )
 from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
@@ -399,6 +400,102 @@ def get_olt_status(
         raise HTTPException(status_code=404, detail="Equipamento não encontrado")
     status_olt = nvr.olt_status or {"atualizado_em": None, "olts": []}
     return {**status_olt, "licenca": licenca_da_config(nvr.config_extra)}
+
+
+# ─── Alarmes (DEFENSE) ──────────────────────────────────────────────────────
+
+@router.get("/{id}/alarmes")
+def get_alarmes_status(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Último status das centrais de alarme de um DEFENSE, enviado pelo agente. Vazio se ainda não chegou."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    return nvr.last_alarm_status or {"atualizado_em": None, "ip": None, "erro": None, "alarmes": [], "incendio": []}
+
+
+ESPERA_COMANDO_ALARME_S = 75.0  # ping a cada 15s + login + comando no painel (o agente espera até 30s pela central)
+
+
+def _registrar_comando_alarme(machine_id: UUID, nvr_nome: str, mensagem: str, nivel: str) -> None:
+    from database import SessionLocal
+    with SessionLocal() as sessao:
+        sessao.add(AgentLog(machine_id=machine_id, event_type="alarme_comando", message=mensagem, nivel=nivel,
+                            equipamento=nvr_nome))
+        sessao.commit()
+
+
+@router.post("/{id}/alarmes/comando", response_model=ComandoAlarmeResultado)
+async def comandar_central_alarme(
+    machine_id: UUID,
+    id: UUID,
+    body: ComandoAlarmeRequest,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Arma ou desarma uma central de alarme do DEFENSE pelo agente da máquina (o painel de alarmes só existe na rede
+    do cliente). Só ADMIN da conta e super admin (o get_contexto barra LEITURA e conta vencida em POST). Espera o
+    resultado do agente e registra o pedido e o resultado nos logs da máquina."""
+    machine = _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr or (nvr.tipo or "").upper() != "DEFENSE":
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    central = next((c for c in (nvr.last_alarm_status or {}).get("alarmes") or []
+                    if isinstance(c, dict) and str(c.get("id")) == body.central_id), None)
+    if not central:
+        raise HTTPException(status_code=404, detail="Central de alarme não encontrada no último status do agente")
+    if not check_machine_online(machine):
+        raise HTTPException(status_code=409, detail="O agente desta máquina está offline: o comando não pode ser entregue.")
+
+    machine_id_str = str(machine_id)
+    if machine_id_str in pending_alarme_tasks:
+        raise HTTPException(status_code=409, detail="Já existe um comando de alarme em andamento nesta máquina. Aguarde.")
+
+    try:
+        senha = decrypt(nvr.password) if nvr.password else ""
+    except Exception:
+        senha = nvr.password or ""
+    try:
+        porta = int((nvr.config_extra or {}).get("porta_alarme") or 3001)
+    except (TypeError, ValueError):
+        porta = 3001
+    acao_texto = "armar" if body.acao == "ARMAR" else "desarmar"
+    nome_central = central.get("nome") or body.central_id
+    task = {
+        "equipamento_id": str(nvr.id), "equipamento": nvr.name, "ip": nvr.ip.strip(), "porta": porta,
+        "username": nvr.username or "system", "password": senha,
+        "central_id": body.central_id, "acao": body.acao,
+    }
+    nvr_nome = nvr.name
+    entry = {"task": task, "event": asyncio.Event(), "result": None, "sent": False}
+    pending_alarme_tasks[machine_id_str] = entry
+    db.close()  # não segura a conexão do banco durante a espera
+
+    _registrar_comando_alarme(machine_id, nvr_nome, f"{ctx.feito_por} pediu para {acao_texto} a central '{nome_central}'.", "INFO")
+    try:
+        await asyncio.wait_for(entry["event"].wait(), timeout=ESPERA_COMANDO_ALARME_S)
+        resultado = entry["result"] or ComandoAlarmeResultado(sucesso=False, mensagem="O agente respondeu sem resultado.")
+    except asyncio.TimeoutError:
+        resultado = ComandoAlarmeResultado(
+            sucesso=False,
+            mensagem="O agente não respondeu a tempo (agente sem suporte a comandos, anterior à 1.1.44, ou offline).",
+        )
+    finally:
+        if pending_alarme_tasks.get(machine_id_str) is entry:
+            pending_alarme_tasks.pop(machine_id_str, None)
+
+    situacao = "concluído" if resultado.sucesso else "falhou"
+    _registrar_comando_alarme(
+        machine_id, nvr_nome,
+        f"Comando para {acao_texto} a central '{nome_central}' {situacao}" + (f": {resultado.mensagem}" if resultado.mensagem else "."),
+        "INFO" if resultado.sucesso else "ERROR",
+    )
+    return resultado
 
 
 # ─── NVR Cameras Gallery ───────────────────────────────────────────────────

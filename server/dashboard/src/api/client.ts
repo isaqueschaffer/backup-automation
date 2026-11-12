@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { AgentLog, CameraNotificacao, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoCamerasNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedBackups, TipoNotificacao } from "./types";
+import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedBackups, TipoNotificacao } from "./types";
 import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -242,5 +242,17 @@ export const fetchCamerasNotificacao = (): Promise<EquipamentoCamerasNotificacao
 
 export const atualizarCameraNotificacao = (cameraId: string, notificarOffline: boolean): Promise<CameraNotificacao> =>
   api.put(`/notificacoes/cameras/${cameraId}`, { notificar_offline: notificarOffline }).then((r) => r.data);
+
+// Arma/desarma pelo agente da máquina: a resposta só volta quando o agente responde (até ~75s)
+export const comandarCentralAlarme = (
+  machineId: string, nvrId: string, centralId: string, acao: "ARMAR" | "DESARMAR",
+): Promise<{ sucesso: boolean; mensagem?: string | null }> =>
+  api.post(`/machines/${machineId}/equipamentos/${nvrId}/alarmes/comando`, { central_id: centralId, acao }).then((r) => r.data);
+
+export const fetchAlarmesNotificacao =(): Promise<EquipamentoAlarmesNotificacao[]> =>
+  api.get("/notificacoes/alarmes").then((r) => r.data);
+
+export const atualizarCentralNotificacao = (nvrId: string, centralId: string, notificar: boolean): Promise<CentralAlarmeNotificacao> =>
+  api.put(`/notificacoes/alarmes/${nvrId}/${encodeURIComponent(centralId)}`, { notificar }).then((r) => r.data);
 
 export default api;

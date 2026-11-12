@@ -1,5 +1,5 @@
-"""Notificações operacionais: as 3 automáticas (licença da UNM2000 vencendo, backup com falha, agente offline) e as
-personalizadas (criadas pelo usuário). Geradas periodicamente (chamado por `main.py` a cada 10 min), aparecem no
+"""Notificações operacionais: as 3 automáticas (licença da UNM2000 vencendo, backup com falha, agente offline), as
+opt-in por item (câmera offline, alarmes das centrais do DEFENSE) e as personalizadas (criadas pelo usuário). Geradas periodicamente (chamado por `main.py` a cada 10 min), aparecem no
 painel (pop-up ao logar + aba Notificações) e, quando configurado, por e-mail."""
 import html
 import logging
@@ -22,6 +22,7 @@ TIPOS = ("LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE")  # tipos com pref
 LIMIAR_LICENCA_DIAS = 10          # a partir de quantos dias antes do vencimento o alerta (e o e-mail diário) começam
 LIMIAR_AGENTE_OFFLINE_MIN = 15    # máquina ativa sem contato por mais que isso = notificação (o status "ao vivo" usa 180s)
 LIMIAR_CAMERA_OFFLINE_MIN = 15    # câmera marcada para notificar, offline por mais que isso = notificação
+LIMIAR_ALARME_SEM_DADOS_MIN = 20  # status dos alarmes mais velho que isso (agente coleta a cada 5 min) não abre nem fecha alerta
 
 
 def tipo_ativo(db: Session, conta_id, tipo: str) -> bool:
@@ -30,30 +31,33 @@ def tipo_ativo(db: Session, conta_id, tipo: str) -> bool:
     return cfg.ativo if cfg else True
 
 
-def _notificacao_aberta(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, definicao_id=None, camera_id=None) -> Optional[Notificacao]:
+def _notificacao_aberta(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, definicao_id=None, camera_id=None,
+                        referencia=None) -> Optional[Notificacao]:
     return db.query(Notificacao).filter(
         Notificacao.conta_id == conta_id, Notificacao.tipo == tipo, Notificacao.resolvido_em.is_(None),
         Notificacao.machine_id == machine_id, Notificacao.nvr_id == nvr_id, Notificacao.definicao_id == definicao_id,
-        Notificacao.camera_id == camera_id,
+        Notificacao.camera_id == camera_id, Notificacao.referencia == referencia,
     ).first()
 
 
-def abrir_ou_atualizar(db: Session, conta_id, tipo: str, titulo: str, mensagem: str, machine_id=None, nvr_id=None, definicao_id=None, camera_id=None) -> Notificacao:
+def abrir_ou_atualizar(db: Session, conta_id, tipo: str, titulo: str, mensagem: str, machine_id=None, nvr_id=None, definicao_id=None,
+                       camera_id=None, referencia=None) -> Notificacao:
     """Cria a notificação se não houver uma aberta igual; se já houver, só atualiza o texto (ex.: dias restantes)."""
-    existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id, camera_id)
+    existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id, camera_id, referencia)
     if existente:
         existente.titulo, existente.mensagem = titulo, mensagem
         existente.atualizado_em = datetime.utcnow()
         return existente
-    nova = Notificacao(conta_id=conta_id, tipo=tipo, titulo=titulo, mensagem=mensagem,
-                       machine_id=machine_id, nvr_id=nvr_id, definicao_id=definicao_id, camera_id=camera_id)
+    nova = Notificacao(conta_id=conta_id, tipo=tipo, titulo=titulo, mensagem=mensagem, machine_id=machine_id,
+                       nvr_id=nvr_id, definicao_id=definicao_id, camera_id=camera_id, referencia=referencia)
     db.add(nova)
     return nova
 
 
-def resolver(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, definicao_id=None, camera_id=None) -> None:
+def resolver(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, definicao_id=None, camera_id=None,
+             referencia=None) -> None:
     """Fecha a notificação aberta (se houver) quando a condição deixou de valer."""
-    existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id, camera_id)
+    existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id, camera_id, referencia)
     if existente:
         existente.resolvido_em = datetime.utcnow()
 
@@ -92,6 +96,10 @@ def _enviar_email_camera_offline(db: Session, conta: Conta, nvr: NVR, camera_nom
     texto_puro = f"A câmera '{camera_nome}' do equipamento '{nvr.name}' está offline {tempo_texto}."
     corpo_html = f"<p>A câmera <strong>{nome_cam}</strong> do equipamento <strong>{nome_eq}</strong> está offline {tempo_texto}.</p>"
     return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Câmera offline '{camera_nome}' em '{nvr.name}'")
+
+
+def _enviar_email_alarme(db: Session, conta: Conta, titulo: str, mensagem: str) -> bool:
+    return _enviar_email(db, conta, titulo, mensagem, f"<p>{html.escape(mensagem)}</p>", f"Alarme '{titulo}'")
 
 
 def _enviar_email_personalizada(db: Session, conta: Conta, definicao: NotificacaoPersonalizada, titulo: str, mensagem: str) -> bool:
@@ -225,6 +233,116 @@ def verificar_cameras_offline(db: Session, agora: Optional[datetime] = None) -> 
     return enviados
 
 
+def _id_texto(valor, reserva) -> str:
+    texto = str(valor).strip() if valor is not None else ""
+    return texto or str(reserva or "").strip()
+
+
+def id_central(central: dict) -> str:
+    """Chave da central de alarme em `NVR.alarmes_notificar`: o id do painel (texto) ou, sem id, o nome."""
+    return _id_texto(central.get("id"), central.get("nome"))
+
+
+def situacoes_alarme(nvr: NVR) -> Optional[dict]:
+    """{referencia: (titulo, mensagem)} do que está errado agora nas centrais marcadas (`NVR.alarmes_notificar`)
+    de um DEFENSE, pelo último `last_alarm_status`. None quando a consulta falhou: aí só a referência "FALHA" vale,
+    e o estado das centrais fica como estava (não dá para saber se o disparo já passou)."""
+    marcadas = {str(c) for c in (nvr.alarmes_notificar or [])}
+    status = nvr.last_alarm_status or {}
+    if not marcadas:
+        return {}
+    if status.get("erro"):
+        return None
+    saida = {}
+    for central in status.get("alarmes") or []:
+        if not isinstance(central, dict):
+            continue
+        cid = id_central(central)
+        if cid not in marcadas:
+            continue
+        nome_c = central.get("nome") or "Central sem nome"
+        if central.get("status") != 1:
+            saida[f"{cid}:DESCONECTADA"] = (
+                f"Central de alarme '{nome_c}' desconectada",
+                f"A central de alarme '{nome_c}' do equipamento '{nvr.name}' está desconectada.",
+            )
+        for particao in central.get("particoes") or []:
+            if not isinstance(particao, dict):
+                continue
+            pid = _id_texto(particao.get("id"), particao.get("nome"))
+            nome_p = particao.get("nome") or "Partição"
+            if particao.get("disparada"):
+                saida[f"{cid}:{pid}:DISPARO"] = (
+                    f"Alarme disparado: '{nome_c}' / '{nome_p}'",
+                    f"A partição '{nome_p}' da central '{nome_c}' ({nvr.name}) está em disparo.",
+                )
+            if not particao.get("armada"):
+                saida[f"{cid}:{pid}:DESARMADA"] = (
+                    f"Partição desarmada: '{nome_c}' / '{nome_p}'",
+                    f"A partição '{nome_p}' da central '{nome_c}' ({nvr.name}) está desarmada.",
+                )
+    return saida
+
+
+def verificar_alarmes_equipamento(db: Session, nvr: NVR, agora: Optional[datetime] = None) -> int:
+    """Abre/atualiza/resolve as notificações ALARME de um DEFENSE (uma por situação, separadas por `referencia`)
+    e manda o e-mail diário de cada alerta aberto. Chamada ao receber o relatório do agente (o disparo aparece na
+    hora) e no ciclo periódico (pega mudanças de opt-in). Relatório velho demais não muda nada: a queda do agente
+    já tem a própria notificação. Retorna quantos e-mails foram enviados."""
+    agora = agora or datetime.utcnow()
+    conta_id = nvr.machine.conta_id
+    abertas = db.query(Notificacao).filter(
+        Notificacao.conta_id == conta_id, Notificacao.tipo == "ALARME", Notificacao.nvr_id == nvr.id,
+        Notificacao.resolvido_em.is_(None),
+    ).all()
+
+    status = nvr.last_alarm_status or {}
+    try:
+        coletado = datetime.strptime(status.get("atualizado_em") or "", "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        coletado = None
+    if nvr.alarmes_notificar and (coletado is None or agora - coletado > timedelta(minutes=LIMIAR_ALARME_SEM_DADOS_MIN)):
+        return 0
+
+    situacoes = situacoes_alarme(nvr)
+    falhou = situacoes is None
+    if falhou:
+        situacoes = {"FALHA": (
+            f"Falha ao consultar alarmes em '{nvr.name}'",
+            f"O agente não conseguiu consultar o painel de alarmes de '{nvr.name}': {status.get('erro')}",
+        )}
+
+    for notif in abertas:
+        manter = notif.referencia in situacoes or (falhou and notif.referencia != "FALHA")
+        if not manter:
+            notif.resolvido_em = agora
+
+    enviados = 0
+    for referencia, (titulo, mensagem) in situacoes.items():
+        titulo = titulo[:255]
+        notif = abrir_ou_atualizar(db, conta_id, "ALARME", titulo, mensagem, nvr_id=nvr.id, referencia=referencia[:120])
+        if notif.ultimo_email_em != agora.date():
+            conta = nvr.machine.conta
+            if conta and _enviar_email_alarme(db, conta, titulo, mensagem):
+                notif.ultimo_email_em = agora.date()
+                enviados += 1
+    return enviados
+
+
+def verificar_alarmes(db: Session, agora: Optional[datetime] = None) -> int:
+    """Roda `verificar_alarmes_equipamento` em todos os DEFENSE ativos. Retorna quantos e-mails saíram."""
+    enviados = 0
+    nvrs = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
+        NVR.tipo == "DEFENSE", NVR.active == True, Machine.active == True
+    ).all()
+    for nvr in nvrs:
+        try:
+            enviados += verificar_alarmes_equipamento(db, nvr, agora)
+        except Exception:
+            logger.exception("Falha ao verificar alarmes de '%s' (%s)", getattr(nvr, "name", ""), getattr(nvr, "id", None))
+    return enviados
+
+
 def verificar_personalizadas(db: Session, agora: Optional[datetime] = None, hoje: Optional[date] = None) -> int:
     """Verifica as definições personalizadas ativas de todas as contas. `mostrar_popup`/`enviar_email` não mudam
     o que é gravado aqui: a notificação sempre fica registrada e visível na aba Notificações; quem decide o que
@@ -286,7 +404,7 @@ def verificar_personalizadas(db: Session, agora: Optional[datetime] = None, hoje
 def verificar_notificacoes(db: Session) -> dict:
     """Roda as quatro verificações (cada uma isolada: uma falhar não impede as outras) e salva. Usada pela tarefa
     de fundo do main.py. Retorna um pequeno resumo para o log."""
-    resumo = {"emails_licenca": 0, "emails_personalizadas": 0, "emails_camera_offline": 0}
+    resumo = {"emails_licenca": 0, "emails_personalizadas": 0, "emails_camera_offline": 0, "emails_alarme": 0}
     try:
         resumo["emails_licenca"] = verificar_licencas_unm2000(db)
     except Exception:
@@ -303,6 +421,10 @@ def verificar_notificacoes(db: Session) -> dict:
         resumo["emails_camera_offline"] = verificar_cameras_offline(db)
     except Exception:
         logger.exception("Falha geral ao verificar câmeras offline")
+    try:
+        resumo["emails_alarme"] = verificar_alarmes(db)
+    except Exception:
+        logger.exception("Falha geral ao verificar alarmes")
     try:
         resumo["emails_personalizadas"] = verificar_personalizadas(db)
     except Exception:

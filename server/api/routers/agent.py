@@ -21,11 +21,13 @@ from schemas import (
     AgentEquipamento,
     BackupReportCreate,
     BackupReportResponse,
+    ComandoAlarmeResultado,
     LogsAgenteReport,
     NVRCameraNightImage,
     PingResponse,
     PingRequest,
     PresencaCamerasReport,
+    StatusAlarmeReport,
     StatusOltReport,
     RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
@@ -155,6 +157,9 @@ def get_agent_config(machine: Machine = Depends(get_current_machine), db: Sessio
 # uvicorn. Com múltiplos workers o ping do agente e o test-rtsp poderiam cair em
 # processos diferentes e a tarefa nunca seria entregue.
 pending_rtsp_tasks: Dict[str, Any] = {}
+
+# Comando de armar/desarmar central de alarme (DEFENSE), mesmo esquema e mesma limitação do pending_rtsp_tasks.
+pending_alarme_tasks: Dict[str, Any] = {}
 
 
 def _read_request_flags(machine_id: UUID) -> tuple[bool, bool]:
@@ -287,6 +292,11 @@ async def ping_agent(
                 rtsp_task=task_data["task"]
             )
 
+        comando = pending_alarme_tasks.get(machine_id_str)
+        if comando is not None and not comando.get("sent", False):
+            comando["sent"] = True
+            return PingResponse(status="ok", restart=False, backup=False, alarme_task=comando["task"])
+
         # Flags normais de restart/backup: só retorna imediatamente se estiverem marcadas
         restart_flag, backup_flag = _read_request_flags(machine_id)
         if (restart_flag and not em_backup) or backup_flag:
@@ -374,6 +384,19 @@ async def receive_rtsp_result(
         task_data["event"].set()
     return {"status": "ok"}
 
+
+@router.post("/defense/alarmes/comando-resultado")
+async def receive_alarme_comando_resultado(
+    result: ComandoAlarmeResultado,
+    machine: Machine = Depends(get_current_machine),
+):
+    """Agente devolve o resultado do comando de armar/desarmar que recebeu no ping."""
+    comando = pending_alarme_tasks.get(str(machine.id))
+    if comando is not None:
+        comando["result"] = result
+        comando["event"].set()
+    return {"status": "ok"}
+
 @router.post("/nvr-cameras/night-image")
 def receive_night_image(
     body: NVRCameraNightImage,
@@ -456,6 +479,39 @@ def receive_olt_status(
             continue
         # Naive em UTC (REGRA-001)
         nvr.olt_status = {"atualizado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "olts": item.olts}
+        atualizados += 1
+    db.commit()
+    return {"status": "ok", "atualizados": atualizados}
+
+
+@router.post("/defense/alarmes/status")
+def receive_alarmes_status(
+    body: StatusAlarmeReport,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Status periódico das centrais de alarme Intelbras cadastradas num DEFENSE (painel de alarmes, `/api/alarm-centrals`).
+    Já verifica as notificações ALARME do equipamento: um disparo não espera o ciclo de 10 min das notificações."""
+    from services.notificacoes import verificar_alarmes_equipamento
+
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
+    atualizados = 0
+    agora = datetime.utcnow()
+    for item in body.equipamentos:
+        nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == item.nome, NVR.active == True).first()
+        if not nvr or (nvr.tipo or "").upper() != "DEFENSE":
+            continue
+        # Naive em UTC (REGRA-001)
+        nvr.last_alarm_status = {
+            "atualizado_em": agora.strftime("%Y-%m-%dT%H:%M:%S"),
+            "ip": item.ip, "erro": item.erro, "alarmes": item.alarmes, "incendio": item.incendio,
+        }
+        try:
+            verificar_alarmes_equipamento(db, nvr, agora)
+        except Exception:
+            logger.exception("Falha ao verificar as notificações de alarme de '%s'", nvr.name)
         atualizados += 1
     db.commit()
     return {"status": "ok", "atualizados": atualizados}

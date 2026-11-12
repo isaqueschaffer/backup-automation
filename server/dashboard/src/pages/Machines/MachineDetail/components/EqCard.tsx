@@ -1,8 +1,8 @@
-import { Activity, Cable, Edit2, FolderOpen, Image, RefreshCw, Trash2, Video } from "lucide-react";
+import { Activity, Cable, Edit2, FolderOpen, Image, RefreshCw, Siren, Trash2, Video } from "lucide-react";
 import { NVR } from "../../../../api/types";
 import { eqCor, eqIcone } from "./eqTipos";
 
-export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onViewOlt, onEdit, onToggleActive }: {
+export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onViewOlt, onViewAlarmes, onEdit, onToggleActive }: {
   eq: NVR;
   somenteLeitura?: boolean;
   onDelete: () => void;
@@ -10,6 +10,7 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
   onViewCameras?: () => void;
   onViewTelemetry?: () => void;
   onViewOlt?: () => void;
+  onViewAlarmes?: () => void;
   onEdit: () => void;
   onToggleActive: () => void;
 }) {
@@ -88,6 +89,12 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
           <button className="btn btn-secondary btn-sm" onClick={onViewTelemetry}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Activity size={13} /> Telemetria
+          </button>
+        )}
+        {eq.tipo === "DEFENSE" && onViewAlarmes && (
+          <button className="btn btn-secondary btn-sm" onClick={onViewAlarmes}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Siren size={13} /> Alarmes
           </button>
         )}
         {!somenteLeitura && (

@@ -328,6 +328,7 @@ class PingResponse(BaseModel):
     restart: bool = False
     backup: bool = False
     rtsp_task: Optional[dict] = None
+    alarme_task: Optional[dict] = None  # armar/desarmar central de alarme (agente >= 1.1.44)
 
 
 class PingRequest(BaseModel):
@@ -358,10 +359,33 @@ class StatusOltReport(BaseModel):
     equipamentos: List[EquipamentoStatusOlt] = Field(default_factory=list, max_length=50)
 
 
+class EquipamentoStatusAlarme(BaseModel):
+    nome: str
+    ip: Optional[str] = None
+    erro: Optional[str] = None
+    alarmes: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)
+    incendio: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)  # agente >= 1.1.44
+
+
+class StatusAlarmeReport(BaseModel):
+    equipamentos: List[EquipamentoStatusAlarme] = Field(default_factory=list, max_length=50)
+
+
+class ComandoAlarmeRequest(BaseModel):
+    central_id: str = Field(min_length=1, max_length=64)
+    acao: Literal["ARMAR", "DESARMAR"]
+
+
+class ComandoAlarmeResultado(BaseModel):
+    """Resultado do comando: enviado pelo agente e devolvido ao painel."""
+    sucesso: bool
+    mensagem: Optional[str] = Field(default=None, max_length=500)
+
+
 # ─────────────────────────────────────────────
 # Notificações
 # ─────────────────────────────────────────────
-TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE"]
+TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE", "ALARME"]
 ModoNotificacaoPersonalizada = Literal["RECORRENTE", "DATA"]
 
 
@@ -409,6 +433,30 @@ class EquipamentoCamerasNotificacaoResponse(BaseModel):
 
 class CameraNotificarUpdate(BaseModel):
     notificar_offline: bool
+
+
+class CentralAlarmeNotificacaoResponse(BaseModel):
+    central_id: str
+    nome: str
+    conectada: bool
+    disparada: bool
+    particoes_total: int
+    particoes_desarmadas: int
+    notificar: bool
+
+
+class EquipamentoAlarmesNotificacaoResponse(BaseModel):
+    nvr_id: UUID
+    nvr_nome: str
+    machine_id: UUID
+    machine_nome: str
+    atualizado_em: Optional[str] = None
+    erro: Optional[str] = None
+    centrais: List[CentralAlarmeNotificacaoResponse]
+
+
+class CentralAlarmeNotificarUpdate(BaseModel):
+    notificar: bool
 
 
 class NotificacaoPersonalizadaBase(BaseModel):
