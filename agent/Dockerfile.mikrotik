@@ -1,0 +1,27 @@
+# Build with: docker buildx build --platform linux/arm/v7 -f agent/Dockerfile.mikrotik -t trilan-agent:armv7 ./agent --load
+
+# Estágio 1: compila os pacotes que não têm wheel ARMv7 no PyPI (pynacl, pycryptodome, psutil, Pillow...).
+# O compilador fica só aqui; a imagem final não o leva (importante: o RB4011 tem ~479 MB livres).
+FROM python:3.11-slim-bookworm AS builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc make libc6-dev libffi-dev libssl-dev libjpeg-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements-linux.txt /tmp/requirements-linux.txt
+RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements-linux.txt
+
+# Estágio 2: imagem final, só com as bibliotecas de execução.
+FROM python:3.11-slim-bookworm
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TRILAN_ENABLE_BACKUPS=false TRILAN_LOG_LEVEL=INFO
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libffi8 libjpeg62-turbo zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /install /usr/local
+WORKDIR /app
+RUN mkdir -p /app/data && chmod 700 /app/data
+COPY agent.py service_linux.py /app/
+COPY src/ /app/src/
+# Mount /app/agent.conf securely; never bake credentials into the image.
+# Liga o pacote do GHCR ao repositório público (página do pacote e permissões).
+LABEL org.opencontainers.image.source="https://github.com/isaqueschaffer/backup-automation" \
+      org.opencontainers.image.description="Trilan Agent - piloto RouterOS ARMv7 (so heartbeat; backups desligados)"
+CMD ["python", "-u", "service_linux.py"]
