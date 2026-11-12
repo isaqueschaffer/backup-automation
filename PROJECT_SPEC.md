@@ -1098,6 +1098,17 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-12] — Erro de SSH da OLT Huawei explicado no painel (agente 1.1.46)
+
+**Problema:** a falha do login SSH chegava ao painel com o texto cru do paramiko ("Authentication failed: transport
+shut down or saw EOF"), que parece senha errada mas significa que a OLT fechou a conexão durante o login. **Alteração:**
+`explicar_erro_ssh` (`agent/src/olt/huawei_status.py`) classifica a falha e diz o que fazer: OLT fechou a conexão
+(sessões SSH ocupadas, usuário bloqueado ou sem serviço SSH), senha/usuário recusados, algoritmo SSH incompatível
+(firmware antigo), tempo esgotado e conexão recusada (SSH desligado ou porta errada). Vale no "Testar conexão", no
+"Atualizar" do modal de ONUs e no status das OLTs. O agente passou a aceitar mensagens de até 700 caracteres no teste
+(antes 300). **Arquivos:** `agent/src/olt/huawei_status.py`, `agent/src/application/teste_conexao.py`,
+`agent/tests/test_huawei_status.py`. **Breaking change:** nenhum. **Branch:** `isaque`. **Versão:** agente 1.1.46.
+
 ### [2026-11-12] — Botão "Atualizar" do modal de ONUs da OLT passa a ler a OLT e mostrar o andamento
 
 **Problema:** o "Atualizar" só relia do servidor o último status salvo (instantâneo e, sem mudança, a tela ficava igual:

@@ -34,7 +34,7 @@ class _Teste:
         texto = str(texto)
         if self.senha and len(self.senha) >= 3:
             texto = texto.replace(self.senha, "***")
-        return texto[:300]
+        return texto[:700]
 
     def _publicar(self, concluido=False, ok=None, mensagem=None):
         try:
