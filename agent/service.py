@@ -8,7 +8,11 @@ Stop:     python service.py stop
 Remove:   python service.py remove
 """
 import os
+import queue
+import subprocess
 import sys
+import threading
+import time
 import traceback
 import logging
 from datetime import datetime, timedelta
@@ -20,25 +24,56 @@ import win32serviceutil
 import servicemanager
 import win32security
 
+
+def _pyinstaller_hidden_imports():
+    """Mantém imports explícitos visíveis ao bytecode do PyInstaller sem atrasar o StartServiceCtrlDispatcher no boot."""
+    import src.camera.rtsp_client  # noqa: F401
+    import src.application.api_client  # noqa: F401
+    import src.application.presenca_cameras  # noqa: F401
+    import src.application.captura_noite_vms  # noqa: F401
+    import src.application.status_olt  # noqa: F401
+    import src.application.teste_conexao  # noqa: F401
+    import src.olt.unm_telnet  # noqa: F401
+    import src.olt.unm_nomes  # noqa: F401
+    import src.application.log_remoto  # noqa: F401
+
+
 DIRETORIO = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
+# O dashboard estima o "Próximo contato" como last_seen + este intervalo (AGENT_PING_INTERVAL_MS)
+PING_INTERVAL_S = 15
+# Backup que passa disto está travado (nenhum backup normal leva tanto): o vigia reinicia o serviço
+LIMITE_BACKUP_S = 6 * 3600
 
 # Usa ProgramData para logs — gravavel sem privilegios de admin
 PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
-PASTA_LOG.mkdir(parents=True, exist_ok=True)
 ARQUIVO_LOG = PASTA_LOG / "servico.log"
-
-logging.basicConfig(
-    filename=str(ARQUIVO_LOG),
-    level=logging.INFO,
-    format="[%(asctime)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+_LOGGING_CONFIGURADO = False
 
 
-def log(msg, is_error=False):
+def _garantir_logging():
+    global _LOGGING_CONFIGURADO
+    if _LOGGING_CONFIGURADO:
+        return
+    try:
+        PASTA_LOG.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(
+            filename=str(ARQUIVO_LOG),
+            level=logging.INFO,
+            format="[%(asctime)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        _LOGGING_CONFIGURADO = True
+    except Exception:
+        pass
+
+
+def log(msg, is_error=False, enviar=False):
+    _garantir_logging()
     if is_error:
         logging.error(msg)
+    elif enviar:
+        logging.info(msg, extra={"enviar_servidor": True})
     else:
         logging.info(msg)
     try:
@@ -50,15 +85,158 @@ def log(msg, is_error=False):
         pass
 
 
+# Janela após a troca do TrilanAgentTray.exe em que o serviço ainda a reabre ao iniciar.
+# Só reabre se o arquivo foi trocado agora (atualização), para não reabrir uma bandeja que o usuário fechou.
+JANELA_REABRIR_BANDEJA_S = 15 * 60
+
+
+def reabrir_bandeja_atualizada():
+    """A atualização OTA fecha a bandeja para trocar o arquivo e não a abre de novo.
+
+    O serviço roda como SYSTEM na sessão 0 e não consegue mostrar janelas; por isso a bandeja é
+    iniciada como o usuário de cada sessão logada (console ou RDP) que ainda não a tem aberta.
+    """
+    tray = DIRETORIO / "TrilanAgentTray.exe"
+    try:
+        if not tray.exists() or time.time() - tray.stat().st_mtime > JANELA_REABRIR_BANDEJA_S:
+            return
+        import win32process
+        import win32profile
+        import win32ts
+
+        servidor = win32ts.WTS_CURRENT_SERVER_HANDLE
+        com_bandeja = {
+            sessao for (sessao, _pid, nome, _sid) in win32ts.WTSEnumerateProcesses(servidor, 1, 0)
+            if (nome or "").lower() == "trilanagenttray.exe"
+        }
+        for info in win32ts.WTSEnumerateSessions(servidor, 1, 0):
+            sessao = info["SessionId"]
+            if sessao == 0 or sessao in com_bandeja:
+                continue
+            if info["State"] not in (win32ts.WTSActive, win32ts.WTSDisconnected):
+                continue
+            token = None
+            try:
+                token = win32ts.WTSQueryUserToken(sessao)  # requer SYSTEM (privilégio SE_TCB)
+                ambiente = win32profile.CreateEnvironmentBlock(token, False)
+                si = win32process.STARTUPINFO()
+                si.lpDesktop = "winsta0\\default"
+                win32process.CreateProcessAsUser(
+                    token, str(tray), None, None, None, False,
+                    win32process.CREATE_UNICODE_ENVIRONMENT | win32process.NORMAL_PRIORITY_CLASS,
+                    ambiente, str(DIRETORIO), si,
+                )
+                log(f"Bandeja reaberta apos atualizacao na sessao {sessao}.")
+            except Exception as e:
+                log(f"Nao foi possivel reabrir a bandeja na sessao {sessao}: {e}", is_error=True)
+            finally:
+                if token is not None:
+                    token.Close()
+    except Exception as e:
+        log(f"Falha ao verificar a bandeja apos atualizacao: {e}", is_error=True)
+
+
+# Script que religa o serviço depois do "Reiniciar" do painel. Roda fora do processo do serviço.
+# Espera o processo antigo sair de verdade (o executável leva alguns segundos para encerrar),
+# tenta iniciar até 5 vezes, confere se subiu e registra tudo em reinicio.log.
+SCRIPT_REINICIO = r"""
+$svc = 'TrilanAgentNVR'
+$log = '__LOG__'
+function L($m) { Add-Content -Path $log -Encoding UTF8 -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) }
+$antigo = __PID__
+L "Reinicio pedido pelo painel. Aguardando o processo $antigo encerrar..."
+$t = 0
+while ($t -lt 90 -and (Get-Process -Id $antigo -ErrorAction SilentlyContinue)) { Start-Sleep -Seconds 1; $t++ }
+L "Processo antigo encerrado apos ${t}s."
+for ($i = 1; $i -le 5; $i++) {
+    Start-Sleep -Seconds 3
+    $st = (Get-Service -Name $svc -ErrorAction SilentlyContinue).Status
+    if ($st -eq 'Running') { L "Servico em execucao (tentativa $i)."; exit 0 }
+    try { Start-Service -Name $svc -ErrorAction Stop; L "Start-Service enviado (tentativa $i)." }
+    catch { L "Falha ao iniciar (tentativa $i): $($_.Exception.Message)" }
+}
+$st = (Get-Service -Name $svc -ErrorAction SilentlyContinue).Status
+if ($st -eq 'Running') { L 'Servico em execucao.' } else { L "ERRO: servico nao voltou (status: $st). A recuperacao do Windows ainda pode reinicia-lo." }
+"""
+
+
+def _configurar_recuperacao_servico():
+    """
+    Garante que o serviço esteja configurado com:
+    - start= delayed-auto (evita timeout de 30s do SCM / Erro 1053 durante descompactação do PyInstaller --onefile no boot)
+    - failure actions (reiniciar automaticamente em caso de queda)
+    - failureflag= 1 (aciona recuperação mesmo se o serviço encerrar com código de erro Win32)
+    Executado tanto no install/update quanto no próprio SvcDoRun (auto-cura para agentes atualizados via OTA).
+    """
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        res = subprocess.run(
+            ["sc.exe", "config", "TrilanAgentNVR", "start=", "delayed-auto"],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
+        if res.returncode != 0:
+            subprocess.run(
+                ["sc.exe", "config", "TrilanAgentNVR", "start=", "auto"],
+                capture_output=True,
+                creationflags=no_window,
+                timeout=10,
+            )
+        subprocess.run(
+            [
+                "sc.exe",
+                "failure",
+                "TrilanAgentNVR",
+                "reset=",
+                "86400",
+                "actions=",
+                "restart/5000/restart/10000/restart/30000",
+            ],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
+        subprocess.run(
+            ["sc.exe", "failureflag", "TrilanAgentNVR", "1"],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
+        # Nome exibido em services.msc (máquinas instaladas com o nome antigo atualizam sozinhas)
+        subprocess.run(
+            ["sc.exe", "config", "TrilanAgentNVR", "DisplayName=", "Trilan — Agente Backup"],
+            capture_output=True,
+            creationflags=no_window,
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
 class TrilanAgentService(win32serviceutil.ServiceFramework):
     _svc_name_ = "TrilanAgentNVR"
-    _svc_display_name_ = "Trilan — Agente Backup NVR"
+    _svc_display_name_ = "Trilan — Agente Backup"
     _svc_description_ = "Executa backups automaticos de NVRs e envia os arquivos ao servidor Trilan."
+    _svc_start_type_ = win32service.SERVICE_AUTO_START
 
     def __init__(self, args):
         super().__init__(args)
         self.stop_requested = False
-        self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+        # Manual-reset: a thread de ping e o loop principal esperam no mesmo evento de parada
+        self.hWaitStop = win32event.CreateEvent(None, 1, 0, None)
+        self.hPingResp = win32event.CreateEvent(None, 0, 0, None)
+        self.ping_responses = queue.Queue()
+        self.last_backup_finished_at = 0.0
+        self.schedule_hour = 2
+        self.schedule_minute = 0
+        self.config_loaded = False
+        self.schedule_updated = False
+        self.threads_iniciadas = False
+        # Reinício pedido pelo painel: o processo termina com erro para a recuperação do Windows religar
+        self.reiniciar_pelo_windows = False
+        # Atualização OTA baixada: o processo sai na hora para o script de troca copiar o executável novo
+        self.sair_apos_atualizacao = False
 
         sec_desc = win32security.SECURITY_DESCRIPTOR()
         sec_desc.SetSecurityDescriptorDacl(1, None, 0)
@@ -72,121 +250,538 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         self.stop_requested = True
         win32event.SetEvent(self.hWaitStop)
 
+    def SvcShutdown(self):
+        # Chamado pelo Windows quando o servidor é desligado/reiniciado (SERVICE_CONTROL_SHUTDOWN)
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        log("Desligamento do Windows detectado (SvcShutdown). Encerrando servico de forma limpa...")
+        self.stop_requested = True
+        win32event.SetEvent(self.hWaitStop)
+
     def SvcDoRun(self):
-        log("=" * 60)
-        log("TRILAN AGENT NVR INICIADO")
-        log(f"Diretorio: {DIRETORIO}")
+        # Reporta SERVICE_RUNNING imediatamente ao SCM para evitar timeout de inicialização no boot
+        self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+        _garantir_logging()
+
+        # Auto-cura em background: aplica delayed-auto e políticas de falha mesmo em máquinas atualizadas via OTA
+        threading.Thread(target=_configurar_recuperacao_servico, daemon=True).start()
+
+        # Tenta carregar a versão do updater se possível
         try:
-            self._load_schedule_and_run()
+            from src.application.updater import get_current_version
+            v = get_current_version()
         except Exception:
-            log(f"ERRO FATAL:\n{traceback.format_exc()}", is_error=True)
+            v = "Desconhecida"
+
+        log("=" * 60)
+        log(f"TRILAN AGENT NVR INICIADO (Versão: {v})")
+        log(f"Diretorio: {DIRETORIO}")
+        # Em thread: nunca atrasa nem derruba a inicialização do serviço
+        threading.Thread(target=reabrir_bandeja_atualizada, daemon=True).start()
+        # Loop de resiliência: se ocorrer erro inesperado no boot (ex.: rede/disco ainda subindo),
+        # não encerra o processo com código 0 (o que impediria o Windows SCM de reiniciar o serviço).
+        while not self.stop_requested:
+            try:
+                self._load_schedule_and_run()
+                if not self.stop_requested:
+                    log("Ciclo principal encerrou sem solicitacao de parada. Reiniciando em 10s...", is_error=True)
+            except Exception:
+                log(f"ERRO FATAL (tentando recuperar em 10s):\n{traceback.format_exc()}", is_error=True)
+
+            if not self.stop_requested:
+                if win32event.WaitForSingleObject(self.hWaitStop, 10000) == win32event.WAIT_OBJECT_0:
+                    break
+
         log("TRILAN AGENT NVR ENCERRADO")
         log("=" * 60)
+        if self.reiniciar_pelo_windows:
+            # Termina sem avisar "parado" ao Windows: ele trata como falha e a recuperação configurada
+            # (_configurar_recuperacao_servico) religa o serviço em 5 s. É a segunda garantia, caso o
+            # script de reinício (SCRIPT_REINICIO) não consiga.
+            logging.shutdown()
+            os._exit(1)
+        if self.sair_apos_atualizacao:
+            # Saindo normalmente, o Python espera threads e pools pendentes antes de terminar; o processo
+            # antigo seguia vivo, travava o TrilanAgentService.exe e a cópia falhava (a 1.1.32 voltava em laço).
+            # Avisa "parado" antes de sair: sem isso a recuperação do Windows religaria a versão antiga.
+            self.ReportServiceStatus(win32service.SERVICE_STOPPED)
+            logging.shutdown()
+            os._exit(0)
+
+    def _init_webhooks(self, server_cfg: dict):
+        """Inicializa integrações locais de webhook (Digifort / Defense) de forma segura."""
+        from src.core.config import parse_config_extra
+        for eq in (server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []):
+            tipo = (eq.get("tipo") or "").upper()
+            if tipo == "DIGIFORT":
+                cfg_ext = parse_config_extra(eq)
+                caminho_csv = cfg_ext.get("caminho_csv", "")
+                caminho_log = cfg_ext.get("caminho_log_csv", "")
+                try:
+                    from src.application.webhook_digifort import start_webhook
+                    start_webhook(caminho_csv, caminho_log, eq.get("cameras_config"))
+                    log("Monitoramento Digifort por Ping ICMP iniciado com sucesso.")
+                except Exception as e:
+                    log(f"Falha ao iniciar monitoramento Digifort por Ping: {e}", is_error=True)
+            elif tipo == "DEFENSE":
+                try:
+                    from src.application.webhook_defense import start_webhook_defense
+                    start_webhook_defense()
+                    log("Agente Webhook Defense IA iniciado com sucesso na porta 8181.")
+                except Exception as e:
+                    log(f"Falha ao iniciar Agente Webhook Defense IA: {e}", is_error=True)
 
     def _load_schedule_and_run(self):
         """Load schedule from server config and run the event loop."""
         if str(DIRETORIO) not in sys.path:
             sys.path.insert(0, str(DIRETORIO))
 
-        import configparser
-        import requests
+        from src.core.config import load_conf, ConfigError
+        from src.application.api_client import fetch_server_config
 
-        conf_file = DIRETORIO / "agent.conf"
-        log(f"Lendo configuracoes de: {conf_file}")
-        if not conf_file.exists():
-            log(f"ERRO FATAL: Arquivo de configuracao {conf_file} nao encontrado!", is_error=True)
+        log(f"Lendo configuracoes de: {DIRETORIO / 'agent.conf'}")
+        try:
+            conf = load_conf()
+        except ConfigError as e:
+            log(str(e), is_error=True)
             return
 
-        cfg = configparser.ConfigParser()
-        cfg.read(conf_file, encoding="utf-8-sig")
-        server_url = cfg["server"]["url"].rstrip("/")
-        client_id = cfg["auth"]["client_id"]
-        api_key = cfg["auth"]["api_key"]
+        log(f"Servidor configurado: {conf['server_url']}")
+        log(f"Client ID: {conf['client_id']}")
 
-        log(f"Servidor configurado: {server_url}")
-        log(f"Client ID: {client_id}")
-
-        headers = {"X-Client-ID": client_id, "X-API-Key": api_key}
-        log(f"Testando comunicacao com o servidor: {server_url}/api/v1/agent/config ...")
+        log(f"Testando comunicacao com o servidor: {conf['server_url']}/api/v1/agent/config ...")
         try:
-            r = requests.get(f"{server_url}/api/v1/agent/config", headers=headers,
-                             timeout=30, verify=False)
-            r.raise_for_status()
-            server_cfg = r.json()
-            hora = int(server_cfg.get("backup_hour", 2))
-            minuto = int(server_cfg.get("backup_minute", 0))
+            server_cfg = fetch_server_config(conf)
+            self.schedule_hour = int(server_cfg.get("backup_hour", 2))
+            self.schedule_minute = int(server_cfg.get("backup_minute", 0))
+            self.config_loaded = True
             log("COMUNICACAO BEM SUCEDIDA! Configuracoes do servidor recebidas.")
+            self._init_webhooks(server_cfg)
         except Exception as e:
             log(f"FALHA na comunicacao com o servidor: {e}", is_error=True)
-            log("Usando horario padrao 02:00 para o proximo backup.")
-            hora, minuto = 2, 0
+            log("Usando horario padrao 02:00 para o proximo backup (sincronizara automaticamente quando a conexao voltar).")
+            self.schedule_hour, self.schedule_minute = 2, 0
+            self.config_loaded = False
 
-        self._run_loop(hora, minuto, server_url, headers)
+        headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+        self._run_loop(conf["server_url"], headers, conf)
 
-    def _run_loop(self, hora: int, minuto: int, server_url: str, headers: dict):
+    def _restart_service(self):
+        """Reinício pedido pelo painel, por dois caminhos independentes:
+        1) SCRIPT_REINICIO (fora deste processo) espera o processo do serviço sair e o inicia de novo;
+        2) o processo termina com erro e a recuperação do Windows o religa em 5 s.
+        """
+        import subprocess
+        pid_servico = os.getpid()
+        try:
+            # No executável de arquivo único quem o Windows acompanha é o processo pai (o bootloader)
+            import psutil
+            pai = psutil.Process(pid_servico).parent()
+            if pai is not None and pai.name().lower() == "trilanagentservice.exe":
+                pid_servico = pai.pid
+        except Exception:
+            pass
+        script = (SCRIPT_REINICIO.replace("__LOG__", str(PASTA_LOG / "reinicio.log"))
+                  .replace("__PID__", str(pid_servico)))
+        try:
+            # Console oculto + entradas/saídas nulas. NÃO usar DETACHED_PROCESS: sem console o PowerShell
+            # fecha na hora sem executar o script (era por isso que o serviço não voltava no reinício).
+            subprocess.Popen(
+                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-NoProfile", "-NonInteractive", "-Command", script],
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            log(f"Falha ao iniciar o script de reinicio (a recuperacao do Windows vai religar): {e}", is_error=True)
+        self.reiniciar_pelo_windows = True
+        self.stop_requested = True
+        win32event.SetEvent(self.hWaitStop)
+
+    @staticmethod
+    def _resumo_ping(ping_resp) -> str:
+        """Resumo do ping seguro para log (rtsp_task, conexao_task e alarme_task contem usuario/senha)."""
+        if not isinstance(ping_resp, dict):
+            return "<resposta invalida>"
+        resumo = {k: v for k, v in ping_resp.items() if k not in ("rtsp_task", "conexao_task", "alarme_task")}
+        task = ping_resp.get("rtsp_task")
+        if task:
+            t = task if isinstance(task, dict) else {}
+            resumo["rtsp_task"] = {k: t.get(k) for k in ("equipamento_id", "ip", "canal", "modo")}
+        task = ping_resp.get("conexao_task")
+        if task:
+            t = task if isinstance(task, dict) else {}
+            resumo["conexao_task"] = {k: t.get(k) for k in ("task_id", "tipo", "name", "ip")}
+        task = ping_resp.get("alarme_task")
+        if task:
+            t = task if isinstance(task, dict) else {}
+            resumo["alarme_task"] = {k: t.get(k) for k in ("equipamento", "central_id", "acao")}
+        return str(resumo)
+
+    @staticmethod
+    def _disparar_conexao(ping_resp: dict, conf: dict):
+        """Teste de conexão pedido pelo painel: roda em thread, na hora (também durante um backup)."""
+        task = ping_resp.get("conexao_task") if isinstance(ping_resp, dict) else None
+        if not isinstance(task, dict):
+            return
+        log(f"Teste de conexao solicitado pelo painel: {task.get('tipo')} {task.get('name')}")
+        from src.application.api_client import send_conexao_progresso
+        from src.application.teste_conexao import executar_teste_conexao
+
+        def rodar(task=task):
+            try:
+                r = executar_teste_conexao(task, conf, lambda estado: send_conexao_progresso(conf, estado))
+                log(f"Teste de conexao de {task.get('name')} concluido: ok={r['ok']} - {r['mensagem']}")
+            except Exception as e:
+                log(f"Falha no teste de conexao: {e}", is_error=True)
+
+        threading.Thread(target=rodar, daemon=True).start()
+
+    @staticmethod
+    def _disparar_comando_alarme(ping_resp: dict, conf: dict):
+        """Armar/desarmar central de alarme pedido pelo painel: roda em thread a partir do proprio ping, para nao
+        esperar o loop principal (que fica preso durante o backup)."""
+        task = ping_resp.get("alarme_task")
+        if not isinstance(task, dict):
+            return
+        log(f"Comando de alarme solicitado pelo painel: {task.get('acao')} central {task.get('central_id')} "
+            f"({task.get('equipamento')}).")
+        from src.application.status_alarmes_defense import atender_comando_alarme
+
+        def executar(task=task):
+            sucesso = atender_comando_alarme(task, conf)
+            log(f"Comando de alarme {task.get('acao')} concluido: sucesso={sucesso}", is_error=not sucesso)
+
+        threading.Thread(target=executar, daemon=True).start()
+
+    def _ping_loop(self, conf: dict):
+        """Pinga em cadência fixa (início a início), independente de backups em andamento no loop principal."""
+        from src.application.api_client import ping_server
+
+        last_successful_ping = time.monotonic()
+        proximo_ping = time.monotonic()
+        while not self.stop_requested:
+            proximo_ping += PING_INTERVAL_S
+            try:
+                # "comando_alarme": o servidor só entrega o alarme_task (leva a senha do DEFENSE) a quem declara
+                ping_resp = ping_server(conf, recursos_extra=("comando_alarme",))
+                if ping_resp:
+                    log(f"Ping recebido pelo servidor. Instrucoes: {self._resumo_ping(ping_resp)}")
+                    self._disparar_conexao(ping_resp, conf)
+                    if time.monotonic() - last_successful_ping > 300:
+                        log("Servidor voltou a responder apos periodo de desconexao!")
+                    last_successful_ping = time.monotonic()
+                    from src.application import estado
+                    if ping_resp.get("restart") and estado.backup_em_andamento:
+                        # O servidor só manda reiniciar com backup em andamento quando ele passou do razoável:
+                        # o loop principal está preso nele e nunca leria este comando
+                        self._reinicio_forcado("reinicio pedido pelo painel com backup travado.")
+                    self._disparar_comando_alarme(ping_resp, conf)
+                    self.ping_responses.put(ping_resp)
+                    win32event.SetEvent(self.hPingResp)
+                else:
+                    log("Ping enviado, mas resposta vazia.")
+            except Exception as e:
+                log(f"Falha ao enviar ping para o servidor (tentara novamente em {PING_INTERVAL_S}s): {e}", is_error=True)
+
+            espera = proximo_ping - time.monotonic()
+            if espera < 0:
+                # Ping demorou mais que o intervalo (timeout de rede): realinha a partir de agora
+                proximo_ping = time.monotonic()
+                espera = 0
+            if win32event.WaitForSingleObject(self.hWaitStop, int(espera * 1000)) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _presenca_loop(self, conf: dict):
+        """Coleta periodicamente o status de presença das câmeras e envia ao servidor."""
+        from src.application import estado
+        from src.application.api_client import fetch_server_config, send_presenca_cameras
+        from src.application.presenca_cameras import coletar_presenca, INTERVALO_PRESENCA_S
+
+        # Espera inicial para não sobrecarregar a inicialização do serviço
+        if win32event.WaitForSingleObject(self.hWaitStop, 90 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                if estado.backup_em_andamento:
+                    log("Presença de câmeras ignorada: backup em andamento.")
+                else:
+                    server_cfg = fetch_server_config(conf)
+                    equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                    lista = coletar_presenca(equipamentos)
+                    if lista:
+                        send_presenca_cameras(conf, lista)
+            except Exception as e:
+                log(f"Falha no ciclo de presença de câmeras: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_PRESENCA_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _reinicio_forcado(self, motivo: str):
+        """Reinício com o loop principal preso num backup: ele não processa pings nem para sozinho, então
+        pede o reinício (script externo + recuperação do Windows) e encerra o processo na hora."""
+        log(f"Reiniciando o servico a forca: {motivo}", is_error=True, enviar=True)
+        try:
+            self._restart_service()
+        except Exception as e:
+            log(f"Falha ao preparar o reinicio forcado: {e}", is_error=True)
+        time.sleep(3)  # dá tempo de o log chegar ao disco e ao servidor
+        logging.shutdown()
+        os._exit(1)
+
+    def _vigia_backup_loop(self):
+        """Backup travado (equipamento que não responde, sem limite de tempo) prendia o loop principal
+        por dias: sem reinício pelo painel, sem atualização (OTA) e sem o backup seguinte."""
+        from src.application import estado
+
+        while not self.stop_requested:
+            if win32event.WaitForSingleObject(self.hWaitStop, 60 * 1000) == win32event.WAIT_OBJECT_0:
+                return
+            minutos = estado.backup_ha_min()
+            if minutos is not None and minutos * 60 >= LIMITE_BACKUP_S:
+                self._reinicio_forcado(f"backup em andamento ha {minutos} min (limite {LIMITE_BACKUP_S // 3600} h).")
+
+    def _noite_loop(self, conf: dict):
+        """Imagem da noite das câmeras DIGIFORT/DEFENSE: captura ao vivo só na janela 19h30-4h."""
+        from src.application import estado
+        from src.application.api_client import fetch_server_config
+        from src.application.captura_noite_vms import INTERVALO_CICLO_S, capturar_noite_vms, na_janela_noite
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 120 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                if na_janela_noite(datetime.now()) and not estado.backup_em_andamento:
+                    server_cfg = fetch_server_config(conf)
+                    equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                    capturar_noite_vms(equipamentos, conf)
+            except Exception as e:
+                log(f"Falha no ciclo da imagem da noite: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_CICLO_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _olt_loop(self, conf: dict):
+        """Status das OLTs das UNM2000 (ONUs, PONs, placas) por SNMP, independente do backup diário."""
+        from src.application.api_client import fetch_server_config, send_status_olts
+        from src.application.status_olt import INTERVALO_OLT_S, coletar_status_olts
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 150 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                server_cfg = fetch_server_config(conf)
+                equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                lista = coletar_status_olts(equipamentos)
+                if lista:
+                    send_status_olts(conf, lista)
+            except Exception as e:
+                log(f"Falha no ciclo de status das OLTs: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_OLT_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _alarmes_loop(self, conf: dict):
+        """Alarmes das centrais Intelbras cadastradas nos equipamentos DEFENSE, independente do backup diário."""
+        from src.application.api_client import fetch_server_config, send_status_alarmes
+        from src.application.status_alarmes_defense import INTERVALO_ALARMES_S, coletar_status_alarmes
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 150 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                server_cfg = fetch_server_config(conf)
+                equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                lista = coletar_status_alarmes(equipamentos)
+                if lista:
+                    send_status_alarmes(conf, lista)
+            except Exception as e:
+                log(f"Falha no ciclo de alarmes do DEFENSE: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_ALARMES_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _logs_loop(self, conf: dict):
+        """Envia periodicamente os logs acumulados do agente ao servidor."""
+        from src.application import log_remoto
+
+        try:
+            log_remoto.instalar(conf)
+        except Exception:
+            pass
+
+        while not self.stop_requested:
+            try:
+                while not self.stop_requested:
+                    enviados = log_remoto.enviar_pendentes(conf)
+                    if enviados < log_remoto.MAX_POR_ENVIO:
+                        break
+            except Exception:
+                pass
+
+            if win32event.WaitForSingleObject(self.hWaitStop, log_remoto.INTERVALO_ENVIO_S * 1000) == win32event.WAIT_OBJECT_0:
+                break
+
+        # Ao sair do laço (parada do serviço), faz uma última tentativa de envio
+        try:
+            log_remoto.enviar_pendentes(conf)
+        except Exception:
+            pass
+
+    def _disparar_rtsp(self, ping_resp: dict, conf: dict):
+        """Dispara em thread o teste RTSP pedido pelo dashboard, se houver."""
+        task = ping_resp.get("rtsp_task")
+        if not task:
+            return
+        log("Teste RTSP solicitado pelo dashboard! Iniciando teste local...")
+        from src.camera.rtsp_client import executar_tarefa_rtsp
+        from src.application.api_client import send_rtsp_result
+
+        def run_and_send_rtsp(task=task):
+            try:
+                result = executar_tarefa_rtsp(task)
+                send_rtsp_result(conf, result)
+                log(f"Teste RTSP concluído e enviado: sucesso={result['success']}")
+            except Exception as e:
+                log(f"Falha no teste RTSP: {e}", is_error=True)
+
+        threading.Thread(target=run_and_send_rtsp, daemon=True).start()
+
+    def _process_ping_responses(self, agent_mod, conf: dict) -> bool:
+        """Executa as instruções recebidas nos pings. Retorna True se o serviço deve encerrar."""
+        from src.application.updater import check_and_apply_update
+
+        while True:
+            try:
+                ping_resp = self.ping_responses.get_nowait()
+            except queue.Empty:
+                return False
+
+            # Se ligou sem internet/servidor, busca a configuração em memória sem derrubar o serviço
+            if not self.config_loaded:
+                log("Servidor voltou a responder! Sincronizando configuracoes em execucao...")
+                try:
+                    from src.application.api_client import fetch_server_config
+                    server_cfg = fetch_server_config(conf)
+                    nova_hora = int(server_cfg.get("backup_hour", 2))
+                    novo_minuto = int(server_cfg.get("backup_minute", 0))
+                    self._init_webhooks(server_cfg)
+                    self.config_loaded = True
+                    if (nova_hora, novo_minuto) != (self.schedule_hour, self.schedule_minute):
+                        self.schedule_hour = nova_hora
+                        self.schedule_minute = novo_minuto
+                        self.schedule_updated = True
+                        log(f"Horario de backup atualizado com sucesso: {self.schedule_hour:02d}:{self.schedule_minute:02d}")
+                    else:
+                        log("Configuracoes e agendamento sincronizados com sucesso.")
+                except Exception as e:
+                    log(f"Falha ao sincronizar configuracoes apos reconexao: {e}", is_error=True)
+
+            self._disparar_rtsp(ping_resp, conf)
+
+            if ping_resp.get("restart"):
+                log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
+                self._restart_service()
+                return True
+
+            if ping_resp.get("backup"):
+                log("Geracao de backup manual solicitada pelo dashboard!")
+                self._executar_backup(agent_mod, "manual_dashboard")
+                # Drena quaisquer pings repetidos com comando de backup que acumularam na fila durante a execução
+                backup_drained = 0
+                while not self.ping_responses.empty():
+                    try:
+                        discarded = self.ping_responses.get_nowait()
+                        self._disparar_rtsp(discarded, conf)
+                        if discarded.get("restart"):
+                            self._restart_service()
+                            return True
+                        if discarded.get("backup"):
+                            backup_drained += 1
+                    except queue.Empty:
+                        break
+                if backup_drained > 0:
+                    log(f"Descartadas {backup_drained} instrucoes repetidas de backup acumuladas durante a execucao.")
+
+            try:
+                atualizou = check_and_apply_update(conf)
+            except Exception:
+                log(f"[OTA] Erro inesperado na verificacao de atualizacao:\n{traceback.format_exc()}", is_error=True)
+                atualizou = False
+            if atualizou:
+                log("[OTA] Nova versao baixada e aplicada. Aguardando reinicio do servico...")
+                self.sair_apos_atualizacao = True
+                self.stop_requested = True
+                win32event.SetEvent(self.hWaitStop)
+                return True
+
+    def _run_loop(self, server_url: str, headers: dict, conf: dict):
         import agent as agent_mod
-        import requests
-        import time
 
-        last_ping_time = 0
+        if not self.threads_iniciadas:
+            self.threads_iniciadas = True
+            threading.Thread(target=self._ping_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._noite_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._olt_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._alarmes_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._vigia_backup_loop, daemon=True).start()
+            threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 
         while not self.stop_requested:
             agora = datetime.now()
-            proximo = agora.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+            proximo = agora.replace(hour=self.schedule_hour, minute=self.schedule_minute, second=0, microsecond=0)
             if proximo <= agora:
                 proximo += timedelta(days=1)
             log(f"Proximo backup: {proximo.strftime('%d/%m/%Y %H:%M')}")
 
             while not self.stop_requested:
-                agora = datetime.now()
-                
-                # Envia ping a cada 5 minutos (300 segundos) para manter status "Online"
-                if time.time() - last_ping_time >= 300:
-                    try:
-                        ping_resp = requests.post(
-                            f"{server_url}/api/v1/agent/ping",
-                            headers=headers, timeout=10, verify=False,
-                        )
-                        last_ping_time = time.time()
-                        # Verifica se o servidor solicitou reinicio
-                        if ping_resp.ok and ping_resp.json().get("restart"):
-                            log("Reinicio solicitado pelo dashboard. Agendando reinicio do servico...")
-                            # Spawna processo detached: aguarda o servico parar (3s) e reinicia
-                            import subprocess
-                            subprocess.Popen(
-                                ["cmd", "/c", "timeout /t 3 /nobreak >nul && sc start TrilanAgentNVR"],
-                                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-                            )
-                            # Para o servico de forma limpa (SCM vai receber o sinal de stop)
-                            self.stop_requested = True
-                            win32event.SetEvent(self.hWaitStop)
-                            return
-                    except Exception:
-                        pass  # Ignora falha no ping para nao travar o loop
-                
-                segundos = (proximo - agora).total_seconds()
+                # Se as configurações foram atualizadas dinamicamente, recalcula o próximo backup
+                if self.schedule_updated:
+                    self.schedule_updated = False
+                    break
+
+                segundos = (proximo - datetime.now()).total_seconds()
                 if segundos <= 0:
                     self._executar_backup(agent_mod, "scheduled")
                     break
 
-                espera_ms = int(min(segundos, 60) * 1000)
+                # Reduzido de 60s para 5s para que o Agente consiga capturar os pings e comandos RTSP a tempo
+                espera_ms = int(min(segundos, 5) * 1000)
                 resultado = win32event.WaitForMultipleObjects(
-                    [self.hWaitStop, self.hBackupManual], False, espera_ms
+                    [self.hWaitStop, self.hBackupManual, self.hPingResp], False, espera_ms
                 )
                 if resultado == win32event.WAIT_OBJECT_0:
                     return
                 elif resultado == win32event.WAIT_OBJECT_0 + 1:
                     self._executar_backup(agent_mod, "manual")
+                elif resultado == win32event.WAIT_OBJECT_0 + 2:
+                    if self._process_ping_responses(agent_mod, conf):
+                        return
 
     def _executar_backup(self, agent_mod, trigger: str):
         if self.stop_requested:
             return
-        log(f"INICIANDO BACKUP — {trigger.upper()}")
+        agora = time.monotonic()
+        if agora - getattr(self, "last_backup_finished_at", 0.0) < 60:
+            log(f"IGNORANDO BACKUP DUPLICADO ({trigger}) — Ultimo backup finalizou ha menos de 60 segundos.")
+            return
+
+        from src.application import estado
+        log(f"INICIANDO BACKUP — {trigger.upper()}", enviar=True)
+        estado.backup_inicio = time.monotonic()
+        estado.backup_em_andamento = True
         try:
             agent_mod.run_backup(trigger)
-            log("BACKUP FINALIZADO.")
+            self.last_backup_finished_at = time.monotonic()
+            log("BACKUP FINALIZADO.", enviar=True)
         except Exception:
+            self.last_backup_finished_at = time.monotonic()
             log(f"ERRO NO BACKUP:\n{traceback.format_exc()}", is_error=True)
+        finally:
+            estado.backup_em_andamento = False
 
 
 if __name__ == "__main__":
@@ -195,4 +790,13 @@ if __name__ == "__main__":
         servicemanager.PrepareToHostSingle(TrilanAgentService)
         servicemanager.StartServiceCtrlDispatcher()
     else:
+        # Identifica o comando real ignorando flags como --startup=...
+        acoes_cli = [a.lower() for a in sys.argv[1:] if not a.startswith("-")]
+        acao_cli = acoes_cli[0] if acoes_cli else ""
+        # Se for install ou update e não especificou --startup, define como delayed por padrão (opções devem vir antes da ação)
+        if acao_cli in ("install", "update") and not any(a.startswith("--startup") for a in sys.argv):
+            sys.argv.insert(1, "--startup=delayed")
         win32serviceutil.HandleCommandLine(TrilanAgentService)
+        # Após install ou update, garante inicialização delayed-auto e recuperação de falhas no Windows SCM
+        if acao_cli in ("install", "update"):
+            _configurar_recuperacao_servico()

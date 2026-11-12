@@ -1,8 +1,9 @@
 Write-Host "Criando ambiente virtual e instalando dependencias..."
-python -m venv venv
+# Python fixo (o build atual usa o 3.14.8), não o que estiver no PATH
+py -3.14 -m venv venv
 
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
-.\venv\Scripts\python.exe -m pip install pyinstaller pywin32
+.\venv\Scripts\python.exe -m pip install pyinstaller==6.22.3 pywin32==312
 
 Write-Host "Compilando serviço em background (service.exe)..."
 # O serviço Windows no PyInstaller precisa ser Console (não windowed) para o pywin32 funcionar
@@ -12,6 +13,16 @@ Write-Host "Compilando serviço em background (service.exe)..."
     --hidden-import win32service `
     --hidden-import servicemanager `
     --hidden-import agent `
+    --hidden-import src.application.updater `
+    --hidden-import src.application.backup_job `
+    --hidden-import src.application.webhook_digifort `
+    --hidden-import src.application.webhook_defense `
+    --hidden-import src.olt.huawei_active `
+    --hidden-import psutil `
+    --hidden-import GPUtil `
+    --collect-all imageio_ffmpeg `
+    --collect-all pysnmp `
+    --collect-all pyasn1 `
     --name TrilanAgentService `
     service.py
 
@@ -23,6 +34,9 @@ Write-Host "Compilando aplicativo da bandeja (tray.exe)..."
     --hidden-import pystray._win32 `
     --name TrilanAgentTray `
     tray.py
+
+Write-Host "Gerando o pacote de código do agente Linux (Mikrotik, OTA)..."
+.\venv\Scripts\python.exe pacote_linux.py
 
 Write-Host "Limpando arquivos temporários..."
 Remove-Item -Recurse -Force build

@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FiberHome OLT - NOC Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0b1120;
+            --card-bg: rgba(30, 41, 59, 0.6);
+            --card-border: rgba(255, 255, 255, 0.05);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-blue: #38bdf8;
+            --accent-green: #34d399;
+            --accent-red: #fb7185;
+            --accent-yellow: #fbbf24;
+            --accent-purple: #c084fc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.08), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(192, 132, 252, 0.08), transparent 25%);
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #38bdf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--accent-green);
+            background: rgba(52, 211, 153, 0.1);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent-green);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--accent-green);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.5; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.5; }
+        }
+
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .kpi-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            backdrop-filter: blur(12px);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        .kpi-title {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .kpi-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+
+        .kpi-trend {
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        /* Specific Card Colors */
+        .card-total .kpi-value { color: var(--accent-blue); }
+        .card-online .kpi-value { color: var(--accent-green); }
+        .card-offline .kpi-value { color: var(--accent-red); }
+        .card-power .kpi-value { color: var(--accent-yellow); }
+        .card-temp .kpi-value { color: var(--accent-purple); }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+        }
+
+        .panel {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .panel h2 {
+            font-size: 1.2rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-main);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Table Styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        td {
+            padding: 1rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.02);
+            font-size: 0.95rem;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .badge-critical { background: rgba(251, 113, 133, 0.1); color: var(--accent-red); }
+        .badge-warning { background: rgba(251, 191, 36, 0.1); color: var(--accent-yellow); }
+        .badge-good { background: rgba(52, 211, 153, 0.1); color: var(--accent-green); }
+
+        /* Pagination Styles */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .page-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            color: var(--text-muted);
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+        }
+
+        .page-btn.active {
+            background: var(--accent-blue);
+            color: #fff;
+            border-color: var(--accent-blue);
+        }
+
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Hardware Bars */
+        .hw-item {
+            margin-bottom: 1.5rem;
+        }
+        
+        .hw-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .progress-bg {
+            width: 100%;
+            height: 8px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 1s ease;
+        }
+
+        .fill-blue { background: var(--accent-blue); }
+        .fill-green { background: var(--accent-green); }
+        .fill-purple { background: var(--accent-purple); }
+
+        @media (max-width: 1024px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+
+
+    <!-- Top KPI Cards -->
+    <div class="kpi-grid">
+        <div class="kpi-card card-total">
+            <div class="kpi-title">Total de ONUs</div>
+            <div class="kpi-value">4.250</div>
+            <div class="kpi-trend"><span style="color: var(--accent-green)">+12</span> nesta semana</div>
+        </div>
+        
+        <div class="kpi-card card-online">
+            <div class="kpi-title">ONUs Online</div>
+            <div class="kpi-value">3.980</div>
+            <div class="kpi-trend">93.6% de disponibilidade</div>
+        </div>
+
+        <div class="kpi-card card-offline">
+            <div class="kpi-title">ONUs Offline</div>
+            <div class="kpi-value">145</div>
+            <div class="kpi-trend"><span style="color: var(--accent-red)">+8</span> nas últimas 2h</div>
+        </div>
+
+        <div class="kpi-card card-power">
+            <div class="kpi-title">Falha de Energia (LOS)</div>
+            <div class="kpi-value">125</div>
+            <div class="kpi-trend">Possível área sem luz</div>
+        </div>
+
+        <div class="kpi-card card-temp">
+            <div class="kpi-title">Temperatura OLT</div>
+            <div class="kpi-value">42°C</div>
+            <div class="kpi-trend"><span style="color: var(--accent-green)">Estável</span> (Limite 48°C)</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-grid">
+        
+        <!-- Left Panel: Optical Signals & Inventory -->
+        <div class="panel">
+            <h2>
+                Monitoramento Óptico (Piores Sinais RX)
+                <span class="badge badge-warning">Atenção Necessária</span>
+            </h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cliente (UNM2000)</th>
+                        <th>Porta PON</th>
+                        <th>Serial ONU</th>
+                        <th>Sinal RX (ONU)</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="onu-table-body">
+                    <!-- Preenchido via JavaScript -->
+                </tbody>
+            </table>
+            <div id="pagination-controls" class="pagination"></div>
+        </div>
+
+        <!-- Right Panel: Hardware & OLT Health -->
+        <div class="panel">
+            <h2>Saúde do Hardware (Controladora)</h2>
+            
+            <div class="hw-item">
+                <div class="hw-header">
+                    <span>Uso de CPU (HSWA)</span>
+                    <span style="color: var(--accent-blue)">18%</span>
+                </div>
+                <div class="progress-bg">
+                    <div class="progress-fill fill-blue" style="width: 18%"></div>
+                </div>
+            </div>
+
+            <div class="hw-item">
+                <div class="hw-header">
+                    <span>Uso de Memória RAM</span>
+                    <span style="color: var(--accent-purple)">45%</span>
+                </div>
+                <div class="progress-bg">
+                    <div class="progress-fill fill-purple" style="width: 45%"></div>
+                </div>
+            </div>
+
+            <div class="hw-item">
+                <div class="hw-header">
+                    <span>Tráfego Uplink SFP 1/1 (In)</span>
+                    <span style="color: var(--accent-green)">4.2 Gbps</span>
+                </div>
+                <div class="progress-bg">
+                    <div class="progress-fill fill-green" style="width: 42%"></div>
+                </div>
+            </div>
+
+            <h2 style="margin-top: 2rem; font-size: 1rem; color: var(--text-muted)">Portas PON de Destaque</h2>
+            <table>
+                <tbody>
+                    <tr>
+                        <td style="padding: 0.5rem 0;">PON 1/2</td>
+                        <td style="text-align: right;">TX: <span style="color: var(--accent-green)">2.5 dBm</span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0.5rem 0;">PON 2/4</td>
+                        <td style="text-align: right;">TX: <span style="color: var(--accent-green)">2.8 dBm</span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0.5rem 0;">PON 3/1</td>
+                        <td style="text-align: right;">TX: <span style="color: var(--accent-yellow)">1.1 dBm</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <script>
+        // Dados mocados para simular a resposta do Zabbix/UNM2000
+        const onuData = [
+            { client: "João Silva (Plano 500M)", pon: "PON 1/2", serial: "FHTT-1234ABCD", rx: "-31.4", status: "critical" },
+            { client: "Empresa XYZ LTDA", pon: "PON 2/4", serial: "FHTT-9876QWER", rx: "-29.8", status: "critical" },
+            { client: "Maria Oliveira", pon: "PON 1/8", serial: "FHTT-5678ZXCV", rx: "-26.5", status: "warning" },
+            { client: "Carlos Pereira", pon: "PON 3/1", serial: "FHTT-1122TYUI", rx: "-25.9", status: "warning" },
+            { client: "Ana Souza", pon: "PON 1/2", serial: "FHTT-3344GHJK", rx: "-21.2", status: "good" },
+            { client: "Marcos Antonio", pon: "PON 2/1", serial: "FHTT-9988ASDF", rx: "-30.1", status: "critical" },
+            { client: "Lucia Mendes", pon: "PON 3/3", serial: "FHTT-5544LKJH", rx: "-28.0", status: "critical" },
+            { client: "Roberto Carlos", pon: "PON 1/4", serial: "FHTT-7766POIU", rx: "-25.1", status: "warning" },
+            { client: "Farmácia Centro", pon: "PON 2/2", serial: "FHTT-3322MNBV", rx: "-26.9", status: "warning" },
+            { client: "Escola Infantil", pon: "PON 1/1", serial: "FHTT-1199CCXX", rx: "-22.5", status: "good" },
+            { client: "Pedro Henrique", pon: "PON 3/2", serial: "FHTT-8877ZZQQ", rx: "-32.0", status: "critical" },
+            { client: "Supermercado Boa Vista", pon: "PON 2/8", serial: "FHTT-4455WWEE", rx: "-27.4", status: "warning" },
+            { client: "Rafael Costa", pon: "PON 4/1", serial: "FHTT-3399RTYU", rx: "-28.5", status: "critical" }
+        ];
+
+        const rowsPerPage = 5;
+        let currentPage = 1;
+
+        function renderTable(page) {
+            const start = (page - 1) * rowsPerPage;
+            const end = start + rowsPerPage;
+            const paginatedItems = onuData.slice(start, end);
+            
+            const tbody = document.getElementById('onu-table-body');
+            tbody.innerHTML = '';
+
+            paginatedItems.forEach(item => {
+                let badgeClass = '';
+                let badgeText = '';
+                let colorVar = '';
+
+                if (item.status === 'critical') {
+                    badgeClass = 'badge-critical';
+                    badgeText = 'Crítico';
+                    colorVar = 'var(--accent-red)';
+                } else if (item.status === 'warning') {
+                    badgeClass = 'badge-warning';
+                    badgeText = 'Aviso';
+                    colorVar = 'var(--accent-yellow)';
+                } else {
+                    badgeClass = 'badge-good';
+                    badgeText = 'Normal';
+                    colorVar = 'var(--accent-green)';
+                }
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${item.client}</td>
+                    <td>${item.pon}</td>
+                    <td>${item.serial}</td>
+                    <td style="color: ${colorVar}; font-weight: bold;">${item.rx} dBm</td>
+                    <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            updatePaginationButtons();
+        }
+
+        function updatePaginationButtons() {
+            const totalPages = Math.ceil(onuData.length / rowsPerPage);
+            const paginationContainer = document.getElementById('pagination-controls');
+            paginationContainer.innerHTML = '';
+
+            // Prev button
+            const prevBtn = document.createElement('button');
+            prevBtn.className = 'page-btn';
+            prevBtn.innerText = 'Anterior';
+            prevBtn.disabled = currentPage === 1;
+            prevBtn.onclick = () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderTable(currentPage);
+                }
+            };
+            paginationContainer.appendChild(prevBtn);
+
+            // Number buttons
+            for (let i = 1; i <= totalPages; i++) {
+                const btn = document.createElement('button');
+                btn.className = `page-btn ${i === currentPage ? 'active' : ''}`;
+                btn.innerText = i;
+                btn.onclick = () => {
+                    currentPage = i;
+                    renderTable(currentPage);
+                };
+                paginationContainer.appendChild(btn);
+            }
+
+            // Next button
+            const nextBtn = document.createElement('button');
+            nextBtn.className = 'page-btn';
+            nextBtn.innerText = 'Próximo';
+            nextBtn.disabled = currentPage === totalPages;
+            nextBtn.onclick = () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderTable(currentPage);
+                }
+            };
+            paginationContainer.appendChild(nextBtn);
+        }
+
+        // Iniciar tabela
+        renderTable(currentPage);
+    </script>
+</body>
+</html>

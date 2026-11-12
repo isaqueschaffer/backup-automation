@@ -1,6 +1,6 @@
-﻿[server]
+[server]
 # URL do servidor Trilan NVR Backup (sem barra no final)
-url = https://hd208ec5kxz.sn.mynetname.net:7001
+url = https://SEU_SERVIDOR:PORTA
 
 [auth]
 # ID unico deste cliente (obtido no painel administrativo)
