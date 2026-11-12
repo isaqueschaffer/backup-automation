@@ -67,7 +67,9 @@ enquanto `TRILAN_ENABLE_BACKUPS=false`, mas definir `TZ=America/Sao_Paulo` antes
 ### Imagem no repositório
 
 `agent/mikrotik/trilan-agent-armv7.tar` (57,4 MB, `docker save` de `trilan-agent:armv7`, `linux/arm/v7`, agente
-1.1.52 com launcher e OTA, gerada em 12/11/2026), versionada como arquivo comum no ramo `isaque`. SHA-256:
+1.1.52 com launcher e OTA, gerada em 12/11/2026). Desde a 1.1.52 **não fica no git** (o push de 57 MB ao `origin`
+caía): vai como anexo `trilan-agent-armv7.tar` da release em `isaqueschaffer/backup-automation` (a da 1.1.52 leva a
+imagem atual) e o arquivo local está no `.gitignore`. SHA-256:
 `567590623c0c865e9c637f649807bf2132b6f327174dcc7c03ae874fb900674d`. No RouterOS: enviar o `.tar` ao roteador e
 `/container add file=trilan-agent-armv7.tar ...`.
 
@@ -80,8 +82,8 @@ docker image inspect trilan-agent:armv7 --format '{{.Os}}/{{.Architecture}}/{{.V
 docker save --platform linux/arm/v7 -o mikrotik/trilan-agent-armv7.tar trilan-agent:armv7
 ```
 
-Depois, commit e push do `.tar` como qualquer arquivo. O GitHub recusa arquivo acima de 100 MB; se a imagem crescer
-até lá, passar a usar Git LFS ou um registry.
+Depois, anexar o `.tar` à release da versão (`gh release upload <versão> agent/mikrotik/trilan-agent-armv7.tar -R
+isaqueschaffer/backup-automation`), sem commit. Anexo de release aceita até 2 GB.
 
 ### Configuração para o teste
 

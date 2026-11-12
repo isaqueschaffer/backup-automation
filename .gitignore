@@ -64,3 +64,6 @@ teste backup motorola/respostas_telemetria_*/
 agent/cache_gravacoes_digifort_*.json
 agent/dist_ferramentas/
 agent/build_ferramentas/
+
+# Imagem do container do Mikrotik: vai como anexo da release (57 MB; o push ao origin cai)
+agent/mikrotik/*.tar
