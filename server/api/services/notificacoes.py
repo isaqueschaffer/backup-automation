@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 
 from models import ConfiguracaoNotificacao, Conta, Machine, NotificacaoPersonalizada, NVR, Notificacao
 from services.avisos_conta import destinatarios
+from services.camera_offline import formatar_offline_ha, segundos_offline
 from services.email_service import _smtp_config, _smtp_send
+from services.galeria_vms import status_por_camera
 from services.licenca_unm import licenca_da_config
 
 logger = logging.getLogger("trilan.notificacoes")
@@ -19,6 +21,7 @@ logger = logging.getLogger("trilan.notificacoes")
 TIPOS = ("LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE")  # tipos com preferência geral por conta (ConfiguracaoNotificacao)
 LIMIAR_LICENCA_DIAS = 10          # a partir de quantos dias antes do vencimento o alerta (e o e-mail diário) começam
 LIMIAR_AGENTE_OFFLINE_MIN = 15    # máquina ativa sem contato por mais que isso = notificação (o status "ao vivo" usa 180s)
+LIMIAR_CAMERA_OFFLINE_MIN = 15    # câmera marcada para notificar, offline por mais que isso = notificação
 
 
 def tipo_ativo(db: Session, conta_id, tipo: str) -> bool:
@@ -27,29 +30,30 @@ def tipo_ativo(db: Session, conta_id, tipo: str) -> bool:
     return cfg.ativo if cfg else True
 
 
-def _notificacao_aberta(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, definicao_id=None) -> Optional[Notificacao]:
+def _notificacao_aberta(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, definicao_id=None, camera_id=None) -> Optional[Notificacao]:
     return db.query(Notificacao).filter(
         Notificacao.conta_id == conta_id, Notificacao.tipo == tipo, Notificacao.resolvido_em.is_(None),
         Notificacao.machine_id == machine_id, Notificacao.nvr_id == nvr_id, Notificacao.definicao_id == definicao_id,
+        Notificacao.camera_id == camera_id,
     ).first()
 
 
-def abrir_ou_atualizar(db: Session, conta_id, tipo: str, titulo: str, mensagem: str, machine_id=None, nvr_id=None, definicao_id=None) -> Notificacao:
+def abrir_ou_atualizar(db: Session, conta_id, tipo: str, titulo: str, mensagem: str, machine_id=None, nvr_id=None, definicao_id=None, camera_id=None) -> Notificacao:
     """Cria a notificação se não houver uma aberta igual; se já houver, só atualiza o texto (ex.: dias restantes)."""
-    existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id)
+    existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id, camera_id)
     if existente:
         existente.titulo, existente.mensagem = titulo, mensagem
         existente.atualizado_em = datetime.utcnow()
         return existente
     nova = Notificacao(conta_id=conta_id, tipo=tipo, titulo=titulo, mensagem=mensagem,
-                       machine_id=machine_id, nvr_id=nvr_id, definicao_id=definicao_id)
+                       machine_id=machine_id, nvr_id=nvr_id, definicao_id=definicao_id, camera_id=camera_id)
     db.add(nova)
     return nova
 
 
-def resolver(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, definicao_id=None) -> None:
+def resolver(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, definicao_id=None, camera_id=None) -> None:
     """Fecha a notificação aberta (se houver) quando a condição deixou de valer."""
-    existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id)
+    existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id, camera_id)
     if existente:
         existente.resolvido_em = datetime.utcnow()
 
@@ -80,6 +84,14 @@ def _enviar_email_licenca(db: Session, conta: Conta, nvr: NVR, dias_restantes: i
         texto_puro = f"A licença da UNM2000 '{nvr.name}' vence em {dias_restantes} dia(s). Renove para não perder o monitoramento."
         corpo_html = f"<p>A licença da UNM2000 <strong>{nome_escapado}</strong> vence em {dias_restantes} dia(s). Renove para não perder o monitoramento.</p>"
     return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Licença da UNM2000 '{nvr.name}'")
+
+
+def _enviar_email_camera_offline(db: Session, conta: Conta, nvr: NVR, camera_nome: str, tempo_texto: str) -> bool:
+    nome_eq, nome_cam = html.escape(nvr.name), html.escape(camera_nome)
+    assunto = f"Câmera '{camera_nome}' offline em '{nvr.name}'"
+    texto_puro = f"A câmera '{camera_nome}' do equipamento '{nvr.name}' está offline {tempo_texto}."
+    corpo_html = f"<p>A câmera <strong>{nome_cam}</strong> do equipamento <strong>{nome_eq}</strong> está offline {tempo_texto}.</p>"
+    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Câmera offline '{camera_nome}' em '{nvr.name}'")
 
 
 def _enviar_email_personalizada(db: Session, conta: Conta, definicao: NotificacaoPersonalizada, titulo: str, mensagem: str) -> bool:
@@ -171,6 +183,48 @@ def verificar_agentes_offline(db: Session, agora: Optional[datetime] = None) -> 
             logger.exception("Falha ao verificar o contato da máquina '%s' (%s)", getattr(m, "name", ""), getattr(m, "id", None))
 
 
+def verificar_cameras_offline(db: Session, agora: Optional[datetime] = None) -> int:
+    """Abre/atualiza/resolve a notificação de câmera offline (CAMERA_OFFLINE) para cada câmera marcada com
+    `NVRCamera.notificar_offline=True` que estiver offline há mais que LIMIAR_CAMERA_OFFLINE_MIN minutos,
+    segundo o `last_recording_status` do equipamento. Vale para NVR, DIGIFORT e DEFENSE — o pareamento de
+    cada câmera com o relatório do agente usa a mesma regra de cada tipo (`services.galeria_vms.status_por_camera`:
+    nome/pasta para DIGIFORT/DEFENSE, canal físico para NVR). Retorna quantos e-mails foram enviados nesta chamada."""
+    agora = agora or datetime.utcnow()
+    limite_s = LIMIAR_CAMERA_OFFLINE_MIN * 60
+    enviados = 0
+    nvrs = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
+        NVR.tipo.in_(("NVR", "DIGIFORT", "DEFENSE")), NVR.active == True, Machine.active == True
+    ).all()
+    for nvr in nvrs:
+        try:
+            cameras = list(nvr.cameras_status)
+            if not any(c.notificar_offline for c in cameras):
+                continue
+            conta_id = nvr.machine.conta_id
+            status_por_camera_id = status_por_camera(cameras, nvr.tipo, nvr.last_recording_status or [])
+            for camera in cameras:
+                if not camera.notificar_offline:
+                    resolver(db, conta_id, "CAMERA_OFFLINE", nvr_id=nvr.id, camera_id=camera.id)
+                    continue
+                st = status_por_camera_id.get(camera.id)
+                segundos, aprox = segundos_offline(st, agora) if st else (None, False)
+                if segundos is None or segundos < limite_s:
+                    resolver(db, conta_id, "CAMERA_OFFLINE", nvr_id=nvr.id, camera_id=camera.id)
+                    continue
+                tempo_texto = formatar_offline_ha(segundos, aprox)
+                titulo = f"Câmera '{camera.nome}' offline em '{nvr.name}'"
+                mensagem = f"A câmera '{camera.nome}' do equipamento '{nvr.name}' está offline {tempo_texto}."
+                notif = abrir_ou_atualizar(db, conta_id, "CAMERA_OFFLINE", titulo, mensagem, nvr_id=nvr.id, camera_id=camera.id)
+                if notif.ultimo_email_em != agora.date():
+                    conta = nvr.machine.conta
+                    if conta and _enviar_email_camera_offline(db, conta, nvr, camera.nome, tempo_texto):
+                        notif.ultimo_email_em = agora.date()
+                        enviados += 1
+        except Exception:
+            logger.exception("Falha ao verificar câmeras offline de '%s' (%s)", getattr(nvr, "name", ""), getattr(nvr, "id", None))
+    return enviados
+
+
 def verificar_personalizadas(db: Session, agora: Optional[datetime] = None, hoje: Optional[date] = None) -> int:
     """Verifica as definições personalizadas ativas de todas as contas. `mostrar_popup`/`enviar_email` não mudam
     o que é gravado aqui: a notificação sempre fica registrada e visível na aba Notificações; quem decide o que
@@ -232,7 +286,7 @@ def verificar_personalizadas(db: Session, agora: Optional[datetime] = None, hoje
 def verificar_notificacoes(db: Session) -> dict:
     """Roda as quatro verificações (cada uma isolada: uma falhar não impede as outras) e salva. Usada pela tarefa
     de fundo do main.py. Retorna um pequeno resumo para o log."""
-    resumo = {"emails_licenca": 0, "emails_personalizadas": 0}
+    resumo = {"emails_licenca": 0, "emails_personalizadas": 0, "emails_camera_offline": 0}
     try:
         resumo["emails_licenca"] = verificar_licencas_unm2000(db)
     except Exception:
@@ -245,6 +299,10 @@ def verificar_notificacoes(db: Session) -> dict:
         verificar_agentes_offline(db)
     except Exception:
         logger.exception("Falha geral ao verificar agentes offline")
+    try:
+        resumo["emails_camera_offline"] = verificar_cameras_offline(db)
+    except Exception:
+        logger.exception("Falha geral ao verificar câmeras offline")
     try:
         resumo["emails_personalizadas"] = verificar_personalizadas(db)
     except Exception:

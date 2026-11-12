@@ -361,7 +361,7 @@ class StatusOltReport(BaseModel):
 # ─────────────────────────────────────────────
 # Notificações
 # ─────────────────────────────────────────────
-TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA"]
+TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE"]
 ModoNotificacaoPersonalizada = Literal["RECORRENTE", "DATA"]
 
 
@@ -372,6 +372,7 @@ class NotificacaoResponse(BaseModel):
     mensagem: str
     machine_id: Optional[UUID] = None
     nvr_id: Optional[UUID] = None
+    camera_id: Optional[UUID] = None
     definicao_id: Optional[UUID] = None
     criado_em: datetime
     atualizado_em: datetime
@@ -385,6 +386,29 @@ class ConfiguracaoNotificacaoResponse(BaseModel):
 
 class ConfiguracaoNotificacaoUpdate(BaseModel):
     ativo: bool
+
+
+# Notificação de câmera offline (CAMERA_OFFLINE): opt-in por câmera, só para equipamentos DEFENSE por ora
+class CameraNotificacaoResponse(BaseModel):
+    id: UUID
+    nome: str
+    notificar_offline: bool
+    status_comunicacao: Optional[str] = None
+    offline_segundos: Optional[int] = None
+    offline_aprox: bool = False
+
+
+class EquipamentoCamerasNotificacaoResponse(BaseModel):
+    nvr_id: UUID
+    nvr_nome: str
+    nvr_tipo: str
+    machine_id: UUID
+    machine_nome: str
+    cameras: List[CameraNotificacaoResponse]
+
+
+class CameraNotificarUpdate(BaseModel):
+    notificar_offline: bool
 
 
 class NotificacaoPersonalizadaBase(BaseModel):

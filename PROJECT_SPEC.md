@@ -733,6 +733,8 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 | GET | `/api/v1/notificacoes/personalizadas` | Definições de notificação personalizada da conta (qualquer papel vê) |
 | POST | `/api/v1/notificacoes/personalizadas` | Cria uma notificação personalizada (ADMIN da conta ou super admin): título/mensagem, canais (`enviar_email`, `mostrar_popup`) e frequência — `modo=RECORRENTE` (`intervalo_dias`) ou `modo=DATA` (`data_alvo` + `dias_antes`) |
 | PUT/DELETE | `/api/v1/notificacoes/personalizadas/{id}` | Editar / apagar (ADMIN da conta ou super admin); apagar fecha o alerta aberto vinculado |
+| GET | `/api/v1/notificacoes/cameras` | Equipamentos ativos com câmeras (NVR, DIGIFORT, DEFENSE), estado atual e `notificar_offline` (isolada por conta) |
+| PUT | `/api/v1/notificacoes/cameras/{camera_id}` | Liga/desliga a notificação de offline de uma câmera (ADMIN da conta ou super admin) |
 | GET/POST/PUT/DELETE | `/api/v1/clients/{machine_id}/nvrs` · `/{nvr_id}` | **Legado** (`routers/nvrs.py`): ativo e com JWT **(plataforma)**, oculto do OpenAPI/Swagger (`include_in_schema=False`) e sem chamador no painel nem no agente. Aqui `{machine_id}` é o id da **Máquina**, embora o prefixo seja `/clients` (ADR-007); não colide com nenhuma rota do Cliente |
 | GET | `/api/health` | Health check |
 
@@ -1091,6 +1093,41 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-12] — Notificação de câmera offline (tipo CAMERA_OFFLINE), para NVR, DIGIFORT e DEFENSE
+
+**Alteração:** novo tipo de alerta `CAMERA_OFFLINE`, opt-in por câmera (não por conta, ao contrário dos 3
+tipos automáticos existentes): o usuário escolhe quais câmeras quer acompanhar na aba Notificações, e cada
+câmera nova já cadastrada começa com a notificação desativada. `NVRCamera` ganhou a coluna
+`notificar_offline` (BOOLEAN, default FALSE) e `Notificacao` ganhou `camera_id` (FK para `nvr_cameras`, `ON
+DELETE CASCADE`) — migração inline em `main.py` (`_MIGRACOES_COLUNAS` + recriação de `ck_notificacoes_tipo`
+com o valor `CAMERA_OFFLINE`). `services/notificacoes.py` ganhou `verificar_cameras_offline`, para
+equipamentos `tipo IN ('NVR', 'DIGIFORT', 'DEFENSE')` (testado primeiro só com DEFENSE, depois estendido aos
+outros dois, a pedido do usuário); o pareamento de cada `NVRCamera` com o `last_recording_status` do agente
+usa a mesma regra de cada tipo — função nova e compartilhada `services/galeria_vms.status_por_camera`
+(pasta/nome via `parear_cameras` para DIGIFORT/DEFENSE; canal físico, via `canal_int`, para NVR tradicional
+— a mesma distinção que `routers/equipamentos.py:get_nvr_cameras` já fazia pra Galeria). Usa
+`services/camera_offline.segundos_offline` para medir o tempo offline; limiar de 15 min
+(`LIMIAR_CAMERA_OFFLINE_MIN`, igual ao de agente offline) antes de abrir o alerta, com e-mail diário (1x/dia
+corrido enquanto continuar offline, mesmo padrão da licença/personalizada). Endpoints novos em
+`routers/notificacoes.py`: `GET /notificacoes/cameras` (lista os equipamentos com câmeras da conta, de
+qualquer um dos 3 tipos, com estado atual e a flag; cada item já vem com `machine_id`/`nvr_id`/`nvr_tipo`
+pra agrupar no painel) e `PUT /notificacoes/cameras/{camera_id}` (liga/desliga, ADMIN da conta ou super
+admin), ambos isolados por conta (REGRA-010) via `Machine.conta_id`. Painel: nova seção "Câmeras offline"
+em `NotificacoesPage.tsx`, agrupada primeiro por Máquina e depois por equipamento (ícone/cor/rótulo do tipo
+vindos de `eqTipos.tsx`, o mesmo usado nos cards de equipamento), com um botão ativar/desativar por câmera
+(mesmo padrão visual dos 3 tipos automáticos); ícone/cor do tipo de notificação em `utils/notificacoes.ts`
+(`VideoOff`, vermelho). Testes de unidade com SQLite em memória em
+`server/api/tests/test_cameras_offline_notificacao.py` (sem Postgres): opt-in por câmera, limiar de tempo,
+volta a ficar online, e o pareamento por canal físico (NVR tradicional) separado do pareamento por nome.
+**Arquivos:** server/api/{models.py,main.py,schemas.py,routers/notificacoes.py,services/{notificacoes.py,galeria_vms.py},tests/test_cameras_offline_notificacao.py}, server/dashboard/src/{api/{client.ts,types.ts},utils/notificacoes.ts,pages/Notificacoes/NotificacoesPage.tsx}, PROJECT_SPEC.md.
+
+### [2026-11-11] — Captura RTSP: porta 554 conferida só depois da 1ª falha (Hikvision antigas davam timeout)
+
+- **Sintoma**: na CFTV 01 - Navarro, as câmeras Hikvision DS-2CD2012-I (e a 2 ANDAR, DS-2CD2020-I) falhavam na captura do painel com "Tempo esgotado (18s) via TCP" em todas as URLs, com IP, usuário e senha certos; Grandstream e a DS-2CD1001-I funcionavam.
+- **Causa** (medida na própria máquina): `test_rtsp_camera` abria e fechava uma conexão TCP na porta 554, sem requisição, antes de chamar o ffmpeg (sonda de 21/10, `0b49f0c`). Esses firmwares ficam ~18 s sem atender o RTSP depois disso: o ffmpeg levou 18,4 s com a sonda e 0,06 s sem ela (ffmpeg 7.1, o mesmo do agente, e o 9.0.2 deram o mesmo resultado). O agente encerrava a 1ª URL aos 18 s e as seguintes também esbarravam na câmera ocupada.
+- **Correção** (`agent/src/camera/rtsp_client.py`): a sonda virou `_porta_rtsp_aberta()` e roda só depois que a 1ª tentativa TCP falha (exceto 401). Câmera que responde não recebe conexão extra; câmera desligada ou IP errado continua parando na 1ª falha com "Porta RTSP 554 inacessível". Testes em `agent/tests/test_rtsp_sonda_porta.py`.
+- Vale para a captura pelo painel e para a imagem da noite dos VMS (mesma função). Precisa de versão nova do agente para chegar às máquinas.
 
 ### [2026-11-11] — Importação do Digifort: pasta de gravação por câmera e raiz automática
 

@@ -478,7 +478,7 @@ export interface OltStatusResponse {
 }
 
 // ─── Notificações ───────────────────────────────────────────────────────────
-export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA";
+export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE";
 export type ModoNotificacaoPersonalizada = "RECORRENTE" | "DATA";
 
 export interface Notificacao {
@@ -488,9 +488,29 @@ export interface Notificacao {
   mensagem: string;
   machine_id?: string | null;
   nvr_id?: string | null;
+  camera_id?: string | null;
   definicao_id?: string | null;
   criado_em: string;
   atualizado_em: string;
+}
+
+// Opt-in por câmera (CAMERA_OFFLINE): NVR, DIGIFORT e DEFENSE
+export interface CameraNotificacao {
+  id: string;
+  nome: string;
+  notificar_offline: boolean;
+  status_comunicacao?: string | null;
+  offline_segundos?: number | null;
+  offline_aprox?: boolean;
+}
+
+export interface EquipamentoCamerasNotificacao {
+  nvr_id: string;
+  nvr_nome: string;
+  nvr_tipo: string;
+  machine_id: string;
+  machine_nome: string;
+  cameras: CameraNotificacao[];
 }
 
 export interface NotificacaoPersonalizada {
