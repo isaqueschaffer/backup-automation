@@ -22,11 +22,13 @@ from schemas import (
     BackupReportCreate,
     BackupReportResponse,
     ConexaoProgresso,
+    ComandoAlarmeResultado,
     LogsAgenteReport,
     NVRCameraNightImage,
     PingResponse,
     PingRequest,
     PresencaCamerasReport,
+    StatusAlarmeReport,
     StatusOltReport,
     RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
@@ -160,6 +162,9 @@ def get_agent_config(machine: Machine = Depends(get_current_machine), db: Sessio
 # processos diferentes e a tarefa nunca seria entregue.
 pending_rtsp_tasks: Dict[str, Any] = {}
 
+# Comando de armar/desarmar central de alarme (DEFENSE), mesmo esquema e mesma limitação do pending_rtsp_tasks.
+pending_alarme_tasks: Dict[str, Any] = {}
+
 
 def _read_request_flags(machine_id: UUID) -> tuple[bool, bool]:
     """Lê restart/backup solicitados usando uma sessão curta (não segura conexão no long-poll)."""
@@ -271,6 +276,7 @@ async def ping_agent(
     # travado e deixa de segurar o reinício: senão um backup preso nunca liberaria o agente.
     telemetria_ping = (body.telemetry or {}) if body else {}
     suporta_teste_conexao = bool(body and "teste_conexao" in (body.recursos or []))
+    suporta_comando_alarme = bool(body and "comando_alarme" in (body.recursos or []))
     em_backup = bool(telemetria_ping.get("backup_em_andamento"))
     ha_min = telemetria_ping.get("backup_ha_min")
     if em_backup and isinstance(ha_min, (int, float)) and not isinstance(ha_min, bool) and ha_min >= BACKUP_TRAVADO_MIN:
@@ -301,6 +307,17 @@ async def ping_agent(
                 return PingResponse(status="ok", restart=False, backup=False, conexao_task=conexao_task)
         else:
             teste_conexao.recusar_pendentes(machine_id_str)
+
+        # Armar/desarmar central (DEFENSE): o pedido leva a senha do equipamento e os agentes até 1.1.49 gravam no log
+        # o que não reconhecem no ping; só vai a quem declara "comando_alarme" (>= 1.1.50). Os demais: recusa na hora.
+        comando = pending_alarme_tasks.get(machine_id_str)
+        if comando is not None and not comando.get("sent", False):
+            comando["sent"] = True
+            if suporta_comando_alarme:
+                return PingResponse(status="ok", restart=False, backup=False, alarme_task=comando["task"])
+            comando["result"] = ComandoAlarmeResultado(
+                sucesso=False, mensagem="O agente desta máquina é anterior à 1.1.50 e não executa comandos de alarme.")
+            comando["event"].set()
 
         # Flags normais de restart/backup: só retorna imediatamente se estiverem marcadas
         restart_flag, backup_flag = _read_request_flags(machine_id)
@@ -419,6 +436,19 @@ def receive_conexao_progresso(
     return {"status": "ok"}
 
 
+
+@router.post("/defense/alarmes/comando-resultado")
+async def receive_alarme_comando_resultado(
+    result: ComandoAlarmeResultado,
+    machine: Machine = Depends(get_current_machine),
+):
+    """Agente devolve o resultado do comando de armar/desarmar que recebeu no ping."""
+    comando = pending_alarme_tasks.get(str(machine.id))
+    if comando is not None:
+        comando["result"] = result
+        comando["event"].set()
+    return {"status": "ok"}
+
 @router.post("/nvr-cameras/night-image")
 def receive_night_image(
     body: NVRCameraNightImage,
@@ -501,6 +531,39 @@ def receive_olt_status(
             continue
         # Naive em UTC (REGRA-001)
         nvr.olt_status = {"atualizado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "olts": item.olts}
+        atualizados += 1
+    db.commit()
+    return {"status": "ok", "atualizados": atualizados}
+
+
+@router.post("/defense/alarmes/status")
+def receive_alarmes_status(
+    body: StatusAlarmeReport,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Status periódico das centrais de alarme Intelbras cadastradas num DEFENSE (painel de alarmes, `/api/alarm-centrals`).
+    Já verifica as notificações ALARME do equipamento: um disparo não espera o ciclo de 10 min das notificações."""
+    from services.notificacoes import verificar_alarmes_equipamento
+
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
+    atualizados = 0
+    agora = datetime.utcnow()
+    for item in body.equipamentos:
+        nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == item.nome, NVR.active == True).first()
+        if not nvr or (nvr.tipo or "").upper() != "DEFENSE":
+            continue
+        # Naive em UTC (REGRA-001)
+        nvr.last_alarm_status = {
+            "atualizado_em": agora.strftime("%Y-%m-%dT%H:%M:%S"),
+            "ip": item.ip, "erro": item.erro, "alarmes": item.alarmes, "incendio": item.incendio,
+        }
+        try:
+            verificar_alarmes_equipamento(db, nvr, agora)
+        except Exception:
+            logger.exception("Falha ao verificar as notificações de alarme de '%s'", nvr.name)
         atualizados += 1
     db.commit()
     return {"status": "ok", "atualizados": atualizados}

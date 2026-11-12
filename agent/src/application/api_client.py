@@ -157,7 +157,7 @@ def _json_safe(obj):
         return [_json_safe(v) for v in obj]
     return obj
 
-def ping_server(conf: dict) -> dict:
+def ping_server(conf: dict, recursos_extra: tuple = ()) -> dict:
     """Envia um ping para o servidor para manter o status online. Usa long-polling."""
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
@@ -168,7 +168,8 @@ def ping_server(conf: dict) -> dict:
     # "recursos": o servidor só entrega o "Testar conexão" a quem declara saber executá-lo (agente >= 1.1.44)
     # "versao": o servidor guarda e o painel mostra em Configuração da Máquina (agente >= 1.1.49)
     from src.application.updater import CURRENT_VERSION
-    payload = {"telemetry": telemetry, "recursos": ["teste_conexao"], "versao": CURRENT_VERSION}
+    # `recursos_extra`: o que só o serviço do Windows executa (ex.: "comando_alarme", >= 1.1.50); o do Linux não manda
+    payload = {"telemetry": telemetry, "recursos": ["teste_conexao", *recursos_extra], "versao": CURRENT_VERSION}
     r = requests.post(
         f"{conf['server_url']}/api/v1/agent/ping",
         headers=headers, timeout=40, verify=False, json=payload
@@ -251,6 +252,40 @@ def send_status_olts(conf: dict, equipamentos: list) -> bool:
         return True
     except Exception as e:
         logging.error(f"Erro ao enviar status das OLTs: {e}")
+        return False
+
+
+def send_status_alarmes(conf: dict, equipamentos: list) -> bool:
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/defense/alarmes/status",
+            json={"equipamentos": equipamentos},
+            headers=headers,
+            timeout=60,
+            verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao enviar status dos alarmes: {e}")
+        return False
+
+
+def send_resultado_comando_alarme(conf: dict, sucesso: bool, mensagem: str) -> bool:
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/defense/alarmes/comando-resultado",
+            json={"sucesso": bool(sucesso), "mensagem": str(mensagem or "")[:500]},
+            headers=headers,
+            timeout=30,
+            verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao enviar resultado do comando de alarme: {e}")
         return False
 
 

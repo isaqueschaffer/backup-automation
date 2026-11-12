@@ -14,8 +14,11 @@ from models import ConfiguracaoNotificacao, Machine, NVR, NVRCamera, Notificacao
 from schemas import (
     CameraNotificacaoResponse,
     CameraNotificarUpdate,
+    CentralAlarmeNotificacaoResponse,
+    CentralAlarmeNotificarUpdate,
     ConfiguracaoNotificacaoResponse,
     ConfiguracaoNotificacaoUpdate,
+    EquipamentoAlarmesNotificacaoResponse,
     EquipamentoCamerasNotificacaoResponse,
     NotificacaoPersonalizadaCreate,
     NotificacaoPersonalizadaResponse,
@@ -25,7 +28,7 @@ from schemas import (
 from services.camera_offline import segundos_offline
 from services.escopo import filtrar_por_conta
 from services.galeria_vms import status_por_camera
-from services.notificacoes import TIPOS
+from services.notificacoes import TIPOS, id_central, verificar_alarmes_equipamento
 
 router = APIRouter(prefix="/api/v1/notificacoes", tags=["Notificações"])
 
@@ -152,6 +155,76 @@ def atualizar_camera_notificacao(
     nvr = camera.nvr
     status_por_camera_id = status_por_camera(list(nvr.cameras_status), nvr.tipo, nvr.last_recording_status or [])
     return _camera_para_resposta(camera, status_por_camera_id, agora)
+
+
+# ─── Alarmes (centrais Intelbras do DEFENSE) ────────────────────────────────────────────────
+# Opt-in por central (NVR.alarmes_notificar); ver services/notificacoes.py para a verificação.
+
+def _centrais_para_resposta(nvr: NVR) -> list:
+    marcadas = {str(c) for c in (nvr.alarmes_notificar or [])}
+    saida = []
+    for central in (nvr.last_alarm_status or {}).get("alarmes") or []:
+        if not isinstance(central, dict):
+            continue
+        particoes = [p for p in central.get("particoes") or [] if isinstance(p, dict)]
+        cid = id_central(central)
+        saida.append({
+            "central_id": cid, "nome": central.get("nome") or "Central sem nome",
+            "conectada": central.get("status") == 1,
+            "disparada": any(p.get("disparada") for p in particoes),
+            "particoes_total": len(particoes),
+            "particoes_desarmadas": sum(1 for p in particoes if not p.get("armada")),
+            "notificar": cid in marcadas,
+        })
+    return sorted(saida, key=lambda c: c["nome"].lower())
+
+
+def _alarmes_do_equipamento(nvr: NVR) -> dict:
+    status = nvr.last_alarm_status or {}
+    return {
+        "nvr_id": nvr.id, "nvr_nome": nvr.name, "machine_id": nvr.machine_id, "machine_nome": nvr.machine.name,
+        "atualizado_em": status.get("atualizado_em"), "erro": status.get("erro"),
+        "centrais": _centrais_para_resposta(nvr),
+    }
+
+
+@router.get("/alarmes", response_model=List[EquipamentoAlarmesNotificacaoResponse])
+def listar_alarmes_notificacao(
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """DEFENSE ativos com as centrais de alarme do último status do agente, para escolher quais notificam."""
+    consulta = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
+        NVR.tipo == "DEFENSE", NVR.active == True, Machine.active == True
+    )
+    consulta = filtrar_por_conta(consulta, Machine.conta_id, ctx)
+    return [_alarmes_do_equipamento(nvr) for nvr in consulta.order_by(Machine.name, NVR.name).all()]
+
+
+@router.put("/alarmes/{nvr_id}/{central_id}", response_model=CentralAlarmeNotificacaoResponse)
+def atualizar_central_notificacao(
+    nvr_id: UUID,
+    central_id: str,
+    body: CentralAlarmeNotificarUpdate,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(exigir_admin_conta),
+):
+    """Liga/desliga as notificações de uma central de alarme (admin da conta ou super admin)."""
+    consulta = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(NVR.id == nvr_id, NVR.tipo == "DEFENSE")
+    nvr = filtrar_por_conta(consulta, Machine.conta_id, ctx).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    central = next((c for c in _centrais_para_resposta(nvr) if c["central_id"] == central_id), None)
+    if not central:
+        raise HTTPException(status_code=404, detail="Central de alarme não encontrada")
+
+    marcadas = [str(c) for c in (nvr.alarmes_notificar or []) if str(c) != central_id]
+    if body.notificar:
+        marcadas.append(central_id)
+    nvr.alarmes_notificar = marcadas  # lista nova: o SQLAlchemy só detecta mudança em JSON por atribuição
+    verificar_alarmes_equipamento(db, nvr)
+    db.commit()
+    return {**central, "notificar": body.notificar}
 
 
 # ─── Notificações personalizadas (criadas pelo usuário) ───────────────────────────────────────

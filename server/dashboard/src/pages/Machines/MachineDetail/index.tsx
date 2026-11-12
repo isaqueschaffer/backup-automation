@@ -30,6 +30,7 @@ import NVRCamerasGalleryModal from "./components/NVRCamerasGalleryModal";
 import NVRTelemetryModal from "./components/NVRTelemetryModal";
 import OltStatusModal from "./components/OltStatusModal";
 import ConexaoTesteModal from "./components/ConexaoTesteModal";
+import AlarmesModal from "./components/AlarmesModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
 import { useSomenteLeitura } from "../../../contexts/AuthContext";
 
@@ -69,6 +70,7 @@ export default function MachineDetail() {
   const [showNVRCamerasModal, setShowNVRCamerasModal] = useState<{ show: boolean, nvrId: string, nvrName: string, eqTipo: TipoEquipamento }>({ show: false, nvrId: "", nvrName: "", eqTipo: "NVR" });
   const [showTelemetryModal, setShowTelemetryModal] = useState<{ show: boolean, nvrName: string, telemetry: NVRTelemetry | null | undefined }>({ show: false, nvrName: "", telemetry: null });
   const [showOltModal, setShowOltModal] = useState<{ nvrId: string, nvrName: string } | null>(null);
+  const [showAlarmesModal, setShowAlarmesModal] = useState<{ nvrId: string, nvrName: string } | null>(null);
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState<EqForm>(emptyEqForm());
   // "Testar conexão" aberto (depois de salvar o equipamento ou pelo botão do card)
@@ -447,6 +449,7 @@ export default function MachineDetail() {
                           onViewTelemetry={() => setShowTelemetryModal({ show: true, nvrName: eq.name, telemetry: eq.last_telemetry_status })}
                           onViewOlt={() => setShowOltModal({ nvrId: eq.id, nvrName: eq.name })}
                           onTestConexao={() => setTesteConexao({ eqId: eq.id, eqNome: eq.name, eqTipo: eq.tipo, origem: "card" })}
+                          onViewAlarmes={() => setShowAlarmesModal({ nvrId: eq.id, nvrName: eq.name })}
                           onEdit={() => openEqModal(eqToForm(eq), eq.id)}
                           onToggleActive={() => handleToggleEquipamento(eq)}
                         />
@@ -571,6 +574,15 @@ export default function MachineDetail() {
           nvrId={showOltModal.nvrId}
           nvrName={showOltModal.nvrName}
           onClose={() => setShowOltModal(null)}
+        />
+      )}
+
+      {showAlarmesModal && (
+        <AlarmesModal
+          machineId={id!}
+          nvrId={showAlarmesModal.nvrId}
+          nvrName={showAlarmesModal.nvrName}
+          onClose={() => setShowAlarmesModal(null)}
         />
       )}
 

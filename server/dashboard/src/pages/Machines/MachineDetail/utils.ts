@@ -32,6 +32,7 @@ export function emptyEqForm(overrides: Partial<EqForm> = {}): EqForm {
     tipo: "NVR", name: "", ip: "", username: "", password: "",
     pasta_origem: "", fabricante_olt: "UNM2000",
     porta_api: 4433,
+    porta_alarme: 3001,
     ...overrides,
   };
 }
@@ -52,6 +53,7 @@ export function eqToForm(eq: NVR): EqForm {
     pasta_gravacoes: cfg?.pasta_gravacoes || "",
     marca: cfg?.marca || "Hikvision",
     porta_api: cfg?.porta_api ?? 4433,
+    porta_alarme: cfg?.porta_alarme ?? 3001,
     olts: cfg?.olts || "",
     telnet_usuario: cfg?.telnet_usuario || "",
     telnet_senha: "",
@@ -141,6 +143,7 @@ export function buildEqPayload(
     payload.config_extra = {
       pasta_origem: eqForm.pasta_origem.trim(),
       porta_api: Number(eqForm.porta_api) || 4433,
+      porta_alarme: Number(eqForm.porta_alarme) || 3001,
     };
   }
   // Remove blank passwords in edit mode so backend ignores them

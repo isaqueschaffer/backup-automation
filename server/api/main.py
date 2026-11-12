@@ -225,6 +225,9 @@ _MIGRACOES_COLUNAS = [
     # Notificação de câmera offline: opt-in por câmera e o vínculo com o alerta gerado
     ("nvr_cameras", "notificar_offline", "ALTER TABLE nvr_cameras ADD COLUMN notificar_offline BOOLEAN NOT NULL DEFAULT FALSE;"),
     ("notificacoes", "camera_id", "ALTER TABLE notificacoes ADD COLUMN camera_id UUID REFERENCES nvr_cameras(id) ON DELETE CASCADE;"),
+    # Notificação de alarmes (DEFENSE): centrais marcadas e a situação de cada alerta
+    ("nvrs", "alarmes_notificar", "ALTER TABLE nvrs ADD COLUMN alarmes_notificar JSON;"),
+    ("notificacoes", "referencia", "ALTER TABLE notificacoes ADD COLUMN referencia VARCHAR(120);"),
 ]
 
 _colunas_cache: dict = {}
@@ -246,8 +249,8 @@ if _tem_tabela("notificacoes"):
     _run_ddl("ALTER TABLE notificacoes DROP CONSTRAINT IF EXISTS ck_notificacoes_tipo;", "dropar ck_notificacoes_tipo antigo")
     _run_ddl(
         "ALTER TABLE notificacoes ADD CONSTRAINT ck_notificacoes_tipo "
-        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE'));",
-        "recriar ck_notificacoes_tipo com PERSONALIZADA e CAMERA_OFFLINE",
+        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME'));",
+        "recriar ck_notificacoes_tipo com PERSONALIZADA, CAMERA_OFFLINE e ALARME",
     )
 
 

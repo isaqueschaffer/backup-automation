@@ -215,6 +215,8 @@ class NVR(Base):
     olt_status = Column(JSON, nullable=True)  # OLT UNM2000: status das OLTs/ONUs por SNMP (enviado pelo agente a cada 5 min)
     last_alarm_status = Column(JSON, nullable=True)  # DEFENSE: centrais de alarme Intelbras (enviado pelo agente a cada 5 min)
     conexao_status = Column(JSON, nullable=True)  # último "Testar conexão" feito pelo agente: ok, mensagem, etapas, testado_em (UTC naive)
+    # DEFENSE: ids (texto) das centrais de alarme que geram notificação ALARME; opt-in, vazio até o usuário marcar
+    alarmes_notificar = Column(JSON, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -326,7 +328,7 @@ class Notificacao(Base):
     __tablename__ = "notificacoes"
     __table_args__ = (
         CheckConstraint(
-            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE')",
+            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME')",
             name="ck_notificacoes_tipo",
         ),
     )
@@ -340,6 +342,9 @@ class Notificacao(Base):
     nvr_id = Column(UUID(as_uuid=True), ForeignKey("nvrs.id", ondelete="CASCADE"), nullable=True)
     # Câmera do alerta (tipo CAMERA_OFFLINE); mesmo CASCADE do equipamento, para não deixar notificação órfã
     camera_id = Column(UUID(as_uuid=True), ForeignKey("nvr_cameras.id", ondelete="CASCADE"), nullable=True)
+    # Situação do alerta dentro do equipamento (tipo ALARME): "<central>:DESCONECTADA", "<central>:<partição>:DISPARO",
+    # "<central>:<partição>:DESARMADA" ou "FALHA"; separa os alertas abertos de um mesmo DEFENSE
+    referencia = Column(String(120), nullable=True)
     # Definição que gerou o alerta (tipo PERSONALIZADA); SET NULL ao apagar a definição para preservar o histórico
     definicao_id = Column(UUID(as_uuid=True), ForeignKey("notificacoes_personalizadas.id", ondelete="SET NULL"), nullable=True)
     criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)

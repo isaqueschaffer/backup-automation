@@ -664,6 +664,8 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | POST | `/api/v1/agent/rtsp-result` | Agente devolve o resultado da tarefa RTSP do dashboard |
 | POST | `/api/v1/agent/conexao-progresso` | Agente (>= 1.1.44) envia o estado inteiro do "Testar conexão" a cada etapa: `{"task_id", "etapas": [...], "concluido", "ok", "mensagem"}`; ao concluir grava `nvrs.conexao_status` (só equipamento DA máquina). O pedido chega no ping como `conexao_task` (o equipamento como em `/agent/config` + `task_id`) e só para o agente que manda `"recursos": ["teste_conexao"]` no corpo do ping |
 | POST | `/api/v1/agent/nvr-cameras/night-image` | Agente envia a imagem da noite de um canal |
+| POST | `/api/v1/agent/defense/alarmes/comando-resultado` | Agente (>= 1.1.44) devolve o resultado do `alarme_task` recebido no ping: `{"sucesso", "mensagem"}` |
+| POST | `/api/v1/agent/defense/alarmes/status` | Agente envia o status das centrais de alarme dos DEFENSE da máquina: `{"equipamentos": [{"nome", "ip", "erro", "alarmes": [...]}]}`; grava `nvrs.last_alarm_status` e já verifica as notificações ALARME; 403 com conta bloqueada |
 | POST | `/api/v1/agent/olt/status` | Agente (>= 1.1.38) envia o status das OLTs das UNM2000 da máquina: `{"equipamentos": [{"nome", "olts": [...]}]}` (até 50 equipamentos e 100 OLTs); grava `nvrs.olt_status` só em equipamento OLT ativo DA máquina; 403 com conta bloqueada |
 
 ### Endpoints de Admin (Bearer Token)
@@ -696,6 +698,8 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 | POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/testar-conexao` | "Testar conexão": volta na hora com `{task_id, etapas, concluido, ok, mensagem, segundos}`; máquina offline = `concluido` com erro e `task_id` nulo; teste em andamento do mesmo equipamento é reaproveitado |
 | GET | `/api/v1/machines/{id}/equipamentos/{eq_id}/testar-conexao/{task_id}` | Andamento do teste (o painel consulta a cada 1 s); 404 se expirou (10 min) ou a API reiniciou. Prazos: 45 s para o agente buscar o pedido, 25 s para a primeira resposta, 5 min no total |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras` | Galeria do NVR (une `nvr_cameras` + `last_recording_status`) |
+| POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/alarmes/comando` | Arma/desarma uma central de alarme do DEFENSE pelo agente (`{"central_id", "acao": "ARMAR"|"DESARMAR"}` → `{"sucesso", "mensagem"}`; espera até 75 s; 409 com agente offline ou outro comando em andamento; ADMIN/super admin; registrado nos logs da máquina) |
+| GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/alarmes` | Último status das centrais de alarme de um DEFENSE (`last_alarm_status`; vazio `{"atualizado_em": null, "alarmes": []}` se ainda não chegou) |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/olt-status` | Último status das OLTs/ONUs de uma UNM2000 (`olt_status`; vazio `{"atualizado_em": null, "olts": []}` se ainda não chegou) |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/perfect-image` | Salvar imagem de referência |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras/import` | Importar câmeras para a galeria (lista `cameras` lida do CSV/XLSX pelo painel) ou, com `sync_from_machine=true`, copiar as câmeras avulsas (tipo `CAMERA`) da máquina |
@@ -739,6 +743,8 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 | PUT/DELETE | `/api/v1/notificacoes/personalizadas/{id}` | Editar / apagar (ADMIN da conta ou super admin); apagar fecha o alerta aberto vinculado |
 | GET | `/api/v1/notificacoes/cameras` | Equipamentos ativos com câmeras (NVR, DIGIFORT, DEFENSE), estado atual e `notificar_offline` (isolada por conta) |
 | PUT | `/api/v1/notificacoes/cameras/{camera_id}` | Liga/desliga a notificação de offline de uma câmera (ADMIN da conta ou super admin) |
+| GET | `/api/v1/notificacoes/alarmes` | DEFENSE ativos com as centrais de alarme do último status (conectada, disparo, partições desarmadas) e `notificar` (isolada por conta) |
+| PUT | `/api/v1/notificacoes/alarmes/{nvr_id}/{central_id}` | Liga/desliga a notificação ALARME de uma central (`{"notificar": bool}`; ADMIN da conta ou super admin); já reavalia os alertas do equipamento |
 | GET/POST/PUT/DELETE | `/api/v1/clients/{machine_id}/nvrs` · `/{nvr_id}` | **Legado** (`routers/nvrs.py`): ativo e com JWT **(plataforma)**, oculto do OpenAPI/Swagger (`include_in_schema=False`) e sem chamador no painel nem no agente. Aqui `{machine_id}` é o id da **Máquina**, embora o prefixo seja `/clients` (ADR-007); não colide com nenhuma rota do Cliente |
 | GET | `/api/health` | Health check |
 
@@ -1098,6 +1104,22 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-12] — Merge com a Helena (4ª rodada): alarmes do DEFENSE, notificação ALARME e versão 1.1.50 do agente
+
+**Incorporado (ramo `helena`, `2af33d4` e `4d8e355`):** alarmes das centrais Intelbras do DEFENSE reativados (saem de
+`legacy/defense_alarmes/`), com login no painel de alarmes, centrais de incêndio, armar/desarmar central pelo painel e a
+notificação `ALARME` opt-in por central (detalhes na entrada da Helena abaixo). Migrações: `nvrs.alarmes_notificar`,
+`notificacoes.referencia` e `ck_notificacoes_tipo` com `ALARME`. **Auditoria:** sem data com fuso, sem segredo (só
+`password="x"` em fixture de teste); rotas novas isoladas por conta (`_get_machine_or_404`/`filtrar_por_conta`, caso novo
+em `test_isolamento_contas.py`); compose, nginx, requirements, build.ps1 e `.env` intocados. **Corrigido no merge:** o
+`alarme_task` do ping leva a senha do DEFENSE e era entregue a qualquer agente; os agentes até 1.1.49 só tiram
+`rtsp_task`/`conexao_task` do log do ping (que vai também ao painel), então gravariam a senha. Agora o serviço do Windows
+declara `"comando_alarme"` em `recursos` (`ping_server(conf, recursos_extra=...)`; o `service_linux.py` não declara, pois
+não executa o comando) e o servidor só entrega a quem declara; os demais recebem na hora "agente anterior à 1.1.50".
+**Conflitos:** `models.py`, `schemas.py`, `routers/{agent,equipamentos}.py`, `test_isolamento_contas.py`, `service.py`,
+`client.ts`, `EqCard.tsx` e `MachineDetail/index.tsx` (resolvidos mantendo "Testar conexão" e "Alarmes" lado a lado) e
+este changelog; versões mantidas as da `isaque` (o ramo trazia 1.1.44). **Bloqueado:** nada. **Versão:** agente 1.1.50.
+
 ### [2026-11-12] — Versão do agente no ping e no painel (agente 1.1.49)
 
 O agente passa a mandar `versao` (`CURRENT_VERSION`) no corpo do `POST /api/v1/agent/ping` (`api_client.ping_server`).
@@ -1192,6 +1214,51 @@ declara (os demais recebem na hora "agente anterior à 1.1.44"). **Arquivos:** `
 `tests/test_teste_conexao.py`; dashboard `api/{client,types}.ts`, `index.css`, `MachineDetail/index.tsx`,
 `components/{EqCard,ConexaoTesteModal,EquipamentoFormModal,OltStatusModal}.tsx`. **Breaking change:** nenhum (campos
 novos opcionais). **Branch:** `isaque`. **Versão:** agente 1.1.44.
+
+### [2026-11-12] — Alarmes do DEFENSE reativados com o login do painel de alarmes, e notificação de alarmes (tipo ALARME)
+
+**Alteração:** a função retirada em 11/11 (`legacy/defense_alarmes/`) voltou aos caminhos originais, agora com a
+autenticação certa. O painel de alarmes (Next.js, porta padrão 3001) não aceita HTTP Basic Auth: o agente
+reproduz o login do navegador — gera o token CSRF no formato do pacote npm `csrf`, assinado com o segredo padrão
+`"secret-key"` (lido no JavaScript do painel), manda no cookie `csrfToken` junto do `POST /api/auth/login`
+(`{username, password}`) e leva o `token.token` recebido no cookie `token` em `GET /api/alarm-centrals` (o header
+`Authorization` é recusado com 400). Credenciais: as mesmas do equipamento DEFENSE; só a porta é configurável
+(`config_extra.porta_alarme`, padrão 3001). `parse_alarmes` passou a copiar `id` da central e `id`/`disparada`
+(`alarm`) das partições, e continua sem copiar `Bridge.private_key`/`access_key`, que a resposta do painel traz.
+Religados: `_alarmes_loop` (5 min) em `agent/service.py`, `send_status_alarmes`, `POST /agent/defense/alarmes/status`,
+`GET /machines/{id}/equipamentos/{nvr_id}/alarmes`, botão "Alarmes" no card do DEFENSE (`AlarmesModal`, agora com a
+coluna de disparo) e o campo "Porta dos Alarmes" no formulário.
+Notificação nova `ALARME`, opt-in por central (coluna nova `nvrs.alarmes_notificar`, JSON com os ids das centrais
+marcadas; vazio até o usuário marcar). Uma notificação por situação, separadas pela coluna nova
+`notificacoes.referencia`: `<central>:<partição>:DISPARO`, `<central>:DESCONECTADA` (status diferente de 1),
+`<central>:<partição>:DESARMADA` e `FALHA` (agente não conseguiu consultar o painel; enquanto falha, as outras
+ficam como estavam). Status com mais de 20 min (`LIMIAR_ALARME_SEM_DADOS_MIN`) não abre nem fecha alerta. A
+verificação roda ao receber o relatório do agente (o disparo aparece na hora), ao ligar/desligar uma central e no
+ciclo de 10 min; e-mail 1x por dia corrido por alerta aberto. Endpoints novos: `GET /notificacoes/alarmes` e
+`PUT /notificacoes/alarmes/{nvr_id}/{central_id}` (isolados por conta). Painel: card "Alarmes" na página
+Notificações, por máquina (recolhível, como o de câmeras), com as centrais de cada DEFENSE e o botão por central.
+Migração inline: `nvrs.alarmes_notificar`, `notificacoes.referencia` e `ck_notificacoes_tipo` com `ALARME`.
+Centrais de incêndio (tela `/central-incendio` do painel): o agente também lê `GET /api/firestations` na mesma sessão
+e manda `incendio: [{id, nome, modelo, status}]` (sem o `hmac` nem a bridge); falha só nessa consulta vira lista
+vazia. Fica em `last_alarm_status.incendio` e aparece numa seção do modal "Alarmes"; ainda não gera notificação.
+Armar/desarmar central (botões no modal "Alarmes", com caixa de confirmação; só ADMIN da conta e super admin, pois o
+`get_contexto` barra POST de LEITURA e conta vencida): `POST /machines/{id}/equipamentos/{nvr_id}/alarmes/comando`
+(`{central_id, acao: ARMAR|DESARMAR}`) cria a tarefa em `pending_alarme_tasks` (memória, 1 por máquina, mesma
+limitação de 1 worker do teste RTSP), entregue no long-poll do ping como `alarme_task`; o agente (thread disparada no
+próprio ping, para não esperar o loop principal durante backup) faz login, confirma o modelo da central em
+`/api/alarm-centrals` e manda o que a tela `/arm-disarm` do painel manda: `PATCH /api/commands/AMT8000/Arm|Desarm`
+com `{"station_id"}` para AMT 8000, ou `PATCH /api/commands/arm-disarm` com `{station_id, command: 1|0,
+partitionsState}` (4010: partições A-D; demais: A e B). Devolve em `POST /agent/defense/alarmes/comando-resultado`
+e, se deu certo, reenvia o status da central 8 s depois. O servidor espera até 75 s, recusa máquina offline (409) e
+grava pedido e resultado nos logs da máquina (`event_type="alarme_comando"`, com o e-mail de quem pediu). Arme
+parcial, bypass e restauração do painel (`/api/commands/AMT8000/{ArmParcial,Bypass,Restore}`) ficaram de fora.
+**Arquivos:** agent/{service.py,src/application/{api_client.py,status_alarmes_defense.py},src/vms/defense_alarmes.py,tests/test_defense_alarmes.py}, server/api/{models.py,main.py,schemas.py,routers/{agent.py,equipamentos.py,notificacoes.py},services/notificacoes.py,tests/test_alarmes_notificacao.py}, server/dashboard/src/{api/{client.ts,types.ts},utils/notificacoes.ts,pages/Notificacoes/NotificacoesPage.tsx,pages/Machines/MachineDetail/{index.tsx,utils.ts,components/{AlarmesModal.tsx,EqCard.tsx,EquipamentoFormModal.tsx}}}, legacy/defense_alarmes (removido), PROJECT_SPEC.md.
+**Breaking change:** não (colunas novas são opcionais; agente antigo só não envia alarmes).
+**Versão do agente:** 1.1.44 (updater.py, installer.iss, package.json). Inclui também a correção do login da VSOL
+(`e1e7126`). Gerada em 12/11 só para teste local na máquina da Helena (venv Python 3.13, sem Inno Setup); a
+release oficial fica para o merge na `isaque`.
+**Branch:** helena.
+
 
 ### [2026-11-12] — Notificação de câmera offline (tipo CAMERA_OFFLINE), para NVR, DIGIFORT e DEFENSE
 

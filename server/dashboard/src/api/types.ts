@@ -56,6 +56,7 @@ export interface EquipamentoConfig {
   marca?: string;
   modelo?: string;
   porta_api?: number;
+  porta_alarme?: number;
   olts?: string;
   telnet_usuario?: string;
   telnet_senha_definida?: boolean;
@@ -84,6 +85,7 @@ export interface EqForm {
   caminho_log_csv?: string;
   pasta_gravacoes?: string;
   porta_api?: number | string;
+  porta_alarme?: number | string;
   olts?: string;
   telnet_usuario?: string;
   telnet_senha?: string;
@@ -505,8 +507,39 @@ export interface OltStatusResponse {
   licenca?: { inicio: string | null; fim: string; dias_restantes: number } | null;
 }
 
+// ─── Alarmes (DEFENSE) ────────────────────────────────────────────────────
+export interface AlarmPartition {
+  id?: number | string | null;
+  nome: string;
+  armada: boolean;
+  disparada?: boolean;
+}
+
+export interface AlarmCentral {
+  id?: number | string | null;
+  nome: string;
+  modelo?: string | null;
+  status?: number | null;
+  particoes: AlarmPartition[];
+}
+
+export interface CentralIncendio {
+  id?: number | string | null;
+  nome: string;
+  modelo?: string | null;
+  status?: number | null;
+}
+
+export interface AlarmeStatusResponse {
+  atualizado_em: string | null;
+  ip?: string | null;
+  erro?: string | null;
+  alarmes: AlarmCentral[];
+  incendio?: CentralIncendio[];
+}
+
 // ─── Notificações ───────────────────────────────────────────────────────────
-export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE";
+export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE" | "ALARME";
 export type ModoNotificacaoPersonalizada = "RECORRENTE" | "DATA";
 
 export interface Notificacao {
@@ -539,6 +572,26 @@ export interface EquipamentoCamerasNotificacao {
   machine_id: string;
   machine_nome: string;
   cameras: CameraNotificacao[];
+}
+
+export interface CentralAlarmeNotificacao {
+  central_id: string;
+  nome: string;
+  conectada: boolean;
+  disparada: boolean;
+  particoes_total: number;
+  particoes_desarmadas: number;
+  notificar: boolean;
+}
+
+export interface EquipamentoAlarmesNotificacao {
+  nvr_id: string;
+  nvr_nome: string;
+  machine_id: string;
+  machine_nome: string;
+  atualizado_em?: string | null;
+  erro?: string | null;
+  centrais: CentralAlarmeNotificacao[];
 }
 
 export interface NotificacaoPersonalizada {

@@ -260,6 +260,10 @@ def test_isolamento_contas():
         # Testar conexão de equipamento de outra conta -> 404
         r = client.post(f"/api/v1/machines/{mB_id}/equipamentos/{uuid4()}/testar-conexao", headers=headers_A)
         assert r.status_code == 404, f"Esperado 404 ao testar conexão em máquina de outra conta, obteve {r.status_code}"
+        # Armar/desarmar central de alarme em máquina de outra conta: 404 antes de qualquer comando
+        r = client.post(f"/api/v1/machines/{mB_id}/equipamentos/{uuid4()}/alarmes/comando", headers=headers_A,
+                        json={"central_id": "3", "acao": "DESARMAR"})
+        assert r.status_code == 404, f"Esperado 404 para comando de alarme em máquina de outra conta, obteve {r.status_code}"
 
         r = client.get(f"/api/v1/backups?machine_id={mB_id}", headers=headers_A)
         assert r.status_code == 200, f"Esperado 200 para listagem de backups, obteve {r.status_code}"

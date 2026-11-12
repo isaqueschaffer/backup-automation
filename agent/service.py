@@ -398,10 +398,10 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
     @staticmethod
     def _resumo_ping(ping_resp) -> str:
-        """Resumo do ping seguro para log (rtsp_task contem usuario/senha da camera)."""
+        """Resumo do ping seguro para log (rtsp_task, conexao_task e alarme_task contem usuario/senha)."""
         if not isinstance(ping_resp, dict):
             return "<resposta invalida>"
-        resumo = {k: v for k, v in ping_resp.items() if k not in ("rtsp_task", "conexao_task")}
+        resumo = {k: v for k, v in ping_resp.items() if k not in ("rtsp_task", "conexao_task", "alarme_task")}
         task = ping_resp.get("rtsp_task")
         if task:
             t = task if isinstance(task, dict) else {}
@@ -410,6 +410,10 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         if task:
             t = task if isinstance(task, dict) else {}
             resumo["conexao_task"] = {k: t.get(k) for k in ("task_id", "tipo", "name", "ip")}
+        task = ping_resp.get("alarme_task")
+        if task:
+            t = task if isinstance(task, dict) else {}
+            resumo["alarme_task"] = {k: t.get(k) for k in ("equipamento", "central_id", "acao")}
         return str(resumo)
 
     @staticmethod
@@ -431,6 +435,23 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
         threading.Thread(target=rodar, daemon=True).start()
 
+    @staticmethod
+    def _disparar_comando_alarme(ping_resp: dict, conf: dict):
+        """Armar/desarmar central de alarme pedido pelo painel: roda em thread a partir do proprio ping, para nao
+        esperar o loop principal (que fica preso durante o backup)."""
+        task = ping_resp.get("alarme_task")
+        if not isinstance(task, dict):
+            return
+        log(f"Comando de alarme solicitado pelo painel: {task.get('acao')} central {task.get('central_id')} "
+            f"({task.get('equipamento')}).")
+        from src.application.status_alarmes_defense import atender_comando_alarme
+
+        def executar(task=task):
+            sucesso = atender_comando_alarme(task, conf)
+            log(f"Comando de alarme {task.get('acao')} concluido: sucesso={sucesso}", is_error=not sucesso)
+
+        threading.Thread(target=executar, daemon=True).start()
+
     def _ping_loop(self, conf: dict):
         """Pinga em cadência fixa (início a início), independente de backups em andamento no loop principal."""
         from src.application.api_client import ping_server
@@ -440,7 +461,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         while not self.stop_requested:
             proximo_ping += PING_INTERVAL_S
             try:
-                ping_resp = ping_server(conf)
+                # "comando_alarme": o servidor só entrega o alarme_task (leva a senha do DEFENSE) a quem declara
+                ping_resp = ping_server(conf, recursos_extra=("comando_alarme",))
                 if ping_resp:
                     log(f"Ping recebido pelo servidor. Instrucoes: {self._resumo_ping(ping_resp)}")
                     self._disparar_conexao(ping_resp, conf)
@@ -452,6 +474,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                         # O servidor só manda reiniciar com backup em andamento quando ele passou do razoável:
                         # o loop principal está preso nele e nunca leria este comando
                         self._reinicio_forcado("reinicio pedido pelo painel com backup travado.")
+                    self._disparar_comando_alarme(ping_resp, conf)
                     self.ping_responses.put(ping_resp)
                     win32event.SetEvent(self.hPingResp)
                 else:
@@ -557,6 +580,27 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 log(f"Falha no ciclo de status das OLTs: {e}", is_error=True)
 
             if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_OLT_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
+    def _alarmes_loop(self, conf: dict):
+        """Alarmes das centrais Intelbras cadastradas nos equipamentos DEFENSE, independente do backup diário."""
+        from src.application.api_client import fetch_server_config, send_status_alarmes
+        from src.application.status_alarmes_defense import INTERVALO_ALARMES_S, coletar_status_alarmes
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 150 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                server_cfg = fetch_server_config(conf)
+                equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                lista = coletar_status_alarmes(equipamentos)
+                if lista:
+                    send_status_alarmes(conf, lista)
+            except Exception as e:
+                log(f"Falha no ciclo de alarmes do DEFENSE: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_ALARMES_S * 1000) == win32event.WAIT_OBJECT_0:
                 return
 
     def _logs_loop(self, conf: dict):
@@ -682,6 +726,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             threading.Thread(target=self._presenca_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._noite_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._olt_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._alarmes_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._vigia_backup_loop, daemon=True).start()
             threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 
