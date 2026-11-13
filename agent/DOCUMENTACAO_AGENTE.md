@@ -317,20 +317,25 @@ RAM, ~479 MB livres), no lugar de um PC Windows no cliente. A versão Windows n�
 | Arquivo | Função |
 |---|---|
 | `service_linux.py` | Processo Linux simples no lugar do `service.py`: ping a cada 15 s, reinício (encerra o processo) e agendamento do backup. |
+| `launcher_linux.py` | Processo principal da imagem (>= 1.1.52): roda o código da OTA ou o da imagem, religa o agente quando ele encerra e desfaz versão nova que não sobe. |
+| `src/application/updater_linux.py` | OTA do Linux: baixa `TrilanAgentLinux.tar.gz` (só o código), confere SHA-256, versão, requisitos e sintaxe e troca as pastas em `/app/data/code`. |
+| `pacote_linux.py` | Gera `dist/TrilanAgentLinux.tar.gz` (chamado pelo `build.ps1`; vai na release). |
 | `requirements-linux.txt` | Dependências sem as de Windows (`pypiwin32`, `pystray`, `GPUtil`) e ainda sem o ffmpeg. |
 | `Dockerfile.mikrotik` | Imagem `linux/arm/v7` em dois estágios (compila as bibliotecas e leva só o resultado). |
 | `.dockerignore` | Tira `venv/`, `dist/`, logs e o `agent.conf` do contexto do build. |
-| `README_MIKROTIK.md` | Limites do piloto, build validado, publicação no GHCR e configuração do teste. |
+| `README_MIKROTIK.md` | Limites do piloto, build validado, como gerar a imagem e configuração do teste. |
+| `mikrotik/trilan-agent-armv7.tar` | A imagem pronta (`docker save`, ~60 MB) para importar no RouterOS. |
 
-Imagem publicada: `ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto1` (~60 MB). A configuração entra por um
+Imagem: `agent/mikrotik/trilan-agent-armv7.tar` (~60 MB). A configuração entra por um
 `agent.conf` montado em `/app/agent.conf`; nada de credencial dentro da imagem.
 
 O piloto **só valida a presença** (ping e online no painel). Backups (`TRILAN_ENABLE_BACKUPS=false` por padrão),
-câmeras, OLTs, RTSP/ffmpeg, webhooks do Digifort/Defense, FTP da Huawei e OTA ficam desligados até serem testados no
-RB4011.
+câmeras, OLTs, RTSP/ffmpeg, webhooks do Digifort/Defense e FTP da Huawei ficam desligados até serem testados no
+RB4011. A OTA do código funciona desde a 1.1.52 (ver `README_MIKROTIK.md`, "Atualização automática"); a imagem só
+precisa ser trocada à mão quando o `requirements-linux.txt` mudar.
 
-O que depende de Windows e precisa de outro caminho no Linux: serviço e bandeja (`win32*`), OTA (`.bat`, `sc`,
-`taskkill`), ping do Digifort (flags do `ping` do Windows), caminhos `C:\` e `ProgramData`. O backup da UNM2000 lê
+O que depende de Windows e precisa de outro caminho no Linux: serviço e bandeja (`win32*`), a OTA do Windows (`.bat`,
+`sc`, `taskkill`; o Linux tem a sua própria), ping do Digifort (flags do `ping` do Windows), caminhos `C:\` e `ProgramData`. O backup da UNM2000 lê
 arquivos e o MySQL do próprio servidor da UNM2000 e não roda no roteador.
 
 ## 16. Referência de arquivos

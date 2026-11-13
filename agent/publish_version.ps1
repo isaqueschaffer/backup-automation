@@ -10,11 +10,13 @@ param(
     [Parameter(Mandatory=$false)] [string]$AdminPassword = "",
     [Parameter(Mandatory=$false)] [string]$Notes = "",
     [Parameter(Mandatory=$false)] [string]$UrlService = "",
-    [Parameter(Mandatory=$false)] [string]$UrlTray = ""
+    [Parameter(Mandatory=$false)] [string]$UrlTray = "",
+    [Parameter(Mandatory=$false)] [string]$UrlLinux = ""   # TrilanAgentLinux.tar.gz (agente do Mikrotik, >= 1.1.52)
 )
 
 $ServiceExe = ".\dist\TrilanAgentService.exe"
 $TrayExe    = ".\dist\TrilanAgentTray.exe"
+$LinuxPkg   = ".\dist\TrilanAgentLinux.tar.gz"
 
 # Verifica se os executáveis existem
 if (-not (Test-Path $ServiceExe)) {
@@ -31,6 +33,16 @@ $HashTray = $null
 if (Test-Path $TrayExe) {
     $HashTray = (Get-FileHash $TrayExe -Algorithm SHA256).Hash.ToLower()
     Write-Host "  TrilanAgentTray.exe:    $HashTray"
+}
+
+$HashLinux = $null
+if ($UrlLinux) {
+    if (-not (Test-Path $LinuxPkg)) {
+        Write-Error "Arquivo não encontrado: $LinuxPkg. Execute .\build.ps1 (ou python pacote_linux.py) primeiro."
+        exit 1
+    }
+    $HashLinux = (Get-FileHash $LinuxPkg -Algorithm SHA256).Hash.ToLower()
+    Write-Host "  TrilanAgentLinux.tar.gz: $HashLinux"
 }
 
 Write-Host ""
@@ -86,6 +98,7 @@ $Body = @{
 
 if ($UrlTray)  { $Body.url_tray    = $UrlTray }
 if ($HashTray) { $Body.sha256_tray = $HashTray }
+if ($UrlLinux -and $HashLinux) { $Body.url_linux = $UrlLinux; $Body.sha256_linux = $HashLinux }
 
 $Headers = $AuthHeaders
 $Headers["Content-Type"] = "application/json; charset=utf-8"

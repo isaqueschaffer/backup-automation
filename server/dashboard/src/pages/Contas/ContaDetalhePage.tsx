@@ -14,6 +14,7 @@ import {
 import { ContaDetalhe, Plano } from "../../api/types";
 import Modal from "../../components/Modal";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { useAuth } from "../../contexts/AuthContext";
 import { fmtDay } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
@@ -26,6 +27,7 @@ export default function ContaDetalhePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const confirmar = useConfirm();
   const { escolherConta } = useAuth();
 
   const [conta, setConta] = useState<ContaDetalhe | null>(null);
@@ -131,13 +133,12 @@ export default function ContaDetalhePage() {
 
   const handleSuspender = async () => {
     if (!id) return;
-    if (
-      !confirm(
-        "Suspender a conta? O painel dela fica somente leitura e os backups param até reativar."
-      )
-    ) {
-      return;
-    }
+    if (!(await confirmar({
+      title: "Suspender conta",
+      message: "Suspender a conta? O painel dela fica somente leitura e os backups param até reativar.",
+      confirmLabel: "Suspender",
+      variant: "danger",
+    }))) return;
 
     setAlterandoStatus(true);
     try {

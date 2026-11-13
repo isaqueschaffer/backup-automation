@@ -4,6 +4,7 @@ import api, { comandarCentralAlarme } from "../../../../api/client";
 import { AlarmCentral, AlarmeStatusResponse } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
+import { useConfirm } from "../../../../components/ConfirmDialog";
 import { useSomenteLeitura } from "../../../../contexts/AuthContext";
 import { fmtDate } from "../../../../utils/date";
 
@@ -39,13 +40,19 @@ export default function AlarmesModal({ machineId, nvrId, nvrName, onClose }: {
   }, [carregar]);
 
   const { toast } = useToast();
+  const confirmar = useConfirm();
   const somenteLeitura = useSomenteLeitura();
   const [enviando, setEnviando] = useState<string | null>(null);
 
   const comandar = async (central: AlarmCentral, acao: "ARMAR" | "DESARMAR") => {
     const verbo = acao === "ARMAR" ? "Armar" : "Desarmar";
     if (central.id === null || central.id === undefined) return;
-    if (!confirm(`${verbo} a central "${central.nome}"?\n\nO comando vai para a central de verdade pelo agente desta máquina.`)) return;
+    if (!(await confirmar({
+      title: `${verbo} central de alarme`,
+      message: `${verbo} a central "${central.nome}"?\n\nO comando vai para a central de verdade pelo agente desta máquina.`,
+      confirmLabel: verbo,
+      variant: acao === "DESARMAR" ? "warning" : "info",
+    }))) return;
     setEnviando(String(central.id));
     try {
       const r = await comandarCentralAlarme(machineId, nvrId, String(central.id), acao);

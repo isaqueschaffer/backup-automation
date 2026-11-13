@@ -8,6 +8,7 @@ import {
 import { Usuario } from "../../api/types";
 import Modal from "../../components/Modal";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { fmtDate } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
 import { PAPEL_LABEL } from "./contaUi";
@@ -19,6 +20,7 @@ interface UsuariosSectionProps {
 
 export default function UsuariosSection({ contaId, podeEditar }: UsuariosSectionProps) {
   const { toast } = useToast();
+  const confirmar = useConfirm();
 
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,7 +158,12 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
       ? `Desativar o usuário "${u.nome}"? Ele não conseguirá mais acessar o painel.`
       : `Reativar o usuário "${u.nome}"?`;
 
-    if (!confirm(confirmMsg)) return;
+    if (!(await confirmar({
+      title: u.ativo ? "Desativar usuário" : "Reativar usuário",
+      message: confirmMsg,
+      confirmLabel: u.ativo ? "Desativar" : "Reativar",
+      variant: u.ativo ? "danger" : "info",
+    }))) return;
 
     setToggleBusyId(u.id);
     try {

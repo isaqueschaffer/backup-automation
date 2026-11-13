@@ -44,6 +44,7 @@ class NVRResponse(NVRBase):
     machine_id: UUID
     last_recording_status: Optional[Any] = None
     last_telemetry_status: Optional[Any] = None
+    conexao_status: Optional[Any] = None
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
@@ -222,6 +223,8 @@ class MachineResponse(MachineBase):
     restart_requested: bool = False
     backup_requested: bool = False
     telemetry: Optional[Dict[str, Any]] = None
+    # Versão do agente informada no último ping (None = agente < 1.1.49 ou nunca pingou)
+    agent_version: Optional[str] = None
     # Calculado no servidor — nunca depende do relógio do navegador
     is_online: bool = False
     current_server_time: Optional[datetime] = None
@@ -328,11 +331,45 @@ class PingResponse(BaseModel):
     restart: bool = False
     backup: bool = False
     rtsp_task: Optional[dict] = None
-    alarme_task: Optional[dict] = None  # armar/desarmar central de alarme (agente >= 1.1.44)
+    # "Testar conexão" do painel (agente >= 1.1.44; os antigos ignoram o campo)
+    conexao_task: Optional[dict] = None
+
+
+class EtapaConexao(BaseModel):
+    id: str
+    rotulo: str
+    estado: str = "pendente"  # pendente | andamento | ok | erro | pulado
+    detalhe: Optional[str] = None
+
+
+class ConexaoProgresso(BaseModel):
+    """Estado de um "Testar conexão": o agente envia o estado inteiro a cada etapa (idempotente)."""
+    task_id: str
+    etapas: List[EtapaConexao] = []
+    concluido: bool = False
+    ok: Optional[bool] = None
+    mensagem: Optional[str] = None
+
+
+class ConexaoTesteResponse(BaseModel):
+    task_id: Optional[str] = None
+    equipamento_id: str
+    etapas: List[EtapaConexao] = []
+    concluido: bool = False
+    ok: Optional[bool] = None
+    mensagem: Optional[str] = None
+    segundos: int = 0
+    alarme_task: Optional[dict] = None  # armar/desarmar central de alarme (agente >= 1.1.50, que declara "comando_alarme")
 
 
 class PingRequest(BaseModel):
     telemetry: Optional[Dict[str, Any]] = None
+    # O que o agente sabe executar (>= 1.1.44: "teste_conexao"). Agentes antigos não mandam: o servidor não lhes
+    # entrega o `conexao_task` (eles registrariam a senha no log do ping).
+    recursos: Optional[List[str]] = None
+    # Versão do agente (>= 1.1.49). Agentes antigos não mandam: o servidor mantém o que já tinha gravado.
+    # Sem max_length: um valor estranho não pode derrubar o ping (422); o router corta em 20 caracteres.
+    versao: Optional[str] = None
 
 
 class CameraPresenca(BaseModel):
@@ -641,6 +678,8 @@ class AgentVersionCreate(BaseModel):
     url_tray: Optional[str] = None
     sha256_service: str                      # SHA256 do service.exe (64 chars hex)
     sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None          # pacote do agente Linux/Mikrotik (>= 1.1.52)
+    sha256_linux: Optional[str] = None
 
     @field_validator("version")
     @classmethod
@@ -652,12 +691,12 @@ class AgentVersionCreate(BaseModel):
     def _check_sha256_service(cls, v):
         return _validate_sha256(v, obrigatorio=True)
 
-    @field_validator("sha256_tray")
+    @field_validator("sha256_tray", "sha256_linux")
     @classmethod
     def _check_sha256_tray(cls, v):
         return _validate_sha256(v)
 
-    @field_validator("url_tray")
+    @field_validator("url_tray", "url_linux")
     @classmethod
     def _check_url_tray(cls, v):
         return _blank_to_none(v)
@@ -669,18 +708,20 @@ class AgentVersionUpdate(BaseModel):
     sha256_service: Optional[str] = None
     url_tray: Optional[str] = None
     sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None
+    sha256_linux: Optional[str] = None
 
     @field_validator("version")
     @classmethod
     def _check_version(cls, v):
         return _validate_version(v)
 
-    @field_validator("sha256_service", "sha256_tray")
+    @field_validator("sha256_service", "sha256_tray", "sha256_linux")
     @classmethod
     def _check_sha256(cls, v):
         return _validate_sha256(v)
 
-    @field_validator("url_tray")
+    @field_validator("url_tray", "url_linux")
     @classmethod
     def _check_url_tray(cls, v):
         return _blank_to_none(v)
@@ -694,6 +735,8 @@ class AgentVersionResponse(BaseModel):
     url_tray: Optional[str]
     sha256_service: str
     sha256_tray: Optional[str]
+    url_linux: Optional[str] = None
+    sha256_linux: Optional[str] = None
     active: bool
     created_at: datetime
 
@@ -708,6 +751,8 @@ class UpdateCheckResponse(BaseModel):
     url_tray: Optional[str] = None
     sha256_service: Optional[str] = None
     sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None      # só para o agente Linux (plataforma=linux)
+    sha256_linux: Optional[str] = None
     notes: Optional[str] = None
 
 

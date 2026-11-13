@@ -179,6 +179,7 @@ class Machine(Base):
     restart_requested = Column(Boolean, default=False, nullable=False)
     backup_requested = Column(Boolean, default=False, nullable=False)
     telemetry = Column(JSON, nullable=True)  # Hardware stats (CPU, RAM, Disk, GPU)
+    agent_version = Column(String(20), nullable=True)  # Versão informada pelo agente no ping (>= 1.1.49)
     # Cliente ao qual a máquina pertence (coluna 'group_id' mantida no BD)
     customer_id = Column("group_id", UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
     queue_order = Column(Integer, default=0, nullable=False)
@@ -213,6 +214,7 @@ class NVR(Base):
     last_telemetry_status = Column(JSON, nullable=True)  # CPU/RAM/discos (NVR Hikvision)
     olt_status = Column(JSON, nullable=True)  # OLT UNM2000: status das OLTs/ONUs por SNMP (enviado pelo agente a cada 5 min)
     last_alarm_status = Column(JSON, nullable=True)  # DEFENSE: centrais de alarme Intelbras (enviado pelo agente a cada 5 min)
+    conexao_status = Column(JSON, nullable=True)  # último "Testar conexão" feito pelo agente: ok, mensagem, etapas, testado_em (UTC naive)
     # DEFENSE: ids (texto) das centrais de alarme que geram notificação ALARME; opt-in, vazio até o usuário marcar
     alarmes_notificar = Column(JSON, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
@@ -317,6 +319,8 @@ class AgentVersion(Base):
     url_tray = Column(Text, nullable=True)                           # URL do TrilanAgentTray.exe
     sha256_service = Column(String(64), nullable=False)              # hash SHA256 do service exe
     sha256_tray = Column(String(64), nullable=True)                  # hash SHA256 do tray exe
+    url_linux = Column(Text, nullable=True)                          # URL do TrilanAgentLinux.tar.gz (código do agente Linux/Mikrotik, >= 1.1.52)
+    sha256_linux = Column(String(64), nullable=True)                 # hash SHA256 do pacote Linux
     active = Column(Boolean, default=True, nullable=False)           # se False, não será distribuída
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

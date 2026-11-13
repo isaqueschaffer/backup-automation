@@ -14,6 +14,7 @@ import {
 import { fetchMachines, fetchStats } from "../../api/client";
 import { Machine, Stats } from "../../api/types";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { Span, useOverviewLayout } from "./layout";
 import MachineHealthCard from "./MachineHealthCard";
 import { useRotulos } from "../../contexts/AuthContext";
@@ -36,6 +37,7 @@ export default function Overview() {
 
   const navigate = useNavigate();
   const { toast } = useToast();
+  const confirmar = useConfirm();
 
   const layout = useOverviewLayout(machines);
 
@@ -226,8 +228,13 @@ export default function Overview() {
             </button>
             <button
               className="btn btn-secondary"
-              onClick={() => {
-                if (confirm("Restaurar a ordem, as larguras e mostrar todas as máquinas?")) {
+              onClick={async () => {
+                if (await confirmar({
+                  title: "Restaurar padrão",
+                  message: "Restaurar a ordem, as larguras e mostrar todas as máquinas?",
+                  confirmLabel: "Restaurar",
+                  variant: "warning",
+                })) {
                   layout.reset();
                 }
               }}

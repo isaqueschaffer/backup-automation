@@ -52,6 +52,7 @@ OTA_PILOTO_MAQUINAS: set = set()
 @agent_router.get("/update-check", response_model=UpdateCheckResponse)
 def check_for_update(
     current_version: str = "0.0.0",
+    plataforma: str = "windows",
     machine: Machine = Depends(get_current_machine),
     db: Session = Depends(get_db),
 ):
@@ -60,7 +61,10 @@ def check_for_update(
     Exemplo: GET /api/v1/agent/update-check?current_version=1.0.0
     Cada máquina recebe a oferta no máximo 1 vez por hora. Com `OTA_PILOTO_MAQUINAS` preenchido, só as
     máquinas do piloto recebem (piloto de 1.1.35 concluído e esvaziado em 30/10/2026).
+    `plataforma=linux` (agente do Mikrotik, >= 1.1.52): só conta versões com o pacote Linux cadastrado
+    (`url_linux` + `sha256_linux`); sem ele a máquina fica na versão que tem, sem oferta inútil.
     """
+    linux = plataforma.strip().lower() == "linux"
     # Compara versões semânticas X.Y.Z como tuplas numéricas
     def _parse(v: str):
         try:
@@ -70,6 +74,8 @@ def check_for_update(
 
     # Escolhe a MAIOR versão ativa (e não a mais recentemente criada)
     ativas = db.query(AgentVersion).filter(AgentVersion.active == True).all()
+    if linux:
+        ativas = [av for av in ativas if av.url_linux and av.sha256_linux]
     latest = max(ativas, key=lambda av: _parse(av.version), default=None)
 
     if not latest:
@@ -84,6 +90,12 @@ def check_for_update(
             return UpdateCheckResponse(has_update=False)
         _ultima_oferta_atualizacao[machine.id] = agora
         versao = latest.version
+        if linux:
+            # O agente Linux não usa .exe nem o .bat: recebe só o pacote de código
+            return UpdateCheckResponse(
+                has_update=True, version=versao, notes=latest.notes,
+                url_linux=latest.url_linux, sha256_linux=latest.sha256_linux,
+            )
         if _parse(current_version) < VERSAO_SCRIPT_CORRIGIDO:
             versao += COMANDOS_ENCERRAR_PROCESSO_ANTIGO
         return UpdateCheckResponse(
@@ -120,6 +132,8 @@ def register_version(body: AgentVersionCreate, db: Session = Depends(get_db)):
         url_tray=body.url_tray,
         sha256_service=body.sha256_service.lower(),
         sha256_tray=body.sha256_tray.lower() if body.sha256_tray else None,
+        url_linux=body.url_linux,
+        sha256_linux=body.sha256_linux.lower() if body.sha256_linux else None,
     )
     db.add(version)
     db.commit()
@@ -186,7 +200,11 @@ def edit_version(version_id: UUID, payload: AgentVersionUpdate, db: Session = De
         version.url_tray = payload.url_tray
     if payload.sha256_tray is not None:
         version.sha256_tray = payload.sha256_tray.lower()
-    
+    if payload.url_linux is not None:
+        version.url_linux = payload.url_linux
+    if payload.sha256_linux is not None:
+        version.sha256_linux = payload.sha256_linux.lower()
+
     db.commit()
     db.refresh(version)
     return version

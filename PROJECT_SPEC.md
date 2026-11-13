@@ -272,6 +272,7 @@ No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta
 | last_recording_status | JSON | list | NULL | — |
 | last_telemetry_status | JSON | dict | NULL | — |
 | olt_status | JSON | dict | NULL | OLT UNM2000: `{"atualizado_em", "olts": [...]}` enviado pelo agente a cada 5 min (Telnet) |
+| conexao_status | JSON | dict | NULL | Último "Testar conexão": `{"ok", "mensagem", "etapas": [{"id", "rotulo", "estado", "detalhe"}], "segundos", "testado_em"}` (`testado_em` naive em UTC) |
 | active | BOOLEAN | bool | NOT NULL | TRUE |
 | updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | NOW() |
 
@@ -655,12 +656,13 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 | Metodo | Path | Descricao |
 |---|---|---|
 | GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente (`client_name` = nome da máquina; `customer_name` = nome do Cliente da máquina, opcional) |
-| POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup`. A telemetria do agente >= 1.1.34 traz `utc_offset_min` (fuso local em minutos, ex.: -180), usado na recuperação de backup perdido (inteiro de -720 a 840; ausente ou inválido = -180) |
+| POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup`. A telemetria do agente >= 1.1.34 traz `utc_offset_min` (fuso local em minutos, ex.: -180), usado na recuperação de backup perdido (inteiro de -720 a 840; ausente ou inválido = -180). O agente >= 1.1.49 manda `versao` (ex.: `"1.1.49"`), gravada em `clients.agent_version` (cortada em 20 caracteres; ausente = mantém a anterior) e devolvida como `agent_version` nas respostas de máquina |
 | POST | `/api/v1/agent/logs` | Agente envia lote (até 100) de avisos/erros e marcos do backup: `{"logs": [{"nivel": "INFO\|WARNING\|ERROR", "mensagem", "equipamento", "segundos_atras"}]}`; o servidor calcula `created_at` (REGRA-005); aceita também conta bloqueada |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup. Equipamento com `status` ERRO e `cameras` nulo ou vazio (agente >= 1.1.34 manda `null` quando o equipamento não informou câmeras; os antigos mandam `[]`) não apaga `last_recording_status`: as câmeras conhecidas ficam com `status_comunicacao`/`status_gravacao` = `NAO_VERIFICADO` e `online` nulo |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
-| GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera). Com `OTA_PILOTO_MAQUINAS` preenchido, só essas máquinas recebem. Para `current_version` < 1.1.35, `version` leva também os comandos que encerram o processo antigo (ver changelog de 30/10/2026) |
+| GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera). Com `OTA_PILOTO_MAQUINAS` preenchido, só essas máquinas recebem. Para `current_version` < 1.1.35, `version` leva também os comandos que encerram o processo antigo (ver changelog de 30/10/2026). `plataforma=linux` (agente do Mikrotik, >= 1.1.52): só versões com `url_linux`/`sha256_linux`, e a resposta traz só esses campos |
 | POST | `/api/v1/agent/rtsp-result` | Agente devolve o resultado da tarefa RTSP do dashboard |
+| POST | `/api/v1/agent/conexao-progresso` | Agente (>= 1.1.44) envia o estado inteiro do "Testar conexão" a cada etapa: `{"task_id", "etapas": [...], "concluido", "ok", "mensagem"}`; ao concluir grava `nvrs.conexao_status` (só equipamento DA máquina). O pedido chega no ping como `conexao_task` (o equipamento como em `/agent/config` + `task_id`) e só para o agente que manda `"recursos": ["teste_conexao"]` no corpo do ping |
 | POST | `/api/v1/agent/nvr-cameras/night-image` | Agente envia a imagem da noite de um canal |
 | POST | `/api/v1/agent/defense/alarmes/comando-resultado` | Agente (>= 1.1.44) devolve o resultado do `alarme_task` recebido no ping: `{"sucesso", "mensagem"}` |
 | POST | `/api/v1/agent/defense/alarmes/status` | Agente envia o status das centrais de alarme dos DEFENSE da máquina: `{"equipamentos": [{"nome", "ip", "erro", "alarmes": [...]}]}`; grava `nvrs.last_alarm_status` e já verifica as notificações ALARME; 403 com conta bloqueada |
@@ -693,6 +695,8 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 | GET/POST | `/api/v1/machines/{id}/equipamentos` | Listar/criar equipamentos da máquina |
 | GET/PUT/DELETE | `/api/v1/machines/{id}/equipamentos/{eq_id}` | Gerenciar equipamento |
 | POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/test-rtsp` | Tarefa RTSP via agente (409 se já houver uma pendente) |
+| POST | `/api/v1/machines/{id}/equipamentos/{eq_id}/testar-conexao` | "Testar conexão": volta na hora com `{task_id, etapas, concluido, ok, mensagem, segundos}`; máquina offline = `concluido` com erro e `task_id` nulo; teste em andamento do mesmo equipamento é reaproveitado |
+| GET | `/api/v1/machines/{id}/equipamentos/{eq_id}/testar-conexao/{task_id}` | Andamento do teste (o painel consulta a cada 1 s); 404 se expirou (10 min) ou a API reiniciou. Prazos: 45 s para o agente buscar o pedido, 25 s para a primeira resposta, 5 min no total |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/cameras` | Galeria do NVR (une `nvr_cameras` + `last_recording_status`) |
 | POST | `/api/v1/machines/{id}/equipamentos/{nvr_id}/alarmes/comando` | Arma/desarma uma central de alarme do DEFENSE pelo agente (`{"central_id", "acao": "ARMAR"|"DESARMAR"}` → `{"sucesso", "mensagem"}`; espera até 75 s; 409 com agente offline ou outro comando em andamento; ADMIN/super admin; registrado nos logs da máquina) |
 | GET | `/api/v1/machines/{id}/equipamentos/{nvr_id}/alarmes` | Último status das centrais de alarme de um DEFENSE (`last_alarm_status`; vazio `{"atualizado_em": null, "alarmes": []}` se ainda não chegou) |
@@ -841,6 +845,19 @@ Quando `config_extra.marca` está definida, ela decide primeiro: `Motorola` vai 
 | `sha256_service` | Sim | Hash SHA-256 em lowercase |
 | `url_tray` | Nao | Se null, o Tray nao e atualizado |
 | `sha256_tray` | Nao | Obrigatorio se url_tray for preenchido |
+| `url_linux` | Nao | `TrilanAgentLinux.tar.gz` (código do agente Linux/Mikrotik, >= 1.1.52). Sem ele o agente Linux não recebe a versão |
+| `sha256_linux` | Nao | Obrigatorio se url_linux for preenchido |
+
+### OTA do agente Linux (Mikrotik, >= 1.1.52)
+
+O container roda `launcher_linux.py` (só na imagem), que sobe o `service_linux.py` da pasta da OTA
+(`/app/data/code/atual`) quando ela é mais nova que a imagem, ou o da imagem. O agente consulta
+`update-check?plataforma=linux` 2 min após subir e depois a cada hora, baixa o pacote, confere SHA-256, recusa
+caminho absoluto/`..`/links, confere que a versão do pacote é a oferecida, que o `requirements-linux.txt` é igual ao da
+imagem (biblioteca nova exige imagem nova) e a sintaxe; troca `atual` -> `anterior`, `novo` -> `atual`, grava
+`pendente` e encerra. O launcher sobe o código novo; o 1º ping bem-sucedido apaga `pendente`. Versão que cai 3 vezes
+(ou não pinga em 10 min) é desfeita para a anterior (ou a imagem) e fica bloqueada 24 h (`falhou`). O "Reiniciar
+agente" do painel passa a funcionar (o launcher religa o processo). Detalhes em `agent/README_MIKROTIK.md`.
 
 ### Compatibilidade de Versoes
 
@@ -1100,6 +1117,161 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-13] — Avisos de confirmação no padrão do sistema (dashboard)
+
+Os 28 `confirm()` do navegador foram trocados por um diálogo próprio: `components/ConfirmDialog.tsx` (`ConfirmProvider` no `App.tsx` e hook `useConfirm()`, que devolve `Promise<boolean>`). Opções: `title`, `message`, `confirmLabel`, `cancelLabel` e `variant` (`danger` vermelho, `warning` âmbar, `info` roxo). Esc e clique fora cancelam. Regra: não usar `alert/confirm/prompt` nativos; usar `useConfirm()` (confirmações) e `useToast()` (avisos). Só dashboard, sem mudança no agente nem na API.
+
+### [2026-11-12] — Atualização automática (OTA) do agente Linux no Mikrotik (agente 1.1.52)
+
+O agente Linux do container RouterOS não tinha OTA (o do Windows troca `.exe` com `.bat`/`sc`), então ficava na
+versão da imagem; o painel mostrava "— (agente anterior à 1.1.49)" para a máquina `teste-mk-maquina`. Agora a OTA
+troca só o código Python (`dist/TrilanAgentLinux.tar.gz`, gerado por `agent/pacote_linux.py` no `build.ps1` e anexado à
+release); as bibliotecas compiladas para ARM ficam na imagem. Novo `agent/launcher_linux.py` (CMD da imagem: escolhe o
+código, religa o agente ao encerrar, desfaz versão que não sobe) e `agent/src/application/updater_linux.py`
+(verificação, download, SHA-256, extração segura, checagens, troca de pastas). `service_linux.py` verifica a OTA a cada
+hora, confirma a versão no 1º ping e sai com código 3 se a versão nova não pingar em 10 min. `src/core/config.py`:
+`DIR_AGENT` aceita `TRILAN_AGENT_DIR` (a imagem define `/app`, onde ficam `agent.conf`, logs e temporários).
+**Servidor:** colunas `agent_versions.url_linux` (TEXT) e `sha256_linux` (VARCHAR(64)), migração inline; schemas de
+criar/editar/listar versão e `UpdateCheckResponse` com os dois campos; `GET /agent/update-check` aceita
+`plataforma=linux` (só versões com pacote Linux; resposta só com `url_linux`/`sha256_linux`). Painel (Configurações ->
+OTA) mostra hash e link do pacote Linux. `publish_version.ps1` ganhou `-UrlLinux`. Testes: `agent/tests/test_ota_linux.py`.
+**Limite:** a imagem precisa ser trocada à mão uma vez (a anterior não tem launcher nem OTA); depois, só quando o
+`requirements-linux.txt` mudar. Sem breaking change (Windows segue igual; campos opcionais). Branch `isaque`.
+
+### [2026-11-12] — Merge com a Helena (5ª rodada): tela de Auditoria
+
+**Incorporado (ramo `helena`, `611267e`):** tela `/auditoria` e `GET /api/v1/auditoria` (+ `/usuarios`), que registram quem
+alterou o quê pelo painel (equipamentos, câmeras, planilhas, máquinas, pedidos de backup/reinício e comandos de alarme)
+em `agent_logs`, com a coluna nova `usuario` (migração inline `VARCHAR(255)` nula e índice parcial
+`ix_agent_logs_usuario_created`). Eventos de usuário ficam 365 dias fora da poda comum. Detalhes na entrada "Tela de
+Auditoria na barra lateral" abaixo. **Auditoria:** sem data com fuso, sem segredo (os eventos guardam só os nomes dos
+campos, nunca os valores), rota nova com `ctx` e `filtrar_por_conta` (REGRA-010), sem mudança em compose, nginx,
+requirements, agente, build ou instalador. Conflito só nos imports de `server/dashboard/src/api/client.ts` (mantidos
+`ConexaoTeste` e `PaginatedAuditoria`). `tsc` sem erro; testes da API com o mesmo resultado antes e depois do merge.
+**Bloqueado:** nada. **Versão:** sem mudança no agente; segue a 1.1.51.
+
+### [2026-11-12] — Gravação do Digifort: novas faixas para câmeras por movimento (agente 1.1.51)
+
+Caso real: no CFTV 01 do Navarro, a maioria das câmeras grava por movimento e ficava amarela nos dias úteis e vermelha
+nos fins de semana e feriados. A "CATRACA (A) - SUBSOLO 3", com pouco movimento, mostrava 12 dias cinza ("sem
+histórico") mesmo tendo gravação, porque nenhum dia passava de 11%. Novas faixas em `resumir_camera`
+(`agent/src/vms/digifort_gravacoes.py`): acima de 20% = gravou (`█`); acima de 0% até 20% = parcial (`▒`); 0% (nenhum
+segundo gravado) = não gravou (`░`). Qualquer gravação no dia agora entra em `dias_com_gravacao`/`total_dias` e conta
+como "gravou hoje". O cinza `·` fica só para dias sem nenhuma gravação antes da primeira gravação da janela (retenção ou
+câmera nova). `LIMIAR_GRAVOU = 0.20` e `LIMIAR_PARCIAL = 0.0`, os dois com comparação "acima de". Textos do
+`MiniCalendar` atualizados. Só agente e texto do painel; nenhuma rota nem migração.
+
+### [2026-11-12] — Merge com a Helena (4ª rodada): alarmes do DEFENSE, notificação ALARME e versão 1.1.50 do agente
+
+**Incorporado (ramo `helena`, `2af33d4` e `4d8e355`):** alarmes das centrais Intelbras do DEFENSE reativados (saem de
+`legacy/defense_alarmes/`), com login no painel de alarmes, centrais de incêndio, armar/desarmar central pelo painel e a
+notificação `ALARME` opt-in por central (detalhes na entrada da Helena abaixo). Migrações: `nvrs.alarmes_notificar`,
+`notificacoes.referencia` e `ck_notificacoes_tipo` com `ALARME`. **Auditoria:** sem data com fuso, sem segredo (só
+`password="x"` em fixture de teste); rotas novas isoladas por conta (`_get_machine_or_404`/`filtrar_por_conta`, caso novo
+em `test_isolamento_contas.py`); compose, nginx, requirements, build.ps1 e `.env` intocados. **Corrigido no merge:** o
+`alarme_task` do ping leva a senha do DEFENSE e era entregue a qualquer agente; os agentes até 1.1.49 só tiram
+`rtsp_task`/`conexao_task` do log do ping (que vai também ao painel), então gravariam a senha. Agora o serviço do Windows
+declara `"comando_alarme"` em `recursos` (`ping_server(conf, recursos_extra=...)`; o `service_linux.py` não declara, pois
+não executa o comando) e o servidor só entrega a quem declara; os demais recebem na hora "agente anterior à 1.1.50".
+**Conflitos:** `models.py`, `schemas.py`, `routers/{agent,equipamentos}.py`, `test_isolamento_contas.py`, `service.py`,
+`client.ts`, `EqCard.tsx` e `MachineDetail/index.tsx` (resolvidos mantendo "Testar conexão" e "Alarmes" lado a lado) e
+este changelog; versões mantidas as da `isaque` (o ramo trazia 1.1.44). **Bloqueado:** nada. **Versão:** agente 1.1.50.
+
+### [2026-11-12] — Versão do agente no ping e no painel (agente 1.1.49)
+
+O agente passa a mandar `versao` (`CURRENT_VERSION`) no corpo do `POST /api/v1/agent/ping` (`api_client.ping_server`).
+O servidor grava em `clients.agent_version` (coluna nova `VARCHAR(20)`, migração inline em `main.py`) e o
+`MachineResponse` devolve `agent_version`. O card "Configuração da Máquina" (`MachineInfoCards.tsx`) ganhou a linha
+"Versão" (`v1.1.49`; sem valor: "— (agente anterior à 1.1.49)"). Campo opcional: agentes antigos continuam pingando
+sem ele e a versão gravada não é apagada. Arquivos: `server/api/{models,schemas,main}.py`, `server/api/routers/agent.py`,
+`server/dashboard/src/api/types.ts`, `agent/src/application/api_client.py`. Sem breaking change. Branch `isaque`.
+
+### [2026-11-12] — Gravação do Digifort por faixas de cobertura (agente 1.1.48)
+
+`resumir_camera` (`agent/src/vms/digifort_gravacoes.py`) deixou de tratar qualquer gravação abaixo de 90% como parcial.
+Cobertura do dia (hoje: do tempo já decorrido): 40% a 100% = gravou (`█`, verde); 11% a 39% = parcial (`▒`, amarelo);
+0% a 10% = não gravou (`░`, vermelho). Dia com 10% ou menos não entra em `dias_com_gravacao`/`total_dias` e não conta como
+"gravou hoje" (`status_gravacao`), o que também corrige o e-mail e o `RecordingModal`. Novo campo `percentual_hoje` no
+resumo da câmera (ainda sem uso no painel). Textos do `MiniCalendar` atualizados. Constantes `LIMIAR_GRAVOU` e
+`LIMIAR_PARCIAL`. Só agente e texto do painel; nenhuma rota nem migração.
+
+### [2026-11-12] — Merge com a Helena (3ª rodada): login da OLT VSOL e versão 1.1.47 do agente
+
+**Incorporado (ramo `helena`, `e1e7126`):** `_parece_tela_login` em `agent/src/olt/vsol.py` reconhece a tela de login da
+VSOL em qualquer idioma (algumas só têm o texto em inglês, sem "senha") e o redirect de sessão inválida
+(`location.href="login.html"`); o status (`vsol_status._pedir`) passa a falhar com o motivo "sessão não autenticada" em
+vez de devolver 0 ONUs sem explicação. Testes em `agent/tests/test_vsol_login.py`. **Auditoria:** sem data com fuso, sem
+segredo, nenhuma rota de servidor, compose, nginx, models, migrações, requirements, build.ps1, installer.iss ou `.env`
+tocados. **Bloqueado:** `fiberhome_out.txt` (despejo binário de depuração da tela do Telnet da FiberHome, solto na
+raiz do repositório). **Conflitos:** nenhum. **Versão:** agente 1.1.47.
+
+### [2026-11-12] — Erro de SSH da OLT Huawei explicado no painel (agente 1.1.46)
+
+**Problema:** a falha do login SSH chegava ao painel com o texto cru do paramiko ("Authentication failed: transport
+shut down or saw EOF"), que parece senha errada mas significa que a OLT fechou a conexão durante o login. **Alteração:**
+`explicar_erro_ssh` (`agent/src/olt/huawei_status.py`) classifica a falha e diz o que fazer: OLT fechou a conexão
+(sessões SSH ocupadas, usuário bloqueado ou sem serviço SSH), senha/usuário recusados, algoritmo SSH incompatível
+(firmware antigo), tempo esgotado e conexão recusada (SSH desligado ou porta errada). Vale no "Testar conexão", no
+"Atualizar" do modal de ONUs e no status das OLTs. O agente passou a aceitar mensagens de até 700 caracteres no teste
+(antes 300). **Arquivos:** `agent/src/olt/huawei_status.py`, `agent/src/application/teste_conexao.py`,
+`agent/tests/test_huawei_status.py`. **Breaking change:** nenhum. **Branch:** `isaque`. **Versão:** agente 1.1.46.
+
+### [2026-11-12] — Botão "Atualizar" do modal de ONUs da OLT passa a ler a OLT e mostrar o andamento
+
+**Problema:** o "Atualizar" só relia do servidor o último status salvo (instantâneo e, sem mudança, a tela ficava igual:
+nenhum sinal de que algo aconteceu). **Alteração:** o botão pede ao agente uma leitura nova da OLT pelo mesmo fluxo do
+"Testar conexão" (`POST .../testar-conexao`, exige agente >= 1.1.44) e mostra barra de progresso, etapa atual e
+cronômetro; ao terminar recarrega os dados e avisa por toast ("Status atualizado em N s." ou o motivo da falha); em
+falha o motivo fica na tela. Sem clique, o modal mostra "Última leitura: data (há N min) · próxima automática em mm:ss".
+Fechar a janela não interrompe a leitura. A lógica de acompanhar o teste virou o hook `MachineDetail/useTesteConexao.ts`,
+usado também por `ConexaoTesteModal.tsx`. **Arquivos:** `server/dashboard/src/pages/Machines/MachineDetail/{useTesteConexao.ts,
+components/{OltStatusModal,ConexaoTesteModal}.tsx}`. **Breaking change:** nenhum; só painel (sem versão nova do agente).
+
+### [2026-11-12] — Merge com a Helena (2ª rodada): limpar planilha e importação por IP, sem versão nova do agente
+
+**Incorporado (ramo `helena`, `bff8c37`):** botão "Limpar planilha" da Galeria e do formulário do Digifort
+(`DELETE /machines/{id}/equipamentos/{nvr_id}/cameras`, só DIGIFORT/DEFENSE) e importação que substitui a câmera de mesmo
+IP (`casar_cameras_por_ip`); detalhes na entrada de 12/11 da Helena abaixo. **Auditoria:** sem data com fuso, sem
+segredo, rota nova isolada por conta (`obter_maquina` e equipamento filtrado pela máquina), sem alteração em compose,
+nginx, models, migrações, requirements, build.ps1, installer.iss, `.env` ou `agent/`. **Conflitos:** nenhum.
+**Bloqueado:** nada. **Versão:** o ramo não mexeu em `agent/`; nenhum executável novo, a 1.1.45 continua a vigente e
+não houve cadastro no painel. Só o servidor e o painel mudam, via deploy do push na `isaque`.
+
+### [2026-11-12] — Merge com a Helena e versão 1.1.45 do agente
+
+**Incorporado (ramo `helena`, `52d3610`):** notificação de câmera offline (`CAMERA_OFFLINE`, opt-in por câmera:
+`nvr_cameras.notificar_offline`, `notificacoes.camera_id`, rotas `GET/PUT /notificacoes/cameras`) e a captura RTSP que só
+confere a porta 554 depois da 1ª falha (Hikvision antigas davam timeout). **Auditoria:** sem data com fuso, sem segredo
+novo (o `navarro@123` está só numa fixture de teste, IC-012), rotas novas isoladas por conta (`filtrar_por_conta`),
+migrações idempotentes; compose, nginx, requirements, build.ps1, installer.iss e `.env` intocados. **Conflitos:**
+`main.py` (migrações: mantidas as duas colunas novas), `client.ts` (imports) e este changelog, resolvidos mantendo os dois
+lados. **Bloqueado:** nada. **Versão:** agente 1.1.45 (`rtsp_client.py`); inclui o "Testar conexão" da 1.1.44, que não
+chegou a ser cadastrada no painel.
+
+### [2026-11-12] — "Testar conexão" dos equipamentos com barra de progresso (agente 1.1.44)
+
+**Contexto:** depois de cadastrar um equipamento não havia como saber se o IP e as credenciais estavam certos antes do
+backup da madrugada (na OLT, o painel só dizia que as ONUs podiam levar 5 min). **Alteração:** (1) Ao salvar um
+equipamento (cadastro ou edição), o painel abre o modal "Testando conexão" (`ConexaoTesteModal.tsx`): barra de
+progresso por etapa, cronômetro, lista de etapas (✓/girando/✗ com detalhe) e a mensagem final; o card ganha o botão
+"Testar" e o selo do último teste (Conectado / Falha na conexão / Conexão não testada + data), guardado em
+`nvrs.conexao_status` (migração inline). (2) Rotas `POST .../testar-conexao` e `GET .../testar-conexao/{task_id}`
+(isoladas por conta, `obter_maquina`) e `POST /agent/conexao-progresso`. Estado em memória em
+`services/teste_conexao.py` (mesma limitação de 1 worker do teste RTSP). (3) Agente (`src/application/teste_conexao.py`):
+roda na thread do ping (funciona durante um backup) com as mesmas rotinas do backup: NVR (porta HTTP, login
+Hikvision ISAPI / Intelbras CGI / Motorola NVMS, contagem de câmeras), OLT (pasta de origem da UNM2000, porta de cada
+OLT, login e leitura das ONUs pelo `coletar_status_olts` e **envio imediato** do status ao painel, sem esperar o ciclo
+de 5 min), PABX Issabel (login e acesso ao backup), Mikrotik (SSH e identidade), Defense IA (API e câmeras), Digifort
+(pasta de origem) e demais tipos (porta TCP). A senha é mascarada nas mensagens e o pedido não aparece no log do ping.
+(4) **Segurança com agentes antigos:** o pedido leva a senha do equipamento e os agentes até 1.1.43 gravam a resposta
+do ping no log; por isso o agente novo declara `"recursos": ["teste_conexao"]` no ping e o servidor só entrega a quem
+declara (os demais recebem na hora "agente anterior à 1.1.44"). **Arquivos:** `server/api/{models,main,schemas}.py`,
+`routers/{agent,equipamentos}.py`, `services/teste_conexao.py`, `tests/test_teste_conexao.py`,
+`tests/test_isolamento_contas.py`; `agent/service.py`, `service_linux.py`, `src/application/{api_client,teste_conexao}.py`,
+`tests/test_teste_conexao.py`; dashboard `api/{client,types}.ts`, `index.css`, `MachineDetail/index.tsx`,
+`components/{EqCard,ConexaoTesteModal,EquipamentoFormModal,OltStatusModal}.tsx`. **Breaking change:** nenhum (campos
+novos opcionais). **Branch:** `isaque`. **Versão:** agente 1.1.44.
+
 ### [2026-11-12] — Alarmes do DEFENSE reativados com o login do painel de alarmes, e notificação de alarmes (tipo ALARME)
 
 **Alteração:** a função retirada em 11/11 (`legacy/defense_alarmes/`) voltou aos caminhos originais, agora com a
@@ -1143,6 +1315,7 @@ parcial, bypass e restauração do painel (`/api/commands/AMT8000/{ArmParcial,By
 (`e1e7126`). Gerada em 12/11 só para teste local na máquina da Helena (venv Python 3.13, sem Inno Setup); a
 release oficial fica para o merge na `isaque`.
 **Branch:** helena.
+
 
 ### [2026-11-12] — Notificação de câmera offline (tipo CAMERA_OFFLINE), para NVR, DIGIFORT e DEFENSE
 
@@ -1219,10 +1392,11 @@ falhava no `pip install` (sem `gcc` e sem `make`: o PyPI não tem wheel ARMv7 de
 `Pillow` e `cffi`). Passou a ter dois estágios (compilação no `builder`, imagem final só com o resultado e
 `libffi8`/`libjpeg62-turbo`/`zlib1g`) e ganhou `agent/.dockerignore`. **Resultado:** imagem `linux/arm/v7` de ~60 MB;
 teste emulado (`armv7l`) importa todas as dependências e os módulos do agente. Build sem cache leva ~1h40 sob QEMU.
-**Publicado:** `ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto1`, para o colega subir no RB4011 de teste. **Não
+**Imagem:** `agent/mikrotik/trilan-agent-armv7.tar` (60,2 MB, SHA-256 `35fbdde5…3433f`), versionada no repositório
+para o colega subir no RB4011 de teste. **Não
 validado:** execução contra o servidor, importação no RouterOS, desempenho no roteador, SSH do `paramiko` 3.4.0 com as
 OLTs Huawei antigas. **Docs:** `agent/DOCUMENTACAO_AGENTE.md` (funcionamento completo do agente Windows e do piloto) e
-seção em português no `agent/README_MIKROTIK.md` (build, publicação e configuração do teste).
+seção em português no `agent/README_MIKROTIK.md` (build, como gerar a imagem e configuração do teste).
 
 ### [2026-11-11] — Merge com a Helena e versão 1.1.43 do agente
 

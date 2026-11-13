@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { fetchCustomers, createCustomer, deleteCustomer } from "../../api/client";
 import { Customer } from "../../api/types";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { fmtDate, fmtSchedule } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
 import { Plus, Trash2, Eye } from "lucide-react";
@@ -21,6 +22,7 @@ export default function CustomersPage() {
   const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const confirmar = useConfirm();
 
   const load = useCallback(() =>
     fetchCustomers()
@@ -62,7 +64,12 @@ export default function CustomersPage() {
     const msg = c.machines_total > 0
       ? `Excluir o ${singularMin} "${c.name}"?\nAs ${c.machines_total} máquina(s) dele continuam cadastradas, mas ficarão sem ${singularMin}.`
       : `Excluir o ${singularMin} "${c.name}"?`;
-    if (!confirm(msg)) return;
+    if (!(await confirmar({
+      title: `Excluir ${singularMin}`,
+      message: msg,
+      confirmLabel: "Excluir",
+      variant: "danger",
+    }))) return;
     try {
       await deleteCustomer(c.id);
       toast(`${singular} excluído.`, "success");

@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import paramiko
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
@@ -179,6 +181,28 @@ class TestColetarHuawei(unittest.TestCase):
         with patch.object(h.paramiko, "SSHClient", side_effect=OSError("sem rota")):
             resultado = h.coletar_huawei("10.11.104.2", "root", "senha")
         self.assertIn("erro", resultado)
+
+    def test_erro_ssh_explicado(self):
+        import socket
+        casos = [
+            (paramiko.AuthenticationException("Authentication failed: transport shut down or saw EOF"), "fechou a conexão"),
+            (paramiko.SSHException("Error reading SSH protocol banner"), "fechou a conexão"),
+            (EOFError(), "fechou a conexão"),
+            (paramiko.AuthenticationException("Authentication failed."), "recusou o usuário ou a senha"),
+            (paramiko.SSHException("Incompatible ssh peer (no acceptable kex algorithm)"), "algoritmo"),
+            (socket.timeout("timed out"), "não respondeu a tempo"),
+            (ConnectionRefusedError("[WinError 10061] refused"), "recusou a conexão"),
+            (RuntimeError("outra coisa"), "outra coisa"),
+        ]
+        for erro, esperado in casos:
+            with self.subTest(erro=repr(erro)):
+                self.assertIn(esperado, h.explicar_erro_ssh(erro, "10.11.104.2", 22))
+
+    def test_falha_de_login_vira_mensagem_explicada(self):
+        with patch.object(h.paramiko, "SSHClient", side_effect=paramiko.AuthenticationException("Authentication failed: transport shut down or saw EOF")):
+            resultado = h.coletar_huawei("10.11.104.2", "root", "senha")
+        self.assertIn("fechou a conexão", resultado["erro"])
+        self.assertNotIn("senha", resultado["erro"].replace("a senha não foi avaliada", ""))
 
     def test_interface_gpon_sem_saida_extra_nao_e_tratada_como_falha(self):
         # Regressao: numa OLT real (MA5800), o `interface gpon 0/<slot>` que da certo nao imprime nada

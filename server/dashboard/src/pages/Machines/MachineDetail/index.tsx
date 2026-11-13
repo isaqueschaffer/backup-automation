@@ -6,6 +6,7 @@ import {
 } from "../../../api/client";
 import { AgentLog, Backup, CameraRecStatus, Machine, EqForm, NVR, NVRTelemetry, TipoEquipamento } from "../../../api/types";
 import { useToast } from "../../../components/Toast";
+import { useConfirm } from "../../../components/ConfirmDialog";
 import { apiErrorMessage } from "../../../utils/errors";
 import { ChevronDown, ChevronRight, Plus, Server } from "lucide-react";
 import {
@@ -29,6 +30,7 @@ import RecordingModal from "./components/RecordingModal";
 import NVRCamerasGalleryModal from "./components/NVRCamerasGalleryModal";
 import NVRTelemetryModal from "./components/NVRTelemetryModal";
 import OltStatusModal from "./components/OltStatusModal";
+import ConexaoTesteModal from "./components/ConexaoTesteModal";
 import AlarmesModal from "./components/AlarmesModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
 import { useSomenteLeitura } from "../../../contexts/AuthContext";
@@ -38,6 +40,7 @@ export default function MachineDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const confirmar = useConfirm();
 
   const [machine, setMachine] = useState<Machine | null>(null);
   const [equipamentos, setEquipamentos] = useState<NVR[]>([]);
@@ -72,6 +75,8 @@ export default function MachineDetail() {
   const [showAlarmesModal, setShowAlarmesModal] = useState<{ nvrId: string, nvrName: string } | null>(null);
   const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [eqForm, setEqForm] = useState<EqForm>(emptyEqForm());
+  // "Testar conexão" aberto (depois de salvar o equipamento ou pelo botão do card)
+  const [testeConexao, setTesteConexao] = useState<{ eqId: string; eqNome: string; eqTipo: string; origem: "salvar" | "card" } | null>(null);
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditMachineForm>({
     name: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
@@ -261,6 +266,11 @@ export default function MachineDetail() {
       setEqForm(emptyEqForm());
       setEditingEqId(null);
       load(true);
+      // Logo depois de salvar, o agente confere IP e login (feedback do cadastro)
+      const eqSalvoId = editingEqId || salvo?.id;
+      if (eqSalvoId) {
+        setTesteConexao({ eqId: eqSalvoId, eqNome: eqForm.name, eqTipo: eqForm.tipo, origem: "salvar" });
+      }
     } catch { toast("Erro ao salvar equipamento.", "error"); }
     finally { setSaving(false); }
   };
@@ -275,7 +285,12 @@ export default function MachineDetail() {
   };
 
   const handleDeleteEquipamento = async (eqId: string, name: string) => {
-    if (!confirm(`Remover equipamento "${name}"?`)) return;
+    if (!(await confirmar({
+      title: "Remover equipamento",
+      message: `Remover equipamento "${name}"?`,
+      confirmLabel: "Remover",
+      variant: "danger",
+    }))) return;
     try {
       await deleteEquipamento(id!, eqId);
       toast("Equipamento removido.", "success");
@@ -319,7 +334,12 @@ export default function MachineDetail() {
   };
 
   const handleRotateKey = async () => {
-    if (!confirm("Gerar nova API Key? A chave atual será invalidada.")) return;
+    if (!(await confirmar({
+      title: "Gerar nova API Key",
+      message: "Gerar nova API Key? A chave atual será invalidada e o agente desta máquina precisará da nova.",
+      confirmLabel: "Gerar nova chave",
+      variant: "danger",
+    }))) return;
     try {
       const data = await rotateMachineKey(id!);
       setRotatedKey(data.api_key || null);
@@ -328,7 +348,12 @@ export default function MachineDetail() {
   };
 
   const handleRestartAgent = async () => {
-    if (!confirm("Solicitar reinício do agente? Ele será reiniciado no próximo ping (em poucos segundos se estiver online).")) return;
+    if (!(await confirmar({
+      title: "Reiniciar agente",
+      message: "Solicitar reinício do agente? Ele será reiniciado no próximo ping (em poucos segundos se estiver online).",
+      confirmLabel: "Reiniciar",
+      variant: "warning",
+    }))) return;
     try {
       await restartMachineAgent(id!);
       toast("Reinício agendado! O agente será reiniciado no próximo ping.", "success");
@@ -336,7 +361,12 @@ export default function MachineDetail() {
   };
 
   const handleTriggerBackup = async () => {
-    if (!confirm("Solicitar execução imediata de backup? Ele começará no próximo ping (em poucos segundos se estiver online).")) return;
+    if (!(await confirmar({
+      title: "Executar backup agora",
+      message: "Solicitar execução imediata de backup? Ele começará no próximo ping (em poucos segundos se estiver online).",
+      confirmLabel: "Iniciar backup",
+      variant: "info",
+    }))) return;
     try {
       await triggerMachineBackup(id!);
       toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
@@ -440,6 +470,7 @@ export default function MachineDetail() {
                           onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}
                           onViewTelemetry={() => setShowTelemetryModal({ show: true, nvrName: eq.name, telemetry: eq.last_telemetry_status })}
                           onViewOlt={() => setShowOltModal({ nvrId: eq.id, nvrName: eq.name })}
+                          onTestConexao={() => setTesteConexao({ eqId: eq.id, eqNome: eq.name, eqTipo: eq.tipo, origem: "card" })}
                           onViewAlarmes={() => setShowAlarmesModal({ nvrId: eq.id, nvrName: eq.name })}
                           onEdit={() => openEqModal(eqToForm(eq), eq.id)}
                           onToggleActive={() => handleToggleEquipamento(eq)}
@@ -539,6 +570,23 @@ export default function MachineDetail() {
             load(true);
           }}
           onClose={() => setShowNVRCamerasModal({ show: false, nvrId: "", nvrName: "", eqTipo: "NVR" })}
+        />
+      )}
+
+      {testeConexao && (
+        <ConexaoTesteModal
+          key={testeConexao.eqId}
+          machineId={id!}
+          eqId={testeConexao.eqId}
+          eqNome={testeConexao.eqNome}
+          eqTipo={testeConexao.eqTipo}
+          origem={testeConexao.origem}
+          onConcluido={() => load(true)}
+          onVerOnus={() => {
+            setShowOltModal({ nvrId: testeConexao.eqId, nvrName: testeConexao.eqNome });
+            setTesteConexao(null);
+          }}
+          onClose={() => setTesteConexao(null)}
         />
       )}
 

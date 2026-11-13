@@ -1,8 +1,32 @@
-import { Activity, Cable, Edit2, FolderOpen, Image, RefreshCw, Siren, Trash2, Video } from "lucide-react";
+import { Activity, Cable, Edit2, FolderOpen, Image, PlugZap, RefreshCw, Siren, Trash2, Video } from "lucide-react";
 import { NVR } from "../../../../api/types";
+import { fmtDate } from "../../../../utils/date";
 import { eqCor, eqIcone } from "./eqTipos";
 
-export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onViewOlt, onViewAlarmes, onEdit, onToggleActive }: {
+// Selo do último "Testar conexão" gravado no equipamento
+function SeloConexao({ eq }: { eq: NVR }) {
+  const st = eq.conexao_status;
+  const [cor, fundo, texto] = !st
+    ? ["var(--text-muted)", "rgba(255,255,255,0.05)", "Conexão não testada"]
+    : st.ok
+      ? ["var(--ok)", "var(--ok-bg)", "Conectado"]
+      : ["var(--err)", "var(--err-bg)", "Falha na conexão"];
+  const dica = st
+    ? `${st.mensagem || ""}
+Testado em ${fmtDate(st.testado_em)}`.trim()
+    : "Use \"Testar\" para o agente conferir o IP e o login deste equipamento.";
+  return (
+    <span title={dica} style={{
+      fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: fundo, color: cor,
+      display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap",
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: cor }} />
+      {texto}{st ? ` · ${fmtDate(st.testado_em, { short: true })}` : ""}
+    </span>
+  );
+}
+
+export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onViewOlt, onTestConexao, onViewAlarmes, onEdit, onToggleActive }: {
   eq: NVR;
   somenteLeitura?: boolean;
   onDelete: () => void;
@@ -10,6 +34,7 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
   onViewCameras?: () => void;
   onViewTelemetry?: () => void;
   onViewOlt?: () => void;
+  onTestConexao?: () => void;
   onViewAlarmes?: () => void;
   onEdit: () => void;
   onToggleActive: () => void;
@@ -37,7 +62,7 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
 
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
           <span style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: 14 }}>{eq.name}</span>
           <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: `${color}18`, color, border: `1px solid ${color}30` }}>
             {eq.tipo}
@@ -47,6 +72,7 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
               PAUSADO
             </span>
           )}
+          <SeloConexao eq={eq} />
         </div>
         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12 }}>
           {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" ? (
@@ -95,6 +121,12 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
           <button className="btn btn-secondary btn-sm" onClick={onViewAlarmes}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Siren size={13} /> Alarmes
+          </button>
+        )}
+        {!somenteLeitura && onTestConexao && (
+          <button className="btn btn-secondary btn-sm" onClick={onTestConexao} title="O agente confere se alcança o equipamento e se o login funciona"
+            style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <PlugZap size={13} /> Testar
           </button>
         )}
         {!somenteLeitura && (

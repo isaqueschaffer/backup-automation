@@ -157,7 +157,7 @@ def _json_safe(obj):
         return [_json_safe(v) for v in obj]
     return obj
 
-def ping_server(conf: dict) -> dict:
+def ping_server(conf: dict, recursos_extra: tuple = ()) -> dict:
     """Envia um ping para o servidor para manter o status online. Usa long-polling."""
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
@@ -165,7 +165,11 @@ def ping_server(conf: dict) -> dict:
     except Exception as e:
         logging.error(f"Telemetria ignorada neste ping: {e}")
         telemetry = None
-    payload = {"telemetry": telemetry}
+    # "recursos": o servidor só entrega o "Testar conexão" a quem declara saber executá-lo (agente >= 1.1.44)
+    # "versao": o servidor guarda e o painel mostra em Configuração da Máquina (agente >= 1.1.49)
+    from src.application.updater import CURRENT_VERSION
+    # `recursos_extra`: o que só o serviço do Windows executa (ex.: "comando_alarme", >= 1.1.50); o do Linux não manda
+    payload = {"telemetry": telemetry, "recursos": ["teste_conexao", *recursos_extra], "versao": CURRENT_VERSION}
     r = requests.post(
         f"{conf['server_url']}/api/v1/agent/ping",
         headers=headers, timeout=40, verify=False, json=payload
@@ -184,6 +188,20 @@ def send_rtsp_result(conf: dict, result: dict) -> bool:
         return True
     except Exception as e:
         logging.error(f"Erro ao enviar resultado RTSP: {e}")
+        return False
+
+def send_conexao_progresso(conf: dict, estado: dict) -> bool:
+    """Andamento do "Testar conexão" (estado inteiro a cada etapa)."""
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/conexao-progresso",
+            json=estado, headers=headers, timeout=20, verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao enviar o progresso do teste de conexao: {e}")
         return False
 
 def upload_night_image(conf: dict, payload: dict) -> bool:

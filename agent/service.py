@@ -32,6 +32,7 @@ def _pyinstaller_hidden_imports():
     import src.application.presenca_cameras  # noqa: F401
     import src.application.captura_noite_vms  # noqa: F401
     import src.application.status_olt  # noqa: F401
+    import src.application.teste_conexao  # noqa: F401
     import src.olt.unm_telnet  # noqa: F401
     import src.olt.unm_nomes  # noqa: F401
     import src.application.log_remoto  # noqa: F401
@@ -397,19 +398,42 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
 
     @staticmethod
     def _resumo_ping(ping_resp) -> str:
-        """Resumo do ping seguro para log (rtsp_task e alarme_task contem usuario/senha)."""
+        """Resumo do ping seguro para log (rtsp_task, conexao_task e alarme_task contem usuario/senha)."""
         if not isinstance(ping_resp, dict):
             return "<resposta invalida>"
-        resumo = {k: v for k, v in ping_resp.items() if k not in ("rtsp_task", "alarme_task")}
+        resumo = {k: v for k, v in ping_resp.items() if k not in ("rtsp_task", "conexao_task", "alarme_task")}
         task = ping_resp.get("rtsp_task")
         if task:
             t = task if isinstance(task, dict) else {}
             resumo["rtsp_task"] = {k: t.get(k) for k in ("equipamento_id", "ip", "canal", "modo")}
+        task = ping_resp.get("conexao_task")
+        if task:
+            t = task if isinstance(task, dict) else {}
+            resumo["conexao_task"] = {k: t.get(k) for k in ("task_id", "tipo", "name", "ip")}
         task = ping_resp.get("alarme_task")
         if task:
             t = task if isinstance(task, dict) else {}
             resumo["alarme_task"] = {k: t.get(k) for k in ("equipamento", "central_id", "acao")}
         return str(resumo)
+
+    @staticmethod
+    def _disparar_conexao(ping_resp: dict, conf: dict):
+        """Teste de conexão pedido pelo painel: roda em thread, na hora (também durante um backup)."""
+        task = ping_resp.get("conexao_task") if isinstance(ping_resp, dict) else None
+        if not isinstance(task, dict):
+            return
+        log(f"Teste de conexao solicitado pelo painel: {task.get('tipo')} {task.get('name')}")
+        from src.application.api_client import send_conexao_progresso
+        from src.application.teste_conexao import executar_teste_conexao
+
+        def rodar(task=task):
+            try:
+                r = executar_teste_conexao(task, conf, lambda estado: send_conexao_progresso(conf, estado))
+                log(f"Teste de conexao de {task.get('name')} concluido: ok={r['ok']} - {r['mensagem']}")
+            except Exception as e:
+                log(f"Falha no teste de conexao: {e}", is_error=True)
+
+        threading.Thread(target=rodar, daemon=True).start()
 
     @staticmethod
     def _disparar_comando_alarme(ping_resp: dict, conf: dict):
@@ -437,9 +461,11 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
         while not self.stop_requested:
             proximo_ping += PING_INTERVAL_S
             try:
-                ping_resp = ping_server(conf)
+                # "comando_alarme": o servidor só entrega o alarme_task (leva a senha do DEFENSE) a quem declara
+                ping_resp = ping_server(conf, recursos_extra=("comando_alarme",))
                 if ping_resp:
                     log(f"Ping recebido pelo servidor. Instrucoes: {self._resumo_ping(ping_resp)}")
+                    self._disparar_conexao(ping_resp, conf)
                     if time.monotonic() - last_successful_ping > 300:
                         log("Servidor voltou a responder apos periodo de desconexao!")
                     last_successful_ping = time.monotonic()

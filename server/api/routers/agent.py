@@ -21,6 +21,7 @@ from schemas import (
     AgentEquipamento,
     BackupReportCreate,
     BackupReportResponse,
+    ConexaoProgresso,
     ComandoAlarmeResultado,
     LogsAgenteReport,
     NVRCameraNightImage,
@@ -47,6 +48,7 @@ from services.backup_runs import attach_report_to_run, finish_queue_run
 from services.contas import maquina_bloqueada
 from services.segredos_config import config_extra_para_agente
 from services.camera_offline import aplicar_presenca, atualizar_presenca
+from services import teste_conexao
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -106,6 +108,19 @@ def _build_cameras_config(machine: Machine, nvr: NVR):
     return out
 
 
+def equipamento_para_agente(machine: Machine, nvr: NVR) -> AgentEquipamento:
+    """O equipamento como o agente o recebe (senha aberta): usado em /agent/config e no "Testar conexão"."""
+    return AgentEquipamento(
+        tipo=nvr.tipo or "NVR",
+        name=nvr.name,
+        ip=nvr.ip,
+        username=nvr.username,
+        password=decrypt(nvr.password),
+        config_extra=config_extra_para_agente(nvr.config_extra),
+        cameras_config=_build_cameras_config(machine, nvr),
+    )
+
+
 @router.get("/config", response_model=AgentConfigResponse)
 def get_agent_config(machine: Machine = Depends(get_current_machine), db: Session = Depends(get_db)):
     """Return full config needed by the Windows agent."""
@@ -114,18 +129,7 @@ def get_agent_config(machine: Machine = Depends(get_current_machine), db: Sessio
         # Conta vencida/suspensa: sem equipamentos o agente não faz backup (backup_job.py encerra com "Nenhum equipamento")
         equipamentos = []
     else:
-        equipamentos = [
-            AgentEquipamento(
-                tipo=nvr.tipo or "NVR",
-                name=nvr.name,
-                ip=nvr.ip,
-                username=nvr.username,
-                password=decrypt(nvr.password),
-                config_extra=config_extra_para_agente(nvr.config_extra),
-                cameras_config=_build_cameras_config(machine, nvr),
-            )
-            for nvr in machine.equipamentos if nvr.active
-        ]
+        equipamentos = [equipamento_para_agente(machine, nvr) for nvr in machine.equipamentos if nvr.active]
     zip_pw = decrypt(machine.zip_password) if machine.zip_password else None
 
     # Usa horário do Cliente se a máquina pertencer a um Cliente
@@ -262,6 +266,8 @@ async def ping_agent(
     machine.last_seen = datetime.utcnow()
     if body and body.telemetry:
         machine.telemetry = body.telemetry
+    if body and body.versao and body.versao.strip():
+        machine.agent_version = body.versao.strip()[:20]
     db.commit()
     machine_id = machine.id
     machine_id_str = str(machine_id)
@@ -269,6 +275,8 @@ async def ping_agent(
     # Passadas BACKUP_TRAVADO_MIN minutos (agente >= 1.1.36 informa `backup_ha_min`), o backup é tratado como
     # travado e deixa de segurar o reinício: senão um backup preso nunca liberaria o agente.
     telemetria_ping = (body.telemetry or {}) if body else {}
+    suporta_teste_conexao = bool(body and "teste_conexao" in (body.recursos or []))
+    suporta_comando_alarme = bool(body and "comando_alarme" in (body.recursos or []))
     em_backup = bool(telemetria_ping.get("backup_em_andamento"))
     ha_min = telemetria_ping.get("backup_ha_min")
     if em_backup and isinstance(ha_min, (int, float)) and not isinstance(ha_min, bool) and ha_min >= BACKUP_TRAVADO_MIN:
@@ -292,10 +300,24 @@ async def ping_agent(
                 rtsp_task=task_data["task"]
             )
 
+        # "Testar conexão" pedido pelo painel: só para o agente que declara saber executá-lo (>= 1.1.44)
+        if suporta_teste_conexao:
+            conexao_task = teste_conexao.proxima_para(machine_id_str)
+            if conexao_task is not None:
+                return PingResponse(status="ok", restart=False, backup=False, conexao_task=conexao_task)
+        else:
+            teste_conexao.recusar_pendentes(machine_id_str)
+
+        # Armar/desarmar central (DEFENSE): o pedido leva a senha do equipamento e os agentes até 1.1.49 gravam no log
+        # o que não reconhecem no ping; só vai a quem declara "comando_alarme" (>= 1.1.50). Os demais: recusa na hora.
         comando = pending_alarme_tasks.get(machine_id_str)
         if comando is not None and not comando.get("sent", False):
             comando["sent"] = True
-            return PingResponse(status="ok", restart=False, backup=False, alarme_task=comando["task"])
+            if suporta_comando_alarme:
+                return PingResponse(status="ok", restart=False, backup=False, alarme_task=comando["task"])
+            comando["result"] = ComandoAlarmeResultado(
+                sucesso=False, mensagem="O agente desta máquina é anterior à 1.1.50 e não executa comandos de alarme.")
+            comando["event"].set()
 
         # Flags normais de restart/backup: só retorna imediatamente se estiverem marcadas
         restart_flag, backup_flag = _read_request_flags(machine_id)
@@ -383,6 +405,36 @@ async def receive_rtsp_result(
         task_data["result"] = result
         task_data["event"].set()
     return {"status": "ok"}
+
+@router.post("/conexao-progresso")
+def receive_conexao_progresso(
+    body: ConexaoProgresso,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Agente informa o andamento do "Testar conexão" (estado inteiro a cada etapa). Ao terminar, o resultado fica
+    gravado no equipamento (`conexao_status`), para o selo do card."""
+    for etapa in body.etapas:
+        etapa.detalhe = mascarar_credenciais(etapa.detalhe)
+    body.mensagem = mascarar_credenciais(body.mensagem)
+    final = teste_conexao.registrar_progresso(str(machine.id), body.model_dump())
+    if final is not None:
+        try:
+            eq_id = UUID(final["equipamento_id"])
+        except (TypeError, ValueError):
+            eq_id = None
+        nvr = db.query(NVR).filter(NVR.id == eq_id, NVR.machine_id == machine.id).first() if eq_id else None
+        if nvr is not None:
+            nvr.conexao_status = {
+                "ok": final["ok"],
+                "mensagem": final["mensagem"],
+                "etapas": final["etapas"],
+                "segundos": final["segundos"],
+                "testado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),  # naive em UTC (REGRA-001)
+            }
+            db.commit()
+    return {"status": "ok"}
+
 
 
 @router.post("/defense/alarmes/comando-resultado")

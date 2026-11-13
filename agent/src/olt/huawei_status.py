@@ -169,10 +169,36 @@ def _coletar(ip: str, usuario: str, senha: str, porta: int) -> dict:
     }
 
 
+def explicar_erro_ssh(e: Exception, ip: str = "", porta: int = PORTA_PADRAO) -> str:
+    """Traduz a falha do SSH na causa provavel e no que fazer. O texto cru do paramiko (ex.: "Authentication failed:
+    transport shut down or saw EOF") nao diz se a senha esta errada ou se a OLT so fechou a conexao."""
+    bruto = (str(e) or e.__class__.__name__).strip()
+    baixo = bruto.lower()
+    alvo = f"{ip}:{porta}" if ip else "a OLT"
+    if isinstance(e, (socket.timeout, TimeoutError)) or "timed out" in baixo:
+        return f"A OLT {alvo} não respondeu a tempo. Confira o IP, a porta SSH e se ela está ligada e alcançável. ({bruto})"
+    if isinstance(e, ConnectionRefusedError) or "refused" in baixo:
+        return f"A OLT {alvo} recusou a conexão: o SSH está desligado ou a porta SSH do cadastro está errada. ({bruto})"
+    if "no acceptable" in baixo or "incompatible ssh" in baixo or "unable to negotiate" in baixo or "no matching" in baixo:
+        return ("A OLT usa um algoritmo de segurança do SSH que o agente não aceita (firmware antigo). "
+                f"Envie o detalhe ao suporte para liberar o algoritmo. ({bruto})")
+    # A OLT aceitou o TCP e fechou durante o login: nao e senha errada
+    if ("saw eof" in baixo or "transport shut down" in baixo or "error reading ssh protocol banner" in baixo
+            or "connection reset" in baixo or isinstance(e, (EOFError, ConnectionResetError))):
+        return ("A OLT fechou a conexão durante o login (a senha não foi avaliada). Causas mais comuns: todas as sessões "
+                "SSH da OLT estão ocupadas (confira `display users` e feche as paradas), o usuário ficou bloqueado por "
+                "tentativas anteriores (aguarde alguns minutos) ou o usuário não tem o serviço SSH/terminal habilitado. "
+                f"({bruto})")
+    if isinstance(e, paramiko.AuthenticationException) or "authentication failed" in baixo:
+        return ("A OLT recusou o usuário ou a senha do SSH. Redigite a senha no cadastro e confira se o usuário tem "
+                "o serviço SSH habilitado. Evite tentar várias vezes: a OLT bloqueia o usuário.")
+    return bruto
+
+
 def coletar_huawei(ip: str, usuario: str, senha: str, porta: int = PORTA_PADRAO) -> dict:
     """Status das ONTs de uma OLT Huawei. Nunca levanta erro: em falha devolve {'ip', 'erro'}."""
     try:
         return _coletar(ip, usuario, senha, porta)
     except Exception as e:
         logging.warning(f"[HUAWEI] Falha ao consultar status de {ip}: {e}")
-        return {"ip": ip, "erro": str(e) or e.__class__.__name__}
+        return {"ip": ip, "erro": explicar_erro_ssh(e, ip, porta)}

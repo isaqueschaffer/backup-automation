@@ -5,12 +5,13 @@ The Windows version in branch `isaque` is unchanged. This branch adds a separate
 ## Implemented
 - Reuses existing client configuration, `/api/v1/agent/config`, and `/api/v1/agent/ping`.
 - Heartbeats roughly every 15 seconds (API latency permitting).
-- Remote restart command stops the agent (requires external RouterOS container restart policy).
+- Remote restart command stops the agent; `launcher_linux.py` starts it again (>= 1.1.52).
+- OTA of the agent code (>= 1.1.52): see "Atualização automática" below.
 - Manual and scheduled backup dispatch exists, but is **disabled by default**.
 
 ## Disabled / unvalidated
 - NVR, OLT, PABX, VMS backup routines have NOT been certified on ARMv7.
-- RTSP/FFmpeg, camera/OLT monitoring, Huawei inbound FTP, Defense webhooks, UNM2000 local-file access and OTA upgrades are not enabled in this pilot.
+- RTSP/FFmpeg, camera/OLT monitoring, Huawei inbound FTP, Defense webhooks, UNM2000 local-file access are not enabled in this pilot.
 - Existing API client has `verify=False`. Correct certificate validation before production.
 - Existing timeout implementation can leave Python threads alive; introduce process-based cancellation before production.
 - Some Python dependencies or base image variants may not support ARMv7; build and runtime testing are still required.
@@ -63,25 +64,26 @@ compiladas, usar um builder ARM nativo ou o índice piwheels (de terceiros; não
 RB4011. O fuso do container: o agendamento usa `datetime.now()`; sem `TZ` definido o container fica em UTC (irrelevante
 enquanto `TRILAN_ENABLE_BACKUPS=false`, mas definir `TZ=America/Sao_Paulo` antes de ligar os backups).
 
-### Imagem publicada
+### Imagem no repositório
 
-`ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto1` (GitHub Container Registry, ligada a
-`isaqueschaffer/backup-automation`). Pelo RouterOS, com registry `https://ghcr.io`, basta adicionar o container por
-`remote-image`. Sem acesso ao registry, use o `.tar` do `docker save` (`/container add file=...`).
+`agent/mikrotik/trilan-agent-armv7.tar` (57,4 MB, `docker save` de `trilan-agent:armv7`, `linux/arm/v7`, agente
+1.1.52 com launcher e OTA, gerada em 12/11/2026). Desde a 1.1.52 **não fica no git** (o push de 57 MB ao `origin`
+caía): vai como anexo `trilan-agent-armv7.tar` da release em `isaqueschaffer/backup-automation` (a da 1.1.52 leva a
+imagem atual) e o arquivo local está no `.gitignore`. SHA-256:
+`567590623c0c865e9c637f649807bf2132b6f327174dcc7c03ae874fb900674d`. No RouterOS: enviar o `.tar` ao roteador e
+`/container add file=trilan-agent-armv7.tar ...`.
 
-### Como gerar e publicar de novo
+### Como gerar de novo
 
 ```powershell
 cd agent
 docker buildx build --platform linux/arm/v7 -f Dockerfile.mikrotik -t trilan-agent:armv7 --load .
 docker image inspect trilan-agent:armv7 --format '{{.Os}}/{{.Architecture}}/{{.Variant}}'   # linux/arm/v7
-docker save --platform linux/arm/v7 -o dist/trilan-agent-armv7.tar trilan-agent:armv7        # arquivo para o RouterOS
-docker tag trilan-agent:armv7 ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto<N>
-docker push ghcr.io/isaqueschaffer/trilan-agent:armv7-piloto<N>
+docker save --platform linux/arm/v7 -o mikrotik/trilan-agent-armv7.tar trilan-agent:armv7
 ```
 
-O push exige o login no GHCR com permissão `write:packages` (`gh auth refresh -h github.com -s write:packages` e
-depois `gh auth token | docker login ghcr.io -u isaqueschaffer --password-stdin`).
+Depois, anexar o `.tar` à release da versão (`gh release upload <versão> agent/mikrotik/trilan-agent-armv7.tar -R
+isaqueschaffer/backup-automation`), sem commit. Anexo de release aceita até 2 GB.
 
 ### Configuração para o teste
 
@@ -90,6 +92,35 @@ depois `gh auth token | docker login ghcr.io -u isaqueschaffer --password-stdin`
   `TRILAN_ALLOW_INSECURE_HTTP=true`).
 - O piloto só faz o ping a cada 15 s (a máquina aparece online no painel) e trata o reinício (encerra o processo; o
   RouterOS precisa religar o container). Backups, câmeras, OLTs, RTSP, webhooks e OTA estão desligados.
+
+## Atualização automática (OTA, desde a 1.1.52)
+
+A imagem passa a rodar `launcher_linux.py` em vez do `service_linux.py` direto:
+
+- O agente consulta `GET /api/v1/agent/update-check?plataforma=linux` 2 min depois de subir e a cada hora. A versão
+  só é oferecida se tiver o pacote Linux cadastrado (`url_linux` + `sha256_linux`, via `publish_version.ps1 -UrlLinux`).
+- O pacote `TrilanAgentLinux.tar.gz` (anexo da release) leva só o código Python. As bibliotecas compiladas para ARM
+  continuam as da imagem. Por isso uma versão que muda o `requirements-linux.txt` é recusada (log "precisa de imagem
+  nova") e exige gerar e importar a imagem de novo.
+- Fica em `/app/data/code/`: `atual/` (em uso), `anterior/`, `pendente` (versão ainda não confirmada) e `falhou`.
+  O 1º ping bem-sucedido confirma a versão. Se ela cair 3 vezes ou não pingar em 10 min, o launcher volta para a
+  anterior (ou para a da imagem) e não a baixa de novo por 24 h.
+- O "Reiniciar agente" do painel agora funciona: o agente encerra e o launcher o sobe de novo em ~2 s.
+- Container recriado com imagem mais nova que `/app/data/code/atual`: a pasta da OTA é descartada e vale a imagem.
+
+**Uma única troca manual:** a imagem anterior à 1.1.52 não tem launcher nem OTA. Importar esta imagem no RouterOS uma
+vez; daí em diante as versões chegam sozinhas, como nos agentes Windows. Recomendado: montar `/app/data` num `mount`
+do RouterOS para a OTA sobreviver a um container recriado (sem o mount, ela fica no disco do container e se perde só se
+o container for removido; a imagem continua funcionando).
+
+```routeros
+/container/stop [find where tag~"trilan"]
+/container/remove [find where tag~"trilan"]
+/container/add file=trilan-agent-armv7.tar interface=veth-trilan root-dir=<disco>/trilan-root \
+    mounts=<mount do agent.conf>,<mount de /app/data> start-on-boot=yes logging=yes
+/container/start [find where tag~"trilan"]
+```
+(Ajustar `interface`, `root-dir` e os `mounts` aos que já estão configurados no roteador.)
 
 ## Acceptance gates before production
 1. ARMv7 image builds and boots; heartbeat visible in test tenant.

@@ -188,6 +188,9 @@ _MIGRACOES_COLUNAS = [
     ("clients", "restart_requested", "ALTER TABLE clients ADD COLUMN restart_requested BOOLEAN NOT NULL DEFAULT FALSE;"),
     ("clients", "backup_requested", "ALTER TABLE clients ADD COLUMN backup_requested BOOLEAN NOT NULL DEFAULT FALSE;"),
     ("clients", "telemetry", "ALTER TABLE clients ADD COLUMN telemetry JSON;"),
+    ("clients", "agent_version", "ALTER TABLE clients ADD COLUMN agent_version VARCHAR(20);"),
+    ("agent_versions", "url_linux", "ALTER TABLE agent_versions ADD COLUMN url_linux TEXT;"),
+    ("agent_versions", "sha256_linux", "ALTER TABLE agent_versions ADD COLUMN sha256_linux VARCHAR(64);"),
     ("clients", "group_id", "ALTER TABLE clients ADD COLUMN group_id UUID REFERENCES client_groups(id) ON DELETE SET NULL;"),
     ("clients", "queue_order", "ALTER TABLE clients ADD COLUMN queue_order INTEGER NOT NULL DEFAULT 0;"),
     ("nvrs", "last_recording_status", "ALTER TABLE nvrs ADD COLUMN last_recording_status JSON;"),
@@ -222,6 +225,7 @@ _MIGRACOES_COLUNAS = [
     ("notificacoes", "definicao_id", "ALTER TABLE notificacoes ADD COLUMN definicao_id UUID REFERENCES notificacoes_personalizadas(id) ON DELETE SET NULL;"),
     # Alarmes das centrais Intelbras cadastradas no DEFENSE (API /api/alarm-centrals, enviado pelo agente)
     ("nvrs", "last_alarm_status", "ALTER TABLE nvrs ADD COLUMN last_alarm_status JSON;"),
+    ("nvrs", "conexao_status", "ALTER TABLE nvrs ADD COLUMN conexao_status JSON;"),
     # Notificação de câmera offline: opt-in por câmera e o vínculo com o alerta gerado
     ("nvr_cameras", "notificar_offline", "ALTER TABLE nvr_cameras ADD COLUMN notificar_offline BOOLEAN NOT NULL DEFAULT FALSE;"),
     ("notificacoes", "camera_id", "ALTER TABLE notificacoes ADD COLUMN camera_id UUID REFERENCES nvr_cameras(id) ON DELETE CASCADE;"),

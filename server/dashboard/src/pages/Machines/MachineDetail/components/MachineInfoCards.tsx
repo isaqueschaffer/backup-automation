@@ -1,4 +1,4 @@
-import { Archive, Building2, CalendarCheck, Clock, KeyRound, Mail, Server, Wifi } from "lucide-react";
+import { Archive, Building2, CalendarCheck, Clock, KeyRound, Mail, Server, Tag, Wifi } from "lucide-react";
 import { Machine } from "../../../../api/types";
 import StatusBadge from "../../../../components/StatusBadge";
 import { Link } from "react-router-dom";
@@ -36,6 +36,10 @@ export default function MachineInfoCards({ machine, customerEmails, isAgentOnlin
               : <span className="text-muted">Sem {singularMin}</span>} />
           <InfoPill icon={<KeyRound size={11} />} label="ID da máquina (Client ID no agent.conf)" value={machine.id} mono copyValue={machine.id} onCopy={onCopy} />
           <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${machine.api_key_prefix}…`} mono />
+          <InfoPill icon={<Tag size={11} />} label="Versão"
+            value={machine.agent_version
+              ? `v${machine.agent_version}`
+              : <span className="text-muted">— (agente anterior à 1.1.49)</span>} mono={!!machine.agent_version} />
           <InfoPill icon={<Clock size={11} />} label="Horário do Backup"
             value={`${fmtSchedule(machine.backup_hour, machine.backup_minute)} (diário)${machine.schedule_from_customer ? ` — definido pelo ${singularMin}` : ""}`} />
           <InfoPill icon={<Mail size={11} />} label={machine.email_from_customer ? `E-mails do relatório (do ${singularMin})` : "E-mails de Notificação"}

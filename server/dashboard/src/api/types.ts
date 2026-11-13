@@ -184,6 +184,8 @@ export interface AgentVersion {
   sha256_service: string;
   url_tray?: string | null;
   sha256_tray?: string | null;
+  url_linux?: string | null;     // pacote do agente Linux/Mikrotik (>= 1.1.52)
+  sha256_linux?: string | null;
   active: boolean;
 }
 
@@ -197,7 +199,34 @@ export interface NVR {
   config_extra?: EquipamentoConfig | null;
   last_recording_status?: CameraRecStatus[] | null;
   last_telemetry_status?: NVRTelemetry | null;
+  conexao_status?: ConexaoStatus | null;
   active: boolean;
+}
+
+// "Testar conexão": etapas executadas pelo agente na máquina
+export type EstadoEtapaConexao = "pendente" | "andamento" | "ok" | "erro" | "pulado";
+export interface EtapaConexao {
+  id: string;
+  rotulo: string;
+  estado: EstadoEtapaConexao;
+  detalhe?: string | null;
+}
+export interface ConexaoTeste {
+  task_id: string | null;
+  equipamento_id: string;
+  etapas: EtapaConexao[];
+  concluido: boolean;
+  ok: boolean | null;
+  mensagem: string | null;
+  segundos: number;
+}
+// Último teste gravado no equipamento (testado_em: naive em UTC, REGRA-001)
+export interface ConexaoStatus {
+  ok: boolean;
+  mensagem: string | null;
+  etapas: EtapaConexao[];
+  segundos: number;
+  testado_em: string;
 }
 
 // Alias semântico
@@ -221,6 +250,7 @@ export interface Machine {
   restart_requested?: boolean;
   backup_requested?: boolean;
   telemetry?: Record<string, any> | null;
+  agent_version?: string | null; // informada pelo agente no ping (>= 1.1.49)
   api_key?: string; // only on create/rotate
   // Campos calculados no servidor (fonte única da verdade para status online)
   is_online?: boolean;

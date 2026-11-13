@@ -18,6 +18,7 @@ import {
   NotificacaoPersonalizadaPayload, TipoNotificacao,
 } from "../../api/types";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { useSomenteLeitura } from "../../contexts/AuthContext";
 import { fmtDate } from "../../utils/date";
 import { COR_NOTIFICACAO, ICONE_NOTIFICACAO, LABEL_NOTIFICACAO } from "../../utils/notificacoes";
@@ -66,6 +67,7 @@ function resumoFrequencia(p: NotificacaoPersonalizada): string {
 
 export default function NotificacoesPage() {
   const { toast } = useToast();
+  const confirmar = useConfirm();
   const somenteLeitura = useSomenteLeitura();
 
   const [abertas, setAbertas] = useState<Notificacao[]>([]);
@@ -155,7 +157,12 @@ export default function NotificacoesPage() {
   };
 
   const apagarPersonalizada = async (p: NotificacaoPersonalizada) => {
-    if (!confirm(`Apagar a notificação "${p.titulo}"?`)) return;
+    if (!(await confirmar({
+      title: "Apagar notificação",
+      message: `Apagar a notificação "${p.titulo}"?`,
+      confirmLabel: "Apagar",
+      variant: "danger",
+    }))) return;
     try {
       await apagarNotificacaoPersonalizada(p.id);
       toast("Notificação apagada.", "success");
