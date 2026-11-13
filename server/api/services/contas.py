@@ -13,7 +13,7 @@ from models import Conta, ContaRenovacao, Customer, Machine, Plano, Setting, Usu
 logger = logging.getLogger("trilan.contas")
 
 TIPOS_CONTA = ("INTEGRADOR", "CLIENTE_FINAL")
-PAPEIS = ("SUPER_ADMIN", "ADMIN", "LEITURA")
+PAPEIS = ("SUPER_ADMIN", "ADMIN", "VISUALIZADOR", "LEITURA")
 # Faixa de aviso no painel a partir de DIAS_AVISO; vermelha a partir de DIAS_CRITICO
 DIAS_AVISO = 15
 DIAS_CRITICO = 3

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Edit2, FileSpreadsheet, Image, Moon, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { AlertTriangle, Camera, Edit2, FileSpreadsheet, Image, Moon, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 import api from "../../../../api/client";
 import { NvrCamera, PlanilhaVms, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
 import { useConfirm } from "../../../../components/ConfirmDialog";
+import { usePodeTestar, useSomenteLeitura } from "../../../../contexts/AuthContext";
 import { fmtDate, fmtOfflineHa } from "../../../../utils/date";
 import {
   colunasDeSenha,
@@ -83,6 +84,11 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
 }) {
   const { toast } = useToast();
   const confirmar = useConfirm();
+  // Somente leitura e visualizador não alteram a Galeria; quem pode testar (admin e visualizador) captura ao vivo sem salvar
+  const somenteLeitura = useSomenteLeitura();
+  const podeTestar = usePodeTestar();
+  const [aoVivo, setAoVivo] = useState<{ canal: number; imagem?: string; erro?: string; hora: string } | null>(null);
+  const [testandoAoVivo, setTestandoAoVivo] = useState(false);
   const isVms = eqTipo === "DIGIFORT" || eqTipo === "DEFENSE";
   const [cameras, setCameras] = useState<NvrCamera[]>([]);
   const [loading, setLoading] = useState(true);
@@ -457,6 +463,24 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     }
   };
 
+  // Teste ao vivo: a imagem só aparece nesta tela, não é gravada como referência nem como noite
+  const testarAoVivo = async (cam: NvrCamera) => {
+    setTestandoAoVivo(true);
+    const hora = new Date().toLocaleTimeString("pt-BR");
+    try {
+      const { data } = await api.post(`/machines/${machineId}/equipamentos/${nvrId}/test-rtsp`, null,
+        { params: { canal: cam.canal, modo: "ao_vivo" } });
+      if (!aliveRef.current) return;
+      setAoVivo(data.success && data.image_base64
+        ? { canal: cam.canal, imagem: data.image_base64, hora }
+        : { canal: cam.canal, erro: data.error_message || "Falha ao capturar. Verifique se o agente está online.", hora });
+    } catch (e) {
+      if (aliveRef.current) setAoVivo({ canal: cam.canal, erro: erroDaApi(e, "Erro ao comunicar com o servidor."), hora });
+    } finally {
+      if (aliveRef.current) setTestandoAoVivo(false);
+    }
+  };
+
   const capturarUma = async (tipo: Tipo, cam: NvrCamera) => {
     setOcupado({ tipo, canal: cam.canal });
     const erro = tipo === "ref" ? await capturarReferencia(cam, true) : await capturarNoite(cam);
@@ -628,24 +652,26 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
             {isVms ? (
               <>
                 <div style={{ marginBottom: 16 }}>Nenhuma câmera configurada ainda. Importe a planilha do equipamento ou sincronize da máquina.</div>
-                <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>{botoesImportacaoVms}</div>
+                {!somenteLeitura && <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>{botoesImportacaoVms}</div>}
               </>
             ) : "Nenhuma câmera sincronizada neste NVR ainda. Aguarde o próximo backup."}
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", height: "80vh", margin: "-24px" }}>
-            {isVms && (
+            {isVms && !somenteLeitura && (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface-50)" }}>
                 {botoesImportacaoVms}
               </div>
             )}
             {/* Ações em lote */}
+            {!somenteLeitura && (
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: "14px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface-50)" }}>
               {grupoLote("ref", <Image size={15} color="#10b981" />, "Referência ideal", faltaRef,
                 "Anexada no e-mail quando a câmera fica offline. Ao vivo; câmera offline usa a gravação mais recente.")}
               {grupoLote("noite", <Moon size={15} color="var(--primary)" />, "Imagem da noite", faltaNoite,
                 "Madrugada (00h–06h) mais recente com gravação, até 15 dias. Não roda mais durante o backup.")}
             </div>
+            )}
 
             <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
               {/* Lateral: canais */}
@@ -756,7 +782,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                           )}
                         </>
                       )}
-                      {isVms && (
+                      {isVms && !somenteLeitura && (
                         <button className="btn btn-secondary btn-sm" onClick={() => abrirEdicaoRtsp(selectedCam)}
                           style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
                           <Edit2 size={13} /> Editar RTSP
@@ -771,6 +797,35 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                         if (f) enviarArquivo(f, selectedCam);
                       }} />
 
+                    {podeTestar && (
+                      <div style={{ marginBottom: 20, padding: "12px 14px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <button className="btn btn-secondary" disabled={travado || testandoAoVivo} onClick={() => testarAoVivo(selectedCam)}
+                            title="Pede ao agente um quadro ao vivo da câmera agora. É só um teste: a imagem não é salva."
+                            style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <Camera size={15} /> {testandoAoVivo ? "Capturando..." : "Testar ao vivo"}
+                          </button>
+                          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Captura um quadro de agora para conferir a câmera. Não é salvo.</span>
+                        </div>
+                        {aoVivo && aoVivo.canal === selectedCam.canal && (
+                          <div style={{ marginTop: 12 }}>
+                            {aoVivo.imagem ? (
+                              <CameraImagePanel
+                                dotColor="var(--accent)"
+                                label={`AO VIVO — ${aoVivo.hora} (teste, não salvo)`}
+                                base64={aoVivo.imagem}
+                                alt="Ao vivo"
+                                emptyText=""
+                                onZoom={src => setZoomImage({ src, title: `${nomeCam(selectedCam)} - AO VIVO ${aoVivo.hora}` })}
+                              />
+                            ) : (
+                              <div style={{ fontSize: 13, color: "var(--err)" }}>Teste das {aoVivo.hora}: {aoVivo.erro}</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24 }}>
                       <div>
                         <CameraImagePanel
@@ -781,6 +836,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                           emptyText="Sem imagem de referência"
                           onZoom={src => setZoomImage({ src, title: `${nomeCam(selectedCam)} - REFERÊNCIA IDEAL` })}
                         />
+                        {!somenteLeitura && (
                         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                           <button className="btn btn-primary" disabled={travado} onClick={() => capturarUma("ref", selectedCam)}
                             title="Imagem ao vivo; se a câmera estiver offline, usa a gravação mais recente"
@@ -795,6 +851,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                             {ocupado?.tipo === "upload" && ocupado.canal === selectedCam.canal ? "Enviando..." : "Enviar imagem"}
                           </button>
                         </div>
+                        )}
                       </div>
 
                       <div>
@@ -806,6 +863,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                           emptyText={selectedCam.captura_motivo || "Sem imagem da noite"}
                           onZoom={src => setZoomImage({ src, title: `${nomeCam(selectedCam)} - NOITE` })}
                         />
+                        {!somenteLeitura && (
                         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                           <button className="btn btn-primary" disabled={travado} onClick={() => capturarUma("noite", selectedCam)}
                             title={isVms ? "Captura um frame ao vivo da câmera (stream principal)." : "Busca a madrugada (00h–06h) mais recente com gravação, até 15 dias atrás. Funciona com a câmera offline."}
@@ -816,6 +874,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                               : (isVms ? "Capturar ao vivo" : "Capturar da gravação")}
                           </button>
                         </div>
+                        )}
                       </div>
                     </div>
                   </>

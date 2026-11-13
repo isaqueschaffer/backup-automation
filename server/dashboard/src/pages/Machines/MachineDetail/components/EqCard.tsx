@@ -26,9 +26,10 @@ Testado em ${fmtDate(st.testado_em)}`.trim()
   );
 }
 
-export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onViewOlt, onTestConexao, onViewAlarmes, onViewAntenas, onEdit, onToggleActive }: {
+export default function EqCard({ eq, somenteLeitura, podeTestar = !somenteLeitura, onDelete, onViewRecording, onViewCameras, onViewTelemetry, onViewOlt, onTestConexao, onViewAlarmes, onViewAntenas, onEdit, onToggleActive }: {
   eq: NVR;
   somenteLeitura?: boolean;
+  podeTestar?: boolean;
   onDelete: () => void;
   onViewRecording: () => void;
   onViewCameras?: () => void;
@@ -130,7 +131,7 @@ export default function EqCard({ eq, somenteLeitura, onDelete, onViewRecording, 
             <Siren size={13} /> Alarmes
           </button>
         )}
-        {!somenteLeitura && onTestConexao && (
+        {podeTestar && onTestConexao && (
           <button className="btn btn-secondary btn-sm" onClick={onTestConexao} title="O agente confere se alcança o equipamento e se o login funciona"
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <PlugZap size={13} /> Testar

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
-from models import Conta, Machine, Usuario
+from models import Conta, Machine, Usuario, UsuarioMaquina
 from services.contas import conta_bloqueada, obter_conta_plataforma_id
 
 # ──────────────────────────────────────────────────────────────
@@ -42,10 +42,12 @@ class Contexto:
     usuario_id: Optional[UUID]  # None = admin legado (login só com senha)
     nome: str
     email: Optional[str]
-    papel: str  # SUPER_ADMIN | ADMIN | LEITURA
+    papel: str  # SUPER_ADMIN | ADMIN | VISUALIZADOR | LEITURA
     conta_id: Optional[UUID]
     conta: Optional[Conta]
     somente_leitura: bool
+    # Isolamento por máquina (VISUALIZADOR/LEITURA): ids das máquinas que o usuário vê; None = todas as da conta
+    maquinas_permitidas: Optional[frozenset] = None
 
     @property
     def super_admin(self) -> bool:
@@ -54,6 +56,14 @@ class Contexto:
     @property
     def feito_por(self) -> str:
         return self.email or "admin"
+
+    @property
+    def pode_testar(self) -> bool:
+        """Pode rodar os testes do painel (captura ao vivo, "Testar conexão"): todos menos LEITURA; conta vencida, ninguém.
+        O VISUALIZADOR é um somente leitura que pode testar, mas não altera nada."""
+        if self.conta and conta_bloqueada(self.conta):
+            return False
+        return self.papel != "LEITURA"
 
 
 def _decodificar(token: str) -> dict:
@@ -139,7 +149,7 @@ def _montar_contexto(token: str, x_conta_id: Optional[str], db: Session) -> Cont
             somente_leitura=False,
         )
 
-    # Usuário ADMIN ou LEITURA (ignora X-Conta-ID)
+    # Usuário ADMIN, VISUALIZADOR ou LEITURA (ignora X-Conta-ID)
     conta = usuario.conta
     if not conta:
         raise HTTPException(
@@ -147,7 +157,11 @@ def _montar_contexto(token: str, x_conta_id: Optional[str], db: Session) -> Cont
             detail="Conta não encontrada",
         )
 
-    somente_leitura = (papel == "LEITURA" or conta_bloqueada(conta))
+    somente_leitura = (papel in ("LEITURA", "VISUALIZADOR") or conta_bloqueada(conta))
+    maquinas_permitidas = None
+    if papel in ("LEITURA", "VISUALIZADOR") and usuario_id is not None:
+        ids = frozenset(m for (m,) in db.query(UsuarioMaquina.machine_id).filter(UsuarioMaquina.usuario_id == usuario_id))
+        maquinas_permitidas = ids or None
     return Contexto(
         usuario_id=usuario_id,
         nome=nome,
@@ -156,6 +170,7 @@ def _montar_contexto(token: str, x_conta_id: Optional[str], db: Session) -> Cont
         conta_id=conta.id,
         conta=conta,
         somente_leitura=somente_leitura,
+        maquinas_permitidas=maquinas_permitidas,
     )
 
 
@@ -176,6 +191,20 @@ def get_contexto(
 ) -> Contexto:
     ctx = _montar_contexto(credentials.credentials, x_conta_id, db)
     _bloquear_escrita(request, ctx)
+    return ctx
+
+
+def get_contexto_teste(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
+    x_conta_id: Optional[str] = Header(None, alias="X-Conta-ID"),
+    db: Session = Depends(get_db),
+) -> Contexto:
+    """Para as rotas de TESTE (captura ao vivo, "Testar conexão"): como `get_contexto`, mas o VISUALIZADOR passa.
+    Só usar em rota que não altera cadastro; a própria rota barra o que o VISUALIZADOR não pode (ex.: salvar imagem)."""
+    ctx = _montar_contexto(credentials.credentials, x_conta_id, db)
+    if not ctx.pode_testar:
+        _bloquear_escrita(request, ctx)
     return ctx
 
 

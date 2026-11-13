@@ -48,11 +48,11 @@ function SuperAdminRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-// Auditoria: só ADMIN e super admin (perfil somente leitura volta para a visão geral)
+// Auditoria: só ADMIN e super admin (visualizador e somente leitura voltam para a visão geral)
 function SemLeituraRoute({ children }: { children: ReactNode }) {
   const { me } = useAuth();
 
-  if (me && me.usuario.papel === "LEITURA") {
+  if (me && (me.usuario.papel === "LEITURA" || me.usuario.papel === "VISUALIZADOR")) {
     return <Navigate to="/" replace />;
   }
 

@@ -554,6 +554,12 @@ def receive_olt_status(
         # Naive em UTC (REGRA-001)
         nvr.olt_status = {"atualizado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "olts": item.olts}
         atualizados += 1
+        if nvr.olt_notificar or nvr.olt_alertas:
+            from services.notificacoes import verificar_olt_equipamento
+            try:
+                verificar_olt_equipamento(db, nvr)
+            except Exception:
+                logging.getLogger("trilan.notificacoes").exception("Falha ao verificar as ONUs de '%s'", nvr.name)
     db.commit()
     return {"status": "ok", "atualizados": atualizados}
 

@@ -173,7 +173,7 @@ if not _tem_tabela('usuarios'):
             nome VARCHAR(255) NOT NULL,
             email VARCHAR(255) NOT NULL UNIQUE,
             senha_hash VARCHAR(255) NOT NULL,
-            papel VARCHAR(20) NOT NULL CONSTRAINT ck_usuarios_papel CHECK (papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')),
+            papel VARCHAR(20) NOT NULL CONSTRAINT ck_usuarios_papel CHECK (papel IN ('SUPER_ADMIN', 'ADMIN', 'VISUALIZADOR', 'LEITURA')),
             ativo BOOLEAN NOT NULL DEFAULT TRUE,
             token_versao INTEGER NOT NULL DEFAULT 1,
             ultimo_login TIMESTAMP WITHOUT TIME ZONE,
@@ -234,6 +234,9 @@ _MIGRACOES_COLUNAS = [
     ("notificacoes", "referencia", "ALTER TABLE notificacoes ADD COLUMN referencia VARCHAR(120);"),
     # Equipamento ANTENA: status das antenas lido pelo MikroTik (enviado pelo agente)
     ("nvrs", "antena_status", "ALTER TABLE nvrs ADD COLUMN antena_status JSON;"),
+    # Notificação de ONUs offline e sinal óptico crítico (OLT): avisos ligados e estado dos alertas
+    ("nvrs", "olt_notificar", "ALTER TABLE nvrs ADD COLUMN olt_notificar JSON;"),
+    ("nvrs", "olt_alertas", "ALTER TABLE nvrs ADD COLUMN olt_alertas JSON;"),
 ]
 
 _colunas_cache: dict = {}
@@ -250,13 +253,22 @@ for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
 _run_ddl("ALTER TABLE nvrs ALTER COLUMN ip TYPE VARCHAR(255);", "nvrs.ip VARCHAR(255)")
 _run_ddl("ALTER TABLE nvr_cameras ALTER COLUMN ip TYPE VARCHAR(255);", "nvr_cameras.ip VARCHAR(255)")
 
+# Perfil VISUALIZADOR (vê e testa, não altera): papel que passou a valer em usuarios.papel (idempotente)
+if _tem_tabela("usuarios"):
+    _run_ddl("ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS ck_usuarios_papel;", "dropar ck_usuarios_papel antigo")
+    _run_ddl(
+        "ALTER TABLE usuarios ADD CONSTRAINT ck_usuarios_papel "
+        "CHECK (papel IN ('SUPER_ADMIN', 'ADMIN', 'VISUALIZADOR', 'LEITURA'));",
+        "recriar ck_usuarios_papel com VISUALIZADOR",
+    )
+
 # Notificações personalizadas e de câmera offline: tipos que passaram a valer em notificacoes.tipo (idempotente)
 if _tem_tabela("notificacoes"):
     _run_ddl("ALTER TABLE notificacoes DROP CONSTRAINT IF EXISTS ck_notificacoes_tipo;", "dropar ck_notificacoes_tipo antigo")
     _run_ddl(
         "ALTER TABLE notificacoes ADD CONSTRAINT ck_notificacoes_tipo "
-        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME', 'ANTENA_OFFLINE'));",
-        "recriar ck_notificacoes_tipo com PERSONALIZADA, CAMERA_OFFLINE, ALARME e ANTENA_OFFLINE",
+        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME', 'ANTENA_OFFLINE', 'ONU_OFFLINE', 'SINAL_OPTICO'));",
+        "recriar ck_notificacoes_tipo com PERSONALIZADA, CAMERA_OFFLINE, ALARME, ANTENA_OFFLINE, ONU_OFFLINE e SINAL_OPTICO",
     )
 
 

@@ -2,7 +2,7 @@ import io
 import zipfile
 import tempfile
 import logging
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
 
@@ -22,8 +22,11 @@ from schemas import (
 )
 from routers.machines import machine_to_response, check_machine_online, next_queue_order
 from services.escopo import (
+    exigir_cliente_inteiro,
     filtrar_por_conta,
+    maquinas_visiveis,
     obter_cliente,
+    ve_cliente_inteiro,
     obter_maquina,
     conta_para_criacao,
 )
@@ -111,15 +114,17 @@ def _ensure_queue_idle(customer: Customer, db: Session) -> None:
         raise HTTPException(status_code=409, detail=QUEUE_ACTIVE_DETAIL.format(name=customer.name))
 
 
-def _to_response(customer: Customer, db: Session, commit: bool = True) -> CustomerResponse:
+def _to_response(customer: Customer, db: Session, commit: bool = True, ctx: Optional[Contexto] = None) -> CustomerResponse:
     # NOTA: este helper também é usado em rotas GET e pode gravar (auto-destravamento
     # da fila). Com commit=False o chamador fica responsável por dar o commit.
+    # Com `ctx` de usuário restrito a algumas máquinas, só elas entram na resposta e nos totais.
     if _auto_unlock_queue(customer) and commit:
         db.commit()
 
-    machines_resp = [machine_to_response(m) for m in customer.machines]
+    maquinas = maquinas_visiveis(ctx, customer.machines) if ctx is not None else list(customer.machines)
+    machines_resp = [machine_to_response(m) for m in maquinas]
     machines_online = sum(1 for m in machines_resp if m.is_online)
-    last_backups = [m.last_backup_at for m in customer.machines if m.last_backup_at]
+    last_backups = [m.last_backup_at for m in maquinas if m.last_backup_at]
     last_backup_at = max(last_backups) if last_backups else None
 
     return CustomerResponse(
@@ -131,9 +136,9 @@ def _to_response(customer: Customer, db: Session, commit: bool = True) -> Custom
         backup_minute=customer.backup_minute,
         created_at=customer.created_at,
         email_to=list(customer.email_to or []),
-        machines_total=len(customer.machines),
+        machines_total=len(maquinas),
         machines_online=machines_online,
-        health=_compute_health(customer.machines),
+        health=_compute_health(maquinas),
         last_backup_at=last_backup_at,
         queue_active=customer.queue_active,
         queue_current_index=customer.queue_current_index,
@@ -145,9 +150,11 @@ def _to_response(customer: Customer, db: Session, commit: bool = True) -> Custom
 @router.get("", response_model=List[CustomerResponse])
 def list_customers(db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     customers = filtrar_por_conta(_load_customers_query(db), Customer.conta_id, ctx).order_by(Customer.name).all()
+    if ctx.maquinas_permitidas is not None:
+        customers = [c for c in customers if maquinas_visiveis(ctx, c.machines)]
     # Um único commit no final (um commit por cliente expiraria os objetos já carregados
     # e reintroduziria o N+1). Esta rota GET grava apenas no auto-destravamento da fila.
-    result = [_to_response(c, db, commit=False) for c in customers]
+    result = [_to_response(c, db, commit=False, ctx=ctx) for c in customers]
     db.commit()
     return result
 
@@ -174,7 +181,7 @@ def create_customer(body: CustomerCreate, db: Session = Depends(get_db), ctx: Co
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(customer_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     customer = obter_cliente(db, ctx, customer_id, _load_customers_query(db))
-    return _to_response(customer, db)
+    return _to_response(customer, db, ctx=ctx)
 
 
 @router.put("/{customer_id}", response_model=CustomerResponse)
@@ -437,6 +444,7 @@ def download_customer_zip(customer_id: UUID, db: Session = Depends(get_db), ctx:
     e os arquivos internos de cada máquina ficam sem senha.
     """
     customer = _get_customer_or_404(customer_id, db, ctx)
+    exigir_cliente_inteiro(ctx, customer)
     f = build_customer_latest_zip(db, customer)
     if f is None:
         raise HTTPException(status_code=404, detail="Nenhum backup disponível para as máquinas deste cliente")
@@ -465,8 +473,10 @@ def _get_run_or_404(customer_id: UUID, run_id: UUID, db: Session) -> CustomerBac
 
 @router.get("/{customer_id}/runs", response_model=List[CustomerRunResponse])
 def list_customer_runs(customer_id: UUID, limit: int = Query(20, ge=1, le=200), db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
-    """Rodadas de backup do cliente (mais recentes primeiro)."""
-    _get_customer_or_404(customer_id, db, ctx)
+    """Rodadas de backup do cliente (mais recentes primeiro). Usuário que não vê todas as máquinas do cliente não
+    vê as rodadas (elas juntam todas)."""
+    if not ve_cliente_inteiro(ctx, _get_customer_or_404(customer_id, db, ctx)):
+        return []
     runs = (
         db.query(CustomerBackupRun)
         .options(selectinload(CustomerBackupRun.backups))
@@ -486,7 +496,7 @@ def download_customer_run_zip(customer_id: UUID, run_id: UUID, db: Session = Dep
     os arquivos internos ficam sem senha dentro do ZIP do cliente).
     Caso contrário, retorna o ZIP sem senha com os ZIPs das máquinas como estão.
     """
-    _get_customer_or_404(customer_id, db, ctx)
+    exigir_cliente_inteiro(ctx, _get_customer_or_404(customer_id, db, ctx))
     run = _get_run_or_404(customer_id, run_id, db)
     customer = run.customer
 

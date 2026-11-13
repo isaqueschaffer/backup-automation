@@ -28,6 +28,7 @@ export const TIPO_CONTA_LABEL: Record<TipoConta, string> = {
 export const PAPEL_LABEL: Record<Papel, string> = {
   SUPER_ADMIN: "Administrador da plataforma",
   ADMIN: "Administrador",
+  VISUALIZADOR: "Visualizador",
   LEITURA: "Somente leitura",
 };
 

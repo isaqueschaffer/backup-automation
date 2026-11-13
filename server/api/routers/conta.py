@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from auth import Contexto, exigir_admin_conta, get_contexto
 from database import get_db
-from models import Conta, Usuario
+from models import Conta, Machine, Usuario, UsuarioMaquina
 from schemas import (
     ContaDetalheResponse,
     RenovacaoResponse,
@@ -62,6 +62,19 @@ def obter_minha_conta(
     return montar_conta_detalhe(conta, db, plataforma_id)
 
 
+def _definir_maquinas(db: Session, ctx: Contexto, usuario: Usuario, maquinas) -> None:
+    """Grava as máquinas que um VISUALIZADOR/LEITURA vê (todas da conta do admin; outra conta = 400). ADMIN vê todas:
+    a lista dele fica vazia."""
+    ids = [] if usuario.papel == "ADMIN" else list(dict.fromkeys(maquinas or []))
+    if ids:
+        validas = {m for (m,) in db.query(Machine.id).filter(Machine.id.in_(ids), Machine.conta_id == ctx.conta_id)}
+        if len(validas) != len(ids):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Alguma máquina escolhida não é desta conta.")
+    # Mantém os vínculos que continuam (apagar e recriar o mesmo par daria conflito de chave na mesma gravação)
+    atuais = {v.machine_id: v for v in usuario.maquinas_vinculo}
+    usuario.maquinas_vinculo = [atuais.get(m) or UsuarioMaquina(machine_id=m) for m in ids]
+
+
 @router.get("/usuarios", response_model=List[UsuarioResponse])
 def listar_usuarios(
     ctx: Contexto = Depends(exigir_admin_conta),
@@ -76,7 +89,7 @@ def criar_usuario(
     ctx: Contexto = Depends(exigir_admin_conta),
     db: Session = Depends(get_db),
 ):
-    if body.papel not in ("ADMIN", "LEITURA"):
+    if body.papel not in ("ADMIN", "VISUALIZADOR", "LEITURA"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Papel inválido.")
 
     email = body.email.strip().lower()
@@ -91,6 +104,7 @@ def criar_usuario(
         conta_id=ctx.conta_id,
         ativo=True,
     )
+    _definir_maquinas(db, ctx, usuario, body.maquinas)
     db.add(usuario)
     db.commit()
     db.refresh(usuario)
@@ -111,7 +125,7 @@ def atualizar_usuario(
     novo_papel = body.papel if body.papel is not None else usuario.papel
     novo_ativo = body.ativo if body.ativo is not None else usuario.ativo
 
-    # Se for mudar papel para LEITURA ou ativo para False, verifica se resta ao menos um ADMIN ativo
+    # Se for mudar papel para VISUALIZADOR/LEITURA ou ativo para False, verifica se resta ao menos um ADMIN ativo
     if usuario.papel == "ADMIN" and usuario.ativo is True:
         if novo_papel != "ADMIN" or novo_ativo is not True:
             admin_ativos_restantes = db.query(Usuario).filter(
@@ -132,7 +146,7 @@ def atualizar_usuario(
         mudou_seguranca = True
 
     if body.papel is not None and body.papel != usuario.papel:
-        if body.papel not in ("ADMIN", "LEITURA"):
+        if body.papel not in ("ADMIN", "VISUALIZADOR", "LEITURA"):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Papel inválido.")
         usuario.papel = body.papel
         mudou_seguranca = True
@@ -146,6 +160,9 @@ def atualizar_usuario(
 
     if "nome" in body.model_fields_set and body.nome is not None:
         usuario.nome = body.nome
+
+    if body.maquinas is not None or usuario.papel == "ADMIN":
+        _definir_maquinas(db, ctx, usuario, body.maquinas if body.maquinas is not None else usuario.maquinas)
 
     db.commit()
     db.refresh(usuario)

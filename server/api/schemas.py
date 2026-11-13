@@ -434,7 +434,7 @@ class ComandoAlarmeResultado(BaseModel):
 # ─────────────────────────────────────────────
 # Notificações
 # ─────────────────────────────────────────────
-TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE", "ALARME", "ANTENA_OFFLINE"]
+TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE", "ALARME", "ANTENA_OFFLINE", "ONU_OFFLINE", "SINAL_OPTICO"]
 ModoNotificacaoPersonalizada = Literal["RECORRENTE", "DATA"]
 
 
@@ -506,6 +506,29 @@ class EquipamentoAlarmesNotificacaoResponse(BaseModel):
 
 class CentralAlarmeNotificarUpdate(BaseModel):
     notificar: bool
+
+
+# Notificação de ONUs (ONU_OFFLINE) e sinal óptico (SINAL_OPTICO): opt-in por equipamento OLT
+class EquipamentoOltNotificacaoResponse(BaseModel):
+    nvr_id: UUID
+    nvr_nome: str
+    machine_id: UUID
+    machine_nome: str
+    fabricante: Optional[str] = None
+    atualizado_em: Optional[str] = None
+    erro: Optional[str] = None
+    total_onus: int = 0
+    onus_offline: int = 0
+    onus_sem_energia: int = 0
+    onus_fibra: int = 0
+    onus_sinal_critico: int = 0
+    onu_offline: bool = False
+    sinal_critico: bool = False
+
+
+class OltNotificarUpdate(BaseModel):
+    onu_offline: Optional[bool] = None
+    sinal_critico: Optional[bool] = None
 
 
 class NotificacaoPersonalizadaBase(BaseModel):
@@ -962,8 +985,8 @@ def _validar_papel_usuario(v: Optional[str], obrigatorio: bool = True) -> Option
             raise ValueError("Papel é obrigatório.")
         return None
     s = v.strip().upper()
-    if s not in ("ADMIN", "LEITURA"):
-        raise ValueError("Papel inválido. Deve ser ADMIN ou LEITURA.")
+    if s not in ("ADMIN", "VISUALIZADOR", "LEITURA"):
+        raise ValueError("Papel inválido. Deve ser ADMIN, VISUALIZADOR ou LEITURA.")
     return s
 
 
@@ -1009,6 +1032,7 @@ class MeResponse(BaseModel):
     usuario: UsuarioMe
     conta: Optional[ContaResumo] = None
     somente_leitura: bool
+    pode_testar: bool = False  # captura ao vivo e "Testar conexão" (ADMIN e VISUALIZADOR)
     rotulos: Rotulos
 
 
@@ -1048,6 +1072,8 @@ class UsuarioCreate(BaseModel):
     email: str
     senha: str
     papel: str
+    # VISUALIZADOR/LEITURA: máquinas que o usuário vê (vazio ou ausente = todas); ignorado para ADMIN
+    maquinas: Optional[List[UUID]] = Field(default=None, max_length=2000)
 
     @field_validator("nome")
     @classmethod
@@ -1075,6 +1101,8 @@ class UsuarioUpdate(BaseModel):
     papel: Optional[str] = None
     ativo: Optional[bool] = None
     senha: Optional[str] = None
+    # None = não mexe; [] = volta a ver todas as máquinas
+    maquinas: Optional[List[UUID]] = Field(default=None, max_length=2000)
 
     @field_validator("nome")
     @classmethod
@@ -1098,6 +1126,7 @@ class UsuarioResponse(BaseModel):
     email: str
     papel: str
     ativo: bool
+    maquinas: List[UUID] = []  # vazio = vê todas as máquinas da conta
     ultimo_login: Optional[datetime] = None
     criado_em: datetime
 

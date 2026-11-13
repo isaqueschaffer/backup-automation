@@ -20,8 +20,8 @@ router = APIRouter(prefix="/api/v1/auditoria", tags=["Auditoria"])
 
 
 def _exigir_acesso(ctx: Contexto) -> None:
-    """Só ADMIN da conta e super admin veem quem alterou o quê; LEITURA não."""
-    if ctx.papel == "LEITURA":
+    """Só ADMIN da conta e super admin veem quem alterou o quê; VISUALIZADOR e LEITURA não."""
+    if ctx.papel in ("LEITURA", "VISUALIZADOR"):
         raise HTTPException(status_code=403, detail="Seu perfil não tem acesso à auditoria.")
 
 

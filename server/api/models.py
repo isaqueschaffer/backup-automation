@@ -67,10 +67,11 @@ class ContaRenovacao(Base):
 
 
 class Usuario(Base):
-    """Usuário do painel. SUPER_ADMIN é da plataforma (sem conta); ADMIN e LEITURA pertencem a uma Conta."""
+    """Usuário do painel. SUPER_ADMIN é da plataforma (sem conta); ADMIN, VISUALIZADOR e LEITURA pertencem a uma Conta.
+    VISUALIZADOR: vê tudo e roda testes (captura ao vivo sem salvar, "Testar conexão"), sem alterar nada."""
     __tablename__ = "usuarios"
     __table_args__ = (
-        CheckConstraint("papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')", name="ck_usuarios_papel"),
+        CheckConstraint("papel IN ('SUPER_ADMIN', 'ADMIN', 'VISUALIZADOR', 'LEITURA')", name="ck_usuarios_papel"),
         CheckConstraint("(papel = 'SUPER_ADMIN') = (conta_id IS NULL)", name="ck_usuarios_super_admin_sem_conta"),
     )
 
@@ -79,7 +80,7 @@ class Usuario(Base):
     nome = Column(String(255), nullable=False)
     email = Column(String(255), nullable=False, unique=True)  # sempre minúsculo
     senha_hash = Column(String(255), nullable=False)  # bcrypt
-    papel = Column(String(20), nullable=False)  # SUPER_ADMIN | ADMIN | LEITURA
+    papel = Column(String(20), nullable=False)  # SUPER_ADMIN | ADMIN | VISUALIZADOR | LEITURA
     ativo = Column(Boolean, default=True, nullable=False)
     # Incrementa ao trocar senha, papel ou desativar: derruba os tokens JWT já emitidos
     token_versao = Column(Integer, default=1, nullable=False)
@@ -87,6 +88,20 @@ class Usuario(Base):
     criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     conta = relationship("Conta", back_populates="usuarios")
+    # VISUALIZADOR/LEITURA: máquinas que o usuário vê (vazio = todas as da conta); o ADMIN sempre vê todas
+    maquinas_vinculo = relationship("UsuarioMaquina", cascade="all, delete-orphan", lazy="selectin")
+
+    @property
+    def maquinas(self) -> list:
+        return [v.machine_id for v in self.maquinas_vinculo]
+
+
+class UsuarioMaquina(Base):
+    """Máquinas liberadas para um usuário VISUALIZADOR ou LEITURA (isolamento por máquina, editado pelo admin da conta)."""
+    __tablename__ = "usuario_maquinas"
+
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True)
+    machine_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True, index=True)
 
 
 class Customer(Base):
@@ -219,6 +234,10 @@ class NVR(Base):
     conexao_status = Column(JSON, nullable=True)  # último "Testar conexão" feito pelo agente: ok, mensagem, etapas, testado_em (UTC naive)
     # DEFENSE: ids (texto) das centrais de alarme que geram notificação ALARME; opt-in, vazio até o usuário marcar
     alarmes_notificar = Column(JSON, nullable=True)
+    # OLT: avisos ligados ({"onu_offline": bool, "sinal_critico": bool}; opt-in, vazio = desligado) e, para a
+    # notificação, desde quando cada ONU está no problema e quais já foram avisadas por e-mail
+    olt_notificar = Column(JSON, nullable=True)
+    olt_alertas = Column(JSON, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -335,7 +354,7 @@ class Notificacao(Base):
     __tablename__ = "notificacoes"
     __table_args__ = (
         CheckConstraint(
-            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME', 'ANTENA_OFFLINE')",
+            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME', 'ANTENA_OFFLINE', 'ONU_OFFLINE', 'SINAL_OPTICO')",
             name="ck_notificacoes_tipo",
         ),
     )
@@ -351,7 +370,8 @@ class Notificacao(Base):
     camera_id = Column(UUID(as_uuid=True), ForeignKey("nvr_cameras.id", ondelete="CASCADE"), nullable=True)
     # Situação do alerta dentro do equipamento (tipo ALARME): "<central>:DESCONECTADA", "<central>:<partição>:DISPARO",
     # "<central>:<partição>:DESARMADA" ou "FALHA"; separa os alertas abertos de um mesmo DEFENSE.
-    # Tipo ANTENA_OFFLINE: o MAC cadastrado da antena, ou "FALHA" (o MikroTik não respondeu ao agente)
+    # Tipo ANTENA_OFFLINE: o MAC cadastrado da antena, ou "FALHA" (o MikroTik não respondeu ao agente).
+    # Tipos ONU_OFFLINE e SINAL_OPTICO: o nome da OLT do equipamento
     referencia = Column(String(120), nullable=True)
     # Definição que gerou o alerta (tipo PERSONALIZADA); SET NULL ao apagar a definição para preservar o histórico
     definicao_id = Column(UUID(as_uuid=True), ForeignKey("notificacoes_personalizadas.id", ondelete="SET NULL"), nullable=True)

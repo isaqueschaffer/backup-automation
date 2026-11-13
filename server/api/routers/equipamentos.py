@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from auth import Contexto, get_contexto
+from auth import Contexto, get_contexto, get_contexto_teste
 from database import get_db
 from models import AgentLog, Machine, NVR, NVRCamera, NVRPlanilha
 from routers.agent import equipamento_para_agente, mascarar_credenciais, pending_alarme_tasks, pending_rtsp_tasks
@@ -231,14 +231,18 @@ async def test_equipamento_rtsp(
     modo: str = Query("ao_vivo", pattern="^(ao_vivo|referencia|noite)$"),
     nome: Optional[str] = Query(None, max_length=200),
     db: Session = Depends(get_db),
-    ctx: Contexto = Depends(get_contexto),
+    ctx: Contexto = Depends(get_contexto_teste),
 ):
     """Captura um frame delegando a tarefa ao agente local via long-polling.
 
     modo "ao_vivo": frame ao vivo (teste de conexão).
     modo "referencia": ao vivo; se a câmera estiver offline, o frame mais recente da gravação (agente >= 1.1.6).
     modo "noite": madrugada mais recente com gravação; o servidor já salva como imagem da noite do canal.
+    O VISUALIZADOR só pode o "ao_vivo", e nada da captura é gravado (nem a câmera recuperada do relatório).
     """
+    so_testa = ctx.somente_leitura  # passou por get_contexto_teste sendo somente leitura = VISUALIZADOR
+    if so_testa and modo != "ao_vivo":
+        raise HTTPException(status_code=403, detail="Seu usuário só pode capturar a imagem ao vivo, sem salvar.")
     _get_machine_or_404(machine_id, db, ctx)
     eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
     if not eq:
@@ -270,7 +274,13 @@ async def test_equipamento_rtsp(
             ip_recup = ip_valido(st_cam.get("ip")) if st_cam else ""
             if ip_recup:
                 mod_recup = (st_cam.get("modelo") or "").strip() or "Hikvision"
-                if not cam_db:
+                if so_testa:
+                    # VISUALIZADOR: usa o IP do relatório só nesta captura, sem cadastrar a câmera
+                    cam_db = NVRCamera(nvr_id=equipamento_id, canal=canal, nome=st_cam.get("nome") or f"Canal {canal}",
+                                       ip=ip_recup, username=(cam_db.username if cam_db else None) or "admin",
+                                       password=(cam_db.password if cam_db else None) or encrypt("navarro@123"),
+                                       modelo=mod_recup, canal_rtsp=cam_db.canal_rtsp if cam_db else None)
+                elif not cam_db:
                     cam_db = NVRCamera(
                         nvr_id=equipamento_id,
                         canal=canal,
@@ -283,8 +293,9 @@ async def test_equipamento_rtsp(
                     db.add(cam_db)
                 else:
                     cam_db.ip = ip_recup
-                db.commit()
-                db.refresh(cam_db)
+                if not so_testa:
+                    db.commit()
+                    db.refresh(cam_db)
             else:
                 return RTSPTestResponse(success=False, error_message="Câmera sem endereço IP configurado na galeria. Importe o CSV ou configure o IP da câmera.")
 
@@ -333,6 +344,12 @@ async def test_equipamento_rtsp(
             "canal": canal,
             "modo": modo,  # agentes < 1.1.6 ignoram e capturam ao vivo
         }
+
+    if modo == "ao_vivo":
+        alvo = f"da câmera '{cam_db.nome}'" if cam_db is not None else ""
+        registrar_alteracao(db, machine_id, ctx.feito_por,
+                            f"testou a captura ao vivo {alvo} do equipamento '{eq.name}' (sem salvar).".replace("  ", " "), eq.name)
+        db.commit()
 
     event = asyncio.Event()
 
@@ -427,7 +444,7 @@ def testar_conexao(
     machine_id: UUID,
     equipamento_id: UUID,
     db: Session = Depends(get_db),
-    ctx: Contexto = Depends(get_contexto),
+    ctx: Contexto = Depends(get_contexto_teste),
 ):
     """Pede ao agente da máquina que teste a conexão com o equipamento (alcance do IP, login e leitura; na OLT, já
     lê e envia o status das ONUs). Volta na hora com o `task_id`; o andamento sai em GET .../testar-conexao/{task_id}.
@@ -440,7 +457,10 @@ def testar_conexao(
         return teste_conexao.falha_imediata(
             str(eq.id), "A máquina está offline: o agente precisa estar em comunicação com o servidor para testar.")
     task = equipamento_para_agente(machine, eq).model_dump()
-    return teste_conexao.criar(str(machine_id), str(eq.id), task)
+    resposta = teste_conexao.criar(str(machine_id), str(eq.id), task)
+    registrar_alteracao(db, machine_id, ctx.feito_por, f"testou a conexão do equipamento '{eq.name}'.", eq.name)
+    db.commit()
+    return resposta
 
 
 @router.get("/{equipamento_id}/testar-conexao/{task_id}", response_model=ConexaoTesteResponse)

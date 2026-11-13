@@ -272,6 +272,8 @@ No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta
 | last_recording_status | JSON | list | NULL | — |
 | last_telemetry_status | JSON | dict | NULL | — |
 | olt_status | JSON | dict | NULL | OLT UNM2000: `{"atualizado_em", "olts": [...]}` enviado pelo agente a cada 5 min (Telnet) |
+| olt_notificar | JSON | dict | NULL | OLT: avisos ligados `{"onu_offline": bool, "sinal_critico": bool}` (opt-in; vazio = desligados) |
+| olt_alertas | JSON | dict | NULL | OLT: estado dos alertas `{"onu": {chave: desde}, "sinal": {chave: desde}, "avisadas": {categoria: {olt: [chaves]}}}` (chave = `<OLT>|<índice ou slot/pon/onu>`, datas naive em UTC) |
 | antena_status | JSON | dict | NULL | ANTENA: `{"atualizado_em", "erro", "mikrotik": {identidade, ip, dispositivos}, "antenas": [...], "descobertas": [...]}` enviado pelo agente a cada 3 min (SSH no MikroTik + ping) |
 | conexao_status | JSON | dict | NULL | Último "Testar conexão": `{"ok", "mensagem", "etapas": [{"id", "rotulo", "estado", "detalhe"}], "segundos", "testado_em"}` (`testado_em` naive em UTC) |
 | active | BOOLEAN | bool | NOT NULL | TRUE |
@@ -441,7 +443,7 @@ A tabela nasce por `Base.metadata.create_all` (`main.py`), sem migração inline
 | nome | VARCHAR(255) | str | NOT NULL | — |
 | email | VARCHAR(255) | str | NOT NULL UNIQUE | — (sempre minúsculo) |
 | senha_hash | VARCHAR(255) | str | NOT NULL | — (bcrypt) |
-| papel | VARCHAR(20) | str | NOT NULL | — (CheckConstraint: `papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')`) |
+| papel | VARCHAR(20) | str | NOT NULL | — (CheckConstraint: `papel IN ('SUPER_ADMIN', 'ADMIN', 'VISUALIZADOR', 'LEITURA')`) |
 | ativo | BOOLEAN | bool | NOT NULL | TRUE |
 | token_versao | INTEGER | int | NOT NULL | 1 (incrementa ao trocar senha/papel) |
 | ultimo_login | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
@@ -515,7 +517,7 @@ datetime.utcnow()            # naive em UTC — compativel com o banco
 - Gerado via `POST /api/v1/auth/login`: com `{email, password}` para usuário (`usuarios`, senha bcrypt) → JWT `{sub: <uuid do usuário>, tv: <token_versao>}`; com só `{password}` (`ADMIN_PASSWORD` ou `settings.admin_password_hash`) → administrador da plataforma legado, JWT `{sub: "admin"}` (usado pelo `agent/publish_version.ps1`; não remover)
 - Expira em `ACCESS_TOKEN_EXPIRE_HOURS` (padrao 8h), algoritmo `HS256`
 - Cada requisição recarrega o usuário (`get_contexto`, `auth.py`): inativo ou `tv` diferente de `token_versao` → 401 (trocar senha, papel ou desativar derruba os tokens já emitidos)
-- Papéis: `SUPER_ADMIN` (plataforma, sem conta própria; escolhe a conta pelo header `X-Conta-ID`, sem ele fica na conta da plataforma — não existe visão "todas as contas" desde 29/10/2026), `ADMIN` e `LEITURA` (de uma conta; `X-Conta-ID` é ignorado). Isolamento por conta: REGRA-010
+- Papéis: `SUPER_ADMIN` (plataforma, sem conta própria; escolhe a conta pelo header `X-Conta-ID`, sem ele fica na conta da plataforma — não existe visão "todas as contas" desde 29/10/2026), `ADMIN`, `VISUALIZADOR` (vê e roda testes, não altera) e `LEITURA` (de uma conta; `X-Conta-ID` é ignorado). Isolamento por conta: REGRA-010
 
 **Agente Windows:** API Key + Client ID
 - Headers: `X-Client-ID: <uuid>` + `X-API-Key: sk_trilan_<token>`
@@ -597,7 +599,7 @@ Comparacao de versoes usa `tuple(int(x) for x in v.split("."))`.
 - Buscar Cliente/Setor e Máquina por `obter_cliente(db, ctx, id)` e `obter_maquina(db, ctx, id)`; listas com `filtrar_por_conta(consulta, Model.conta_id, ctx)` (`services/escopo.py`). Equipamento, backup, rodada e dashboard chegam pela máquina ou pelo Cliente já validados.
 - Recurso de outra conta = **404** com a mesma mensagem de "não encontrado" (nunca 403, para não revelar que existe).
 - Todo `Customer(...)` e `Machine(...)` novo recebe `conta_id` (`conta_para_criacao(db, ctx)`, ou a conta do Cliente da máquina). Máquina e Cliente vinculados são sempre da mesma conta (409 se não forem).
-- O bloqueio de escrita (conta vencida/suspensa ou usuário LEITURA → 403 em POST/PUT/PATCH/DELETE) já acontece dentro do `get_contexto`: não repetir nas rotas.
+- O bloqueio de escrita (conta vencida/suspensa ou usuário LEITURA/VISUALIZADOR → 403 em POST/PUT/PATCH/DELETE) já acontece dentro do `get_contexto`: não repetir nas rotas. Rota de **teste** que o VISUALIZADOR pode usar (não altera cadastro) usa `get_contexto_teste` no lugar.
 - Rotas do agente continuam com `get_current_machine` (REGRA-003); a conta bloqueada é tratada por `maquina_bloqueada(machine)` (`services/contas.py`).
 
 **NAO FAZER:** `db.query(Customer|Machine|Backup|NVR)` sem filtro de conta em rota do painel; usar `verify_admin_token` em rota nova de dados de conta (ele aceita só o super admin e existe por compatibilidade).
@@ -1119,6 +1121,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-13] — Merge do ramo `helena` (perfil Visualizador, isolamento por máquina e avisos de OLT)
+
+**Incorporado:** `7595a31` (Notificações: seção "OLTs" com avisos de ONU offline e de sinal óptico crítico, tipos `ONU_OFFLINE`/`SINAL_OPTICO`) e `532fe4a` (perfil `VISUALIZADOR` e isolamento por máquina para Visualizador/Somente leitura, tabela `usuario_maquinas`). Detalhes nas entradas abaixo.
+**Auditoria:** nenhuma data com fuso nas linhas adicionadas (REGRA-001 ok); nenhum segredo (só fixtures de teste); rotas novas/alteradas com `ctx` e `filtrar_por_conta`/`filtrar_maquinas`/`obter_maquina` (REGRA-010 ok, `GET/PUT /notificacoes/olts` filtrados pela conta); migração inline só acrescenta `nvrs.olt_notificar`/`nvrs.olt_alertas` (JSON anuláveis) e recria `ck_usuarios_papel` e `ck_notificacoes_tipo` de forma idempotente; `usuario_maquinas` nasce pelo `create_all`. Compose, nginx, `requirements*.txt`, `agent/`, `build.ps1` e `installer.iss` não foram tocados.
+**Bloqueado:** nada. Conflito só no changelog, resolvido mantendo os dois lados.
+**Versão:** nenhuma (o ramo não mexeu em `agent/`; só deploy do servidor e do painel).
+
 ### [2026-11-13] — Dashboard por Cliente: grade livre (posição x/y, 24 colunas), desfazer/refazer e rolagem do mouse corrigida
 
 **Alteração:** a edição do Dashboard por Cliente deixa de ser uma lista em ordem (CSS grid de 12 colunas × 50 px) e passa a ser uma grade livre como a do Grafana.
@@ -1166,6 +1175,36 @@ server/dashboard/src/pages/Machines/MachineDetail/components/MiniCalendar.tsx (l
 **Conciliação feita:** a sincronização com o OneDrive estava correta (VM `/opt/trilan/backups` e a pasta do OneDrive no servidor Windows idênticas por cliente). Procedimento e comandos na skill `.claude/skills/conciliar-backups-onedrive` (só do Claude).
 **Arquivos:** server/api/routers/agent.py, server/api/tests/test_recuperacao_backup.py, .claude/skills/conciliar-backups-onedrive/SKILL.md, CLAUDE.md, PROJECT_SPEC.md
 **Breaking Change:** Não. **Requer:** só o deploy do servidor (sem versão nova do agente).
+### [2026-11-13] — Isolamento por máquina para Visualizador e Somente leitura (editado pelo admin)
+
+- **Regra** (decisões do usuário): o admin da conta escolhe, na edição do usuário, quais máquinas um **VISUALIZADOR** ou **LEITURA** vê. **Nenhuma marcada = todas** (os usuários atuais não mudam). O **ADMIN sempre vê todas** (a lista dele fica vazia). Escolha por máquina, agrupada por Cliente, com "marcar todas do cliente"; máquina nova não entra sozinha.
+- **Banco**: tabela nova `usuario_maquinas` (`usuario_id` → usuarios ON DELETE CASCADE, `machine_id` → clients ON DELETE CASCADE, PK nos dois; criada pelo `create_all`). Model `UsuarioMaquina` e `Usuario.maquinas` (lista de ids).
+- **Contexto** (`auth.py`): `Contexto.maquinas_permitidas` (frozenset; None = todas), lido a cada requisição (mudança do admin vale na hora, sem novo login).
+- **Onde vale** (`services/escopo.py`): `obter_maquina` devolve 404 para máquina fora da lista (cobre detalhe da máquina, equipamentos, Galeria, logs, testes); `obter_cliente` 404 para cliente sem nenhuma máquina liberada; `filtrar_maquinas` nas listas de máquinas, backups (também detalhe/download/reenvio de backup) e nas listas da tela de Notificações (câmeras, alarmes, OLTs); a lista de alertas mostra só os das máquinas liberadas e os que não são de máquina (personalizadas). Clientes: a lista e o detalhe mostram só as máquinas liberadas (totais e saúde contam só elas). **O que junta o cliente inteiro exige todas as máquinas dele** (`exigir_cliente_inteiro`): ZIP do cliente e ZIP de rodada (403), dashboard do cliente (403); a lista de rodadas volta vazia.
+- **Regra para rota nova** (extensão da REGRA-010): buscar máquina por `obter_maquina` e filtrar listas com `filtrar_maquinas(consulta, <coluna machine_id>, ctx)` além do `filtrar_por_conta`; dado que junta várias máquinas de um cliente passa por `exigir_cliente_inteiro`.
+- **API**: `UsuarioCreate`/`UsuarioUpdate` aceitam `maquinas` (lista de ids da conta; outra conta = 400; `[]` = todas; ausente no update = não muda); `UsuarioResponse.maquinas`.
+- **Painel**: tela de usuários com a coluna "Máquinas" ("Todas" ou "N máquina(s)") e, para Visualizador/Somente leitura, o campo "Máquinas que o usuário vê" (`pages/Contas/MaquinasUsuarioCampo.tsx`: "Todas as máquinas da conta" ou "Só as máquinas marcadas", agrupadas por cliente).
+- **Testes**: `server/api/tests/test_isolamento_maquina.py` (6). Teste real no local: Visualizador limitado a "Teste PABX" vê 1 de 6 máquinas, outra máquina e os equipamentos dela 404, backups só da liberada, cliente "Central" com 1 de 3 máquinas, ZIP do cliente 403, rodadas vazias, cliente "Segunda" 404, 1 de 6 alertas; máquina de outra conta recusada (400). Usuário de teste voltou a "todas" e foi desativado. Sem mudança no agente.
+- **Arquivos:** server/api/{models.py,auth.py,schemas.py,services/escopo.py,routers/{conta.py,machines.py,backups.py,customers.py,dashboards.py,notificacoes.py},tests/test_isolamento_maquina.py}, server/dashboard/src/{api/{types.ts,contas.ts},pages/Contas/{UsuariosSection.tsx,MaquinasUsuarioCampo.tsx}}, PROJECT_SPEC.md.
+
+### [2026-11-13] — Perfil de usuário VISUALIZADOR (vê tudo e roda testes, não altera nada)
+
+- **Papéis**: `usuarios.papel` passa a aceitar `VISUALIZADOR` (além de SUPER_ADMIN, ADMIN e LEITURA); `ck_usuarios_papel` recriado na migração inline. Criado e editado na tela de usuários da conta ("Visualizador (vê e testa, não altera)").
+- **O que pode**: tudo que o LEITURA vê, mais os **testes**: "Testar conexão" de qualquer equipamento (o "Atualizar" do modal de ONUs usa o mesmo teste) e, na Galeria, o novo **"Testar ao vivo"**, que pede um quadro ao vivo da câmera e só mostra na tela (**nada é salvo**: nem referência, nem noite, nem a câmera recuperada do relatório do agente).
+- **O que não pode** (decisões do usuário): capturar/salvar referência ou imagem da noite (a da noite só se vê), disparar backup manual (só admin), armar/desarmar centrais de alarme (só vê o status), cadastrar/editar/pausar/remover qualquer coisa, ligar avisos de notificação, ver a Auditoria.
+- **Como é aplicado** (`auth.py`): o VISUALIZADOR é `somente_leitura` (o `_bloquear_escrita` barra POST/PUT/DELETE como no LEITURA). Nova dependência **`get_contexto_teste`**, usada só nas rotas de teste (`POST .../test-rtsp` e `POST .../testar-conexao`), deixa passar quem tem `Contexto.pode_testar` (todos menos LEITURA; ninguém com a conta vencida/suspensa). No `test-rtsp`, o VISUALIZADOR só pode `modo=ao_vivo` (403 nos outros). Rota nova de escrita continua bloqueada por padrão: só entra na lista de teste quem usar `get_contexto_teste`. `/auth/me` devolve `pode_testar` (painel: hook `usePodeTestar()`).
+- **Auditoria**: os testes passam a ser registrados para qualquer usuário ("testou a conexão do equipamento X", "testou a captura ao vivo da câmera Y do equipamento X (sem salvar)").
+- **Painel**: faixa própria ("Seu acesso é de visualizador..."); Auditoria escondida (como no LEITURA); na Galeria, os botões de importar/limpar planilha, sincronizar, editar RTSP, capturas em lote, capturar/enviar referência e capturar noite somem para LEITURA e VISUALIZADOR; o botão "Testar" do card e o "Atualizar" das ONUs aparecem para quem pode testar.
+- **Testes**: `server/api/tests/test_visualizador.py` (6). Teste real no servidor local: usuário VISUALIZADOR criado, `testar-conexao` 200, editar equipamento/capturar noite/referência/backup manual/Auditoria 403, teste registrado na Auditoria; usuário de teste desativado (não há rota para apagar usuário). Sem mudança no agente.
+- **Arquivos:** server/api/{auth.py,models.py,main.py,schemas.py,services/contas.py,routers/{auth_router.py,conta.py,auditoria.py,equipamentos.py},tests/test_visualizador.py}, server/dashboard/src/{App.tsx,api/{types.ts,contas.ts},contexts/AuthContext.tsx,components/{Sidebar.tsx,AvisoConta.tsx},pages/Contas/{contaUi.tsx,UsuariosSection.tsx},pages/Machines/MachineDetail/{index.tsx,components/{EqCard.tsx,NVRCamerasGalleryModal.tsx,OltStatusModal.tsx}}}, PROJECT_SPEC.md.
+
+### [2026-11-13] — Notificações: seção "OLTs" com aviso de ONU offline e de sinal óptico crítico
+
+- **Tela** (Notificações): nova seção **OLTs**, no mesmo formato das de câmeras e alarmes (máquina → OLT → opções). Em cada OLT, dois avisos independentes, ligados/desligados separadamente: **ONU offline** (sem energia, fibra desconectada ou offline) e **Sinal óptico crítico** (ONU online com qualidade `RUIM`, -27 dBm ou pior, a mesma classificação do modal de ONUs). Mostra o que está acontecendo agora (contagem por causa) e quando foi a última leitura. Começam desativados (opt-in); perfil LEITURA só vê.
+- **Regra** (`services/notificacoes.verificar_olt_equipamento`, chamada ao receber o status da OLT e no ciclo de 10 min): a ONU entra no aviso depois de **10 min** no problema (`LIMIAR_OLT_MIN`; o momento em que entrou fica em `nvrs.olt_alertas`). **Um alerta por OLT** (`referencia` = nome da OLT), com a contagem por causa e a lista das ONUs (até 15, depois "+N outras"); fecha sozinho quando nenhuma ONU está mais no problema. **E-mail** quando o alerta abre e quando entram ONUs ainda não avisadas (não repete todo dia); se o envio falhar, tenta na leitura seguinte; ONU que volta e cai de novo é avisada de novo. OLT que não respondeu na leitura mantém o alerta e as contagens como estavam; status com mais de 20 min não abre nem fecha nada. Desligar o aviso fecha o alerta aberto.
+- **Tipos novos** `ONU_OFFLINE` e `SINAL_OPTICO` em `notificacoes.tipo` (`ck_notificacoes_tipo` recriado na migração). **Colunas** `nvrs.olt_notificar` e `nvrs.olt_alertas` (migração inline). **API**: `GET /api/v1/notificacoes/olts` e `PUT /api/v1/notificacoes/olts/{nvr_id}` (`{onu_offline?, sinal_critico?}`, admin da conta), filtradas pela conta (REGRA-010).
+- **Sem versão nova do agente**: usa o `olt_status` que UNM2000, Huawei e VSOL já enviam (`estado` e `qualidade` de cada ONU).
+- **Testes**: `server/api/tests/test_olt_notificacao.py` (7). **Arquivos:** server/api/{models.py,main.py,schemas.py,routers/{agent.py,notificacoes.py},services/notificacoes.py,tests/test_olt_notificacao.py}, server/dashboard/src/{api/{types.ts,client.ts},utils/notificacoes.ts,pages/Notificacoes/NotificacoesPage.tsx}, PROJECT_SPEC.md.
 
 ### [2026-11-13] — Equipamento tipo ANTENA: status das antenas Wi-Fi (Ruijie etc.) lido pelo MikroTik
 

@@ -394,7 +394,7 @@ export interface CustomerRun {
 }
 
 // ── Multi-contas ──────────────────────────────────────────────
-export type Papel = "SUPER_ADMIN" | "ADMIN" | "LEITURA";
+export type Papel = "SUPER_ADMIN" | "ADMIN" | "VISUALIZADOR" | "LEITURA";
 export type TipoConta = "INTEGRADOR" | "CLIENTE_FINAL";
 export type StatusConta = "OK" | "AVISO" | "CRITICO" | "VENCIDA" | "SUSPENSA" | "VITALICIA";
 
@@ -419,6 +419,8 @@ export interface Me {
   usuario: { id: string | null; nome: string; email: string | null; papel: Papel };
   conta: ContaResumo | null;
   somente_leitura: boolean;
+  // Pode rodar os testes (captura ao vivo sem salvar, "Testar conexão"): ADMIN e VISUALIZADOR
+  pode_testar?: boolean;
   rotulos: Rotulos;
 }
 
@@ -465,6 +467,8 @@ export interface Usuario {
   ativo: boolean;
   ultimo_login: string | null;
   criado_em: string;
+  // Visualizador / Somente leitura: máquinas que vê (vazio = todas as da conta)
+  maquinas?: string[];
 }
 
 
@@ -569,7 +573,7 @@ export interface AlarmeStatusResponse {
 }
 
 // ─── Notificações ───────────────────────────────────────────────────────────
-export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE" | "ALARME" | "ANTENA_OFFLINE";
+export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE" | "ALARME" | "ANTENA_OFFLINE" | "ONU_OFFLINE" | "SINAL_OPTICO";
 export type ModoNotificacaoPersonalizada = "RECORRENTE" | "DATA";
 
 export interface Notificacao {
@@ -612,6 +616,24 @@ export interface CentralAlarmeNotificacao {
   particoes_total: number;
   particoes_desarmadas: number;
   notificar: boolean;
+}
+
+// Opt-in por equipamento OLT: ONU offline (ONU_OFFLINE) e sinal óptico crítico (SINAL_OPTICO)
+export interface EquipamentoOltNotificacao {
+  nvr_id: string;
+  nvr_nome: string;
+  machine_id: string;
+  machine_nome: string;
+  fabricante?: string | null;
+  atualizado_em?: string | null;
+  erro?: string | null;
+  total_onus: number;
+  onus_offline: number;
+  onus_sem_energia: number;
+  onus_fibra: number;
+  onus_sinal_critico: number;
+  onu_offline: boolean;
+  sinal_critico: boolean;
 }
 
 export interface EquipamentoAlarmesNotificacao {
