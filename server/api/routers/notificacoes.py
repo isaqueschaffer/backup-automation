@@ -20,6 +20,8 @@ from schemas import (
     ConfiguracaoNotificacaoUpdate,
     EquipamentoAlarmesNotificacaoResponse,
     EquipamentoCamerasNotificacaoResponse,
+    EquipamentoOltNotificacaoResponse,
+    OltNotificarUpdate,
     NotificacaoPersonalizadaCreate,
     NotificacaoPersonalizadaResponse,
     NotificacaoPersonalizadaUpdate,
@@ -28,7 +30,7 @@ from schemas import (
 from services.camera_offline import segundos_offline
 from services.escopo import filtrar_por_conta
 from services.galeria_vms import status_por_camera
-from services.notificacoes import TIPOS, id_central, verificar_alarmes_equipamento
+from services.notificacoes import TIPOS, id_central, verificar_alarmes_equipamento, verificar_olt_equipamento
 
 router = APIRouter(prefix="/api/v1/notificacoes", tags=["Notificações"])
 
@@ -225,6 +227,72 @@ def atualizar_central_notificacao(
     verificar_alarmes_equipamento(db, nvr)
     db.commit()
     return {**central, "notificar": body.notificar}
+
+
+# ─── OLTs: ONUs offline e sinal óptico crítico ──────────────────────────────────────────────────
+# Opt-in por equipamento OLT (NVR.olt_notificar); ver services/notificacoes.verificar_olt_equipamento.
+
+def _olt_para_resposta(nvr: NVR) -> dict:
+    status = nvr.olt_status or {}
+    opcoes = nvr.olt_notificar or {}
+    contagem = {"total": 0, "OFFLINE": 0, "SEM_ENERGIA": 0, "FALHA": 0, "sinal": 0}
+    erros = []
+    for olt in status.get("olts") or []:
+        if not isinstance(olt, dict):
+            continue
+        if olt.get("erro"):
+            erros.append(f"{olt.get('nome') or olt.get('ip') or nvr.name}: {olt['erro']}")
+            continue
+        for onu in olt.get("onus") or []:
+            if not isinstance(onu, dict):
+                continue
+            contagem["total"] += 1
+            if onu.get("estado") in contagem:
+                contagem[onu["estado"]] += 1
+            if onu.get("estado") == "ONLINE" and onu.get("qualidade") == "RUIM":
+                contagem["sinal"] += 1
+    return {
+        "nvr_id": nvr.id, "nvr_nome": nvr.name, "machine_id": nvr.machine_id, "machine_nome": nvr.machine.name,
+        "fabricante": (nvr.config_extra or {}).get("fabricante_olt"),
+        "atualizado_em": status.get("atualizado_em"), "erro": " | ".join(erros)[:500] or None,
+        "total_onus": contagem["total"], "onus_offline": contagem["OFFLINE"], "onus_sem_energia": contagem["SEM_ENERGIA"],
+        "onus_fibra": contagem["FALHA"], "onus_sinal_critico": contagem["sinal"],
+        "onu_offline": bool(opcoes.get("onu_offline")), "sinal_critico": bool(opcoes.get("sinal_critico")),
+    }
+
+
+@router.get("/olts", response_model=List[EquipamentoOltNotificacaoResponse])
+def listar_olts_notificacao(
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """OLTs ativas com o resumo das ONUs do último status do agente, para escolher os avisos de cada uma."""
+    consulta = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
+        NVR.tipo == "OLT", NVR.active == True, Machine.active == True
+    )
+    consulta = filtrar_por_conta(consulta, Machine.conta_id, ctx)
+    return [_olt_para_resposta(nvr) for nvr in consulta.order_by(Machine.name, NVR.name).all()]
+
+
+@router.put("/olts/{nvr_id}", response_model=EquipamentoOltNotificacaoResponse)
+def atualizar_olt_notificacao(
+    nvr_id: UUID,
+    body: OltNotificarUpdate,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(exigir_admin_conta),
+):
+    """Liga/desliga os avisos de ONU offline e/ou de sinal óptico crítico de uma OLT (admin da conta ou super admin)."""
+    consulta = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(NVR.id == nvr_id, NVR.tipo == "OLT")
+    nvr = filtrar_por_conta(consulta, Machine.conta_id, ctx).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    opcoes = dict(nvr.olt_notificar or {})
+    for campo, valor in body.model_dump(exclude_none=True).items():
+        opcoes[campo] = valor
+    nvr.olt_notificar = opcoes  # dict novo: o SQLAlchemy só detecta mudança em JSON por atribuição
+    verificar_olt_equipamento(db, nvr)
+    db.commit()
+    return _olt_para_resposta(nvr)
 
 
 # ─── Notificações personalizadas (criadas pelo usuário) ───────────────────────────────────────

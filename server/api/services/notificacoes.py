@@ -25,6 +25,8 @@ LIMIAR_CAMERA_OFFLINE_MIN = 15    # câmera marcada para notificar, offline por 
 LIMIAR_ALARME_SEM_DADOS_MIN = 20  # status dos alarmes mais velho que isso (agente coleta a cada 5 min) não abre nem fecha alerta
 LIMIAR_ANTENA_OFFLINE_MIN = 10    # antena marcada para notificar, fora do ar por mais que isso = notificação (o agente coleta a cada 3 min)
 LIMIAR_ANTENA_SEM_DADOS_MIN = 20  # status das antenas mais velho que isso não abre nem fecha alerta
+LIMIAR_OLT_MIN = 10              # ONU offline/sinal crítico por mais que isso entra no alerta da OLT (o agente coleta a cada 5 min)
+LIMIAR_OLT_SEM_DADOS_MIN = 20    # status da OLT mais velho que isso não abre nem fecha alerta
 
 
 def tipo_ativo(db: Session, conta_id, tipo: str) -> bool:
@@ -506,11 +508,163 @@ def verificar_antenas(db: Session, agora: Optional[datetime] = None) -> int:
     return enviados
 
 
+# ─── OLT: ONUs offline e sinal óptico crítico (opt-in por equipamento OLT, NVR.olt_notificar) ───────────────
+
+ESTADOS_ONU_OFFLINE = {"SEM_ENERGIA": "sem energia", "FALHA": "fibra desconectada", "OFFLINE": "offline"}
+MAX_ONUS_NA_MENSAGEM = 15
+# (categoria em NVR.olt_alertas, tipo da notificação, chave em NVR.olt_notificar)
+CATEGORIAS_OLT = (("onu", "ONU_OFFLINE", "onu_offline"), ("sinal", "SINAL_OPTICO", "sinal_critico"))
+
+
+def _chave_onu(onu: dict) -> str:
+    if onu.get("indice"):
+        return str(onu["indice"])
+    return "/".join(str(onu.get(c)) for c in ("slot", "pon", "onu"))
+
+
+def _rotulo_onu(onu: dict) -> str:
+    posicao = "/".join(str(onu.get(c)) for c in ("slot", "pon", "onu") if onu.get(c) is not None)
+    nome = onu.get("nome") or onu.get("serial") or (f"ONU {posicao}" if posicao else "ONU")
+    return f"{nome} ({posicao})" if posicao and nome != f"ONU {posicao}" else nome
+
+
+def _dbm_onu(onu: dict):
+    for campo in ("sinal_olt_dbm", "sinal_onu_dbm"):
+        if isinstance(onu.get(campo), (int, float)):
+            return onu[campo]
+    return None
+
+
+def _onu_no_problema(categoria: str, onu: dict) -> bool:
+    if categoria == "onu":
+        return onu.get("estado") in ESTADOS_ONU_OFFLINE
+    return onu.get("estado") == "ONLINE" and onu.get("qualidade") == "RUIM"
+
+
+def _texto_alerta_olt(categoria: str, nvr: NVR, nome_olt: str, onus: list) -> tuple:
+    """(titulo, mensagem) do alerta de uma OLT com as ONUs que estão no problema há mais do limiar."""
+    onde = nome_olt if nome_olt == nvr.name else f"{nome_olt} ({nvr.name})"
+    lista = []
+    for o in onus[:MAX_ONUS_NA_MENSAGEM]:
+        if categoria == "onu":
+            lista.append(f"{_rotulo_onu(o)}: {ESTADOS_ONU_OFFLINE[o['estado']]}")
+        else:
+            dbm = _dbm_onu(o)
+            lista.append(f"{_rotulo_onu(o)}: {dbm:.1f} dBm".replace(".", ",") if dbm is not None else _rotulo_onu(o))
+    resto = f" (+{len(onus) - MAX_ONUS_NA_MENSAGEM} outras)" if len(onus) > MAX_ONUS_NA_MENSAGEM else ""
+    if categoria == "onu":
+        contagem = {}
+        for o in onus:
+            contagem[o["estado"]] = contagem.get(o["estado"], 0) + 1
+        partes = ", ".join(f"{n} {ESTADOS_ONU_OFFLINE[e]}" for e, n in contagem.items())
+        titulo = f"{len(onus)} ONU(s) offline na OLT '{onde}'"
+        mensagem = f"{len(onus)} ONU(s) offline há mais de {LIMIAR_OLT_MIN} min ({partes}): {'; '.join(lista)}{resto}."
+    else:
+        titulo = f"{len(onus)} ONU(s) com sinal óptico crítico na OLT '{onde}'"
+        mensagem = (f"{len(onus)} ONU(s) com sinal óptico crítico (-27 dBm ou pior) há mais de {LIMIAR_OLT_MIN} min: "
+                    f"{'; '.join(lista)}{resto}.")
+    return titulo[:255], mensagem
+
+
+def verificar_olt_equipamento(db: Session, nvr: NVR, agora: Optional[datetime] = None) -> int:
+    """Abre/atualiza/resolve as notificações ONU_OFFLINE e SINAL_OPTICO de um equipamento OLT: uma por OLT do
+    equipamento (`referencia` = nome da OLT), com as ONUs que estão no problema há mais de LIMIAR_OLT_MIN minutos.
+    Quando a ONU entra no problema, o momento fica em `NVR.olt_alertas`; o e-mail sai quando o alerta abre e quando
+    entram ONUs que ainda não foram avisadas (não repete diariamente). OLT que não respondeu nesta leitura mantém o
+    alerta como estava. Relatório velho demais não muda nada. Retorna quantos e-mails saíram."""
+    agora = agora or datetime.utcnow()
+    status = nvr.olt_status or {}
+    coletado = _data_status(status.get("atualizado_em"))
+    if coletado is None or agora - coletado > timedelta(minutes=LIMIAR_OLT_SEM_DADOS_MIN):
+        return 0
+    opcoes = nvr.olt_notificar or {}
+    conta_id = nvr.machine.conta_id
+    conta = nvr.machine.conta
+    estado_antigo = nvr.olt_alertas or {}
+    estado_novo = {"avisadas": {}}
+    agora_txt = agora.strftime("%Y-%m-%dT%H:%M:%S")
+    olts = [o for o in status.get("olts") or [] if isinstance(o, dict)]
+    enviados = 0
+
+    for categoria, tipo, opcao in CATEGORIAS_OLT:
+        abertas = db.query(Notificacao).filter(
+            Notificacao.conta_id == conta_id, Notificacao.tipo == tipo, Notificacao.nvr_id == nvr.id,
+            Notificacao.resolvido_em.is_(None),
+        ).all()
+        if not opcoes.get(opcao):
+            for notif in abertas:
+                notif.resolvido_em = agora
+            continue
+
+        desde_antes = estado_antigo.get(categoria) or {}
+        avisadas_antes = (estado_antigo.get("avisadas") or {}).get(categoria) or {}
+        desde_agora, avisadas_agora, problemas, sem_resposta = {}, {}, {}, set()
+        for olt in olts:
+            nome_olt = str(olt.get("nome") or olt.get("ip") or nvr.name)
+            prefixo = f"{nome_olt}|"
+            if olt.get("erro"):
+                sem_resposta.add(nome_olt)  # leitura falhou: mantém o que se sabia dessa OLT
+                desde_agora.update({k: v for k, v in desde_antes.items() if k.startswith(prefixo)})
+                if nome_olt in avisadas_antes:
+                    avisadas_agora[nome_olt] = avisadas_antes[nome_olt]
+                continue
+            vencidas = []
+            for onu in olt.get("onus") or []:
+                if not isinstance(onu, dict) or not _onu_no_problema(categoria, onu):
+                    continue
+                chave = prefixo + _chave_onu(onu)
+                desde_agora[chave] = desde_antes.get(chave) or agora_txt
+                inicio = _data_status(desde_agora[chave])
+                if inicio is not None and agora - inicio >= timedelta(minutes=LIMIAR_OLT_MIN):
+                    vencidas.append((chave, onu))
+            if vencidas:
+                problemas[nome_olt] = vencidas
+
+        for notif in abertas:
+            if notif.referencia not in problemas and notif.referencia not in sem_resposta:
+                notif.resolvido_em = agora
+
+        for nome_olt, vencidas in problemas.items():
+            titulo, mensagem = _texto_alerta_olt(categoria, nvr, nome_olt, [o for _, o in vencidas])
+            notif = abrir_ou_atualizar(db, conta_id, tipo, titulo, mensagem, nvr_id=nvr.id, referencia=nome_olt[:120])
+            chaves = sorted(k for k, _ in vencidas)
+            ja_avisadas = set(avisadas_antes.get(nome_olt) or [])
+            if set(chaves) - ja_avisadas:
+                if conta and _enviar_email_alarme(db, conta, titulo, mensagem):
+                    notif.ultimo_email_em = agora.date()
+                    enviados += 1
+                    ja_avisadas = set(chaves)
+            # só as que continuam no problema: uma ONU que voltou e caiu de novo é avisada de novo
+            avisadas_agora[nome_olt] = sorted(ja_avisadas & set(chaves))
+
+        estado_novo[categoria] = desde_agora
+        estado_novo["avisadas"][categoria] = avisadas_agora
+
+    nvr.olt_alertas = estado_novo  # objeto novo: o SQLAlchemy só detecta mudança em JSON por atribuição
+    return enviados
+
+
+def verificar_olts(db: Session, agora: Optional[datetime] = None) -> int:
+    """Roda `verificar_olt_equipamento` nas OLTs ativas com algum aviso ligado. Retorna quantos e-mails saíram."""
+    enviados = 0
+    nvrs = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
+        NVR.tipo == "OLT", NVR.active == True, Machine.active == True
+    ).all()
+    for nvr in nvrs:
+        if not (nvr.olt_notificar or nvr.olt_alertas):
+            continue
+        try:
+            enviados += verificar_olt_equipamento(db, nvr, agora)
+        except Exception:
+            logger.exception("Falha ao verificar as ONUs de '%s' (%s)", getattr(nvr, "name", ""), getattr(nvr, "id", None))
+    return enviados
+
+
 def verificar_notificacoes(db: Session) -> dict:
     """Roda as verificações (cada uma isolada: uma falhar não impede as outras) e salva. Usada pela tarefa
     de fundo do main.py. Retorna um pequeno resumo para o log."""
     resumo = {"emails_licenca": 0, "emails_personalizadas": 0, "emails_camera_offline": 0, "emails_alarme": 0,
-              "emails_antena": 0}
+              "emails_antena": 0, "emails_olt": 0}
     try:
         resumo["emails_licenca"] = verificar_licencas_unm2000(db)
     except Exception:
@@ -531,6 +685,10 @@ def verificar_notificacoes(db: Session) -> dict:
         resumo["emails_alarme"] = verificar_alarmes(db)
     except Exception:
         logger.exception("Falha geral ao verificar alarmes")
+    try:
+        resumo["emails_olt"] = verificar_olts(db)
+    except Exception:
+        logger.exception("Falha geral ao verificar ONUs das OLTs")
     try:
         resumo["emails_antena"] = verificar_antenas(db)
     except Exception:

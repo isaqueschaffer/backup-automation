@@ -434,7 +434,7 @@ class ComandoAlarmeResultado(BaseModel):
 # ─────────────────────────────────────────────
 # Notificações
 # ─────────────────────────────────────────────
-TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE", "ALARME", "ANTENA_OFFLINE"]
+TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE", "ALARME", "ANTENA_OFFLINE", "ONU_OFFLINE", "SINAL_OPTICO"]
 ModoNotificacaoPersonalizada = Literal["RECORRENTE", "DATA"]
 
 
@@ -506,6 +506,29 @@ class EquipamentoAlarmesNotificacaoResponse(BaseModel):
 
 class CentralAlarmeNotificarUpdate(BaseModel):
     notificar: bool
+
+
+# Notificação de ONUs (ONU_OFFLINE) e sinal óptico (SINAL_OPTICO): opt-in por equipamento OLT
+class EquipamentoOltNotificacaoResponse(BaseModel):
+    nvr_id: UUID
+    nvr_nome: str
+    machine_id: UUID
+    machine_nome: str
+    fabricante: Optional[str] = None
+    atualizado_em: Optional[str] = None
+    erro: Optional[str] = None
+    total_onus: int = 0
+    onus_offline: int = 0
+    onus_sem_energia: int = 0
+    onus_fibra: int = 0
+    onus_sinal_critico: int = 0
+    onu_offline: bool = False
+    sinal_critico: bool = False
+
+
+class OltNotificarUpdate(BaseModel):
+    onu_offline: Optional[bool] = None
+    sinal_critico: Optional[bool] = None
 
 
 class NotificacaoPersonalizadaBase(BaseModel):

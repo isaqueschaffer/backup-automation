@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedAuditoria, PaginatedBackups, TipoNotificacao } from "./types";
+import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, EquipamentoOltNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedAuditoria, PaginatedBackups, TipoNotificacao } from "./types";
 import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -268,6 +268,14 @@ export const comandarCentralAlarme = (
   machineId: string, nvrId: string, centralId: string, acao: "ARMAR" | "DESARMAR",
 ): Promise<{ sucesso: boolean; mensagem?: string | null }> =>
   api.post(`/machines/${machineId}/equipamentos/${nvrId}/alarmes/comando`, { central_id: centralId, acao }).then((r) => r.data);
+
+export const fetchOltsNotificacao = (): Promise<EquipamentoOltNotificacao[]> =>
+  api.get("/notificacoes/olts").then((r) => r.data);
+
+export const atualizarOltNotificacao = (
+  nvrId: string, opcoes: { onu_offline?: boolean; sinal_critico?: boolean },
+): Promise<EquipamentoOltNotificacao> =>
+  api.put(`/notificacoes/olts/${nvrId}`, opcoes).then((r) => r.data);
 
 export const fetchAlarmesNotificacao =(): Promise<EquipamentoAlarmesNotificacao[]> =>
   api.get("/notificacoes/alarmes").then((r) => r.data);

@@ -234,6 +234,9 @@ _MIGRACOES_COLUNAS = [
     ("notificacoes", "referencia", "ALTER TABLE notificacoes ADD COLUMN referencia VARCHAR(120);"),
     # Equipamento ANTENA: status das antenas lido pelo MikroTik (enviado pelo agente)
     ("nvrs", "antena_status", "ALTER TABLE nvrs ADD COLUMN antena_status JSON;"),
+    # Notificação de ONUs offline e sinal óptico crítico (OLT): avisos ligados e estado dos alertas
+    ("nvrs", "olt_notificar", "ALTER TABLE nvrs ADD COLUMN olt_notificar JSON;"),
+    ("nvrs", "olt_alertas", "ALTER TABLE nvrs ADD COLUMN olt_alertas JSON;"),
 ]
 
 _colunas_cache: dict = {}
@@ -255,8 +258,8 @@ if _tem_tabela("notificacoes"):
     _run_ddl("ALTER TABLE notificacoes DROP CONSTRAINT IF EXISTS ck_notificacoes_tipo;", "dropar ck_notificacoes_tipo antigo")
     _run_ddl(
         "ALTER TABLE notificacoes ADD CONSTRAINT ck_notificacoes_tipo "
-        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME', 'ANTENA_OFFLINE'));",
-        "recriar ck_notificacoes_tipo com PERSONALIZADA, CAMERA_OFFLINE, ALARME e ANTENA_OFFLINE",
+        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME', 'ANTENA_OFFLINE', 'ONU_OFFLINE', 'SINAL_OPTICO'));",
+        "recriar ck_notificacoes_tipo com PERSONALIZADA, CAMERA_OFFLINE, ALARME, ANTENA_OFFLINE, ONU_OFFLINE e SINAL_OPTICO",
     )
 
 

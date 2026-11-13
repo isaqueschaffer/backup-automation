@@ -569,7 +569,7 @@ export interface AlarmeStatusResponse {
 }
 
 // ─── Notificações ───────────────────────────────────────────────────────────
-export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE" | "ALARME" | "ANTENA_OFFLINE";
+export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE" | "ALARME" | "ANTENA_OFFLINE" | "ONU_OFFLINE" | "SINAL_OPTICO";
 export type ModoNotificacaoPersonalizada = "RECORRENTE" | "DATA";
 
 export interface Notificacao {
@@ -612,6 +612,24 @@ export interface CentralAlarmeNotificacao {
   particoes_total: number;
   particoes_desarmadas: number;
   notificar: boolean;
+}
+
+// Opt-in por equipamento OLT: ONU offline (ONU_OFFLINE) e sinal óptico crítico (SINAL_OPTICO)
+export interface EquipamentoOltNotificacao {
+  nvr_id: string;
+  nvr_nome: string;
+  machine_id: string;
+  machine_nome: string;
+  fabricante?: string | null;
+  atualizado_em?: string | null;
+  erro?: string | null;
+  total_onus: number;
+  onus_offline: number;
+  onus_sem_energia: number;
+  onus_fibra: number;
+  onus_sinal_critico: number;
+  onu_offline: boolean;
+  sinal_critico: boolean;
 }
 
 export interface EquipamentoAlarmesNotificacao {

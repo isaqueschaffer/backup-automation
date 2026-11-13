@@ -272,6 +272,8 @@ No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta
 | last_recording_status | JSON | list | NULL | — |
 | last_telemetry_status | JSON | dict | NULL | — |
 | olt_status | JSON | dict | NULL | OLT UNM2000: `{"atualizado_em", "olts": [...]}` enviado pelo agente a cada 5 min (Telnet) |
+| olt_notificar | JSON | dict | NULL | OLT: avisos ligados `{"onu_offline": bool, "sinal_critico": bool}` (opt-in; vazio = desligados) |
+| olt_alertas | JSON | dict | NULL | OLT: estado dos alertas `{"onu": {chave: desde}, "sinal": {chave: desde}, "avisadas": {categoria: {olt: [chaves]}}}` (chave = `<OLT>|<índice ou slot/pon/onu>`, datas naive em UTC) |
 | antena_status | JSON | dict | NULL | ANTENA: `{"atualizado_em", "erro", "mikrotik": {identidade, ip, dispositivos}, "antenas": [...], "descobertas": [...]}` enviado pelo agente a cada 3 min (SSH no MikroTik + ping) |
 | conexao_status | JSON | dict | NULL | Último "Testar conexão": `{"ok", "mensagem", "etapas": [{"id", "rotulo", "estado", "detalhe"}], "segundos", "testado_em"}` (`testado_em` naive em UTC) |
 | active | BOOLEAN | bool | NOT NULL | TRUE |
@@ -1118,6 +1120,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-13] — Notificações: seção "OLTs" com aviso de ONU offline e de sinal óptico crítico
+
+- **Tela** (Notificações): nova seção **OLTs**, no mesmo formato das de câmeras e alarmes (máquina → OLT → opções). Em cada OLT, dois avisos independentes, ligados/desligados separadamente: **ONU offline** (sem energia, fibra desconectada ou offline) e **Sinal óptico crítico** (ONU online com qualidade `RUIM`, -27 dBm ou pior, a mesma classificação do modal de ONUs). Mostra o que está acontecendo agora (contagem por causa) e quando foi a última leitura. Começam desativados (opt-in); perfil LEITURA só vê.
+- **Regra** (`services/notificacoes.verificar_olt_equipamento`, chamada ao receber o status da OLT e no ciclo de 10 min): a ONU entra no aviso depois de **10 min** no problema (`LIMIAR_OLT_MIN`; o momento em que entrou fica em `nvrs.olt_alertas`). **Um alerta por OLT** (`referencia` = nome da OLT), com a contagem por causa e a lista das ONUs (até 15, depois "+N outras"); fecha sozinho quando nenhuma ONU está mais no problema. **E-mail** quando o alerta abre e quando entram ONUs ainda não avisadas (não repete todo dia); se o envio falhar, tenta na leitura seguinte; ONU que volta e cai de novo é avisada de novo. OLT que não respondeu na leitura mantém o alerta e as contagens como estavam; status com mais de 20 min não abre nem fecha nada. Desligar o aviso fecha o alerta aberto.
+- **Tipos novos** `ONU_OFFLINE` e `SINAL_OPTICO` em `notificacoes.tipo` (`ck_notificacoes_tipo` recriado na migração). **Colunas** `nvrs.olt_notificar` e `nvrs.olt_alertas` (migração inline). **API**: `GET /api/v1/notificacoes/olts` e `PUT /api/v1/notificacoes/olts/{nvr_id}` (`{onu_offline?, sinal_critico?}`, admin da conta), filtradas pela conta (REGRA-010).
+- **Sem versão nova do agente**: usa o `olt_status` que UNM2000, Huawei e VSOL já enviam (`estado` e `qualidade` de cada ONU).
+- **Testes**: `server/api/tests/test_olt_notificacao.py` (7). **Arquivos:** server/api/{models.py,main.py,schemas.py,routers/{agent.py,notificacoes.py},services/notificacoes.py,tests/test_olt_notificacao.py}, server/dashboard/src/{api/{types.ts,client.ts},utils/notificacoes.ts,pages/Notificacoes/NotificacoesPage.tsx}, PROJECT_SPEC.md.
 
 ### [2026-11-13] — Equipamento tipo ANTENA: status das antenas Wi-Fi (Ruijie etc.) lido pelo MikroTik
 

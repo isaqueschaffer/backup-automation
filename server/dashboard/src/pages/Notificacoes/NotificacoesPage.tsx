@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bell, ChevronDown, ChevronRight, Pencil, Plus, Power, PowerOff, Siren, Trash2, VideoOff } from "lucide-react";
+import { AlertTriangle, Bell, ChevronDown, ChevronRight, Pencil, Plus, Power, PowerOff, Siren, Trash2, Unplug, VideoOff } from "lucide-react";
 import {
   apagarNotificacaoPersonalizada,
   atualizarCameraNotificacao,
   atualizarCentralNotificacao,
   atualizarConfigNotificacao,
   atualizarNotificacaoPersonalizada,
+  atualizarOltNotificacao,
   criarNotificacaoPersonalizada,
   fetchAlarmesNotificacao,
   fetchCamerasNotificacao,
   fetchConfigNotificacoes,
   fetchNotificacoes,
   fetchNotificacoesPersonalizadas,
+  fetchOltsNotificacao,
 } from "../../api/client";
 import {
-  ConfiguracaoNotificacao, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, Notificacao, NotificacaoPersonalizada,
+  ConfiguracaoNotificacao, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, EquipamentoOltNotificacao, Notificacao, NotificacaoPersonalizada,
   NotificacaoPersonalizadaPayload, TipoNotificacao,
 } from "../../api/types";
 import { useToast } from "../../components/Toast";
@@ -33,6 +35,8 @@ const DESCRICAO_TIPO: Record<TipoNotificacao, string> = {
   CAMERA_OFFLINE: "",
   ALARME: "",
   ANTENA_OFFLINE: "",
+  ONU_OFFLINE: "",
+  SINAL_OPTICO: "",
 };
 
 const TIPOS_AUTOMATICOS: TipoNotificacao[] = ["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE"];
@@ -76,6 +80,7 @@ export default function NotificacoesPage() {
   const [personalizadas, setPersonalizadas] = useState<NotificacaoPersonalizada[]>([]);
   const [cameras, setCameras] = useState<EquipamentoCamerasNotificacao[]>([]);
   const [alarmes, setAlarmes] = useState<EquipamentoAlarmesNotificacao[]>([]);
+  const [olts, setOlts] = useState<EquipamentoOltNotificacao[]>([]);
   // chaves "camera:<máquina>" e "alarme:<máquina>": cada card abre e fecha as suas máquinas
   const [maquinasAbertas, setMaquinasAbertas] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -86,9 +91,9 @@ export default function NotificacoesPage() {
     setLoading(true);
     Promise.all([
       fetchNotificacoes(true), fetchConfigNotificacoes(), fetchNotificacoesPersonalizadas(), fetchCamerasNotificacao(),
-      fetchAlarmesNotificacao(),
+      fetchAlarmesNotificacao(), fetchOltsNotificacao(),
     ])
-      .then(([n, c, p, cam, alm]) => { setAbertas(n); setConfig(c); setPersonalizadas(p); setCameras(cam); setAlarmes(alm); })
+      .then(([n, c, p, cam, alm, olt]) => { setAbertas(n); setConfig(c); setPersonalizadas(p); setCameras(cam); setAlarmes(alm); setOlts(olt); })
       .catch(() => toast("Erro ao carregar notificações.", "error"))
       .finally(() => setLoading(false));
   }, [toast]);
@@ -97,6 +102,7 @@ export default function NotificacoesPage() {
 
   const cameraPorMaquina = useMemo(() => agruparPorMaquina(cameras), [cameras]);
   const alarmePorMaquina = useMemo(() => agruparPorMaquina(alarmes), [alarmes]);
+  const oltPorMaquina = useMemo(() => agruparPorMaquina(olts), [olts]);
 
   const alternarTipo = async (tipo: TipoNotificacao, ativoAtual: boolean) => {
     setSalvando(tipo);
@@ -135,6 +141,19 @@ export default function NotificacoesPage() {
     setSalvando(chave);
     try {
       await atualizarCentralNotificacao(nvrId, centralId, !ativoAtual);
+      toast(!ativoAtual ? "Notificação ativada." : "Notificação desativada.", "success");
+      carregar();
+    } catch {
+      toast("Não foi possível alterar essa notificação.", "error");
+    } finally {
+      setSalvando(null);
+    }
+  };
+
+  const alternarOlt = async (nvrId: string, campo: "onu_offline" | "sinal_critico", ativoAtual: boolean) => {
+    setSalvando(`${nvrId}:${campo}`);
+    try {
+      await atualizarOltNotificacao(nvrId, { [campo]: !ativoAtual });
       toast(!ativoAtual ? "Notificação ativada." : "Notificação desativada.", "success");
       carregar();
     } catch {
@@ -340,6 +359,116 @@ export default function NotificacoesPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                  )}
+                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="section-title"><Unplug size={15} color={COR_NOTIFICACAO.ONU_OFFLINE} />OLTs</div>
+          <p className="text-sm text-muted" style={{ marginBottom: 10 }}>
+            Escolha, em cada OLT, se quer aviso de ONU offline (sem energia, fibra desconectada ou offline) e/ou de sinal óptico
+            crítico (-27 dBm ou pior). Uma ONU entra no aviso depois de 10 minutos no problema; vem um alerta por OLT, com a lista
+            das ONUs, e o e-mail sai quando o alerta abre e quando entram ONUs novas. O agente lê as ONUs a cada 5 minutos. OLTs
+            novas começam com os dois avisos desativados.
+          </p>
+          {oltPorMaquina.length === 0 ? (
+            <p className="text-sm text-muted">Nenhuma OLT cadastrada.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {oltPorMaquina.map((maquina) => {
+                const chave = `olt:${maquina.machine_id}`;
+                const aberta = maquinasAbertas.has(chave);
+                const totalOffline = maquina.equipamentos.reduce((s, eq) => s + eq.onus_offline + eq.onus_sem_energia + eq.onus_fibra, 0);
+                const totalSinal = maquina.equipamentos.reduce((s, eq) => s + eq.onus_sinal_critico, 0);
+                return (
+                <div key={maquina.machine_id}>
+                  <button
+                    type="button"
+                    onClick={() => alternarMaquinaAberta(chave)}
+                    aria-expanded={aberta}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+                      background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
+                      borderBottom: aberta ? "none" : "1px solid var(--border)",
+                    }}
+                  >
+                    {aberta ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)" }}>{maquina.machine_nome}</span>
+                    <span style={SELO_NEUTRO}>{maquina.equipamentos.length} OLT(s)</span>
+                    {totalOffline > 0 && <span style={SELO_ERRO}>{totalOffline} ONU(s) offline</span>}
+                    {totalSinal > 0 && <span style={SELO_ERRO}>{totalSinal} com sinal crítico</span>}
+                  </button>
+                  {aberta && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingLeft: 20, marginTop: 10, marginBottom: 10, borderLeft: "2px solid var(--border)" }}>
+                    {maquina.equipamentos.map((eq) => {
+                      const offline = eq.onus_offline + eq.onus_sem_energia + eq.onus_fibra;
+                      const opcoes: { campo: "onu_offline" | "sinal_critico"; rotulo: string; detalhe: string; problema: boolean }[] = [
+                        {
+                          campo: "onu_offline", rotulo: "ONU offline",
+                          detalhe: offline > 0
+                            ? `Agora: ${eq.onus_sem_energia} sem energia, ${eq.onus_fibra} fibra desconectada, ${eq.onus_offline} offline`
+                            : "Sem energia, fibra desconectada ou offline",
+                          problema: offline > 0,
+                        },
+                        {
+                          campo: "sinal_critico", rotulo: "Sinal óptico crítico",
+                          detalhe: eq.onus_sinal_critico > 0 ? `Agora: ${eq.onus_sinal_critico} ONU(s) com -27 dBm ou pior` : "-27 dBm ou pior, em ONU online",
+                          problema: eq.onus_sinal_critico > 0,
+                        },
+                      ];
+                      return (
+                      <div key={eq.nvr_id}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, color: eqCor("OLT"), flexWrap: "wrap" }}>
+                          {eqIcone("OLT", 14)}
+                          <span style={{ fontWeight: 600, fontSize: 12.5, color: "var(--text-primary)" }}>{eq.nvr_nome}</span>
+                          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                            ({eq.fabricante || "OLT"}{eq.atualizado_em ? ` · ${eq.total_onus} ONU(s) · coletado em ${fmtDate(eq.atualizado_em, { short: true })}` : ""})
+                          </span>
+                        </div>
+                        {eq.erro && (
+                          <div style={{ fontSize: 12, color: "var(--err)", padding: "4px 4px 8px" }}>Sem resposta da OLT: {eq.erro}</div>
+                        )}
+                        {!eq.atualizado_em && (
+                          <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "4px 4px 8px" }}>
+                            Ainda sem leitura das ONUs. O agente envia o status a cada 5 minutos (OLT com monitoramento configurado).
+                          </div>
+                        )}
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          {opcoes.map((op) => {
+                            const ativo = eq[op.campo];
+                            const chaveOpcao = `${eq.nvr_id}:${op.campo}`;
+                            return (
+                            <div key={op.campo}
+                              style={{ display: "flex", gap: 12, alignItems: "center", padding: "8px 4px", borderBottom: "1px solid var(--border)" }}>
+                              <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: op.problema ? "var(--err)" : "var(--ok)" }} />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 500, fontSize: 13 }}>{op.rotulo}</div>
+                                <div style={{ fontSize: 12, color: op.problema ? "var(--err)" : "var(--text-muted)" }}>{op.detalhe}</div>
+                              </div>
+                              {!somenteLeitura && (
+                                <button
+                                  type="button"
+                                  className={`btn btn-sm ${ativo ? "btn-secondary" : "btn-primary"}`}
+                                  disabled={salvando === chaveOpcao}
+                                  onClick={() => alternarOlt(eq.nvr_id, op.campo, ativo)}
+                                  style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}
+                                >
+                                  {ativo ? <Power size={13} /> : <PowerOff size={13} />}
+                                  {ativo ? "Ativada" : "Desativada"}
+                                </button>
+                              )}
+                            </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      );
+                    })}
                   </div>
                   )}
                 </div>
