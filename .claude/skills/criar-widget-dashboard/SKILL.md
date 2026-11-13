@@ -16,14 +16,14 @@ então só devolva o que o cliente pode ver (nada de IP, usuário, senha, `confi
    - Use `ctx.maquinas` (só as ativas do cliente, com equipamentos carregados) e `filtrar_maquinas(ctx, config.maquinas)`: ids de outros clientes são ignorados.
    - Consultas extras sempre filtradas por `ctx.maquinas`/`ctx.customer.id`. Datas em UTC naive; serialize com `iso(dt)`.
    - Telemetria só por `telemetria_publica(...)` (lista branca). Resultado serializável em JSON.
-3. **Registro**: no fim do arquivo, `registrar(TipoWidget(tipo="x", rotulo=..., descricao=..., config_model=ConfigX, largura_padrao=<2..12 colunas>, altura_padrao=<1..40 linhas de 50px>, construir=construir_x))`.
+3. **Registro**: no fim do arquivo, `registrar(TipoWidget(tipo="x", rotulo=..., descricao=..., config_model=ConfigX, largura_padrao=<2..24 colunas>, altura_padrao=<1..80 linhas de 31px>, construir=construir_x))`.
 4. Se a config referencia ids de máquina/equipamento, confira `ids_referenciados` em `layout.py`: ele lê as chaves `maquinas` (qualquer widget) e `equipamentos` (nos widgets `cameras`, `telemetria_equipamentos` e `status_nvr`). Chave nova de id exige ajustar essa função (senão o 422 de isolamento não cobre o campo).
 
 ## Front (`server/dashboard/src/pages/Dashboards/`)
 
 1. **Tipos** em `types.ts`: `DadosX` com o formato devolvido pela montagem.
 2. **Componente** `widgets/XWidget.tsx`: `({ dados, widget })`, estilos inline e variáveis CSS; texto sempre como texto (nunca HTML). O tamanho é livre (o usuário redimensiona): reorganize o conteúdo pela área (`flexWrap`, grades `auto-fit`, `useElementSize` para gráficos) e **não crie rolagem própria** na raiz (`overflow: auto`): a rolagem é do quadro (`data-widget-corpo`), que é o que o "ajustar ao conteúdo" mede. Tabelas ficam num contêiner com `overflowX: auto` e altura automática. Nenhuma informação pode ser cortada.
-3. **Registro** em `widgets/registry.tsx` (`DEFINICOES`): `rotulo`, `descricao`, `icone` (lucide), `larguraPadrao`, `alturaPadrao` (colunas e linhas de 50px, iguais às do backend), `larguraMin`/`alturaMin` (menor tamanho em que o conteúdo ainda cabe; o usuário redimensiona com o mouse e o editor respeita esse mínimo), `configPadrao` (igual aos defaults do Pydantic), `renderizar` (um único cast de `unknown` para `DadosX`) e `campos`.
+3. **Registro** em `widgets/registry.tsx` (`DEFINICOES`): `rotulo`, `descricao`, `icone` (lucide), `larguraPadrao`, `alturaPadrao` (grade de 24 colunas e linhas de 31 px, iguais às do backend; o widget novo vai para o primeiro lugar livre), `larguraMin`/`alturaMin` (menor tamanho que o editor deixa redimensionar; o conteúdo que não couber rola dentro do widget). Não pôr `overscroll-behavior: contain` no corpo do widget: prende a roda do mouse e a página para de rolar, `configPadrao` (igual aos defaults do Pydantic), `renderizar` (um único cast de `unknown` para `DadosX`) e `campos`.
 4. **Campos de configuração** (`CampoWidget`): `maquinas`, `equipamentos`, `tipos`, `periodo`, `opcao` (select com `opcoes`), `booleano` e `texto`. O modal de configuração é gerado a partir deles; tipo de campo novo exige tratar em `WidgetConfigModal.tsx`.
 5. O catálogo do servidor (`GET /api/v1/dashboards/widgets`) já lista o tipo novo sozinho.
 

@@ -1108,13 +1108,14 @@ def construir_alarmes_defense(ctx: ContextoDados, config: ConfigAlarmesDefense) 
 
 
 # ─── Registro dos tipos de widget ──────────────────────────────────────────
+# Tamanhos na grade do schema 3 (24 colunas, linhas de 31 px)
 registrar(TipoWidget(
     tipo="resumo",
     rotulo="Resumo",
     descricao="Visão geral de máquinas, backups e câmeras do cliente",
     config_model=ConfigResumo,
-    largura_padrao=12,
-    altura_padrao=3,
+    largura_padrao=24,
+    altura_padrao=6,
     construir=construir_resumo,
 ))
 
@@ -1123,8 +1124,8 @@ registrar(TipoWidget(
     rotulo="Saúde do servidor",
     descricao="Medidores de CPU, RAM, disco, rede e GPU das máquinas",
     config_model=ConfigSaudeServidor,
-    largura_padrao=12,
-    altura_padrao=9,
+    largura_padrao=24,
+    altura_padrao=18,
     construir=construir_saude_servidor,
 ))
 
@@ -1133,8 +1134,8 @@ registrar(TipoWidget(
     rotulo="Status dos backups",
     descricao="Último status de backup por máquina e por equipamento",
     config_model=ConfigStatusBackups,
-    largura_padrao=6,
-    altura_padrao=6,
+    largura_padrao=12,
+    altura_padrao=12,
     construir=construir_status_backups,
 ))
 
@@ -1143,8 +1144,8 @@ registrar(TipoWidget(
     rotulo="Histórico de backups",
     descricao="Histórico de execuções com taxa de sucesso e duração",
     config_model=ConfigHistoricoBackups,
-    largura_padrao=6,
-    altura_padrao=6,
+    largura_padrao=12,
+    altura_padrao=12,
     construir=construir_historico_backups,
 ))
 
@@ -1153,8 +1154,8 @@ registrar(TipoWidget(
     rotulo="Câmeras e gravação",
     descricao="Status de comunicação e gravação das câmeras",
     config_model=ConfigCameras,
-    largura_padrao=6,
-    altura_padrao=6,
+    largura_padrao=12,
+    altura_padrao=12,
     construir=construir_cameras,
 ))
 
@@ -1163,8 +1164,8 @@ registrar(TipoWidget(
     rotulo="Gravadores (CPU, RAM e discos)",
     descricao="Telemetria dos gravadores (NVR/DVR) personalizável: escolha CPU, memória, tempo ligado e, por disco, uso, temperatura, saúde, capacidade e idade",
     config_model=ConfigTelemetriaEquipamentos,
-    largura_padrao=6,
-    altura_padrao=6,
+    largura_padrao=12,
+    altura_padrao=12,
     construir=construir_telemetria_equipamentos,
 ))
 
@@ -1173,8 +1174,8 @@ registrar(TipoWidget(
     rotulo="Equipamentos",
     descricao="Lista de equipamentos cadastrados por tipo",
     config_model=ConfigEquipamentos,
-    largura_padrao=6,
-    altura_padrao=6,
+    largura_padrao=12,
+    altura_padrao=12,
     construir=construir_equipamentos,
 ))
 
@@ -1183,8 +1184,8 @@ registrar(TipoWidget(
     rotulo="Texto",
     descricao="Bloco de texto livre ou aviso institucional",
     config_model=ConfigTexto,
-    largura_padrao=4,
-    altura_padrao=3,
+    largura_padrao=8,
+    altura_padrao=6,
     construir=construir_texto,
 ))
 
@@ -1193,8 +1194,8 @@ registrar(TipoWidget(
     rotulo="Status dos NVRs (pizza)",
     descricao="Gráfico de pizza com a situação das câmeras de cada NVR: gravando, sem gravação, offline e não verificado",
     config_model=ConfigStatusNvr,
-    largura_padrao=6,
-    altura_padrao=8,
+    largura_padrao=12,
+    altura_padrao=16,
     construir=construir_status_nvr,
 ))
 
@@ -1203,8 +1204,8 @@ registrar(TipoWidget(
     rotulo="Antenas Wi-Fi",
     descricao="Antenas online e fora do ar (com há quanto tempo), problemas primeiro",
     config_model=ConfigAntenas,
-    largura_padrao=6,
-    altura_padrao=6,
+    largura_padrao=12,
+    altura_padrao=12,
     construir=construir_antenas,
 ))
 
@@ -1213,8 +1214,8 @@ registrar(TipoWidget(
     rotulo="OLTs e ONUs",
     descricao="ONUs online, fora do ar e com sinal ruim por OLT, PONs com problema e licença da UNM2000",
     config_model=ConfigStatusOlt,
-    largura_padrao=6,
-    altura_padrao=7,
+    largura_padrao=12,
+    altura_padrao=14,
     construir=construir_status_olt,
 ))
 
@@ -1223,7 +1224,7 @@ registrar(TipoWidget(
     rotulo="Centrais de alarme",
     descricao="Disparos, centrais desconectadas e partições das centrais de alarme do Defense",
     config_model=ConfigAlarmesDefense,
-    largura_padrao=6,
-    altura_padrao=6,
+    largura_padrao=12,
+    altura_padrao=12,
     construir=construir_alarmes_defense,
 ))

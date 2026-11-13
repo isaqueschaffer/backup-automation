@@ -1,92 +1,169 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardLayout, Periodo, WidgetInstancia } from "./types";
 import { DefinicaoWidget } from "./widgets/registry";
+import { compactar, posicionar, primeiroLugarLivre } from "./gradeLayout";
 
-// Gerencia o estado de rascunho de um dashboard em edição
+const LIMITE_HISTORICO = 100;
+
+interface Historico {
+  passado: DashboardLayout[];
+  atual: DashboardLayout;
+  futuro: DashboardLayout[];
+}
+
+type PatchWidget = Partial<
+  Pick<WidgetInstancia, "titulo" | "x" | "y" | "largura" | "altura" | "config">
+>;
+
+const novoHistorico = (layout: DashboardLayout): Historico => ({
+  passado: [],
+  atual: layout,
+  futuro: [],
+});
+
+// Gerencia o rascunho de um dashboard em edição, com desfazer/refazer.
+// Cada alteração vira um passo do histórico; arrastar e redimensionar só gravam ao soltar.
 export function useDashboardDraft(salvo: DashboardLayout) {
-  const [draft, setDraft] = useState<DashboardLayout>(salvo);
+  const [hist, setHist] = useState<Historico>(() => novoHistorico(salvo));
 
   useEffect(() => {
-    setDraft(salvo);
+    setHist(novoHistorico(salvo));
   }, [salvo]);
+
+  const draft = hist.atual;
 
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(salvo),
     [draft, salvo]
   );
 
-  const adicionar = useCallback((def: DefinicaoWidget): WidgetInstancia => {
-    let id = "";
-    do {
-      id = `${def.tipo}-${Math.random().toString(36).slice(2, 8)}`;
-    } while (draft.widgets.some((w) => w.id === id));
-
-    const novo: WidgetInstancia = {
-      id,
-      tipo: def.tipo,
-      titulo: null,
-      largura: def.larguraPadrao,
-      altura: def.alturaPadrao,
-      config: structuredClone(def.configPadrao),
-    };
-
-    setDraft((prev) => ({
-      ...prev,
-      widgets: [...prev.widgets, novo],
-    }));
-
-    return novo;
-  }, [draft.widgets]);
-
-  const remover = useCallback((id: string) => {
-    setDraft((prev) => ({
-      ...prev,
-      widgets: prev.widgets.filter((w) => w.id !== id),
-    }));
-  }, []);
-
-  const mover = useCallback((id: string, alvoId: string, antes: boolean) => {
-    setDraft((prev) => {
-      const fromIdx = prev.widgets.findIndex((w) => w.id === id);
-      if (fromIdx === -1) return prev;
-      const nextWidgets = [...prev.widgets];
-      const [item] = nextWidgets.splice(fromIdx, 1);
-      const insertIdx = nextWidgets.findIndex((w) => w.id === alvoId);
-      if (insertIdx === -1) return prev;
-      nextWidgets.splice(antes ? insertIdx : insertIdx + 1, 0, item);
-      return {
-        ...prev,
-        widgets: nextWidgets,
-      };
-    });
-  }, []);
-
-  const atualizar = useCallback(
-    (
-      id: string,
-      patch: Partial<Pick<WidgetInstancia, "titulo" | "largura" | "altura" | "config">>
-    ) => {
-      setDraft((prev) => ({
-        ...prev,
-        widgets: prev.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)),
-      }));
+  const aplicar = useCallback(
+    (fn: (l: DashboardLayout) => DashboardLayout, semHistorico = false) => {
+      setHist((prev) => {
+        const novo = fn(prev.atual);
+        if (novo === prev.atual) return prev;
+        if (semHistorico) return { ...prev, atual: novo };
+        return {
+          passado: [...prev.passado, prev.atual].slice(-LIMITE_HISTORICO),
+          atual: novo,
+          futuro: [],
+        };
+      });
     },
     []
   );
 
-  const setPeriodo = useCallback((p: Periodo) => {
-    setDraft((prev) => ({
-      ...prev,
-      filtros: { ...prev.filtros, periodo: p },
-    }));
+  const adicionar = useCallback(
+    (def: DefinicaoWidget): WidgetInstancia => {
+      let id = "";
+      do {
+        id = `${def.tipo}-${Math.random().toString(36).slice(2, 8)}`;
+      } while (draft.widgets.some((w) => w.id === id));
+
+      const { x, y } = primeiroLugarLivre(draft.widgets, def.larguraPadrao, def.alturaPadrao);
+      const novo: WidgetInstancia = {
+        id,
+        tipo: def.tipo,
+        titulo: null,
+        x,
+        y,
+        largura: def.larguraPadrao,
+        altura: def.alturaPadrao,
+        config: structuredClone(def.configPadrao),
+      };
+
+      aplicar((prev) => ({
+        ...prev,
+        widgets: compactar([...prev.widgets, novo]),
+      }));
+
+      return novo;
+    },
+    [draft.widgets, aplicar]
+  );
+
+  const remover = useCallback(
+    (id: string) => {
+      aplicar((prev) => ({
+        ...prev,
+        widgets: compactar(prev.widgets.filter((w) => w.id !== id)),
+      }));
+    },
+    [aplicar]
+  );
+
+  // Troca as posições de uma vez (resultado de um arrasto ou redimensionamento)
+  const definirWidgets = useCallback(
+    (widgets: WidgetInstancia[]) => {
+      aplicar((prev) => ({ ...prev, widgets }));
+    },
+    [aplicar]
+  );
+
+  const atualizar = useCallback(
+    (id: string, patch: PatchWidget, opcoes?: { semHistorico?: boolean }) => {
+      aplicar((prev) => {
+        const atual = prev.widgets.find((w) => w.id === id);
+        if (!atual) return prev;
+        const mudaCaixa =
+          patch.x !== undefined ||
+          patch.y !== undefined ||
+          patch.largura !== undefined ||
+          patch.altura !== undefined;
+        const { x, y, largura, altura, ...resto } = patch;
+        let widgets = prev.widgets.map((w) => (w.id === id ? { ...w, ...resto } : w));
+        if (mudaCaixa) {
+          widgets = posicionar(widgets, id, {
+            x: x ?? atual.x,
+            y: y ?? atual.y,
+            largura: largura ?? atual.largura,
+            altura: altura ?? atual.altura,
+          });
+        }
+        return { ...prev, widgets };
+      }, opcoes?.semHistorico);
+    },
+    [aplicar]
+  );
+
+  const setPeriodo = useCallback(
+    (p: Periodo) => {
+      aplicar((prev) => ({
+        ...prev,
+        filtros: { ...prev.filtros, periodo: p },
+      }));
+    },
+    [aplicar]
+  );
+
+  const desfazer = useCallback(() => {
+    setHist((prev) => {
+      if (prev.passado.length === 0) return prev;
+      return {
+        passado: prev.passado.slice(0, -1),
+        atual: prev.passado[prev.passado.length - 1],
+        futuro: [prev.atual, ...prev.futuro],
+      };
+    });
+  }, []);
+
+  const refazer = useCallback(() => {
+    setHist((prev) => {
+      if (prev.futuro.length === 0) return prev;
+      return {
+        passado: [...prev.passado, prev.atual],
+        atual: prev.futuro[0],
+        futuro: prev.futuro.slice(1),
+      };
+    });
   }, []);
 
   const descartar = useCallback(() => {
-    setDraft(salvo);
+    setHist(novoHistorico(salvo));
   }, [salvo]);
 
   const substituir = useCallback((layout: DashboardLayout) => {
-    setDraft(layout);
+    setHist(novoHistorico(layout));
   }, []);
 
   return {
@@ -94,9 +171,13 @@ export function useDashboardDraft(salvo: DashboardLayout) {
     dirty,
     adicionar,
     remover,
-    mover,
+    definirWidgets,
     atualizar,
     setPeriodo,
+    desfazer,
+    refazer,
+    podeDesfazer: hist.passado.length > 0,
+    podeRefazer: hist.futuro.length > 0,
     descartar,
     substituir,
   };

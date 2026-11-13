@@ -8,9 +8,11 @@ interface Props {
   dados?: DadosWidget;
   acoes?: ReactNode;
   children?: ReactNode;
+  // Em edição, o cabeçalho inteiro serve de alça para arrastar o componente
+  arrastavel?: boolean;
 }
 
-export default function WidgetFrame({ widget, dados, acoes, children }: Props) {
+export default function WidgetFrame({ widget, dados, acoes, children, arrastavel }: Props) {
   const def = definicaoDe(widget.tipo);
   const Icone = def?.icone || AlertCircle;
   const titulo = widget.titulo || def?.rotulo || "Widget";
@@ -30,6 +32,8 @@ export default function WidgetFrame({ widget, dados, acoes, children }: Props) {
     >
       {/* Cabeçalho do widget */}
       <div
+        data-drag-handle={arrastavel ? "" : undefined}
+        title={arrastavel ? "Arraste pelo cabeçalho para mover" : undefined}
         style={{
           display: "flex",
           alignItems: "center",
@@ -37,6 +41,9 @@ export default function WidgetFrame({ widget, dados, acoes, children }: Props) {
           gap: 8,
           marginBottom: 10,
           minHeight: 20,
+          cursor: arrastavel ? "grab" : undefined,
+          userSelect: arrastavel ? "none" : undefined,
+          touchAction: arrastavel ? "none" : undefined,
         }}
       >
         <div
@@ -70,7 +77,9 @@ export default function WidgetFrame({ widget, dados, acoes, children }: Props) {
         {acoes && <div style={{ flexShrink: 0 }}>{acoes}</div>}
       </div>
 
-      {/* Corpo do widget */}
+      {/* Corpo do widget: rola só quando o conteúdo passa da caixa; sem rolagem (ou no fim dela)
+          a roda do mouse passa para a página. Não usar overscroll-behavior: contain aqui: ele
+          prende a roda no widget mesmo quando não há nada para rolar. */}
       <div
         data-widget-corpo
         style={{
@@ -78,7 +87,6 @@ export default function WidgetFrame({ widget, dados, acoes, children }: Props) {
           minHeight: 0,
           minWidth: 0,
           overflow: "auto",
-          overscrollBehavior: "contain",
         }}
       >
         <div data-widget-conteudo style={{ height: "100%", minWidth: 0 }}>

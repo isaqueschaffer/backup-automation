@@ -4,9 +4,11 @@ import {
   Eye,
   Pencil,
   Plus,
+  Redo2,
   RotateCcw,
   Save,
   SlidersHorizontal,
+  Undo2,
 } from "lucide-react";
 import { useToast } from "../../components/Toast";
 import { useConfirm } from "../../components/ConfirmDialog";
@@ -15,6 +17,8 @@ import {
   DadosDashboard,
   DashboardLayout,
   OpcoesDashboard,
+  ALTURA_MAX_GRADE,
+  COLUNAS_GRADE,
   Periodo,
 } from "./types";
 import { DefinicaoWidget, definicaoDe } from "./widgets/registry";
@@ -85,11 +89,41 @@ export default function DashboardWorkspace({
     dirty,
     adicionar,
     remover,
-    mover,
+    definirWidgets,
     atualizar,
     setPeriodo,
+    desfazer,
+    refazer,
+    podeDesfazer,
+    podeRefazer,
     descartar,
   } = useDashboardDraft(layout);
+
+  // Ctrl+Z desfaz; Ctrl+Y ou Ctrl+Shift+Z refaz (só na edição, fora de campos e janelas)
+  const modalAberto = modalAdicionar || widgetEmConfig !== null;
+  useEffect(() => {
+    if (modo !== "editar" || modalAberto) return;
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const alvo = e.target as HTMLElement | null;
+      if (
+        alvo &&
+        (alvo.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(alvo.tagName))
+      ) {
+        return;
+      }
+      const tecla = e.key.toLowerCase();
+      if (tecla === "z" && !e.shiftKey) {
+        e.preventDefault();
+        desfazer();
+      } else if (tecla === "y" || (tecla === "z" && e.shiftKey)) {
+        e.preventDefault();
+        refazer();
+      }
+    };
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [modo, modalAberto, desfazer, refazer]);
 
   // Carrega opções uma única vez ao entrar em edição ou prévia
   useEffect(() => {
@@ -216,7 +250,7 @@ export default function DashboardWorkspace({
   );
 
   const ajustarAoConteudo = useCallback(
-    (id: string, somenteReduzir?: boolean) => {
+    (id: string) => {
       const item = document.querySelector<HTMLElement>(`[data-widget-id="${id}"]`);
       if (!item) return;
 
@@ -226,12 +260,9 @@ export default function DashboardWorkspace({
       if (def?.alturaFluida) return;
 
       const linhas = linhasDoConteudo(item);
-      if (linhas === null) return;
+      if (linhas === null || linhas === widget.altura) return;
 
-      const alvo = Math.min(40, linhas);
-      if (somenteReduzir && alvo >= widget.altura) return;
-
-      atualizar(id, { altura: alvo });
+      atualizar(id, { altura: Math.min(ALTURA_MAX_GRADE, linhas) });
     },
     [draft.widgets, atualizar]
   );
@@ -322,6 +353,29 @@ export default function DashboardWorkspace({
                 <option value="7d">Últimos 7 dias</option>
                 <option value="30d">Últimos 30 dias</option>
               </select>
+            </div>
+
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                type="button"
+                className="btn-icon"
+                title="Desfazer (Ctrl+Z)"
+                style={{ width: 32, height: 32 }}
+                onClick={desfazer}
+                disabled={!podeDesfazer}
+              >
+                <Undo2 size={15} style={{ flexShrink: 0 }} />
+              </button>
+              <button
+                type="button"
+                className="btn-icon"
+                title="Refazer (Ctrl+Y)"
+                style={{ width: 32, height: 32 }}
+                onClick={refazer}
+                disabled={!podeRefazer}
+              >
+                <Redo2 size={15} style={{ flexShrink: 0 }} />
+              </button>
             </div>
 
             <button
@@ -427,15 +481,14 @@ export default function DashboardWorkspace({
         layout={modo === "ver" ? layout : draft}
         dados={modo === "ver" ? dadosVivos : (dadosPrevia ?? dadosVivos)}
         editando={modo === "editar"}
-        onMover={mover}
-        onRedimensionar={modo === "editar" ? (id, t) => atualizar(id, t) : undefined}
+        onAlterar={modo === "editar" ? definirWidgets : undefined}
         onAjustar={modo === "editar" ? ajustarAoConteudo : undefined}
         renderAcoes={
           modo === "editar"
             ? (w) => (
                 <WidgetAcoesEdicao
                   widget={w}
-                  onLarguraTotal={() => atualizar(w.id, { largura: 12 })}
+                  onLarguraTotal={() => atualizar(w.id, { x: 0, largura: COLUNAS_GRADE })}
                   onAjustar={() => ajustarAoConteudo(w.id)}
                   onConfigurar={() => setWidgetEmConfig(w.id)}
                   onRemover={() => remover(w.id)}

@@ -1,8 +1,12 @@
 export type Periodo = "24h" | "7d" | "30d";
 export type Largura = number;
 export type Altura = number;
-export const ALTURA_LINHA_PX = 50;
-export const GAP_GRADE_PX = 12;
+// Grade do schema 3: 24 colunas e linhas de 31 px. Cada linha já inclui o espaço entre os
+// cartões (o item tem 6 px de respiro em cada lado), então 2 linhas = 1 linha antiga de 50 px + 12 px.
+export const COLUNAS_GRADE = 24;
+export const ALTURA_LINHA_PX = 31;
+export const RESPIRO_GRADE_PX = 6;
+export const ALTURA_MAX_GRADE = 80;
 export type TipoWidget =
   | "resumo"
   | "saude_servidor"
@@ -21,6 +25,8 @@ export interface WidgetInstancia {
   id: string;
   tipo: string;
   titulo: string | null;
+  x: number;
+  y: number;
   largura: Largura;
   altura: Altura;
   config: Record<string, unknown>;

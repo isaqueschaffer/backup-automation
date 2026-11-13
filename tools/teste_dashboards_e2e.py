@@ -96,10 +96,11 @@ ok(s == 422, f"salvar com maquina de OUTRO cliente -> 422 ({s})")
 lay_tipo = json.loads(json.dumps(lay)); lay_tipo["widgets"].append({"id": "x", "tipo": "inexistente", "largura": 6, "altura": 6, "config": {}})
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_tipo, "version": 1}, ADM)
 ok(s == 422, f"tipo de widget desconhecido -> 422 ({s})")
-lay_larg = json.loads(json.dumps(lay)); lay_larg["widgets"][0]["largura"] = 13
+# Grade do schema 3: 24 colunas e até 80 linhas de 31 px
+lay_larg = json.loads(json.dumps(lay)); lay_larg["widgets"][0]["largura"] = 25
 s, r, _ = call("PUT", f"/clients/{A}/dashboard", {"layout": lay_larg, "version": 1}, ADM)
-ok(s == 422, f"largura invalida (13 colunas) -> 422 ({s})")
-for l_, a_, esperado in [(5, 37, 200), (2, 1, 200), (1, 6, 422), (6, 41, 422), (6, 0, 422)]:
+ok(s == 422, f"largura invalida (25 colunas) -> 422 ({s})")
+for l_, a_, esperado in [(5, 37, 200), (2, 1, 200), (1, 6, 422), (6, 81, 422), (6, 0, 422)]:
     lay_t = json.loads(json.dumps(lay)); lay_t["widgets"][0]["largura"] = l_; lay_t["widgets"][0]["altura"] = a_
     s, r, _ = call("POST", f"/clients/{A}/dashboard/preview", {"layout": lay_t}, ADM)
     ok(s == esperado, f"tamanho livre {l_} colunas x {a_} linhas -> {esperado} ({s})")

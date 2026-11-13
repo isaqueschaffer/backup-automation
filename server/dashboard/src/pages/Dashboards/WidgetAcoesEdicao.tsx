@@ -30,14 +30,14 @@ export default function WidgetAcoesEdicao({
           flexShrink: 0,
           marginRight: 2,
         }}
-        title={`Tamanho: ${widget.largura} colunas × ${widget.altura} linhas`}
+        title={`Tamanho: ${widget.largura} de 24 colunas × ${widget.altura} linhas`}
       >
         {widget.largura}×{widget.altura}
       </span>
 
       <span
         data-drag-handle
-        title="Arraste para reordenar"
+        title="Arraste (por aqui ou pelo cabeçalho) para mover"
         style={{
           cursor: "grab",
           display: "inline-flex",

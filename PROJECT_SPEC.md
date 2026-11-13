@@ -382,7 +382,7 @@ A tabela nasce por `Base.metadata.create_all` (`main.py`), sem migração inline
 |---|---|---|---|---|
 | id | UUID | uuid.UUID | NOT NULL | PK |
 | customer_id | UUID | uuid.UUID | NOT NULL UNIQUE | FK `client_groups.id` ON DELETE CASCADE |
-| layout | JSON | dict | NOT NULL | `{schema_version, filtros:{periodo}, widgets:[{id, tipo, titulo, largura, altura, config}]}` validado por `services/dashboards/layout.py` |
+| layout | JSON | dict | NOT NULL | `{schema_version: 3, filtros:{periodo}, widgets:[{id, tipo, titulo, x, y, largura, altura, config}]}` (grade de 24 colunas × linhas de 31 px; o schema 2 é migrado ao ler) validado por `services/dashboards/layout.py` |
 | version | INTEGER | int | NOT NULL | +1 a cada gravação do layout (409 em edição concorrente) |
 | share_token_hash | VARCHAR(64) | str | NULL UNIQUE | SHA-256 do token do link; o token em texto puro nunca é gravado |
 | share_enabled | BOOLEAN | bool | NOT NULL | Link ativo |
@@ -1118,6 +1118,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-13] — Dashboard por Cliente: grade livre (posição x/y, 24 colunas), desfazer/refazer e rolagem do mouse corrigida
+
+**Alteração:** a edição do Dashboard por Cliente deixa de ser uma lista em ordem (CSS grid de 12 colunas × 50 px) e passa a ser uma grade livre como a do Grafana.
+- **Layout schema 3:** cada widget ganha `x`/`y`; a grade tem 24 colunas e linhas de 31 px. Cada linha já inclui o respiro entre cartões, então duas linhas novas equivalem a uma antiga. `services/dashboards/layout.py` migra o schema 2 ao validar: refaz o posicionamento automático do CSS grid antigo para achar x/y e dobra largura e altura, então a aparência fica igual. A migração também cobre uma aba aberta antes do deploy que salve no formato antigo. Ao validar, o servidor também limita `x`, põe no primeiro lugar livre o widget sem posição, desfaz sobreposições e sobe os widgets para não deixar buracos. Os tamanhos padrão dos tipos foram dobrados (`widgets.py` e `registry.tsx`); os mínimos ficaram com o mesmo número, então dá para deixar o widget com metade do tamanho mínimo de antes.
+- **Editor** (`DashboardCanvas.tsx` + `gradeLayout.ts`): arrastar pelo cabeçalho inteiro para qualquer ponto da grade, com um contorno mostrando onde o widget vai cair. Os outros abrem espaço e sobem. Ao arrastar perto da borda da janela, a página rola. Alças nos quatro lados e nos quatro cantos; dois cliques na borda de cima ou de baixo ajustam a altura ao conteúdo. O redimensionamento não encolhe mais o widget sozinho ao soltar. Em telas de até 1000 px os widgets ficam empilhados na ordem de leitura, sem arrastar.
+- **Desfazer/refazer** (`useDashboardDraft.ts`): até 100 passos, com botões na barra de edição e Ctrl+Z / Ctrl+Y (ou Ctrl+Shift+Z). Arrastar e redimensionar contam como um passo cada, gravado ao soltar.
+- **Rolagem:** o corpo do widget tinha `overscroll-behavior: contain`, que prendia a roda do mouse no widget mesmo sem nada para rolar. Agora o widget rola só quando o conteúdo passa da caixa; sem rolagem, ou no fim dela, a página rola.
+**Testes:** `server/api/tests/test_dashboard_grade.py` (migração do schema 2, lugar livre, sobreposição, limite de `x`, layout padrão).
+**Breaking change:** não (os layouts salvos são migrados ao ler e ao salvar). **Requer:** deploy do servidor e do painel juntos; sem mudança no agente.
 
 ### [2026-11-13] — Dashboard por Cliente: widgets de antenas, OLT e centrais de alarme; skill `especialista-dashboard`
 

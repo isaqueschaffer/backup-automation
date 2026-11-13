@@ -10,10 +10,15 @@ from models import CustomerDashboard, Machine, NVR
 from . import widgets  # noqa: F401  registra os tipos de widget
 from .registro import REGISTRO
 
+# Grade do schema 3: 24 colunas e linhas de 31 px (metade das 12 colunas × 62 px do schema 2),
+# com posição livre (x, y) e empilhamento para cima (sem buracos), como no Grafana.
+SCHEMA_ATUAL = 3
+COLUNAS = 24
 LARGURA_MIN = 2
-LARGURA_MAX = 12
+LARGURA_MAX = COLUNAS
 ALTURA_MIN = 1
-ALTURA_MAX = 40
+ALTURA_MAX = 80
+Y_MAX = 5000
 MAX_WIDGETS = 40
 
 
@@ -27,8 +32,11 @@ class WidgetInstancia(BaseModel):
     id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     tipo: str
     titulo: Optional[str] = Field(None, max_length=80)
-    largura: int = Field(6, ge=LARGURA_MIN, le=LARGURA_MAX)
-    altura: int = Field(6, ge=ALTURA_MIN, le=ALTURA_MAX)
+    # Sem x/y, o widget vai para o primeiro lugar livre da grade
+    x: Optional[int] = Field(None, ge=0, le=COLUNAS - 1)
+    y: Optional[int] = Field(None, ge=0, le=Y_MAX)
+    largura: int = Field(12, ge=LARGURA_MIN, le=LARGURA_MAX)
+    altura: int = Field(12, ge=ALTURA_MIN, le=ALTURA_MAX)
     config: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -41,11 +49,115 @@ class WidgetInstancia(BaseModel):
         return self
 
 
+def _inteiro(valor: Any, padrao: int, minimo: int, maximo: int) -> int:
+    try:
+        n = int(valor)
+    except (ValueError, TypeError):
+        n = padrao
+    return max(minimo, min(maximo, n))
+
+
+def _migrar_widgets_v2(widgets: List[Any]) -> List[Any]:
+    """Schema 2 -> 3: reproduz o posicionamento automático do CSS grid antigo
+    (12 colunas, em ordem) para achar x/y e dobra tudo para a grade de 24 colunas."""
+    ocupado: Set[Tuple[int, int]] = set()
+    cursor_l, cursor_c = 0, 0
+    saida: List[Any] = []
+    for w in widgets:
+        if not isinstance(w, dict):
+            saida.append(w)
+            continue
+        w = dict(w)
+        larg = _inteiro(w.get("largura"), 6, 1, 12)
+        alt = _inteiro(w.get("altura"), 6, 1, 40)
+        linha, col = cursor_l, cursor_c
+        while True:
+            if col + larg > 12:
+                linha, col = linha + 1, 0
+                continue
+            livre = all(
+                (linha + i, col + j) not in ocupado for i in range(alt) for j in range(larg)
+            )
+            if livre:
+                break
+            col += 1
+        for i in range(alt):
+            for j in range(larg):
+                ocupado.add((linha + i, col + j))
+        cursor_l, cursor_c = linha, col + larg
+        w.update(
+            x=col * 2,
+            y=linha * 2,
+            largura=max(LARGURA_MIN, larg * 2),
+            altura=min(alt * 2, ALTURA_MAX),
+        )
+        saida.append(w)
+    return saida
+
+
+def _colide(a: WidgetInstancia, b: WidgetInstancia) -> bool:
+    return (
+        a.x < b.x + b.largura
+        and b.x < a.x + a.largura
+        and a.y < b.y + b.altura
+        and b.y < a.y + a.altura
+    )
+
+
+def _compactar(widgets: List[WidgetInstancia]) -> List[WidgetInstancia]:
+    """Sobe cada widget o máximo possível e desfaz sobreposições (mesma regra do painel)."""
+    colocados: List[WidgetInstancia] = []
+    for w in sorted(widgets, key=lambda w: (w.y, w.x)):
+        # Encosta no widget mais baixo que esteja acima dele na mesma faixa de colunas
+        w.y = max(
+            (
+                o.y + o.altura
+                for o in colocados
+                if o.x < w.x + w.largura and w.x < o.x + o.largura and o.y + o.altura <= w.y
+            ),
+            default=0,
+        )
+        while True:
+            choque = next((o for o in colocados if _colide(w, o)), None)
+            if choque is None:
+                break
+            w.y = choque.y + choque.altura
+        colocados.append(w)
+    return colocados
+
+
+def _primeiro_lugar_livre(colocados: List[WidgetInstancia], w: WidgetInstancia) -> None:
+    fundo = max((o.y + o.altura for o in colocados), default=0)
+    for y in range(fundo + 1):
+        for x in range(COLUNAS - w.largura + 1):
+            w.x, w.y = x, y
+            if not any(_colide(w, o) for o in colocados):
+                return
+    w.x, w.y = 0, fundo
+
+
 class DashboardLayout(BaseModel):
     model_config = {"extra": "forbid"}
-    schema_version: int = 2
+    schema_version: int = SCHEMA_ATUAL
     filtros: FiltrosGlobais = Field(default_factory=FiltrosGlobais)
     widgets: List[WidgetInstancia] = Field(default_factory=list, max_length=MAX_WIDGETS)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrar_schema(cls, dados: Any) -> Any:
+        # Também cobre uma aba aberta antes da atualização que salve no formato antigo
+        if not isinstance(dados, dict):
+            return dados
+        try:
+            versao = int(dados.get("schema_version", SCHEMA_ATUAL))
+        except (ValueError, TypeError):
+            versao = SCHEMA_ATUAL
+        if versao < SCHEMA_ATUAL:
+            dados = dict(dados)
+            if isinstance(dados.get("widgets"), list):
+                dados["widgets"] = _migrar_widgets_v2(dados["widgets"])
+            dados["schema_version"] = SCHEMA_ATUAL
+        return dados
 
     @model_validator(mode="after")
     def _ids_unicos(self):
@@ -54,16 +166,35 @@ class DashboardLayout(BaseModel):
             raise ValueError("Há widgets com id repetido")
         return self
 
+    @model_validator(mode="after")
+    def _normalizar_grade(self):
+        com_posicao: List[WidgetInstancia] = []
+        sem_posicao: List[WidgetInstancia] = []
+        for w in self.widgets:
+            if w.x is None or w.y is None:
+                sem_posicao.append(w)
+            else:
+                w.x = min(w.x, COLUNAS - w.largura)
+                com_posicao.append(w)
+        colocados = _compactar(com_posicao)
+        for w in sem_posicao:
+            _primeiro_lugar_livre(colocados, w)
+            colocados.append(w)
+        # Ordem de leitura (de cima para baixo): é a ordem usada no celular
+        self.widgets = _compactar(colocados)
+        self.schema_version = SCHEMA_ATUAL
+        return self
+
 
 def layout_padrao() -> DashboardLayout:
     return DashboardLayout(
-        schema_version=2,
+        schema_version=SCHEMA_ATUAL,
         filtros=FiltrosGlobais(periodo="7d"),
         widgets=[
-            WidgetInstancia(id="resumo", tipo="resumo", largura=12, altura=3, config={}),
-            WidgetInstancia(id="saude_servidor", tipo="saude_servidor", largura=12, altura=9, config={}),
-            WidgetInstancia(id="status_backups", tipo="status_backups", largura=6, altura=6, config={}),
-            WidgetInstancia(id="cameras", tipo="cameras", largura=6, altura=6, config={}),
+            WidgetInstancia(id="resumo", tipo="resumo", x=0, y=0, largura=24, altura=6, config={}),
+            WidgetInstancia(id="saude_servidor", tipo="saude_servidor", x=0, y=6, largura=24, altura=18, config={}),
+            WidgetInstancia(id="status_backups", tipo="status_backups", x=0, y=24, largura=12, altura=12, config={}),
+            WidgetInstancia(id="cameras", tipo="cameras", x=12, y=24, largura=12, altura=12, config={}),
         ],
     )
 

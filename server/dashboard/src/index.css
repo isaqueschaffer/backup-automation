@@ -869,7 +869,14 @@ tbody td {
   gap: 12px;
 }
 .dash-item { min-width: 0; min-height: 0; }
+/* Grade livre (telas largas): itens posicionados por x/y em DashboardCanvas.tsx */
+.dash-grade-guia {
+  background-image: radial-gradient(circle, var(--border) 1.2px, transparent 1.6px);
+  border-radius: 8px;
+}
 body.dash-resizing { user-select: none; cursor: nwse-resize; }
+body.dash-arrastando { user-select: none; cursor: grabbing; }
+body.dash-arrastando * { cursor: grabbing !important; }
 .dash-resize-handle { opacity: 0.55; transition: opacity 0.15s, background 0.15s; border-radius: 4px; }
 .dash-resize-handle:hover { opacity: 1; background: var(--accent-glow); }
 @media (max-width: 1000px) {
