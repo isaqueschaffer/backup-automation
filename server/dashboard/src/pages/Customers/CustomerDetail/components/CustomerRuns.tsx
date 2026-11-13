@@ -31,6 +31,7 @@ export default function CustomerRuns({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [verTodas, setVerTodas] = useState(false);
+  const [aberta, setAberta] = useState(false);   // seção recolhida por padrão
   const [expandidas, setExpandidas] = useState<Set<string>>(() => new Set());
 
   const toggleExpand = (id: string) => {
@@ -83,14 +84,25 @@ export default function CustomerRuns({
 
   return (
     <div style={{ marginBottom: 24 }}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="section-title" style={{ marginBottom: 0 }}>
+      <div className={`flex items-center justify-between ${aberta ? "mb-3" : ""}`}>
+        <button
+          type="button"
+          aria-expanded={aberta}
+          onClick={() => setAberta((v) => !v)}
+          className="section-title"
+          style={{ marginBottom: 0, background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", font: "inherit", textAlign: "left" }}
+        >
+          {aberta ? (
+            <ChevronDown size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+          ) : (
+            <ChevronRight size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+          )}
           <Layers size={15} style={{ flexShrink: 0 }} /> Rodadas de backup
-        </div>
+        </button>
         <span className="text-xs text-muted">1 e-mail por rodada com todas as máquinas</span>
       </div>
 
-      {runs === null ? (
+      {!aberta ? null : runs === null ? (
         <div className="loading-state">
           <div className="spinner" />
         </div>

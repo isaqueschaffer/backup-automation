@@ -48,6 +48,8 @@ export default function MachineDetail() {
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [gruposAbertos, setGruposAbertos] = useState<Set<string>>(new Set());
+  // Seção Equipamentos recolhida por padrão (como Histórico, Câmeras e Eventos do Agente)
+  const [equipamentosAberto, setEquipamentosAberto] = useState(false);
 
   // Filtros de logs com refs espelho para o polling contínuo
   const [filtrosLogs, setFiltrosLogs] = useState<FiltrosLogsState>({
@@ -409,13 +411,24 @@ export default function MachineDetail() {
 
       {/* ── Equipamentos ── */}
       <div style={{ marginBottom: 24 }}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="section-title mb-0">
+        <div className={`flex items-center justify-between ${equipamentosAberto ? "mb-3" : ""}`}>
+          <button
+            type="button"
+            aria-expanded={equipamentosAberto}
+            onClick={() => setEquipamentosAberto((v) => !v)}
+            className="section-title mb-0"
+            style={{ background: "none", border: "none", padding: 0, margin: 0, cursor: "pointer", color: "inherit", font: "inherit", textAlign: "left" }}
+          >
+            {equipamentosAberto ? (
+              <ChevronDown size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+            ) : (
+              <ChevronRight size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+            )}
             <Server size={15} /> Equipamentos
             <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
               {otherEquipamentos.length}
             </span>
-          </div>
+          </button>
           {!somenteLeitura && (
             <button className="btn btn-secondary" onClick={() => openEqModal(emptyEqForm(), null)}>
               <Plus size={14} /> Adicionar
@@ -423,7 +436,7 @@ export default function MachineDetail() {
           )}
         </div>
 
-        {otherEquipamentos.length === 0 ? (
+        {!equipamentosAberto ? null : otherEquipamentos.length === 0 ? (
           <div className="empty-state" style={{ padding: "32px" }}>
             <div className="empty-icon">🖥️</div>
             <div>Nenhum equipamento cadastrado.</div>

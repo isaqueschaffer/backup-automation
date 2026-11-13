@@ -69,7 +69,7 @@ export default function AgentLogs({
   lastSeen,
   online,
 }: AgentLogsProps) {
-  const [aberta, setAberta] = useState(true);
+  const [aberta, setAberta] = useState(false);   // recolhida por padrão
   const [linhasExpandidas, setLinhasExpandidas] = useState<Set<string>>(new Set());
   const [copiadoId, setCopiadoId] = useState<string | null>(null);
 

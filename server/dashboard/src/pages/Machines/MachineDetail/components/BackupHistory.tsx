@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, Download } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { Backup } from "../../../../api/types";
 import StatusBadge from "../../../../components/StatusBadge";
 import { fmtDate } from "../../../../utils/date";
@@ -9,6 +9,7 @@ import { useToast } from "../../../../components/Toast";
 
 export default function BackupHistory({ backups }: { backups: Backup[] }) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [aberta, setAberta] = useState(false);   // recolhida por padrão
   const { toast } = useToast();
 
   const handleDownload = async (backupId: string, filename: string) => {
@@ -28,7 +29,18 @@ export default function BackupHistory({ backups }: { backups: Backup[] }) {
 
   return (
     <div>
-      <div className="section-title">
+      <button
+        type="button"
+        aria-expanded={aberta}
+        onClick={() => setAberta((v) => !v)}
+        className="section-title"
+        style={{ width: "100%", background: "none", borderTop: "none", borderLeft: "none", borderRight: "none", padding: "0 0 10px 0", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+      >
+        {aberta ? (
+          <ChevronDown size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+        ) : (
+          <ChevronRight size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+        )}
         <Archive size={15} style={{ flexShrink: 0 }} /> Histórico de Backups da Máquina
         <span
           style={{
@@ -43,9 +55,9 @@ export default function BackupHistory({ backups }: { backups: Backup[] }) {
         >
           últimos 10
         </span>
-      </div>
+      </button>
 
-      {backups.length === 0 ? (
+      {!aberta ? null : backups.length === 0 ? (
         <div className="empty-state" style={{ padding: "32px" }}>
           <div className="empty-icon">📦</div>
           <div>Nenhum backup realizado ainda.</div>
