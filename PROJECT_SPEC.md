@@ -1172,6 +1172,15 @@ vindos de `eqTipos.tsx`, o mesmo usado nos cards de equipamento), com um botão 
 volta a ficar online, e o pareamento por canal físico (NVR tradicional) separado do pareamento por nome.
 **Arquivos:** server/api/{models.py,main.py,schemas.py,routers/notificacoes.py,services/{notificacoes.py,galeria_vms.py},tests/test_cameras_offline_notificacao.py}, server/dashboard/src/{api/{client.ts,types.ts},utils/notificacoes.ts,pages/Notificacoes/NotificacoesPage.tsx}, PROJECT_SPEC.md.
 
+### [2026-11-13] — Defense: câmeras de DVR/NVR voltam à Galeria ("Sincronizar da Máquina" traz tudo que o Defense lista)
+
+- **Sintoma** (Defense Trilan): a Galeria tinha só as 10 câmeras de IP próprio; os 5 canais do DVR-CATANDUVA, os 3 do ESTOQUE CATANDUVA, o canal do NVR INTELBRAS e a LATERAL TERRENO (10 de 20) não apareciam, sem estado, gravação nem imagem.
+- **Causa**: (1) a importação da planilha só aceita linhas do tipo "câmera" (`d0e682e`, 26/10) e a planilha do Defense não traz os canais dos gravadores; (2) desde 29/10 (`248d255`) o agente, havendo câmeras na Galeria, reporta só as câmeras da Galeria (antes inventava estado para o que não achava); (3) câmeras de IP compartilhado precisam de `canal_rtsp` para a captura (`7cc188e`). A API do Defense sempre devolveu as 20 câmeras, com estado e gravação.
+- **Agente** (`src/vms/defense.py`): `_casar_cameras_defense` acrescenta ao relatório as câmeras que o Defense lista e a Galeria não tem (por nome, nome do canal ou, em câmera de IP próprio, IP); essas entradas levam `modelo` e `canal_rtsp`. `canal_rtsp` sai do código do canal (`1000079$1$0$3` = canal 4 do gravador) e só existe para canais de DVR/NVR. Entradas da Galeria não mudam. Testes: `agent/tests/test_defense_cameras_fora_da_galeria.py`. **Precisa de versão nova do agente.**
+- **Servidor**: `POST .../cameras/import` com `sync_from_machine` num DEFENSE cria também as câmeras do relatório sem par na Galeria (`cameras_do_relatorio_sem_par` e `marca_pelo_modelo` em `services/galeria_vms.py`): nome e IP do Defense, `canal_rtsp` do gravador, marca pelo modelo (DS-=Hikvision, MTI/DIH=ONVIF, MHDX/VIP/iNVD=Intelbras) e a senha padrão do projeto (a do gravador não vem do Defense: editar na câmera se for outra). Sem nada para trazer responde 400 com o motivo. Testes: `server/api/tests/test_galeria_sync_defense.py`.
+- **Painel**: mesma tela e botão "Sincronizar da Máquina" (só o texto da dica muda no DEFENSE). Depois do agente novo, as câmeras de gravador já aparecem na Galeria (só com estado e gravação); o botão as cadastra para a captura das imagens.
+- **Suposição não testada**: o canal físico do gravador é o último número do código + 1 (ESTOQUE CATANDUVA, MHDX 1108-C de 8 canais, tem os canais 6, 7 e 8). Conferir a primeira captura de cada gravador.
+
 ### [2026-11-12] — Tela de Auditoria na barra lateral
 
 - **Tela**: `/auditoria` ("Auditoria", ícone de relógio, entre Notificações e Minha conta). Tabela com data/hora, usuário, máquina (com o cliente) e o que mudou, filtros por cliente, máquina, usuário, período e texto, paginada de 30 em 30. Só ADMIN da conta e super admin veem; o perfil LEITURA não vê o item e a API responde 403.

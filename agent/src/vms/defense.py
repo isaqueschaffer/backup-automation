@@ -21,6 +21,18 @@ DEVICE_TYPE_ACESSO = "16"
 DEVICE_CATEGORY_ACESSO = "8"
 
 
+def canal_rtsp_do_codigo(codigo, eh_gravador: bool):
+    """Canal RTSP de uma câmera de DVR/NVR a partir do código do canal no Defense ("1000079$1$0$3" = 4º canal do
+    gravador, RTSP canal 4). None para câmera com IP próprio (não tem canal dentro de um equipamento) ou código
+    fora do padrão."""
+    if not eh_gravador:
+        return None
+    try:
+        return int(str(codigo).split("$")[-1]) + 1
+    except (ValueError, TypeError):
+        return None
+
+
 def calcular_assinatura_defense(username: str, password: str, realm: str, random_key: str) -> str:
     """
     Calcula a assinatura MD5 em 4 etapas conforme especificação nativa do BRMS / Dahua DSS / Intelbras Defense IA.
@@ -128,6 +140,7 @@ def extrair_cameras_defense_tree(devices: list) -> list:
                 "dev_name": dev_name,
                 "canal_nome_original": raw_ch_name,
                 "is_single_channel": canal_unico,
+                "canal_rtsp": canal_rtsp_do_codigo(ch_code, eh_gravador),
             })
             canal_idx += 1
 
@@ -558,6 +571,28 @@ def _casar_cameras_defense(cameras_config: list, status_dict: dict, cameras_api:
                     # A API respondeu com sucesso, mas a câmera não está cadastrada no Defense IA
                     is_ok = False
             casadas.append({"canal": canal, "nome": nome_cam, "ip": ip_cam, "codigo": "", "online": is_ok, "cam": cam})
+        # Câmeras que o Defense lista e a Galeria não tem (ex.: canais de DVR/NVR, que a planilha não traz):
+        # entram no relatório para o painel mostrar estado e gravação e o "Sincronizar da Máquina" trazê-las
+        nomes_galeria = {(c.get("nome") or "").strip().lower() for c in cameras_config}
+        ips_galeria = {(c.get("ip") or "").strip() for c in cameras_config if c.get("ip")}
+        for cam in cameras_api:
+            nomes_api = {(cam.get("nome") or "").strip().lower(), (cam.get("canal_nome_original") or "").strip().lower()}
+            nomes_api.discard("")
+            ip_api = (cam.get("ip") or "").strip()
+            # Mesmo critério da busca de estado acima: nome (completo ou do canal) ou, em câmera de IP próprio, o IP
+            ja_na_galeria = bool(nomes_api & nomes_galeria) or (
+                cam.get("is_single_channel") and ip_api and ip_api != "N/A" and ip_api in ips_galeria)
+            if ja_na_galeria or not cam.get("nome"):
+                continue
+            casadas.append({
+                "canal": cam.get("canal"),
+                "nome": cam["nome"],
+                "ip": cam.get("ip") or "N/A",
+                "codigo": cam.get("codigo") or "",
+                "online": cam.get("online", False),
+                "cam": cam,
+                "so_na_api": True,
+            })
     else:
         for cam in cameras_api:
             casadas.append({
@@ -655,7 +690,7 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
         else:
             status_com = "ERRO_COMUNICACAO"
 
-        status_cameras.append({
+        entrada = {
             "canal": canal,
             "nome": nome_cam,
             "ip": ip_cam,
@@ -665,7 +700,13 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
             "total_dias": total_dias,
             "mapa": mapa,
             "dias_com_gravacao": dias_grav,
-        })
+        }
+        if c.get("so_na_api"):
+            # Câmera só do Defense (fora da Galeria): modelo e canal do gravador para o painel criá-la na Galeria
+            entrada["modelo"] = (c["cam"].get("modelo") or "").strip()
+            if c["cam"].get("canal_rtsp"):
+                entrada["canal_rtsp"] = c["cam"]["canal_rtsp"]
+        status_cameras.append(entrada)
 
     return status_cameras
 

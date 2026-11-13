@@ -591,7 +591,9 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
         <Trash2 size={13} /> Limpar planilha
       </button>
       <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={sincronizarDaMaquina}
-        style={{ display: "flex", alignItems: "center", gap: 6 }} title="Copia as câmeras já importadas em 'Câmeras da Máquina' para esta galeria">
+        style={{ display: "flex", alignItems: "center", gap: 6 }} title={eqTipo === "DEFENSE"
+          ? "Copia as câmeras de 'Câmeras da Máquina' e traz as que o Defense lista e ainda não estão na galeria (ex.: canais de DVR/NVR)"
+          : "Copia as câmeras já importadas em 'Câmeras da Máquina' para esta galeria"}>
         <RefreshCw size={13} /> Sincronizar da Máquina
       </button>
       <button className="btn btn-secondary btn-sm" disabled={vmsBusy} onClick={() => abrirEdicaoRtsp()}

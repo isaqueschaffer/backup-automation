@@ -30,6 +30,7 @@ from services.segredos_config import proteger_segredos
 from services.escopo import obter_maquina
 from services.licenca_unm import licenca_da_config
 from services.galeria_vms import (
+    cameras_do_relatorio_sem_par,
     canal_int as _canal_int,
     ip_valido,
     parear_cameras,
@@ -679,8 +680,6 @@ def import_cameras(
 
     if payload.sync_from_machine:
         machine_cams = [e for e in machine.equipamentos if (e.tipo or "").upper() == "CAMERA" and e.active and e.ip]
-        if not machine_cams:
-            raise HTTPException(status_code=400, detail="Nenhuma câmera (tipo CAMERA) cadastrada na máquina para sincronizar.")
         itens = [
             NVRCameraConfigItem(
                 nome=mc.name,
@@ -691,6 +690,22 @@ def import_cameras(
             )
             for mc in machine_cams
         ]
+        if (nvr.tipo or "").upper() == "DEFENSE":
+            # Câmeras que o Defense lista e a Galeria não tem (canais de DVR/NVR...), vindas do relatório do agente
+            ja_tem = {(i.nome or "").strip().lower() for i in itens}
+            todas_galeria = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).all()
+            itens += [
+                NVRCameraConfigItem(**dados)
+                for dados in cameras_do_relatorio_sem_par(todas_galeria, nvr.last_recording_status or [])
+                if dados["nome"].lower() not in ja_tem
+            ]
+        if not itens:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma câmera para sincronizar: a máquina não tem câmeras do tipo CAMERA"
+                       + (" e o Defense não informou câmeras novas (o agente precisa fazer um backup para reportá-las)."
+                          if (nvr.tipo or "").upper() == "DEFENSE" else "."),
+            )
     else:
         itens = payload.cameras
         if not itens:
