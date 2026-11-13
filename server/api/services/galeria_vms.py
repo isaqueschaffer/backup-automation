@@ -61,6 +61,38 @@ def bloqueada_por_ip_compartilhado(camera, cameras_db: list) -> bool:
     return bool(ip and ip in ips_compartilhados(cameras_db) and canal_rtsp is None)
 
 
+def marca_pelo_modelo(modelo) -> str:
+    """Marca usada na Galeria (define as URLs RTSP tentadas) a partir do modelo que o Defense informa.
+    DS-/IDS- = Hikvision; MTI/DIH (linha Motorola) = ONVIF; MHDX, VIP, VHD, iNVD... = Intelbras; o resto, Hikvision
+    (o padrão da Galeria; dá para trocar na edição da câmera)."""
+    m = (modelo or "").strip().upper()
+    if m.startswith(("DS-", "IDS-")):
+        return "Hikvision"
+    if m.startswith(("MTI", "DIH", "MOTOROLA")):
+        return "ONVIF"
+    if m.startswith(("MHDX", "VIP", "VHD", "INVD", "NVD", "IM", "MIP")):
+        return "Intelbras"
+    return "Hikvision"
+
+
+def cameras_do_relatorio_sem_par(cameras_db: list, relatorio: list) -> List[dict]:
+    """Câmeras do relatório do agente que não casam com nenhuma da Galeria e têm IP: {nome, ip, modelo, canal_rtsp}.
+    São as que o Defense lista e a planilha não trouxe (ex.: canais de DVR/NVR); o "Sincronizar da Máquina" as cria."""
+    saida = []
+    for _, st, c, _ in parear_cameras(cameras_db, relatorio):
+        if st is None or c is not None:
+            continue
+        nome, ip = (st.get("nome") or "").strip(), ip_valido(st.get("ip"))
+        if not nome or not ip:
+            continue
+        canal_rtsp = canal_int(st.get("canal_rtsp"))
+        saida.append({
+            "nome": nome, "ip": ip, "modelo": marca_pelo_modelo(st.get("modelo")),
+            "canal_rtsp": canal_rtsp if canal_rtsp and 1 <= canal_rtsp <= 512 else None,
+        })
+    return saida
+
+
 def aprender_pastas(cameras_db: list, relatorio: list) -> int:
     """Grava `pasta_gravacao` nas câmeras da Galeria que casam por nome igual com uma entrada do relatório que
     informa a pasta. Depois disso o vínculo é pela pasta e a câmera pode ser renomeada sem perder a gravação.

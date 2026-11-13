@@ -32,6 +32,8 @@ def _pyinstaller_hidden_imports():
     import src.application.presenca_cameras  # noqa: F401
     import src.application.captura_noite_vms  # noqa: F401
     import src.application.status_olt  # noqa: F401
+    import src.application.status_antena  # noqa: F401
+    import src.mikrotik.antenas  # noqa: F401
     import src.application.teste_conexao  # noqa: F401
     import src.olt.unm_telnet  # noqa: F401
     import src.olt.unm_nomes  # noqa: F401
@@ -582,6 +584,27 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_OLT_S * 1000) == win32event.WAIT_OBJECT_0:
                 return
 
+    def _antena_loop(self, conf: dict):
+        """Status das antenas (equipamento ANTENA) lido pelo MikroTik por SSH, mais o ping de cada uma."""
+        from src.application.api_client import fetch_server_config, send_status_antenas
+        from src.application.status_antena import INTERVALO_ANTENA_S, coletar_status_antenas
+
+        if win32event.WaitForSingleObject(self.hWaitStop, 90 * 1000) == win32event.WAIT_OBJECT_0:
+            return
+
+        while not self.stop_requested:
+            try:
+                server_cfg = fetch_server_config(conf)
+                equipamentos = server_cfg.get("equipamentos") or server_cfg.get("nvrs") or []
+                lista = coletar_status_antenas(equipamentos)
+                if lista:
+                    send_status_antenas(conf, lista)
+            except Exception as e:
+                log(f"Falha no ciclo de status das antenas: {e}", is_error=True)
+
+            if win32event.WaitForSingleObject(self.hWaitStop, INTERVALO_ANTENA_S * 1000) == win32event.WAIT_OBJECT_0:
+                return
+
     def _alarmes_loop(self, conf: dict):
         """Alarmes das centrais Intelbras cadastradas nos equipamentos DEFENSE, independente do backup diário."""
         from src.application.api_client import fetch_server_config, send_status_alarmes
@@ -727,6 +750,7 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
             threading.Thread(target=self._noite_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._olt_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._alarmes_loop, args=(conf,), daemon=True).start()
+            threading.Thread(target=self._antena_loop, args=(conf,), daemon=True).start()
             threading.Thread(target=self._vigia_backup_loop, daemon=True).start()
             threading.Thread(target=self._logs_loop, args=(conf,), daemon=True).start()
 

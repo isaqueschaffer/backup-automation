@@ -29,6 +29,7 @@ from schemas import (
     PingRequest,
     PresencaCamerasReport,
     StatusAlarmeReport,
+    StatusAntenaReport,
     StatusOltReport,
     RTSPTestResponse,
     TIPOS_EQUIPAMENTO,
@@ -553,6 +554,36 @@ def receive_olt_status(
         # Naive em UTC (REGRA-001)
         nvr.olt_status = {"atualizado_em": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "olts": item.olts}
         atualizados += 1
+    db.commit()
+    return {"status": "ok", "atualizados": atualizados}
+
+
+@router.post("/antenas/status")
+def receive_antenas_status(
+    body: StatusAntenaReport,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Status periódico das antenas de um equipamento ANTENA (lido pelo MikroTik por SSH, mais o ping do agente).
+    Já verifica as notificações ANTENA_OFFLINE: a queda não espera o ciclo de 10 min das notificações."""
+    from services.antenas import mesclar_status
+    from services.notificacoes import verificar_antenas_equipamento
+
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+
+    agora = datetime.utcnow()  # naive em UTC (REGRA-001)
+    atualizados = 0
+    for item in body.equipamentos:
+        nvr = db.query(NVR).filter(NVR.machine_id == machine.id, NVR.name == item.nome, NVR.active == True).first()
+        if not nvr or (nvr.tipo or "").upper() != "ANTENA":
+            continue
+        nvr.antena_status = mesclar_status(nvr.antena_status, item.model_dump(), agora)
+        atualizados += 1
+        try:
+            verificar_antenas_equipamento(db, nvr, agora)
+        except Exception:
+            logging.getLogger("trilan.notificacoes").exception("Falha ao verificar as antenas de '%s'", nvr.name)
     db.commit()
     return {"status": "ok", "atualizados": atualizados}
 

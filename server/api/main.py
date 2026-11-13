@@ -232,6 +232,8 @@ _MIGRACOES_COLUNAS = [
     # Notificação de alarmes (DEFENSE): centrais marcadas e a situação de cada alerta
     ("nvrs", "alarmes_notificar", "ALTER TABLE nvrs ADD COLUMN alarmes_notificar JSON;"),
     ("notificacoes", "referencia", "ALTER TABLE notificacoes ADD COLUMN referencia VARCHAR(120);"),
+    # Equipamento ANTENA: status das antenas lido pelo MikroTik (enviado pelo agente)
+    ("nvrs", "antena_status", "ALTER TABLE nvrs ADD COLUMN antena_status JSON;"),
 ]
 
 _colunas_cache: dict = {}
@@ -253,8 +255,8 @@ if _tem_tabela("notificacoes"):
     _run_ddl("ALTER TABLE notificacoes DROP CONSTRAINT IF EXISTS ck_notificacoes_tipo;", "dropar ck_notificacoes_tipo antigo")
     _run_ddl(
         "ALTER TABLE notificacoes ADD CONSTRAINT ck_notificacoes_tipo "
-        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME'));",
-        "recriar ck_notificacoes_tipo com PERSONALIZADA, CAMERA_OFFLINE e ALARME",
+        "CHECK (tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME', 'ANTENA_OFFLINE'));",
+        "recriar ck_notificacoes_tipo com PERSONALIZADA, CAMERA_OFFLINE, ALARME e ANTENA_OFFLINE",
     )
 
 

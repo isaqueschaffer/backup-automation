@@ -23,6 +23,8 @@ LIMIAR_LICENCA_DIAS = 10          # a partir de quantos dias antes do vencimento
 LIMIAR_AGENTE_OFFLINE_MIN = 15    # máquina ativa sem contato por mais que isso = notificação (o status "ao vivo" usa 180s)
 LIMIAR_CAMERA_OFFLINE_MIN = 15    # câmera marcada para notificar, offline por mais que isso = notificação
 LIMIAR_ALARME_SEM_DADOS_MIN = 20  # status dos alarmes mais velho que isso (agente coleta a cada 5 min) não abre nem fecha alerta
+LIMIAR_ANTENA_OFFLINE_MIN = 10    # antena marcada para notificar, fora do ar por mais que isso = notificação (o agente coleta a cada 3 min)
+LIMIAR_ANTENA_SEM_DADOS_MIN = 20  # status das antenas mais velho que isso não abre nem fecha alerta
 
 
 def tipo_ativo(db: Session, conta_id, tipo: str) -> bool:
@@ -401,10 +403,114 @@ def verificar_personalizadas(db: Session, agora: Optional[datetime] = None, hoje
     return enviados
 
 
+def _enviar_email_antena(db: Session, conta: Conta, titulo: str, mensagem: str) -> bool:
+    return _enviar_email(db, conta, titulo, mensagem, f"<p>{html.escape(mensagem)}</p>", f"Antena '{titulo}'")
+
+
+def situacoes_antena(nvr: NVR, agora: datetime) -> Optional[dict]:
+    """{referencia: (titulo, mensagem)} das antenas cadastradas que estão fora do ar há mais de LIMIAR_ANTENA_OFFLINE_MIN
+    minutos (só as marcadas para notificar), pelo último `antena_status`. None quando o agente não conseguiu ler o MikroTik:
+    aí só a referência "FALHA" vale e as antenas ficam como estavam (não dá para saber se voltaram)."""
+    status = nvr.antena_status or {}
+    if status.get("erro"):
+        return None
+    saida = {}
+    for a in status.get("antenas") or []:
+        if not isinstance(a, dict) or a.get("status") == "ONLINE" or a.get("notificar") is False:
+            continue
+        desde = _data_status(a.get("offline_desde"))
+        if desde is None or agora - desde < timedelta(minutes=LIMIAR_ANTENA_OFFLINE_MIN):
+            continue
+        nome = a.get("nome") or a.get("mac") or "Antena"
+        onde = f" (MAC {a.get('mac')}" + (f", IP {a['ip']}" if a.get("ip") else "") + ")"
+        tempo = formatar_offline_ha(int((agora - desde).total_seconds()))
+        saida[str(a.get("mac") or nome)[:120]] = (
+            f"Antena '{nome}' offline em '{nvr.name}'",
+            f"A antena '{nome}'{onde} do equipamento '{nvr.name}' está offline {tempo}.",
+        )
+    return saida
+
+
+def _data_status(texto) -> Optional[datetime]:
+    try:
+        return datetime.strptime(str(texto or ""), "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
+
+
+def verificar_antenas_equipamento(db: Session, nvr: NVR, agora: Optional[datetime] = None) -> int:
+    """Abre/atualiza/resolve as notificações ANTENA_OFFLINE de um equipamento ANTENA (uma por antena, separadas por
+    `referencia` = MAC; "FALHA" quando o MikroTik não respondeu ao agente) e manda o e-mail diário de cada alerta aberto.
+    Quando um alerta que já tinha e-mail fecha porque a antena voltou, manda também o e-mail de "voltou". Relatório
+    velho demais não muda nada: a queda do agente já tem a própria notificação. Retorna quantos e-mails saíram."""
+    agora = agora or datetime.utcnow()
+    conta_id = nvr.machine.conta_id
+    abertas = db.query(Notificacao).filter(
+        Notificacao.conta_id == conta_id, Notificacao.tipo == "ANTENA_OFFLINE", Notificacao.nvr_id == nvr.id,
+        Notificacao.resolvido_em.is_(None),
+    ).all()
+
+    status = nvr.antena_status or {}
+    coletado = _data_status(status.get("atualizado_em"))
+    if coletado is None or agora - coletado > timedelta(minutes=LIMIAR_ANTENA_SEM_DADOS_MIN):
+        return 0
+
+    situacoes = situacoes_antena(nvr, agora)
+    falhou = situacoes is None
+    if falhou:
+        situacoes = {"FALHA": (
+            f"Falha ao ler o MikroTik de '{nvr.name}'",
+            f"O agente não conseguiu ler o MikroTik do equipamento '{nvr.name}': {status.get('erro')}",
+        )}
+
+    enviados = 0
+    conta = nvr.machine.conta
+    for notif in abertas:
+        manter = notif.referencia in situacoes or (falhou and notif.referencia != "FALHA")
+        if manter:
+            continue
+        notif.resolvido_em = agora
+        if notif.ultimo_email_em is not None and conta:
+            antena = next((a for a in status.get("antenas") or [] if isinstance(a, dict) and a.get("mac") == notif.referencia), None)
+            if notif.referencia == "FALHA":
+                titulo, msg = f"MikroTik de '{nvr.name}' voltou a responder", f"O agente voltou a ler o MikroTik do equipamento '{nvr.name}'."
+            elif antena and antena.get("status") == "ONLINE":
+                nome = antena.get("nome") or notif.referencia
+                titulo, msg = f"Antena '{nome}' voltou em '{nvr.name}'", f"A antena '{nome}' do equipamento '{nvr.name}' voltou a responder."
+            else:
+                continue  # removida do cadastro ou desligada da notificação: fecha sem avisar "voltou"
+            if _enviar_email_antena(db, conta, titulo, msg):
+                enviados += 1
+
+    for referencia, (titulo, mensagem) in situacoes.items():
+        titulo = titulo[:255]
+        notif = abrir_ou_atualizar(db, conta_id, "ANTENA_OFFLINE", titulo, mensagem, nvr_id=nvr.id, referencia=referencia[:120])
+        if notif.ultimo_email_em != agora.date():
+            if conta and _enviar_email_antena(db, conta, titulo, mensagem):
+                notif.ultimo_email_em = agora.date()
+                enviados += 1
+    return enviados
+
+
+def verificar_antenas(db: Session, agora: Optional[datetime] = None) -> int:
+    """Roda `verificar_antenas_equipamento` em todos os equipamentos ANTENA ativos. Retorna quantos e-mails saíram."""
+    enviados = 0
+    nvrs = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
+        NVR.tipo == "ANTENA", NVR.active == True, Machine.active == True
+    ).all()
+    for nvr in nvrs:
+        try:
+            enviados += verificar_antenas_equipamento(db, nvr, agora)
+        except Exception:
+            logger.exception("Falha ao verificar as antenas de '%s' (%s)", getattr(nvr, "name", ""), getattr(nvr, "id", None))
+    return enviados
+
+
 def verificar_notificacoes(db: Session) -> dict:
-    """Roda as quatro verificações (cada uma isolada: uma falhar não impede as outras) e salva. Usada pela tarefa
+    """Roda as verificações (cada uma isolada: uma falhar não impede as outras) e salva. Usada pela tarefa
     de fundo do main.py. Retorna um pequeno resumo para o log."""
-    resumo = {"emails_licenca": 0, "emails_personalizadas": 0, "emails_camera_offline": 0, "emails_alarme": 0}
+    resumo = {"emails_licenca": 0, "emails_personalizadas": 0, "emails_camera_offline": 0, "emails_alarme": 0,
+              "emails_antena": 0}
     try:
         resumo["emails_licenca"] = verificar_licencas_unm2000(db)
     except Exception:
@@ -425,6 +531,10 @@ def verificar_notificacoes(db: Session) -> dict:
         resumo["emails_alarme"] = verificar_alarmes(db)
     except Exception:
         logger.exception("Falha geral ao verificar alarmes")
+    try:
+        resumo["emails_antena"] = verificar_antenas(db)
+    except Exception:
+        logger.exception("Falha geral ao verificar antenas")
     try:
         resumo["emails_personalizadas"] = verificar_personalizadas(db)
     except Exception:

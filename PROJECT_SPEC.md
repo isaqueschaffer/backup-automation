@@ -272,6 +272,7 @@ No ambiente local (`docker-compose.local.yml`) o layout é outro: Nginx na porta
 | last_recording_status | JSON | list | NULL | — |
 | last_telemetry_status | JSON | dict | NULL | — |
 | olt_status | JSON | dict | NULL | OLT UNM2000: `{"atualizado_em", "olts": [...]}` enviado pelo agente a cada 5 min (Telnet) |
+| antena_status | JSON | dict | NULL | ANTENA: `{"atualizado_em", "erro", "mikrotik": {identidade, ip, dispositivos}, "antenas": [...], "descobertas": [...]}` enviado pelo agente a cada 3 min (SSH no MikroTik + ping) |
 | conexao_status | JSON | dict | NULL | Último "Testar conexão": `{"ok", "mensagem", "etapas": [{"id", "rotulo", "estado", "detalhe"}], "segundos", "testado_em"}` (`testado_em` naive em UTC) |
 | active | BOOLEAN | bool | NOT NULL | TRUE |
 | updated_at | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | NOW() |
@@ -962,12 +963,13 @@ Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose 
 | ONU | ONU | — | — |
 | PABX | PABX | src/pabx/ | — |
 | Mikrotik | MIKROTIK | src/mikrotik/routeros.py | SSH/SFTP |
+| Antenas (Wi-Fi) | ANTENA | src/mikrotik/antenas.py + src/application/status_antena.py (server: services/antenas.py) | SSH no MikroTik (só leitura: vizinhos, ARP, DHCP, bridge) + ping ICMP do agente |
 | Digifort | DIGIFORT | src/application/webhook_digifort.py (ping ICMP) + src/vms/digifort_gravacoes.py (tempo gravado pelos índices `.dix`) | Ping + leitura dos arquivos de gravação |
 | Intelbras Defense | DEFENSE | src/vms/defense.py (+ src/application/webhook_defense.py, plano B) | API REST do Defense IA (HTTPS, porta `config_extra.porta_api`, padrão 4433): estado das câmeras e gravações no backup; só o estado (sem gravações e sem RTSP) na presença a cada 5 min. Gravação `COM_GRAVACAO` só se gravou hoje (como no NVR); sem dado da API = `NAO_VERIFICADO`. API sem resposta: estado pelo CSV do webhook (`config_extra.caminho_log_csv` ou o padrão), câmera sem informação = `ERRO_COMUNICACAO`. O webhook escuta só em `127.0.0.1:8181` |
 | Misto / Custom | MIXED | — | — |
 | Câmera IP (Teste RTSP)| CAMERA | server/api/routers/equipamentos.py + agent.py (`/rtsp-result`), agent/src/camera/rtsp_client.py | RTSP (TCP) |
 
-Os valores válidos de `nvrs.tipo` são os de `TIPOS_EQUIPAMENTO` (`server/api/schemas.py`): NVR, OLT, ONU, PABX, MIKROTIK, DIGIFORT, MIXED, DEFENSE e CAMERA (outro valor: 400). `DVR` e `MOTOROLA` são tipos detectados pelo agente em tempo de execução, nunca gravados em `nvrs.tipo`; a marca do NVR fica em `config_extra.marca` (Hikvision / Intelbras / Motorola).
+Os valores válidos de `nvrs.tipo` são os de `TIPOS_EQUIPAMENTO` (`server/api/schemas.py`): NVR, OLT, ONU, PABX, MIKROTIK, DIGIFORT, MIXED, DEFENSE, CAMERA e ANTENA (outro valor: 400). `DVR` e `MOTOROLA` são tipos detectados pelo agente em tempo de execução, nunca gravados em `nvrs.tipo`; a marca do NVR fica em `config_extra.marca` (Hikvision / Intelbras / Motorola).
 
 ---
 
@@ -1117,6 +1119,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-13] — Merge do ramo `helena` (antenas Wi-Fi via MikroTik e galeria do Defense) — agente 1.1.54
+
+**Incorporado:** `bd3b3bc` (galeria do Defense: "Sincronizar da máquina" passa a trazer as câmeras que o Defense lista e a Galeria não tem, a partir do relatório do agente; `cameras_do_relatorio_sem_par` em `services/galeria_vms.py`), `914fcc5` (merge de `integracao-equipamentos` em `helena`) e `727c770` (equipamento tipo ANTENA, entrada abaixo).
+**Auditoria:** datas novas em `datetime.utcnow()` naive (REGRA-001 ok); nenhum segredo nas linhas adicionadas (só fixtures de teste); rota nova do painel (`GET .../antena-status`) com `ctx` via `_get_machine_or_404` e a do agente com `get_current_machine` (REGRA-010 ok); migração inline só acrescenta `nvrs.antena_status` e o tipo `ANTENA_OFFLINE` no `ck_notificacoes_tipo`; compose, nginx, `requirements*.txt`, `build.ps1` e `installer.iss` não foram tocados.
+**Bloqueado:** nada. Conflito só no changelog, resolvido mantendo os dois lados.
+**Versão:** agente 1.1.54 (o ramo mexeu em `agent/`; é a versão que leva o `_antena_loop` às máquinas).
+
 ### [2026-11-13] — Gravação do Digifort: verde acima de 10% e vermelho só sem nenhum registro (agente 1.1.53)
 
 **Problema:** uma câmera aparecia como falha no sistema e tinha gravação no próprio Digifort. Em `segundos_por_dia`
@@ -1137,6 +1146,19 @@ server/dashboard/src/pages/Machines/MachineDetail/components/MiniCalendar.tsx (l
 **Conciliação feita:** a sincronização com o OneDrive estava correta (VM `/opt/trilan/backups` e a pasta do OneDrive no servidor Windows idênticas por cliente). Procedimento e comandos na skill `.claude/skills/conciliar-backups-onedrive` (só do Claude).
 **Arquivos:** server/api/routers/agent.py, server/api/tests/test_recuperacao_backup.py, .claude/skills/conciliar-backups-onedrive/SKILL.md, CLAUDE.md, PROJECT_SPEC.md
 **Breaking Change:** Não. **Requer:** só o deploy do servidor (sem versão nova do agente).
+
+### [2026-11-13] — Equipamento tipo ANTENA: status das antenas Wi-Fi (Ruijie etc.) lido pelo MikroTik
+
+- **Motivo**: acompanhar antenas sem depender da API da Ruijie (o `appid`/`secret` só sai por pedido à Ruijie). O agente entra por SSH no MikroTik da rede e vê as antenas pelo ponto de vista dele. Testado no MikroTik da sede (RouterOS 7.25): a antena Ruijie `9C:2B:A6:71:6A:CF` aparece com o MAC `...6A:D0` (+1), IP 192.168.75.123, sem LLDP: só DHCP, ARP e tabela da bridge a enxergam.
+- **Cadastro** (`nvrs.tipo = 'ANTENA'`): `ip`/`username`/`password` são o acesso SSH ao MikroTik (senha criptografada como nos outros; recomendado usuário só de leitura, `policy=ssh,read,test`); `config_extra`: `porta_ssh` (22), `prefixos_mac` (OUI da busca automática, ex.: `9C:2B:A6, 54:16:51`) e `antenas` (`[{nome, mac, ip?, marca?, notificar}]`, até 200; `marca` com até 40 caracteres, opcional). `services/antenas.normalizar_config` valida e normaliza no POST/PUT (MAC em `AA:BB:CC:DD:EE:FF`, sem repetição; erro vira 400 com a mensagem).
+- **MAC com tolerância**: a antena é cadastrada por um MAC e vale qualquer MAC do **mesmo fabricante (3 primeiros bytes) a até 32 endereços de diferença** (`TOLERANCIA_MAC`), porque porta e rádios têm MACs consecutivos. O painel recusa cadastrar um MAC já coberto por outra antena.
+- **Agente** (`src/mikrotik/antenas.py`, `src/application/status_antena.py`; laço `_antena_loop` no `service.py`, a cada 3 min, `INTERVALO_ANTENA_S`): lê `/ip neighbor`, `/ip arp`, `/ip dhcp-server lease` e `/interface bridge host` (só `print`, nada é alterado no MikroTik), junta por MAC e avalia cada antena: **ONLINE** (respondeu ao ping, ou ARP `reachable`/`delay`/`probe`, ou foi vista na bridge sem IP), **OFFLINE** (IP conhecido que não responde), **SEM_REGISTRO** (nenhum MAC dela no MikroTik e sem IP). Ping ICMP em paralelo (até 8) com a latência. **Busca automática** (`descobertas`): vizinhos com capacidade `wlan-ap` ou nome Ruijie/Reyee e MACs com prefixo de `prefixos_mac`, fora das já cadastradas; MACs próximos viram um só. "Testar conexão" do tipo ANTENA: rede (SSH), leitura, conferência das antenas e envio. O backup diário ignora o tipo (`backup_job.py`, como a câmera avulsa).
+- **Servidor**: coluna `nvrs.antena_status` (migração inline); `POST /api/v1/agent/antenas/status` (agente) grava via `services/antenas.mesclar_status` (guarda `ultimo_online`, `offline_desde` na primeira queda e o último IP/hostname quando a antena some; erro de leitura do MikroTik mantém o estado anterior); `GET /api/v1/machines/{id}/equipamentos/{id}/antena-status` (painel). As antenas são editadas pelo `PUT` do equipamento (lista inteira em `config_extra.antenas`), então cada mudança entra na Auditoria.
+- **Marca da antena**: o agente detecta a marca pelo que o vizinho (LLDP/CDP/MNDP) e o DHCP anunciam (`marca_do_texto` em `src/mikrotik/antenas.py`; por enquanto só **Ruijie** (palavras `ruijie`, `reyee`), **Aruba** e **Xixian**, uma lista de palavras, não de MACs; outras marcas ficam sem detecção até serem acrescentadas aqui e em `MARCAS` de `AntenasModal.tsx`). Cada antena traz `marca` (a do cadastro, que vale sobre a detectada, ou, sem ela, a detectada) e `marca_detectada`; a busca automática também traz `marca`. Quando o LLDP não identifica (caso da antena Ruijie testada, que não anuncia LLDP), o usuário escolhe a marca no formulário "Adicionar pelo MAC" ou no seletor Marca da linha da antena (lista fechada Ruijie/Aruba/Xixian; uma marca já gravada fora da lista continua aparecendo; o servidor aceita qualquer texto até 40 caracteres). A marca é só informação: não muda a busca nem o cruzamento de MACs.
+- **Notificação `ANTENA_OFFLINE`** (nova no `ck_notificacoes_tipo`, recriado na migração; `services/notificacoes.py`): uma por antena (`referencia` = MAC), aberta quando a antena marcada para notificar fica fora do ar há mais de 10 min (`LIMIAR_ANTENA_OFFLINE_MIN`) e resolvida sozinha quando volta; "FALHA" quando o agente não consegue ler o MikroTik. E-mail no máximo 1 por dia por alerta e, se o alerta já tinha e-mail, outro "voltou" ao resolver (não avisa "voltou" se a antena foi removida). Relatório com mais de 20 min não abre nem fecha alerta (a queda do agente tem notificação própria).
+- **Painel**: novo tipo "Antenas" no formulário (IP/porta SSH/usuário/senha do MikroTik e prefixos de MAC); botão **Antenas** no card abre `AntenasModal` (status, IP, MAC cadastrado e "visto como", ping, offline desde, sino por antena, remover), a **busca automática** com "Adicionar" e o formulário **Adicionar pelo MAC** (aceita `9C:2B:A6:71:6A:CF`, `9c2b.a671.6acf` e `9c-2b-...`).
+- **Limites**: precisa de agente novo (**versão a publicar pelo dono**: sem ela o `_antena_loop` não existe na máquina e o status não chega); o agente precisa alcançar o MikroTik pelo SSH, e o ping parte da máquina do agente (se ela estiver em outra rede e bloquear ICMP, vale o ARP do MikroTik). Antena que some do ARP/DHCP/bridge sem IP fixo no cadastro fica "Não encontrada" (o IP opcional da antena serve de reserva). Não usa a API da Ruijie Cloud (sem `appid`/`secret` ainda).
+- **Testes**: `agent/tests/test_antenas.py` (27) e `server/api/tests/test_antenas.py` (18). **Arquivos:** agent/{service.py,src/mikrotik/antenas.py,src/application/{status_antena.py,api_client.py,teste_conexao.py,backup_job.py}}, server/api/{models.py,main.py,schemas.py,routers/{agent.py,equipamentos.py},services/{antenas.py,notificacoes.py}}, server/dashboard/src/{api/types.ts,utils/notificacoes.ts,pages/Machines/MachineDetail/{index.tsx,utils.ts,components/{AntenasModal.tsx,EqCard.tsx,EquipamentoFormModal.tsx,eqTipos.tsx}},pages/Notificacoes/NotificacoesPage.tsx}, PROJECT_SPEC.md.
 
 ### [2026-11-13] — Avisos de confirmação no padrão do sistema (dashboard)
 
@@ -1365,6 +1387,15 @@ vindos de `eqTipos.tsx`, o mesmo usado nos cards de equipamento), com um botão 
 `server/api/tests/test_cameras_offline_notificacao.py` (sem Postgres): opt-in por câmera, limiar de tempo,
 volta a ficar online, e o pareamento por canal físico (NVR tradicional) separado do pareamento por nome.
 **Arquivos:** server/api/{models.py,main.py,schemas.py,routers/notificacoes.py,services/{notificacoes.py,galeria_vms.py},tests/test_cameras_offline_notificacao.py}, server/dashboard/src/{api/{client.ts,types.ts},utils/notificacoes.ts,pages/Notificacoes/NotificacoesPage.tsx}, PROJECT_SPEC.md.
+
+### [2026-11-13] — Defense: câmeras de DVR/NVR voltam à Galeria ("Sincronizar da Máquina" traz tudo que o Defense lista)
+
+- **Sintoma** (Defense Trilan): a Galeria tinha só as 10 câmeras de IP próprio; os 5 canais do DVR-CATANDUVA, os 3 do ESTOQUE CATANDUVA, o canal do NVR INTELBRAS e a LATERAL TERRENO (10 de 20) não apareciam, sem estado, gravação nem imagem.
+- **Causa**: (1) a importação da planilha só aceita linhas do tipo "câmera" (`d0e682e`, 26/10) e a planilha do Defense não traz os canais dos gravadores; (2) desde 29/10 (`248d255`) o agente, havendo câmeras na Galeria, reporta só as câmeras da Galeria (antes inventava estado para o que não achava); (3) câmeras de IP compartilhado precisam de `canal_rtsp` para a captura (`7cc188e`). A API do Defense sempre devolveu as 20 câmeras, com estado e gravação.
+- **Agente** (`src/vms/defense.py`): `_casar_cameras_defense` acrescenta ao relatório as câmeras que o Defense lista e a Galeria não tem (por nome, nome do canal ou, em câmera de IP próprio, IP); essas entradas levam `modelo` e `canal_rtsp`. `canal_rtsp` sai do código do canal (`1000079$1$0$3` = canal 4 do gravador) e só existe para canais de DVR/NVR. Entradas da Galeria não mudam. Testes: `agent/tests/test_defense_cameras_fora_da_galeria.py`. **Precisa de versão nova do agente.**
+- **Servidor**: `POST .../cameras/import` com `sync_from_machine` num DEFENSE cria também as câmeras do relatório sem par na Galeria (`cameras_do_relatorio_sem_par` e `marca_pelo_modelo` em `services/galeria_vms.py`): nome e IP do Defense, `canal_rtsp` do gravador, marca pelo modelo (DS-=Hikvision, MTI/DIH=ONVIF, MHDX/VIP/iNVD=Intelbras) e a senha padrão do projeto (a do gravador não vem do Defense: editar na câmera se for outra). Sem nada para trazer responde 400 com o motivo. Testes: `server/api/tests/test_galeria_sync_defense.py`.
+- **Painel**: mesma tela e botão "Sincronizar da Máquina" (só o texto da dica muda no DEFENSE). Depois do agente novo, as câmeras de gravador já aparecem na Galeria (só com estado e gravação); o botão as cadastra para a captura das imagens.
+- **Suposição não testada**: o canal físico do gravador é o último número do código + 1 (ESTOQUE CATANDUVA, MHDX 1108-C de 8 canais, tem os canais 6, 7 e 8). Conferir a primeira captura de cada gravador.
 
 ### [2026-11-12] — Tela de Auditoria na barra lateral
 

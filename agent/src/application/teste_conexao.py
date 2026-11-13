@@ -335,6 +335,40 @@ def _testar_mikrotik(t: _Teste, eq: dict, cfg: dict) -> str:
         ssh.close()
 
 
+def _testar_antena(t: _Teste, eq: dict, cfg: dict, conf: dict) -> str:
+    from src.application.api_client import send_status_antenas
+    from src.application.status_antena import coletar_antena, porta_ssh
+
+    ip, porta = (eq.get("ip") or "").strip(), porta_ssh(cfg)
+    t.planejar(("rede", "Alcançando o MikroTik (SSH)"), ("leitura", "Entrando e lendo vizinhos, ARP e DHCP"),
+               ("antenas", "Conferindo as antenas cadastradas"), ("envio", "Enviando o status ao painel"))
+    _tcp(t, "rede", ip, porta)
+    t.iniciar("leitura")
+    if not eq.get("username") or not eq.get("password"):
+        t.erro("leitura", "Usuário ou senha do MikroTik não informados")
+        raise _Falha("Informe o usuário e a senha do SSH do MikroTik.")
+    res = coletar_antena({**eq, "active": True})
+    if res.get("erro"):
+        t.erro("leitura", res["erro"])
+        raise _Falha(res["erro"])
+    mk = res.get("mikrotik") or {}
+    t.ok("leitura", f"{mk.get('identidade') or 'MikroTik'}: {mk.get('dispositivos', 0)} dispositivo(s) na rede")
+
+    t.iniciar("antenas")
+    antenas, descobertas = res.get("antenas") or [], res.get("descobertas") or []
+    online = sum(1 for a in antenas if a.get("status") == "ONLINE")
+    t.ok("antenas", f"{online} de {len(antenas)} antena(s) online; {len(descobertas)} encontrada(s) na busca automática")
+
+    t.iniciar("envio")
+    if send_status_antenas(conf, [res]):
+        t.ok("envio", "Status atualizado no painel")
+    else:
+        t.erro("envio", "O servidor não aceitou o status")
+        raise _Falha("O MikroTik respondeu, mas o envio do status ao painel falhou; o ciclo normal tenta de novo em 3 min.")
+    return (f"Conectado ao MikroTik {mk.get('identidade') or ''}: {online} de {len(antenas)} antena(s) online, "
+            f"{len(descobertas)} nova(s) na busca automática.").replace("  ", " ")
+
+
 def _testar_defense(t: _Teste, eq: dict, cfg: dict) -> str:
     from src.vms.defense import consultar_status_cameras_defense_api
 
@@ -392,6 +426,8 @@ def executar_teste_conexao(task: dict, conf: dict, enviar: Callable[[dict], None
             mensagem = _testar_pabx(t, task, cfg)
         elif tipo == "MIKROTIK":
             mensagem = _testar_mikrotik(t, task, cfg)
+        elif tipo == "ANTENA":
+            mensagem = _testar_antena(t, task, cfg, conf)
         elif tipo == "DEFENSE":
             mensagem = _testar_defense(t, task, cfg)
         elif tipo == "DIGIFORT":

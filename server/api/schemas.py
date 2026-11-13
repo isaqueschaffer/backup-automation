@@ -14,7 +14,7 @@ from services.senhas import validar_senha_nova
 # ─────────────────────────────────────────────
 # Equipamento (antes chamado NVR)
 # ─────────────────────────────────────────────
-TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED", "DEFENSE", "CAMERA"]
+TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED", "DEFENSE", "CAMERA", "ANTENA"]
 
 class NVRBase(BaseModel):
     tipo: str = "NVR"  # NVR, OLT, ONU, PABX
@@ -396,6 +396,18 @@ class StatusOltReport(BaseModel):
     equipamentos: List[EquipamentoStatusOlt] = Field(default_factory=list, max_length=50)
 
 
+class EquipamentoStatusAntena(BaseModel):
+    nome: str
+    erro: Optional[str] = Field(default=None, max_length=1000)
+    mikrotik: Dict[str, Any] = Field(default_factory=dict)
+    antenas: List[Dict[str, Any]] = Field(default_factory=list, max_length=200)
+    descobertas: List[Dict[str, Any]] = Field(default_factory=list, max_length=200)
+
+
+class StatusAntenaReport(BaseModel):
+    equipamentos: List[EquipamentoStatusAntena] = Field(default_factory=list, max_length=50)
+
+
 class EquipamentoStatusAlarme(BaseModel):
     nome: str
     ip: Optional[str] = None
@@ -422,7 +434,7 @@ class ComandoAlarmeResultado(BaseModel):
 # ─────────────────────────────────────────────
 # Notificações
 # ─────────────────────────────────────────────
-TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE", "ALARME"]
+TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE", "ALARME", "ANTENA_OFFLINE"]
 ModoNotificacaoPersonalizada = Literal["RECORRENTE", "DATA"]
 
 

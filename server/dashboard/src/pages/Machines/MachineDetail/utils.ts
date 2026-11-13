@@ -19,9 +19,9 @@ export const OVERDUE_FAST_POLL_MS = 30 * 1000;
 export const serverUtcMs = (iso: string) =>
   new Date(/Z|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + "Z").getTime();
 
-export const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "DIGIFORT", "DEFENSE"];
+export const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "ANTENA", "DIGIFORT", "DEFENSE"];
 export const TIPO_ICONE_EMOJI: Record<string, string> = {
-  NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", DIGIFORT: "🖥️", DEFENSE: "🛡️",
+  NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", ANTENA: "📡", DIGIFORT: "🖥️", DEFENSE: "🛡️",
 };
 
 // Nome seguro para arquivo (espaços -> "_")
@@ -33,6 +33,8 @@ export function emptyEqForm(overrides: Partial<EqForm> = {}): EqForm {
     pasta_origem: "", fabricante_olt: "UNM2000",
     porta_api: 4433,
     porta_alarme: 3001,
+    porta_ssh: 22,
+    prefixos_mac: "",
     ...overrides,
   };
 }
@@ -65,6 +67,9 @@ export function eqToForm(eq: NVR): EqForm {
     nomes_db_senha_definida: !!cfg?.nomes_db_senha_definida,
     licenca_inicio: cfg?.licenca_inicio || "",
     licenca_fim: cfg?.licenca_fim || "",
+    porta_ssh: cfg?.porta_ssh ?? 22,
+    prefixos_mac: cfg?.prefixos_mac || "",
+    antenas: cfg?.antenas || [],
   };
 }
 
@@ -84,13 +89,18 @@ export function buildEqPayload(
   if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
   const payload: EqPayload = { tipo: eqForm.tipo, name: eqForm.name.trim(), ip: "", username: "", password: "", config_extra: null };
 
-  if (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA") {
+  if (eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA" || eqForm.tipo === "ANTENA") {
     if (!eqForm.ip || (!editingEqId && (!eqForm.username || !eqForm.password))) return { error: `Para ${eqForm.tipo}, preencha IP/Host, usuário e senha.` };
     payload.ip = eqForm.ip.trim(); payload.username = eqForm.username.trim(); payload.password = eqForm.password;
     if (eqForm.tipo === "CAMERA") {
       payload.config_extra = { modelo: eqForm.modelo || "Hikvision" };
     } else if (eqForm.tipo === "NVR") {
       payload.config_extra = { marca: eqForm.marca || "Hikvision" };
+    } else if (eqForm.tipo === "ANTENA") {
+      const porta = Number(eqForm.porta_ssh) || 22;
+      if (porta < 1 || porta > 65535) return { error: "A porta SSH do MikroTik deve estar entre 1 e 65535." };
+      // A lista de antenas vem do que já está cadastrado (ela é editada no botão "Antenas" do card)
+      payload.config_extra = { porta_ssh: porta, prefixos_mac: (eqForm.prefixos_mac || "").trim(), antenas: eqForm.antenas || [] };
     }
   } else if (eqForm.tipo === "DIGIFORT") {
     if (!eqForm.pasta_origem) return { error: "Para DIGIFORT, informe a pasta de backup." };

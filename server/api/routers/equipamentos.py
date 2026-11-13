@@ -25,12 +25,14 @@ from schemas import (
     NVRPlanilhaEntrada, NVRPlanilhaResposta, ConexaoTesteResponse, ComandoAlarmeRequest, ComandoAlarmeResultado,
 )
 from services.agent_logs import registrar_alteracao
+from services.antenas import normalizar_config as normalizar_config_antena
 from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
 from services.segredos_config import proteger_segredos
 from services.escopo import obter_maquina
 from services.licenca_unm import licenca_da_config
 from services.galeria_vms import (
+    cameras_do_relatorio_sem_par,
     canal_int as _canal_int,
     ip_valido,
     parear_cameras,
@@ -117,6 +119,10 @@ def create_equipamento(
             detail=f"Tipo inválido. Tipos suportados: {TIPOS_EQUIPAMENTO}",
         )
 
+    config_extra = body.config_extra
+    if tipo == "ANTENA":
+        config_extra = _config_antena(config_extra)
+
     equipamento = NVR(
         machine_id=machine_id,
         tipo=tipo,
@@ -124,7 +130,7 @@ def create_equipamento(
         ip=body.ip,
         username=body.username,
         password=encrypt(body.password),
-        config_extra=proteger_segredos(body.config_extra),
+        config_extra=proteger_segredos(config_extra),
         active=body.active,
     )
     db.add(equipamento)
@@ -158,6 +164,8 @@ def update_equipamento(
         if field == "password" and value:
             eq.password = encrypt(value)
         elif field == "config_extra":
+            if (body.tipo or eq.tipo or "").upper() == "ANTENA":
+                value = _config_antena(value)
             eq.config_extra = proteger_segredos(value, eq.config_extra)
         elif field == "tipo" and value:
             if value.upper() not in TIPOS_EQUIPAMENTO:
@@ -451,6 +459,31 @@ def andamento_teste_conexao(
     return estado
 
 
+def _config_antena(config: Optional[dict]) -> Optional[dict]:
+    """Valida o cadastro de um equipamento ANTENA (MACs, porta SSH, prefixos); erro vira 400 com a mensagem do painel."""
+    try:
+        return normalizar_config_antena(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{id}/antena-status")
+def get_antena_status(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Último status das antenas de um equipamento ANTENA (lido pelo agente no MikroTik). Vazio se ainda não chegou."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "").upper() != "ANTENA":
+        raise HTTPException(status_code=400, detail="Este equipamento não é do tipo ANTENA.")
+    return nvr.antena_status or {"atualizado_em": None, "erro": None, "mikrotik": {}, "antenas": [], "descobertas": []}
+
+
 @router.get("/{id}/olt-status")
 def get_olt_status(
     machine_id: UUID,
@@ -717,8 +750,6 @@ def import_cameras(
 
     if payload.sync_from_machine:
         machine_cams = [e for e in machine.equipamentos if (e.tipo or "").upper() == "CAMERA" and e.active and e.ip]
-        if not machine_cams:
-            raise HTTPException(status_code=400, detail="Nenhuma câmera (tipo CAMERA) cadastrada na máquina para sincronizar.")
         itens = [
             NVRCameraConfigItem(
                 nome=mc.name,
@@ -729,6 +760,22 @@ def import_cameras(
             )
             for mc in machine_cams
         ]
+        if (nvr.tipo or "").upper() == "DEFENSE":
+            # Câmeras que o Defense lista e a Galeria não tem (canais de DVR/NVR...), vindas do relatório do agente
+            ja_tem = {(i.nome or "").strip().lower() for i in itens}
+            todas_galeria = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).all()
+            itens += [
+                NVRCameraConfigItem(**dados)
+                for dados in cameras_do_relatorio_sem_par(todas_galeria, nvr.last_recording_status or [])
+                if dados["nome"].lower() not in ja_tem
+            ]
+        if not itens:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma câmera para sincronizar: a máquina não tem câmeras do tipo CAMERA"
+                       + (" e o Defense não informou câmeras novas (o agente precisa fazer um backup para reportá-las)."
+                          if (nvr.tipo or "").upper() == "DEFENSE" else "."),
+            )
     else:
         itens = payload.cameras
         if not itens:

@@ -1,4 +1,4 @@
-export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE" | "CAMERA" | "MIXED";
+export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE" | "CAMERA" | "ANTENA" | "MIXED";
 
 // Status de gravação de uma câmera (NVR.last_recording_status)
 export interface CameraRecStatus {
@@ -67,6 +67,10 @@ export interface EquipamentoConfig {
   licenca_inicio?: string;
   licenca_fim?: string;
   nomes_db_senha_definida?: boolean;
+  // ANTENA: acesso SSH ao MikroTik (porta), prefixos de fabricante da busca automática e as antenas cadastradas
+  porta_ssh?: number;
+  prefixos_mac?: string;
+  antenas?: AntenaCadastro[];
   [key: string]: unknown;
 }
 
@@ -97,6 +101,10 @@ export interface EqForm {
   nomes_db_senha_definida?: boolean;
   licenca_inicio?: string;
   licenca_fim?: string;
+  // ANTENA
+  porta_ssh?: number | string;
+  prefixos_mac?: string;
+  antenas?: AntenaCadastro[];
   // Planilha das câmeras do Digifort lida no formulário (enviada à Galeria ao salvar)
   planilhaNova?: PlanilhaPendente | null;
   // Digifort já cadastrado: o que a Galeria do equipamento já tem (exigência satisfeita sem nova planilha)
@@ -561,7 +569,7 @@ export interface AlarmeStatusResponse {
 }
 
 // ─── Notificações ───────────────────────────────────────────────────────────
-export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE" | "ALARME";
+export type TipoNotificacao = "LICENCA_UNM2000" | "BACKUP_FALHOU" | "AGENTE_OFFLINE" | "PERSONALIZADA" | "CAMERA_OFFLINE" | "ALARME" | "ANTENA_OFFLINE";
 export type ModoNotificacaoPersonalizada = "RECORRENTE" | "DATA";
 
 export interface Notificacao {
@@ -647,4 +655,56 @@ export interface NotificacaoPersonalizadaPayload {
 export interface ConfiguracaoNotificacao {
   tipo: TipoNotificacao;
   ativo: boolean;
+}
+
+// ── Antenas (equipamento ANTENA): lidas pelo MikroTik por SSH (GET /machines/{id}/equipamentos/{id}/antena-status)
+export interface AntenaCadastro {
+  nome: string;
+  mac: string;
+  ip?: string;
+  // Marca informada pelo usuário (vale sobre a detectada pelo LLDP/vizinho)
+  marca?: string;
+  notificar?: boolean;
+}
+
+export type SituacaoAntena = "ONLINE" | "OFFLINE" | "SEM_REGISTRO" | "ERRO";
+
+export interface AntenaStatus {
+  nome: string;
+  mac: string;
+  ip?: string;
+  ip_ultimo?: boolean;
+  mac_visto?: string;
+  hostname?: string;
+  interface?: string;
+  fontes?: string[];
+  arp_status?: string;
+  ping_ms?: number | null;
+  // Marca em uso (a do cadastro ou, sem ela, a detectada) e a que o LLDP/vizinho/DHCP anunciou
+  marca?: string;
+  marca_detectada?: string;
+  status: SituacaoAntena;
+  notificar?: boolean;
+  erro?: string;
+  ultimo_online?: string | null;
+  offline_desde?: string | null;
+}
+
+export interface AntenaDescoberta {
+  mac: string;
+  ip?: string;
+  hostname?: string;
+  interface?: string;
+  fontes?: string[];
+  motivo?: string;
+  marca?: string;
+  macs?: string[];
+}
+
+export interface AntenaStatusResponse {
+  atualizado_em: string | null;
+  erro: string | null;
+  mikrotik: { identidade?: string; ip?: string; dispositivos?: number };
+  antenas: AntenaStatus[];
+  descobertas: AntenaDescoberta[];
 }

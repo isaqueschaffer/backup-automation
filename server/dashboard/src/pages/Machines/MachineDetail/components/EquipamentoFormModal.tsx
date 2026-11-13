@@ -38,10 +38,10 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
           placeholder={`${eqForm.tipo}_Maquina1`}
           value={eqForm.name} onChange={e => setEqForm({ ...eqForm, name: e.target.value })} />
       </div>
-      {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA") && (
+      {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA" || eqForm.tipo === "ANTENA") && (
         <>
           <div className="form-group">
-            <label className="form-label">Endereço IP ou Host *</label>
+            <label className="form-label">{eqForm.tipo === "ANTENA" ? "Endereço IP do MikroTik *" : "Endereço IP ou Host *"}</label>
             <input className="form-input" type="text" placeholder={eqForm.tipo === "PABX" ? "https://192.168.12.2" : "192.168.1.100"}
               value={eqForm.ip} onChange={e => setEqForm({ ...eqForm, ip: e.target.value })} />
           </div>
@@ -57,6 +57,28 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
                 value={eqForm.password} onChange={e => setEqForm({ ...eqForm, password: e.target.value })} />
             </div>
           </div>
+          {eqForm.tipo === "ANTENA" && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginTop: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Porta SSH</label>
+                  <input className="form-input" type="number" min={1} max={65535} placeholder="22"
+                    value={eqForm.porta_ssh ?? 22} onChange={e => setEqForm({ ...eqForm, porta_ssh: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Prefixos de MAC das antenas (busca automática)</label>
+                  <input className="form-input" type="text" placeholder="9C:2B:A6, 54:16:51"
+                    value={eqForm.prefixos_mac || ""} onChange={e => setEqForm({ ...eqForm, prefixos_mac: e.target.value })} />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, display: "block" }}>
+                O agente entra por SSH neste MikroTik (use um usuário só de leitura) e lê vizinhos, ARP e DHCP a cada 3 minutos. A busca
+                automática traz os pontos de acesso vizinhos e os MACs com os prefixos acima (os 3 primeiros bytes do fabricante). As antenas
+                são cadastradas depois, no botão "Antenas" do card: pela busca automática ou pelo MAC, e vale qualquer MAC até 32
+                endereços de diferença do informado.
+              </span>
+            </>
+          )}
           {eqForm.tipo === "CAMERA" && (
             <div className="form-group" style={{ marginTop: 12 }}>
               <label className="form-label">Modelo / Fabricante</label>

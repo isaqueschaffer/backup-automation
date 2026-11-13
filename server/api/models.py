@@ -214,6 +214,8 @@ class NVR(Base):
     last_telemetry_status = Column(JSON, nullable=True)  # CPU/RAM/discos (NVR Hikvision)
     olt_status = Column(JSON, nullable=True)  # OLT UNM2000: status das OLTs/ONUs por SNMP (enviado pelo agente a cada 5 min)
     last_alarm_status = Column(JSON, nullable=True)  # DEFENSE: centrais de alarme Intelbras (enviado pelo agente a cada 5 min)
+    # ANTENA: status das antenas lido pelo MikroTik (services/antenas.py: atualizado_em, erro, mikrotik, antenas, descobertas)
+    antena_status = Column(JSON, nullable=True)
     conexao_status = Column(JSON, nullable=True)  # último "Testar conexão" feito pelo agente: ok, mensagem, etapas, testado_em (UTC naive)
     # DEFENSE: ids (texto) das centrais de alarme que geram notificação ALARME; opt-in, vazio até o usuário marcar
     alarmes_notificar = Column(JSON, nullable=True)
@@ -333,7 +335,7 @@ class Notificacao(Base):
     __tablename__ = "notificacoes"
     __table_args__ = (
         CheckConstraint(
-            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME')",
+            "tipo IN ('LICENCA_UNM2000', 'BACKUP_FALHOU', 'AGENTE_OFFLINE', 'PERSONALIZADA', 'CAMERA_OFFLINE', 'ALARME', 'ANTENA_OFFLINE')",
             name="ck_notificacoes_tipo",
         ),
     )
@@ -348,7 +350,8 @@ class Notificacao(Base):
     # Câmera do alerta (tipo CAMERA_OFFLINE); mesmo CASCADE do equipamento, para não deixar notificação órfã
     camera_id = Column(UUID(as_uuid=True), ForeignKey("nvr_cameras.id", ondelete="CASCADE"), nullable=True)
     # Situação do alerta dentro do equipamento (tipo ALARME): "<central>:DESCONECTADA", "<central>:<partição>:DISPARO",
-    # "<central>:<partição>:DESARMADA" ou "FALHA"; separa os alertas abertos de um mesmo DEFENSE
+    # "<central>:<partição>:DESARMADA" ou "FALHA"; separa os alertas abertos de um mesmo DEFENSE.
+    # Tipo ANTENA_OFFLINE: o MAC cadastrado da antena, ou "FALHA" (o MikroTik não respondeu ao agente)
     referencia = Column(String(120), nullable=True)
     # Definição que gerou o alerta (tipo PERSONALIZADA); SET NULL ao apagar a definição para preservar o histórico
     definicao_id = Column(UUID(as_uuid=True), ForeignKey("notificacoes_personalizadas.id", ondelete="SET NULL"), nullable=True)

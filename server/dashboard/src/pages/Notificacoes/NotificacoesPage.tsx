@@ -32,6 +32,7 @@ const DESCRICAO_TIPO: Record<TipoNotificacao, string> = {
   PERSONALIZADA: "",
   CAMERA_OFFLINE: "",
   ALARME: "",
+  ANTENA_OFFLINE: "",
 };
 
 const TIPOS_AUTOMATICOS: TipoNotificacao[] = ["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE"];
