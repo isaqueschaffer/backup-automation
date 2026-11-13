@@ -394,7 +394,7 @@ export interface CustomerRun {
 }
 
 // ── Multi-contas ──────────────────────────────────────────────
-export type Papel = "SUPER_ADMIN" | "ADMIN" | "LEITURA";
+export type Papel = "SUPER_ADMIN" | "ADMIN" | "VISUALIZADOR" | "LEITURA";
 export type TipoConta = "INTEGRADOR" | "CLIENTE_FINAL";
 export type StatusConta = "OK" | "AVISO" | "CRITICO" | "VENCIDA" | "SUSPENSA" | "VITALICIA";
 
@@ -419,6 +419,8 @@ export interface Me {
   usuario: { id: string | null; nome: string; email: string | null; papel: Papel };
   conta: ContaResumo | null;
   somente_leitura: boolean;
+  // Pode rodar os testes (captura ao vivo sem salvar, "Testar conexão"): ADMIN e VISUALIZADOR
+  pode_testar?: boolean;
   rotulos: Rotulos;
 }
 
@@ -465,6 +467,8 @@ export interface Usuario {
   ativo: boolean;
   ultimo_login: string | null;
   criado_em: string;
+  // Visualizador / Somente leitura: máquinas que vê (vazio = todas as da conta)
+  maquinas?: string[];
 }
 
 

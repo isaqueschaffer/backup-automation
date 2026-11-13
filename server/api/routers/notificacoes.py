@@ -5,7 +5,7 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from auth import Contexto, exigir_admin_conta, get_contexto
@@ -28,7 +28,7 @@ from schemas import (
     NotificacaoResponse,
 )
 from services.camera_offline import segundos_offline
-from services.escopo import filtrar_por_conta
+from services.escopo import filtrar_maquinas, filtrar_por_conta
 from services.galeria_vms import status_por_camera
 from services.notificacoes import TIPOS, id_central, verificar_alarmes_equipamento, verificar_olt_equipamento
 
@@ -53,6 +53,14 @@ def listar_notificacoes(
             or_(Notificacao.tipo != "PERSONALIZADA", NotificacaoPersonalizada.mostrar_popup == True)
         )
     consulta = filtrar_por_conta(consulta, Notificacao.conta_id, ctx)
+    if ctx.maquinas_permitidas is not None:
+        # Usuário restrito a algumas máquinas: só os alertas delas e os que não são de máquina (ex.: personalizadas)
+        maquinas = list(ctx.maquinas_permitidas)
+        consulta = consulta.filter(or_(
+            Notificacao.machine_id.in_(maquinas),
+            Notificacao.nvr_id.in_(db.query(NVR.id).filter(NVR.machine_id.in_(maquinas))),
+            and_(Notificacao.machine_id.is_(None), Notificacao.nvr_id.is_(None)),
+        ))
     return consulta.order_by(Notificacao.criado_em.desc()).limit(200).all()
 
 
@@ -115,7 +123,7 @@ def listar_cameras_notificacao(
     consulta = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
         NVR.tipo.in_(("NVR", "DIGIFORT", "DEFENSE")), NVR.active == True, Machine.active == True
     )
-    consulta = filtrar_por_conta(consulta, Machine.conta_id, ctx)
+    consulta = filtrar_maquinas(filtrar_por_conta(consulta, Machine.conta_id, ctx), Machine.id, ctx)
     agora = datetime.utcnow()
     saida = []
     for nvr in consulta.order_by(Machine.name, NVR.name).all():
@@ -199,7 +207,7 @@ def listar_alarmes_notificacao(
     consulta = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
         NVR.tipo == "DEFENSE", NVR.active == True, Machine.active == True
     )
-    consulta = filtrar_por_conta(consulta, Machine.conta_id, ctx)
+    consulta = filtrar_maquinas(filtrar_por_conta(consulta, Machine.conta_id, ctx), Machine.id, ctx)
     return [_alarmes_do_equipamento(nvr) for nvr in consulta.order_by(Machine.name, NVR.name).all()]
 
 
@@ -270,7 +278,7 @@ def listar_olts_notificacao(
     consulta = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
         NVR.tipo == "OLT", NVR.active == True, Machine.active == True
     )
-    consulta = filtrar_por_conta(consulta, Machine.conta_id, ctx)
+    consulta = filtrar_maquinas(filtrar_por_conta(consulta, Machine.conta_id, ctx), Machine.id, ctx)
     return [_olt_para_resposta(nvr) for nvr in consulta.order_by(Machine.name, NVR.name).all()]
 
 

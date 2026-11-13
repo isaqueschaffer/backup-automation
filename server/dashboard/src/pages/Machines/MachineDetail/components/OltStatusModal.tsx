@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 import api from "../../../../api/client";
 import { ConexaoTeste, OltStatus, OltStatusResponse } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
+import { usePodeTestar } from "../../../../contexts/AuthContext";
 import StatusBadge from "../../../../components/StatusBadge";
 import { useToast } from "../../../../components/Toast";
 import { fmtDate } from "../../../../utils/date";
@@ -245,6 +246,7 @@ export default function OltStatusModal({ machineId, nvrId, nvrName, onClose }: {
     else toast(t.mensagem || "A atualização falhou.", "error");
   }, [carregar, toast]);
   const leitura = useTesteConexao(machineId, nvrId, { onConcluido: aoConcluir });
+  const podeTestar = usePodeTestar();
 
   // relógio para a idade do dado e a contagem até a próxima coleta automática
   useEffect(() => {
@@ -266,12 +268,12 @@ export default function OltStatusModal({ machineId, nvrId, nvrName, onClose }: {
             {o.nome}{o.erro ? " ⚠" : ""}
           </button>
         ))}
-        <button className="btn btn-secondary btn-sm" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}
+        {podeTestar && <button className="btn btn-secondary btn-sm" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}
           onClick={leitura.iniciar} disabled={leitura.emAndamento}
           title="Pede ao agente da máquina uma leitura nova da OLT agora">
           <RefreshCw size={13} style={leitura.emAndamento ? { animation: "spin 0.9s linear infinite" } : undefined} />
           {leitura.emAndamento ? "Atualizando..." : "Atualizar"}
-        </button>
+        </button>}
       </div>
       {leitura.emAndamento ? (
         <div style={{ marginBottom: 12 }}>

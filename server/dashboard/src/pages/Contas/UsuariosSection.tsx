@@ -12,6 +12,7 @@ import { useConfirm } from "../../components/ConfirmDialog";
 import { fmtDate } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
 import { PAPEL_LABEL } from "./contaUi";
+import MaquinasUsuarioCampo from "./MaquinasUsuarioCampo";
 
 interface UsuariosSectionProps {
   contaId?: string;
@@ -31,14 +32,18 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
   const [novoNome, setNovoNome] = useState("");
   const [novoEmail, setNovoEmail] = useState("");
   const [novaSenha, setNovaSenha] = useState("");
-  const [novoPapel, setNovoPapel] = useState<"ADMIN" | "LEITURA">("ADMIN");
+  const [novoPapel, setNovoPapel] = useState<"ADMIN" | "VISUALIZADOR" | "LEITURA">("ADMIN");
+  const [novoRestringir, setNovoRestringir] = useState(false);
+  const [novoMaquinas, setNovoMaquinas] = useState<string[]>([]);
   const [novoSaving, setNovoSaving] = useState(false);
 
   // Modal Editar Usuário
   const [editingUsuario, setEditingUsuario] = useState<Usuario | null>(null);
   const [editNome, setEditNome] = useState("");
-  const [editPapel, setEditPapel] = useState<"ADMIN" | "LEITURA">("ADMIN");
+  const [editPapel, setEditPapel] = useState<"ADMIN" | "VISUALIZADOR" | "LEITURA">("ADMIN");
   const [editSenha, setEditSenha] = useState("");
+  const [editRestringir, setEditRestringir] = useState(false);
+  const [editMaquinas, setEditMaquinas] = useState<string[]>([]);
   const [editSaving, setEditSaving] = useState(false);
 
   // Ação Ativar/Desativar
@@ -66,6 +71,8 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
     setNovoEmail("");
     setNovaSenha("");
     setNovoPapel("ADMIN");
+    setNovoRestringir(false);
+    setNovoMaquinas([]);
     setShowNovoModal(true);
   };
 
@@ -86,6 +93,10 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
       toast("A senha deve ter no mínimo 10 caracteres.", "error");
       return;
     }
+    if (novoPapel !== "ADMIN" && novoRestringir && novoMaquinas.length === 0) {
+      toast("Marque pelo menos uma máquina, ou escolha \"Todas as máquinas da conta\".", "error");
+      return;
+    }
 
     setNovoSaving(true);
     try {
@@ -95,6 +106,7 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
           email: emailTrim,
           senha: novaSenha,
           papel: novoPapel,
+          maquinas: novoPapel !== "ADMIN" && novoRestringir ? novoMaquinas : [],
         },
         contaId
       );
@@ -111,8 +123,10 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
   const abrirEditarModal = (u: Usuario) => {
     setEditingUsuario(u);
     setEditNome(u.nome);
-    setEditPapel(u.papel === "LEITURA" ? "LEITURA" : "ADMIN");
+    setEditPapel(u.papel === "LEITURA" || u.papel === "VISUALIZADOR" ? u.papel : "ADMIN");
     setEditSenha("");
+    setEditRestringir((u.maquinas || []).length > 0);
+    setEditMaquinas(u.maquinas || []);
   };
 
   const handleEditarUsuario = async (e: FormEvent) => {
@@ -130,6 +144,10 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
       toast("A nova senha deve ter no mínimo 10 caracteres.", "error");
       return;
     }
+    if (editPapel !== "ADMIN" && editRestringir && editMaquinas.length === 0) {
+      toast("Marque pelo menos uma máquina, ou escolha \"Todas as máquinas da conta\".", "error");
+      return;
+    }
 
     setEditSaving(true);
     try {
@@ -139,6 +157,7 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
           nome: nomeTrim,
           papel: editPapel,
           senha: senhaTrim || undefined,
+          maquinas: editPapel !== "ADMIN" && editRestringir ? editMaquinas : [],
         },
         contaId
       );
@@ -247,6 +266,7 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
                 <th>Nome</th>
                 <th>E-mail</th>
                 <th>Papel</th>
+                <th>Máquinas</th>
                 <th>Situação</th>
                 <th>Último acesso</th>
                 {podeEditar && <th>Ações</th>}
@@ -260,6 +280,11 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
                   </td>
                   <td>{u.email}</td>
                   <td>{PAPEL_LABEL[u.papel] ?? u.papel}</td>
+                  <td className="text-sm">
+                    {u.papel === "ADMIN" || u.papel === "SUPER_ADMIN" || !(u.maquinas || []).length
+                      ? "Todas"
+                      : `${(u.maquinas || []).length} máquina(s)`}
+                  </td>
                   <td>
                     {u.ativo ? (
                       <span className="badge ok">Ativo</span>
@@ -361,13 +386,18 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
                 className="form-input"
                 value={novoPapel}
                 onChange={(e) =>
-                  setNovoPapel(e.target.value as "ADMIN" | "LEITURA")
+                  setNovoPapel(e.target.value as "ADMIN" | "VISUALIZADOR" | "LEITURA")
                 }
               >
                 <option value="ADMIN">Administrador</option>
+                <option value="VISUALIZADOR">Visualizador (vê e testa, não altera)</option>
                 <option value="LEITURA">Somente leitura</option>
               </select>
             </div>
+            {novoPapel !== "ADMIN" && (
+              <MaquinasUsuarioCampo contaId={contaId} restringir={novoRestringir} onRestringir={setNovoRestringir}
+                selecionadas={novoMaquinas} onSelecionadas={setNovoMaquinas} />
+            )}
             <div
               className="flex gap-3 mt-4"
               style={{ justifyContent: "flex-end" }}
@@ -421,13 +451,18 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
                 className="form-input"
                 value={editPapel}
                 onChange={(e) =>
-                  setEditPapel(e.target.value as "ADMIN" | "LEITURA")
+                  setEditPapel(e.target.value as "ADMIN" | "VISUALIZADOR" | "LEITURA")
                 }
               >
                 <option value="ADMIN">Administrador</option>
+                <option value="VISUALIZADOR">Visualizador (vê e testa, não altera)</option>
                 <option value="LEITURA">Somente leitura</option>
               </select>
             </div>
+            {editPapel !== "ADMIN" && (
+              <MaquinasUsuarioCampo contaId={contaId} restringir={editRestringir} onRestringir={setEditRestringir}
+                selecionadas={editMaquinas} onSelecionadas={setEditMaquinas} />
+            )}
             <div className="form-group">
               <label className="form-label">Nova senha (opcional)</label>
               <input

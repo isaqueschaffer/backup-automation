@@ -9,7 +9,7 @@ from auth import Contexto, get_contexto
 from config import settings
 from database import get_db
 from models import Customer, CustomerDashboard
-from services.escopo import obter_cliente
+from services.escopo import obter_cliente, exigir_cliente_inteiro
 from services.dashboards.compartilhamento import gerar_token
 from services.dashboards.dados import listar_opcoes, montar_dados
 from services.dashboards.esquemas import (
@@ -36,7 +36,10 @@ router = APIRouter(tags=["Dashboards"])
 
 
 def _cliente_ou_404(db: Session, ctx: Contexto, customer_id: UUID) -> Customer:
-    return obter_cliente(db, ctx, customer_id)
+    # O dashboard junta todas as máquinas do cliente: usuário restrito a parte delas não o abre
+    cliente = obter_cliente(db, ctx, customer_id)
+    exigir_cliente_inteiro(ctx, cliente)
+    return cliente
 
 
 def _obter_ou_criar(db: Session, customer: Customer) -> CustomerDashboard:

@@ -100,6 +100,7 @@ def get_me(
         usuario=usuario_me,
         conta=conta_resumo,
         somente_leitura=ctx.somente_leitura,
+        pode_testar=ctx.pode_testar,
         rotulos=rotulos,
     )
 

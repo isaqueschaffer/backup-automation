@@ -23,6 +23,8 @@ function getPapelLabel(papel: string): string {
       return "Administrador da plataforma";
     case "ADMIN":
       return "Administrador";
+    case "VISUALIZADOR":
+      return "Visualizador";
     case "LEITURA":
       return "Somente leitura";
     default:
@@ -57,7 +59,7 @@ export default function Sidebar() {
     { to: "/backups", icon: Archive, label: "Backups" },
     { to: "/notificacoes", icon: Bell, label: "Notificações" },
     // Quem alterou o quê: perfil somente leitura não vê
-    ...(me?.usuario.papel === "LEITURA" ? [] : [{ to: "/auditoria", icon: History, label: "Auditoria" }]),
+    ...(me?.usuario.papel === "LEITURA" || me?.usuario.papel === "VISUALIZADOR" ? [] : [{ to: "/auditoria", icon: History, label: "Auditoria" }]),
     { to: "/minha-conta", icon: UserCircle, label: "Minha conta" },
   ];
 

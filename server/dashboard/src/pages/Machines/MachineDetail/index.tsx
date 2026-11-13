@@ -34,10 +34,11 @@ import ConexaoTesteModal from "./components/ConexaoTesteModal";
 import AlarmesModal from "./components/AlarmesModal";
 import AntenasModal from "./components/AntenasModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
-import { useSomenteLeitura } from "../../../contexts/AuthContext";
+import { usePodeTestar, useSomenteLeitura } from "../../../contexts/AuthContext";
 
 export default function MachineDetail() {
   const somenteLeitura = useSomenteLeitura();
+  const podeTestar = usePodeTestar();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -467,6 +468,7 @@ export default function MachineDetail() {
                       {g.itens.map(eq => (
                         <EqCard key={eq.id} eq={eq}
                           somenteLeitura={somenteLeitura}
+                          podeTestar={podeTestar}
                           onDelete={() => handleDeleteEquipamento(eq.id, eq.name)}
                           onViewRecording={() => setShowRecordingModal({ show: true, nvrName: eq.name, cameras: eq.last_recording_status || [] })}
                           onViewCameras={() => setShowNVRCamerasModal({ show: true, nvrId: eq.id, nvrName: eq.name, eqTipo: eq.tipo })}

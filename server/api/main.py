@@ -173,7 +173,7 @@ if not _tem_tabela('usuarios'):
             nome VARCHAR(255) NOT NULL,
             email VARCHAR(255) NOT NULL UNIQUE,
             senha_hash VARCHAR(255) NOT NULL,
-            papel VARCHAR(20) NOT NULL CONSTRAINT ck_usuarios_papel CHECK (papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')),
+            papel VARCHAR(20) NOT NULL CONSTRAINT ck_usuarios_papel CHECK (papel IN ('SUPER_ADMIN', 'ADMIN', 'VISUALIZADOR', 'LEITURA')),
             ativo BOOLEAN NOT NULL DEFAULT TRUE,
             token_versao INTEGER NOT NULL DEFAULT 1,
             ultimo_login TIMESTAMP WITHOUT TIME ZONE,
@@ -252,6 +252,15 @@ for _tabela, _coluna, _ddl in _MIGRACOES_COLUNAS:
 # Expansão de colunas existentes para acomodar hosts/caminhos longos
 _run_ddl("ALTER TABLE nvrs ALTER COLUMN ip TYPE VARCHAR(255);", "nvrs.ip VARCHAR(255)")
 _run_ddl("ALTER TABLE nvr_cameras ALTER COLUMN ip TYPE VARCHAR(255);", "nvr_cameras.ip VARCHAR(255)")
+
+# Perfil VISUALIZADOR (vê e testa, não altera): papel que passou a valer em usuarios.papel (idempotente)
+if _tem_tabela("usuarios"):
+    _run_ddl("ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS ck_usuarios_papel;", "dropar ck_usuarios_papel antigo")
+    _run_ddl(
+        "ALTER TABLE usuarios ADD CONSTRAINT ck_usuarios_papel "
+        "CHECK (papel IN ('SUPER_ADMIN', 'ADMIN', 'VISUALIZADOR', 'LEITURA'));",
+        "recriar ck_usuarios_papel com VISUALIZADOR",
+    )
 
 # Notificações personalizadas e de câmera offline: tipos que passaram a valer em notificacoes.tipo (idempotente)
 if _tem_tabela("notificacoes"):

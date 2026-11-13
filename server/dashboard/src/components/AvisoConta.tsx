@@ -167,7 +167,7 @@ export default function AvisoConta() {
 
   const mostrarSuperAdminFaixa = isSuperAdmin && !!conta;
   const mostrarLeituraFaixa =
-    me.usuario.papel === "LEITURA" && (!conta || !conta.bloqueada);
+    (me.usuario.papel === "LEITURA" || me.usuario.papel === "VISUALIZADOR") && (!conta || !conta.bloqueada);
 
   return (
     <>
@@ -210,7 +210,11 @@ export default function AvisoConta() {
           }}
         >
           <Eye size={18} style={{ flexShrink: 0 }} />
-          <span style={{ flex: 1 }}>Seu acesso é somente leitura.</span>
+          <span style={{ flex: 1 }}>
+            {me.usuario.papel === "VISUALIZADOR"
+              ? "Seu acesso é de visualizador: você vê tudo e pode rodar os testes (captura ao vivo, testar conexão), mas não altera nada."
+              : "Seu acesso é somente leitura."}
+          </span>
         </div>
       )}
     </>

@@ -67,10 +67,11 @@ class ContaRenovacao(Base):
 
 
 class Usuario(Base):
-    """Usuário do painel. SUPER_ADMIN é da plataforma (sem conta); ADMIN e LEITURA pertencem a uma Conta."""
+    """Usuário do painel. SUPER_ADMIN é da plataforma (sem conta); ADMIN, VISUALIZADOR e LEITURA pertencem a uma Conta.
+    VISUALIZADOR: vê tudo e roda testes (captura ao vivo sem salvar, "Testar conexão"), sem alterar nada."""
     __tablename__ = "usuarios"
     __table_args__ = (
-        CheckConstraint("papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')", name="ck_usuarios_papel"),
+        CheckConstraint("papel IN ('SUPER_ADMIN', 'ADMIN', 'VISUALIZADOR', 'LEITURA')", name="ck_usuarios_papel"),
         CheckConstraint("(papel = 'SUPER_ADMIN') = (conta_id IS NULL)", name="ck_usuarios_super_admin_sem_conta"),
     )
 
@@ -79,7 +80,7 @@ class Usuario(Base):
     nome = Column(String(255), nullable=False)
     email = Column(String(255), nullable=False, unique=True)  # sempre minúsculo
     senha_hash = Column(String(255), nullable=False)  # bcrypt
-    papel = Column(String(20), nullable=False)  # SUPER_ADMIN | ADMIN | LEITURA
+    papel = Column(String(20), nullable=False)  # SUPER_ADMIN | ADMIN | VISUALIZADOR | LEITURA
     ativo = Column(Boolean, default=True, nullable=False)
     # Incrementa ao trocar senha, papel ou desativar: derruba os tokens JWT já emitidos
     token_versao = Column(Integer, default=1, nullable=False)
@@ -87,6 +88,20 @@ class Usuario(Base):
     criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     conta = relationship("Conta", back_populates="usuarios")
+    # VISUALIZADOR/LEITURA: máquinas que o usuário vê (vazio = todas as da conta); o ADMIN sempre vê todas
+    maquinas_vinculo = relationship("UsuarioMaquina", cascade="all, delete-orphan", lazy="selectin")
+
+    @property
+    def maquinas(self) -> list:
+        return [v.machine_id for v in self.maquinas_vinculo]
+
+
+class UsuarioMaquina(Base):
+    """Máquinas liberadas para um usuário VISUALIZADOR ou LEITURA (isolamento por máquina, editado pelo admin da conta)."""
+    __tablename__ = "usuario_maquinas"
+
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True)
+    machine_id = Column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True, index=True)
 
 
 class Customer(Base):

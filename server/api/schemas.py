@@ -985,8 +985,8 @@ def _validar_papel_usuario(v: Optional[str], obrigatorio: bool = True) -> Option
             raise ValueError("Papel é obrigatório.")
         return None
     s = v.strip().upper()
-    if s not in ("ADMIN", "LEITURA"):
-        raise ValueError("Papel inválido. Deve ser ADMIN ou LEITURA.")
+    if s not in ("ADMIN", "VISUALIZADOR", "LEITURA"):
+        raise ValueError("Papel inválido. Deve ser ADMIN, VISUALIZADOR ou LEITURA.")
     return s
 
 
@@ -1032,6 +1032,7 @@ class MeResponse(BaseModel):
     usuario: UsuarioMe
     conta: Optional[ContaResumo] = None
     somente_leitura: bool
+    pode_testar: bool = False  # captura ao vivo e "Testar conexão" (ADMIN e VISUALIZADOR)
     rotulos: Rotulos
 
 
@@ -1071,6 +1072,8 @@ class UsuarioCreate(BaseModel):
     email: str
     senha: str
     papel: str
+    # VISUALIZADOR/LEITURA: máquinas que o usuário vê (vazio ou ausente = todas); ignorado para ADMIN
+    maquinas: Optional[List[UUID]] = Field(default=None, max_length=2000)
 
     @field_validator("nome")
     @classmethod
@@ -1098,6 +1101,8 @@ class UsuarioUpdate(BaseModel):
     papel: Optional[str] = None
     ativo: Optional[bool] = None
     senha: Optional[str] = None
+    # None = não mexe; [] = volta a ver todas as máquinas
+    maquinas: Optional[List[UUID]] = Field(default=None, max_length=2000)
 
     @field_validator("nome")
     @classmethod
@@ -1121,6 +1126,7 @@ class UsuarioResponse(BaseModel):
     email: str
     papel: str
     ativo: bool
+    maquinas: List[UUID] = []  # vazio = vê todas as máquinas da conta
     ultimo_login: Optional[datetime] = None
     criado_em: datetime
 

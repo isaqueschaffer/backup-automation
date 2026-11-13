@@ -10,7 +10,7 @@ from sqlalchemy import func, cast, Date
 
 from auth import Contexto, get_contexto
 from database import get_db
-from services.escopo import filtrar_por_conta
+from services.escopo import filtrar_maquinas, filtrar_por_conta, maquina_permitida
 from models import Backup, Machine
 from schemas import BackupResponse, PaginatedBackups
 from services.storage_service import get_zip_path, pasta_canonica_da_maquina
@@ -74,6 +74,7 @@ def list_backups(
 
     if ctx.conta_id is not None:
         q = q.filter(Backup.machine_id.in_(filtrar_por_conta(db.query(Machine.id), Machine.conta_id, ctx)))
+    q = filtrar_maquinas(q, Backup.machine_id, ctx)
 
     total = q.count()
     items = q.order_by(Backup.started_at.desc()).offset((page - 1) * size).limit(size).all()
@@ -90,7 +91,8 @@ def list_backups(
 @router.get("/{backup_id}", response_model=BackupResponse)
 def get_backup(backup_id: UUID, db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     b = db.query(Backup).options(_with_machine()).filter(Backup.id == backup_id).first()
-    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)):
+    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)) \
+            or not maquina_permitida(ctx, b.machine_id):
         raise HTTPException(status_code=404, detail="Backup not found")
     return _to_response(b)
 
@@ -109,7 +111,8 @@ def download_backup_zip(
     from services.storage_service import _sanitize_name
 
     b = db.query(Backup).options(_with_machine()).filter(Backup.id == backup_id).first()
-    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)):
+    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)) \
+            or not maquina_permitida(ctx, b.machine_id):
         raise HTTPException(status_code=404, detail="Backup not found")
     if not b.zip_filename:
         raise HTTPException(status_code=404, detail="ZIP nao disponivel para este backup")
@@ -223,7 +226,8 @@ def resend_backup_email(
 ):
     """Reenvia o relatório de e-mail de um backup já existente."""
     b = db.query(Backup).options(_with_machine()).filter(Backup.id == backup_id).first()
-    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)):
+    if not b or (ctx.conta_id is not None and (not b.machine or b.machine.conta_id != ctx.conta_id)) \
+            or not maquina_permitida(ctx, b.machine_id):
         raise HTTPException(status_code=404, detail="Backup não encontrado")
     if not b.machine:
         raise HTTPException(status_code=400, detail="Máquina associada ao backup não encontrada")

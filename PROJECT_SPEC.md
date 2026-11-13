@@ -443,7 +443,7 @@ A tabela nasce por `Base.metadata.create_all` (`main.py`), sem migração inline
 | nome | VARCHAR(255) | str | NOT NULL | — |
 | email | VARCHAR(255) | str | NOT NULL UNIQUE | — (sempre minúsculo) |
 | senha_hash | VARCHAR(255) | str | NOT NULL | — (bcrypt) |
-| papel | VARCHAR(20) | str | NOT NULL | — (CheckConstraint: `papel IN ('SUPER_ADMIN', 'ADMIN', 'LEITURA')`) |
+| papel | VARCHAR(20) | str | NOT NULL | — (CheckConstraint: `papel IN ('SUPER_ADMIN', 'ADMIN', 'VISUALIZADOR', 'LEITURA')`) |
 | ativo | BOOLEAN | bool | NOT NULL | TRUE |
 | token_versao | INTEGER | int | NOT NULL | 1 (incrementa ao trocar senha/papel) |
 | ultimo_login | TIMESTAMP WITHOUT TIME ZONE | datetime naive | NULL | — |
@@ -517,7 +517,7 @@ datetime.utcnow()            # naive em UTC — compativel com o banco
 - Gerado via `POST /api/v1/auth/login`: com `{email, password}` para usuário (`usuarios`, senha bcrypt) → JWT `{sub: <uuid do usuário>, tv: <token_versao>}`; com só `{password}` (`ADMIN_PASSWORD` ou `settings.admin_password_hash`) → administrador da plataforma legado, JWT `{sub: "admin"}` (usado pelo `agent/publish_version.ps1`; não remover)
 - Expira em `ACCESS_TOKEN_EXPIRE_HOURS` (padrao 8h), algoritmo `HS256`
 - Cada requisição recarrega o usuário (`get_contexto`, `auth.py`): inativo ou `tv` diferente de `token_versao` → 401 (trocar senha, papel ou desativar derruba os tokens já emitidos)
-- Papéis: `SUPER_ADMIN` (plataforma, sem conta própria; escolhe a conta pelo header `X-Conta-ID`, sem ele fica na conta da plataforma — não existe visão "todas as contas" desde 29/10/2026), `ADMIN` e `LEITURA` (de uma conta; `X-Conta-ID` é ignorado). Isolamento por conta: REGRA-010
+- Papéis: `SUPER_ADMIN` (plataforma, sem conta própria; escolhe a conta pelo header `X-Conta-ID`, sem ele fica na conta da plataforma — não existe visão "todas as contas" desde 29/10/2026), `ADMIN`, `VISUALIZADOR` (vê e roda testes, não altera) e `LEITURA` (de uma conta; `X-Conta-ID` é ignorado). Isolamento por conta: REGRA-010
 
 **Agente Windows:** API Key + Client ID
 - Headers: `X-Client-ID: <uuid>` + `X-API-Key: sk_trilan_<token>`
@@ -599,7 +599,7 @@ Comparacao de versoes usa `tuple(int(x) for x in v.split("."))`.
 - Buscar Cliente/Setor e Máquina por `obter_cliente(db, ctx, id)` e `obter_maquina(db, ctx, id)`; listas com `filtrar_por_conta(consulta, Model.conta_id, ctx)` (`services/escopo.py`). Equipamento, backup, rodada e dashboard chegam pela máquina ou pelo Cliente já validados.
 - Recurso de outra conta = **404** com a mesma mensagem de "não encontrado" (nunca 403, para não revelar que existe).
 - Todo `Customer(...)` e `Machine(...)` novo recebe `conta_id` (`conta_para_criacao(db, ctx)`, ou a conta do Cliente da máquina). Máquina e Cliente vinculados são sempre da mesma conta (409 se não forem).
-- O bloqueio de escrita (conta vencida/suspensa ou usuário LEITURA → 403 em POST/PUT/PATCH/DELETE) já acontece dentro do `get_contexto`: não repetir nas rotas.
+- O bloqueio de escrita (conta vencida/suspensa ou usuário LEITURA/VISUALIZADOR → 403 em POST/PUT/PATCH/DELETE) já acontece dentro do `get_contexto`: não repetir nas rotas. Rota de **teste** que o VISUALIZADOR pode usar (não altera cadastro) usa `get_contexto_teste` no lugar.
 - Rotas do agente continuam com `get_current_machine` (REGRA-003); a conta bloqueada é tratada por `maquina_bloqueada(machine)` (`services/contas.py`).
 
 **NAO FAZER:** `db.query(Customer|Machine|Backup|NVR)` sem filtro de conta em rota do painel; usar `verify_admin_token` em rota nova de dados de conta (ele aceita só o super admin e existe por compatibilidade).
@@ -1120,6 +1120,29 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-13] — Isolamento por máquina para Visualizador e Somente leitura (editado pelo admin)
+
+- **Regra** (decisões do usuário): o admin da conta escolhe, na edição do usuário, quais máquinas um **VISUALIZADOR** ou **LEITURA** vê. **Nenhuma marcada = todas** (os usuários atuais não mudam). O **ADMIN sempre vê todas** (a lista dele fica vazia). Escolha por máquina, agrupada por Cliente, com "marcar todas do cliente"; máquina nova não entra sozinha.
+- **Banco**: tabela nova `usuario_maquinas` (`usuario_id` → usuarios ON DELETE CASCADE, `machine_id` → clients ON DELETE CASCADE, PK nos dois; criada pelo `create_all`). Model `UsuarioMaquina` e `Usuario.maquinas` (lista de ids).
+- **Contexto** (`auth.py`): `Contexto.maquinas_permitidas` (frozenset; None = todas), lido a cada requisição (mudança do admin vale na hora, sem novo login).
+- **Onde vale** (`services/escopo.py`): `obter_maquina` devolve 404 para máquina fora da lista (cobre detalhe da máquina, equipamentos, Galeria, logs, testes); `obter_cliente` 404 para cliente sem nenhuma máquina liberada; `filtrar_maquinas` nas listas de máquinas, backups (também detalhe/download/reenvio de backup) e nas listas da tela de Notificações (câmeras, alarmes, OLTs); a lista de alertas mostra só os das máquinas liberadas e os que não são de máquina (personalizadas). Clientes: a lista e o detalhe mostram só as máquinas liberadas (totais e saúde contam só elas). **O que junta o cliente inteiro exige todas as máquinas dele** (`exigir_cliente_inteiro`): ZIP do cliente e ZIP de rodada (403), dashboard do cliente (403); a lista de rodadas volta vazia.
+- **Regra para rota nova** (extensão da REGRA-010): buscar máquina por `obter_maquina` e filtrar listas com `filtrar_maquinas(consulta, <coluna machine_id>, ctx)` além do `filtrar_por_conta`; dado que junta várias máquinas de um cliente passa por `exigir_cliente_inteiro`.
+- **API**: `UsuarioCreate`/`UsuarioUpdate` aceitam `maquinas` (lista de ids da conta; outra conta = 400; `[]` = todas; ausente no update = não muda); `UsuarioResponse.maquinas`.
+- **Painel**: tela de usuários com a coluna "Máquinas" ("Todas" ou "N máquina(s)") e, para Visualizador/Somente leitura, o campo "Máquinas que o usuário vê" (`pages/Contas/MaquinasUsuarioCampo.tsx`: "Todas as máquinas da conta" ou "Só as máquinas marcadas", agrupadas por cliente).
+- **Testes**: `server/api/tests/test_isolamento_maquina.py` (6). Teste real no local: Visualizador limitado a "Teste PABX" vê 1 de 6 máquinas, outra máquina e os equipamentos dela 404, backups só da liberada, cliente "Central" com 1 de 3 máquinas, ZIP do cliente 403, rodadas vazias, cliente "Segunda" 404, 1 de 6 alertas; máquina de outra conta recusada (400). Usuário de teste voltou a "todas" e foi desativado. Sem mudança no agente.
+- **Arquivos:** server/api/{models.py,auth.py,schemas.py,services/escopo.py,routers/{conta.py,machines.py,backups.py,customers.py,dashboards.py,notificacoes.py},tests/test_isolamento_maquina.py}, server/dashboard/src/{api/{types.ts,contas.ts},pages/Contas/{UsuariosSection.tsx,MaquinasUsuarioCampo.tsx}}, PROJECT_SPEC.md.
+
+### [2026-11-13] — Perfil de usuário VISUALIZADOR (vê tudo e roda testes, não altera nada)
+
+- **Papéis**: `usuarios.papel` passa a aceitar `VISUALIZADOR` (além de SUPER_ADMIN, ADMIN e LEITURA); `ck_usuarios_papel` recriado na migração inline. Criado e editado na tela de usuários da conta ("Visualizador (vê e testa, não altera)").
+- **O que pode**: tudo que o LEITURA vê, mais os **testes**: "Testar conexão" de qualquer equipamento (o "Atualizar" do modal de ONUs usa o mesmo teste) e, na Galeria, o novo **"Testar ao vivo"**, que pede um quadro ao vivo da câmera e só mostra na tela (**nada é salvo**: nem referência, nem noite, nem a câmera recuperada do relatório do agente).
+- **O que não pode** (decisões do usuário): capturar/salvar referência ou imagem da noite (a da noite só se vê), disparar backup manual (só admin), armar/desarmar centrais de alarme (só vê o status), cadastrar/editar/pausar/remover qualquer coisa, ligar avisos de notificação, ver a Auditoria.
+- **Como é aplicado** (`auth.py`): o VISUALIZADOR é `somente_leitura` (o `_bloquear_escrita` barra POST/PUT/DELETE como no LEITURA). Nova dependência **`get_contexto_teste`**, usada só nas rotas de teste (`POST .../test-rtsp` e `POST .../testar-conexao`), deixa passar quem tem `Contexto.pode_testar` (todos menos LEITURA; ninguém com a conta vencida/suspensa). No `test-rtsp`, o VISUALIZADOR só pode `modo=ao_vivo` (403 nos outros). Rota nova de escrita continua bloqueada por padrão: só entra na lista de teste quem usar `get_contexto_teste`. `/auth/me` devolve `pode_testar` (painel: hook `usePodeTestar()`).
+- **Auditoria**: os testes passam a ser registrados para qualquer usuário ("testou a conexão do equipamento X", "testou a captura ao vivo da câmera Y do equipamento X (sem salvar)").
+- **Painel**: faixa própria ("Seu acesso é de visualizador..."); Auditoria escondida (como no LEITURA); na Galeria, os botões de importar/limpar planilha, sincronizar, editar RTSP, capturas em lote, capturar/enviar referência e capturar noite somem para LEITURA e VISUALIZADOR; o botão "Testar" do card e o "Atualizar" das ONUs aparecem para quem pode testar.
+- **Testes**: `server/api/tests/test_visualizador.py` (6). Teste real no servidor local: usuário VISUALIZADOR criado, `testar-conexao` 200, editar equipamento/capturar noite/referência/backup manual/Auditoria 403, teste registrado na Auditoria; usuário de teste desativado (não há rota para apagar usuário). Sem mudança no agente.
+- **Arquivos:** server/api/{auth.py,models.py,main.py,schemas.py,services/contas.py,routers/{auth_router.py,conta.py,auditoria.py,equipamentos.py},tests/test_visualizador.py}, server/dashboard/src/{App.tsx,api/{types.ts,contas.ts},contexts/AuthContext.tsx,components/{Sidebar.tsx,AvisoConta.tsx},pages/Contas/{contaUi.tsx,UsuariosSection.tsx},pages/Machines/MachineDetail/{index.tsx,components/{EqCard.tsx,NVRCamerasGalleryModal.tsx,OltStatusModal.tsx}}}, PROJECT_SPEC.md.
 
 ### [2026-11-13] — Notificações: seção "OLTs" com aviso de ONU offline e de sinal óptico crítico
 

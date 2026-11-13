@@ -145,4 +145,11 @@ export function useRotulos() {
 
 export const useSomenteLeitura = () => !!useAuth().me?.somente_leitura;
 
+// Testes do painel (captura ao vivo sem salvar, "Testar conexão", atualizar ONUs): ADMIN e VISUALIZADOR.
+// Servidor antigo sem `pode_testar`: vale o contrário do somente leitura.
+export const usePodeTestar = () => {
+  const me = useAuth().me;
+  return me ? (me.pode_testar ?? !me.somente_leitura) : false;
+};
+
 export const useSuperAdmin = () => useAuth().me?.usuario.papel === "SUPER_ADMIN";

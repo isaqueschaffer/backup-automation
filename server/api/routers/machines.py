@@ -14,6 +14,7 @@ from schemas import MachineCreate, MachineUpdate, MachineResponse, MachineWithKe
 from services.agent_logs import registrar_alteracao
 from services.crypto_service import encrypt
 from services.escopo import (
+    filtrar_maquinas,
     filtrar_por_conta,
     obter_cliente,
     obter_maquina,
@@ -87,7 +88,7 @@ def list_machines(
         q = q.filter(Machine.customer_id == customer_id)
     if unassigned:
         q = q.filter(Machine.customer_id.is_(None))
-    q = filtrar_por_conta(q, Machine.conta_id, ctx)
+    q = filtrar_maquinas(filtrar_por_conta(q, Machine.conta_id, ctx), Machine.id, ctx)
     machines = q.order_by(Machine.created_at.desc()).all()
     return [machine_to_response(m) for m in machines]
 
