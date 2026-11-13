@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request, Query
@@ -255,6 +255,21 @@ def _offset_utc_min(telemetria_ping, telemetria_maquina) -> int:
     return offset if -720 <= offset <= 840 else OFFSET_UTC_PADRAO_MIN
 
 
+RECUPERACAO_TOLERANCIA_MIN = 30  # só considera o horário "perdido" 30 min depois dele
+
+
+def _ultimo_horario_agendado(agora_local: datetime, hora: int, minuto: int) -> Optional[datetime]:
+    """Último horário agendado (hora local da máquina, naive) que já passou há mais de
+    RECUPERACAO_TOLERANCIA_MIN: o de hoje, se já passou, senão o de ontem."""
+    try:
+        hoje = agora_local.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+    except ValueError:
+        return None
+    if agora_local > hoje + timedelta(minutes=RECUPERACAO_TOLERANCIA_MIN):
+        return hoje
+    return hoje - timedelta(days=1)
+
+
 @router.post("/ping", response_model=PingResponse)
 async def ping_agent(
     body: PingRequest | None = None,
@@ -346,14 +361,16 @@ async def ping_agent(
         # Tudo naive (REGRA-001): UTC do servidor + fuso local da máquina (o agente agenda pela hora local)
         offset_min = _offset_utc_min(body.telemetry if body else None, machine.telemetry)
         agora_local = datetime.utcnow() + timedelta(minutes=offset_min)
-        scheduled_time_today = agora_local.replace(hour=machine.backup_hour, minute=machine.backup_minute, second=0, microsecond=0)
+        ultimo_agendado = _ultimo_horario_agendado(agora_local, machine.backup_hour, machine.backup_minute)
 
-        if agora_local > scheduled_time_today + timedelta(minutes=30):
-            # 1. Verifica se já concluiu backup hoje (data local da máquina)
+        if ultimo_agendado is not None:
+            # 1. Verifica se já houve backup depois do último horário agendado (hora local da máquina).
+            # Antes comparava só com o horário de "hoje": com agendamento à noite (ex.: 23:00) e o
+            # servidor fora do ar até depois da meia-noite, a recuperação nunca disparava.
             made_backup_today = False
             if machine.last_backup_at:
                 last_backup_local = machine.last_backup_at + timedelta(minutes=offset_min)
-                if last_backup_local.date() == agora_local.date():
+                if last_backup_local >= ultimo_agendado:
                     made_backup_today = True
 
             # 2. Verifica se houve backup recente (últimas 2 horas) para evitar disparos duplicados
@@ -364,12 +381,12 @@ async def ping_agent(
             if recent_backup:
                 made_backup_today = True
 
-            # 3. Verifica se já disparou ping_recovery hoje
-            today_utc_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            # 3. Verifica se já disparou ping_recovery desde o último horário agendado
+            ultimo_agendado_utc = ultimo_agendado - timedelta(minutes=offset_min)
             already_recovered_today = db.query(AgentLog).filter(
                 AgentLog.machine_id == machine.id,
                 AgentLog.event_type == "ping_recovery",
-                AgentLog.created_at >= today_utc_start
+                AgentLog.created_at >= ultimo_agendado_utc
             ).first() is not None
 
             if not made_backup_today and not already_recovered_today:

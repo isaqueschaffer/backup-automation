@@ -1117,6 +1117,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-13] — Recuperação de backup perdido passa a olhar o último horário agendado (e não só o de hoje)
+
+**Problema:** os backups das 23:00 de 11/11 e 12/11 não existem para as 12 máquinas agendadas nesse horário. Nas duas noites o servidor estava fora do ar: em 11/11 o host Windows desligou sem shutdown limpo às 21:09; em 12/11 a VM ficou lenta a partir de ~22:40, foi pausada pelo Hyper-V às 02:43 por **disco C: do host cheio** (VHDX dinâmico e `.VMRS` no C:), desligada às 03:13 e só voltou às 08:41. O agente rodou no horário, não conseguiu `GET /agent/config` (timeout) e abortou sem ZIP nem registro. A recuperação no ping (`routers/agent.py`) comparava só com o horário agendado de **hoje**: depois da meia-noite as 23:00 "de hoje" ainda estavam no futuro, então a recuperação nunca disparava para agendamentos noturnos.
+**Correção:** `_ultimo_horario_agendado(agora_local, hora, minuto)` devolve o último horário que já passou há mais de 30 min (o de hoje ou o de ontem). Há backup a recuperar quando `last_backup_at` (hora local) é anterior a esse horário, não houve backup nas últimas 2 h e não houve `ping_recovery` desde esse horário. Logo após o deploy, as máquinas sem backup desde a última janela recebem um backup de recuperação no próximo ping.
+**Conciliação feita:** a sincronização com o OneDrive estava correta (VM `/opt/trilan/backups` e a pasta do OneDrive no servidor Windows idênticas por cliente). Procedimento e comandos na skill `.claude/skills/conciliar-backups-onedrive` (só do Claude).
+**Arquivos:** server/api/routers/agent.py, server/api/tests/test_recuperacao_backup.py, .claude/skills/conciliar-backups-onedrive/SKILL.md, CLAUDE.md, PROJECT_SPEC.md
+**Breaking Change:** Não. **Requer:** só o deploy do servidor (sem versão nova do agente).
+
 ### [2026-11-13] — Avisos de confirmação no padrão do sistema (dashboard)
 
 Os 28 `confirm()` do navegador foram trocados por um diálogo próprio: `components/ConfirmDialog.tsx` (`ConfirmProvider` no `App.tsx` e hook `useConfirm()`, que devolve `Promise<boolean>`). Opções: `title`, `message`, `confirmLabel`, `cancelLabel` e `variant` (`danger` vermelho, `warning` âmbar, `info` roxo). Esc e clique fora cancelam. Regra: não usar `alert/confirm/prompt` nativos; usar `useConfirm()` (confirmações) e `useToast()` (avisos). Só dashboard, sem mudança no agente nem na API.
