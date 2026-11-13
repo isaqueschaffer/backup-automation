@@ -1117,6 +1117,19 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-13] — Gravação do Digifort: verde acima de 10% e vermelho só sem nenhum registro (agente 1.1.53)
+
+**Problema:** uma câmera aparecia como falha no sistema e tinha gravação no próprio Digifort. Em `segundos_por_dia`
+(`agent/src/vms/digifort_gravacoes.py`), um trecho de um registro só (início == fim: quadro isolado, clipe curto de
+movimento) somava 0 s, e o dia ficava vermelho mesmo com registro no índice.
+**Correção:** `LIMIAR_GRAVOU` passou de `0.20` para `0.10` (acima de 10% = verde; acima de 0% até 10% = amarelo).
+Vermelho continua sendo 0%, mas agora 0% quer dizer **nenhum registro no índice do dia**: um trecho de um registro só
+conta `MINIMO_TRECHO_S = 1` s no seu dia (fica amarelo e conta como "gravou hoje", `COM_GRAVACAO`). O cache dos índices
+guarda os trechos, não os segundos, então não precisa ser invalidado.
+**Arquivos:** agent/src/vms/digifort_gravacoes.py, agent/tests/test_digifort_gravacoes.py,
+server/dashboard/src/pages/Machines/MachineDetail/components/MiniCalendar.tsx (legenda), versão nos três lugares.
+**Breaking Change:** Não. Nenhuma rota nem migração.
+
 ### [2026-11-13] — Recuperação de backup perdido passa a olhar o último horário agendado (e não só o de hoje)
 
 **Problema:** os backups das 23:00 de 11/11 e 12/11 não existem para as 12 máquinas agendadas nesse horário. Nas duas noites o servidor estava fora do ar: em 11/11 o host Windows desligou sem shutdown limpo às 21:09; em 12/11 a VM ficou lenta a partir de ~22:40, foi pausada pelo Hyper-V às 02:43 por **disco C: do host cheio** (VHDX dinâmico e `.VMRS` no C:), desligada às 03:13 e só voltou às 08:41. O agente rodou no horário, não conseguiu `GET /agent/config` (timeout) e abortou sem ZIP nem registro. A recuperação no ping (`routers/agent.py`) comparava só com o horário agendado de **hoje**: depois da meia-noite as 23:00 "de hoje" ainda estavam no futuro, então a recuperação nunca disparava para agendamentos noturnos.

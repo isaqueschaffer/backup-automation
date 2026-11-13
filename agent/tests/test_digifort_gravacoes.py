@@ -181,7 +181,7 @@ class TestResumo(unittest.TestCase):
     def test_mapa_com_todos_os_estados(self):
         por_dia = {
             self.dia(3): 86400 * 0.95,   # gravou
-            self.dia(2): 86400 * 0.15,   # parcial (acima de 0% ate 20%)
+            self.dia(2): 86400 * 0.05,   # parcial (acima de 0% ate 10%)
             self.dia(0): 43200 * 0.95,   # hoje: 95% do que ja passou
         }                                # dia(1) sem nada
         r = g.resumir_camera(por_dia, self.HOJE, self.AGORA)
@@ -192,10 +192,10 @@ class TestResumo(unittest.TestCase):
         self.assertEqual(r["dias_com_gravacao"], [self.dia(3).isoformat(), self.dia(2).isoformat(), self.HOJE.isoformat()])
 
     def test_hoje_e_medido_contra_o_tempo_decorrido(self):
-        # 1 h gravada: as 02:00 e 50% do que passou = gravou; as 06:00 e 17% = parcial; nada gravado = nao gravou
+        # 1 h gravada: as 02:00 e 50% do que passou = gravou; as 12:00 e 8% = parcial; nada gravado = nao gravou
         r = g.resumir_camera({self.HOJE: 3600}, self.HOJE, datetime(2026, 10, 29, 2, 0))
         self.assertTrue(r["mapa"].endswith("█"))
-        r = g.resumir_camera({self.HOJE: 3600}, self.HOJE, datetime(2026, 10, 29, 6, 0))
+        r = g.resumir_camera({self.HOJE: 3600}, self.HOJE, datetime(2026, 10, 29, 12, 0))
         self.assertTrue(r["mapa"].endswith("▒"))
         self.assertEqual(r["status_gravacao"], "COM_GRAVACAO")
         r = g.resumir_camera({self.HOJE: 0}, self.HOJE, datetime(2026, 10, 29, 12, 0))
@@ -207,10 +207,20 @@ class TestResumo(unittest.TestCase):
             return g.resumir_camera({self.dia(1): 86400 * frac}, self.HOJE, self.AGORA)["mapa"][-2]
         self.assertEqual(mapa(0), "░")       # 0% = nao gravou
         self.assertEqual(mapa(0.001), "▒")   # 0,1% (~1,5 min) = parcial
+        self.assertEqual(mapa(1 / 86400), "▒")   # 1 s no dia = parcial
         self.assertEqual(mapa(0.10), "▒")    # 10% = parcial
-        self.assertEqual(mapa(0.20), "▒")    # 20% = parcial
-        self.assertEqual(mapa(0.21), "█")    # acima de 20% = gravou
+        self.assertEqual(mapa(0.11), "█")    # acima de 10% = gravou
+        self.assertEqual(mapa(0.20), "█")
         self.assertEqual(mapa(1.0), "█")
+
+    def test_registro_isolado_conta_como_gravacao(self):
+        # Um quadro so (inicio == fim) somava 0 s e o dia ficava vermelho mesmo com registro no Digifort
+        t = 46324 + 9 / 24   # 29/10/2026 09:00 em TDateTime
+        por_dia = g.segundos_por_dia([(t, t)])
+        self.assertEqual(por_dia, {date(2026, 10, 29): g.MINIMO_TRECHO_S})
+        r = g.resumir_camera(por_dia, self.HOJE, self.AGORA)
+        self.assertTrue(r["mapa"].endswith("▒"))
+        self.assertEqual(r["status_gravacao"], "COM_GRAVACAO")
 
     def test_pouco_movimento_nao_vira_sem_historico(self):
         # Camera por movimento (caso CATRACA (A) - SUBSOLO 3, Navarro): poucos minutos por dia = parcial, nao cinza

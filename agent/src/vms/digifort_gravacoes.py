@@ -34,9 +34,11 @@ PASSO_AMOSTRA = 600     # 1 registro a cada 600 (~20 s a 30 fps): so le tudo ond
 DIAS_PADRAO = 15
 # Faixas de cobertura do dia (ou do tempo ja decorrido, no dia de hoje). A maioria das cameras grava por
 # movimento, entao qualquer gravacao no dia ja conta:
-#   acima de 20% = gravou (verde) | acima de 0% ate 20% = parcial (amarelo) | 0% = nao gravou (vermelho)
-LIMIAR_GRAVOU = 0.20    # cobertura ACIMA disto = gravou
-LIMIAR_PARCIAL = 0.0    # cobertura ACIMA disto = parcial; 0 (nenhum segundo gravado) = sem gravacao
+#   acima de 10% = gravou (verde) | acima de 0% ate 10% = parcial (amarelo) | 0% = nao gravou (vermelho)
+# Vermelho so quando o dia nao tem NENHUM registro no indice: qualquer registro (ate um quadro isolado) = parcial.
+LIMIAR_GRAVOU = 0.10    # cobertura ACIMA disto = gravou
+LIMIAR_PARCIAL = 0.0    # cobertura ACIMA disto = parcial; 0 (nenhum registro no dia) = sem gravacao
+MINIMO_TRECHO_S = 1.0   # trecho de um registro so (inicio == fim) conta 1 s, senao somaria 0 e o dia viraria vermelho
 LIMITE_TOTAL_S = 900    # tempo maximo de leitura por execucao; o que sobrar fica no cache para a proxima
 VERSAO_CACHE = 1
 
@@ -106,9 +108,15 @@ def intervalos_do_indice(caminho, tolerancia_s=TOLERANCIA_S, passo=PASSO_AMOSTRA
 
 
 def segundos_por_dia(intervalos, destino=None):
-    """Soma os trechos por dia (um trecho que atravessa a meia-noite e dividido)."""
+    """Soma os trechos por dia (um trecho que atravessa a meia-noite e dividido).
+    Um trecho de um registro so (quadro isolado, clipe curto de movimento) conta MINIMO_TRECHO_S no seu dia:
+    o dia que tem registro no indice nunca fica com 0 s (vermelho)."""
     destino = {} if destino is None else destino
     for inicio, fim in intervalos:
+        if (fim - inicio) * 86400 < MINIMO_TRECHO_S:
+            chave = _EPOCA_DELPHI + timedelta(days=int(inicio))
+            destino[chave] = destino.get(chave, 0.0) + MINIMO_TRECHO_S
+            continue
         dia = int(inicio)
         while dia <= int(fim):
             sobreposto = (min(fim, dia + 1) - max(inicio, dia)) * 86400
