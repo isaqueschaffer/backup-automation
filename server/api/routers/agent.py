@@ -369,7 +369,11 @@ async def ping_agent(
             # servidor fora do ar até depois da meia-noite, a recuperação nunca disparava.
             made_backup_today = False
             if machine.last_backup_at:
-                last_backup_local = machine.last_backup_at + timedelta(minutes=offset_min)
+                # Em produção a coluna volta com fuso (aware); converte para UTC naive antes de comparar
+                last_backup_utc = machine.last_backup_at
+                if last_backup_utc.tzinfo is not None:
+                    last_backup_utc = last_backup_utc.replace(tzinfo=None) - (last_backup_utc.utcoffset() or timedelta(0))
+                last_backup_local = last_backup_utc + timedelta(minutes=offset_min)
                 if last_backup_local >= ultimo_agendado:
                     made_backup_today = True
 
