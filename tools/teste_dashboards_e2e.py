@@ -132,6 +132,12 @@ ok(eq0["tem_problema"] is True and len(eq0["disks"]) == 2 and eq0["disks"][1]["s
 gtxt = json.dumps(dg, ensure_ascii=False)
 for proibido in ["172.16.9.9", "SN-SEGREDO", "ip_interno", "serial", "NVR-B-SEGREDO", "10.10.10.10"]:
     ok(proibido not in gtxt, f"dados do widget NAO contem '{proibido}'")
+ok({c["tipo"] for c in cat} >= {"antenas", "status_olt", "alarmes_defense"}, "catalogo tem antenas, status_olt e alarmes_defense")
+for tipo_novo in ("antenas", "status_olt", "alarmes_defense"):
+    lay_n = json.loads(json.dumps(dtmp["layout"]))
+    lay_n["widgets"].append({"id": "novo", "tipo": tipo_novo, "largura": 6, "altura": 6, "config": {"equipamentos": [eqB]}})
+    s, r, _ = call("POST", f"/clients/{A}/dashboard/preview", {"layout": lay_n}, ADM)
+    ok(s == 422, f"{tipo_novo} com equipamento de OUTRO cliente -> 422 ({s})")
 rs = dg["widgets"]["resumo"]["dados"]
 ok(rs["gravadores_com_telemetria"] == 1 and rs["discos_total"] == 2 and rs["discos_com_problema"] == 1, f"resumo conta so o cliente A: {rs['gravadores_com_telemetria']}/{rs['discos_total']}/{rs['discos_com_problema']}")
 

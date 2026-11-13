@@ -5,15 +5,21 @@ import {
   BarChart3,
   HardDrive,
   LayoutGrid,
+  Network,
   PieChart as IconePizza,
   Server,
+  ShieldAlert,
   ShieldCheck,
   Type,
   Video,
+  Wifi,
 } from "lucide-react";
 import {
   Altura,
+  DadosAlarmesDefense,
+  DadosAntenas,
   DadosCameras,
+  DadosStatusOlt,
   DadosEquipamentos,
   DadosHistorico,
   DadosResumo,
@@ -34,6 +40,9 @@ import TelemetriaEquipamentosWidget from "./TelemetriaEquipamentosWidget";
 import EquipamentosWidget from "./EquipamentosWidget";
 import TextoWidget from "./TextoWidget";
 import StatusNvrWidget from "./StatusNvrWidget";
+import AntenasWidget from "./AntenasWidget";
+import StatusOltWidget from "./StatusOltWidget";
+import AlarmesDefenseWidget from "./AlarmesDefenseWidget";
 
 export type CampoWidget =
   | { chave: string; tipo: "maquinas"; rotulo: string }
@@ -267,6 +276,68 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
         equipamentos: [],
       }) as DadosStatusNvr;
       return <StatusNvrWidget dados={d} widget={widget} />;
+    },
+  },
+  antenas: {
+    tipo: "antenas",
+    rotulo: "Antenas Wi-Fi",
+    descricao: "Antenas online e fora do ar (com há quanto tempo), problemas primeiro",
+    icone: Wifi,
+    larguraPadrao: 6,
+    alturaPadrao: 6,
+    larguraMin: 3,
+    alturaMin: 3,
+    configPadrao: { equipamentos: [], mostrar_latencia: true },
+    campos: [
+      { chave: "equipamentos", tipo: "equipamentos", rotulo: "Equipamentos de antenas exibidos", tipos: ["ANTENA"] },
+      { chave: "mostrar_latencia", tipo: "booleano", rotulo: "Mostrar a latência (ping) das antenas online" },
+    ],
+    renderizar: (dados, widget) => {
+      const d = (dados || { mostrar_latencia: true, total: { total: 0, online: 0, offline: 0, sem_registro: 0, erro: 0 }, equipamentos: [] }) as DadosAntenas;
+      return <AntenasWidget dados={d} widget={widget} />;
+    },
+  },
+  status_olt: {
+    tipo: "status_olt",
+    rotulo: "OLTs e ONUs",
+    descricao: "ONUs online, fora do ar e com sinal ruim por OLT, PONs com problema e licença da UNM2000",
+    icone: Network,
+    larguraPadrao: 6,
+    alturaPadrao: 7,
+    larguraMin: 3,
+    alturaMin: 3,
+    configPadrao: { equipamentos: [], mostrar_pons: true, mostrar_licenca: true },
+    campos: [
+      { chave: "equipamentos", tipo: "equipamentos", rotulo: "OLTs exibidas", tipos: ["OLT"] },
+      { chave: "mostrar_pons", tipo: "booleano", rotulo: "Mostrar as PONs com problema" },
+      { chave: "mostrar_licenca", tipo: "booleano", rotulo: "Mostrar a licença da UNM2000" },
+    ],
+    renderizar: (dados, widget) => {
+      const d = (dados || {
+        total: { total: 0, online: 0, offline: 0, falha: 0, sem_energia: 0, sinal_ruim: 0 },
+        equipamentos: [],
+      }) as DadosStatusOlt;
+      return <StatusOltWidget dados={d} widget={widget} />;
+    },
+  },
+  alarmes_defense: {
+    tipo: "alarmes_defense",
+    rotulo: "Centrais de alarme",
+    descricao: "Disparos, centrais desconectadas e partições das centrais de alarme do Defense",
+    icone: ShieldAlert,
+    larguraPadrao: 6,
+    alturaPadrao: 6,
+    larguraMin: 3,
+    alturaMin: 3,
+    configPadrao: { equipamentos: [], mostrar_particoes: true, mostrar_incendio: true },
+    campos: [
+      { chave: "equipamentos", tipo: "equipamentos", rotulo: "Equipamentos Defense exibidos", tipos: ["DEFENSE"] },
+      { chave: "mostrar_particoes", tipo: "booleano", rotulo: "Mostrar as partições (armada/desarmada só aparece no painel, não no link público)" },
+      { chave: "mostrar_incendio", tipo: "booleano", rotulo: "Mostrar as centrais de incêndio" },
+    ],
+    renderizar: (dados, widget) => {
+      const d = (dados || { mostra_armada: false, total: { centrais: 0, desconectadas: 0, disparos: 0 }, equipamentos: [] }) as DadosAlarmesDefense;
+      return <AlarmesDefenseWidget dados={d} widget={widget} />;
     },
   },
 };

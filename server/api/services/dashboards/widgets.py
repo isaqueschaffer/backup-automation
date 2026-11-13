@@ -20,9 +20,10 @@ class ContextoDados:
     maquinas: List[Machine]      # só as máquinas ATIVAS do cliente, com equipamentos já carregados
     periodo: str                 # filtro global: "24h" | "7d" | "30d"
     agora: datetime              # utcnow naive
+    publico: bool = False        # True quando os dados vão para o link público (esconde o que expõe o local)
 
 
-def carregar_contexto(db: Session, customer: Customer, periodo: str) -> ContextoDados:
+def carregar_contexto(db: Session, customer: Customer, periodo: str, publico: bool = False) -> ContextoDados:
     maquinas = (
         db.query(Machine)
         .options(selectinload(Machine.equipamentos))
@@ -36,6 +37,7 @@ def carregar_contexto(db: Session, customer: Customer, periodo: str) -> Contexto
         maquinas=maquinas,
         periodo=periodo,
         agora=datetime.utcnow(),
+        publico=publico,
     )
 
 
@@ -331,10 +333,17 @@ def construir_resumo(ctx: ContextoDados, config: ConfigResumo) -> Dict[str, Any]
     gravadores_com_telemetria = 0
     discos_total = 0
     discos_com_problema = 0
+    antenas_total = 0
+    antenas_online = 0
 
     for m in ctx.maquinas:
         for e in equipamentos_ativos(m):
             equipamentos_total += 1
+            if (e.tipo or "").upper() == "ANTENA":
+                ant = antena_publico(e.antena_status, ctx.agora)
+                if ant:
+                    antenas_total += ant["total"]
+                    antenas_online += ant["online"]
             cnt = contar_cameras(e)
             cameras_total += cnt["total"]
             cameras_online += cnt["online"]
@@ -365,6 +374,8 @@ def construir_resumo(ctx: ContextoDados, config: ConfigResumo) -> Dict[str, Any]
         "gravadores_com_telemetria": gravadores_com_telemetria,
         "discos_total": discos_total,
         "discos_com_problema": discos_com_problema,
+        "antenas_total": antenas_total,
+        "antenas_online": antenas_online,
     }
 
 
@@ -757,6 +768,345 @@ def construir_status_nvr(ctx: ContextoDados, config: ConfigStatusNvr) -> Dict[st
     }
 
 
+# ─── Auxiliares dos status periódicos (ANTENA, OLT, DEFENSE) ─────────────────
+# Esses equipamentos guardam só o último status enviado pelo agente, numa coluna JSON. Cada função `*_publico`
+# é a lista branca do que pode sair para o cliente (vale o link público): nada de IP, MAC, serial, texto de erro
+# ou `config_extra`. O `nivel` de cada item ("critico" | "atencao" | "ok" | "neutro") define a cor no front.
+FORMATO_STATUS = "%Y-%m-%dT%H:%M:%S"
+ORDEM_NIVEL = {"critico": 0, "atencao": 1, "ok": 2, "neutro": 3}
+
+
+def _num(v: Any) -> Optional[float]:
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _inteiro(v: Any) -> int:
+    n = _num(v)
+    return int(n) if n is not None else 0
+
+
+def _texto(v: Any, limite: int) -> Optional[str]:
+    if v is None:
+        return None
+    t = " ".join(str(v).split())
+    return t[:limite] or None
+
+
+def _data_status(v: Any) -> Optional[datetime]:
+    """Datas dos status são texto UTC naive ("2026-11-13T15:00:00"), REGRA-001."""
+    if not v:
+        return None
+    try:
+        return datetime.strptime(str(v)[:19], FORMATO_STATUS)
+    except ValueError:
+        return None
+
+
+def _atualidade(ctx: ContextoDados, raw: Any, limite_min: int) -> Dict[str, Any]:
+    dt = _data_status(raw.get("atualizado_em")) if isinstance(raw, dict) else None
+    seg = segundos_desde(ctx.agora, dt)
+    return {
+        "atualizado_em": iso(dt),
+        "segundos_desde_atualizacao": seg,
+        "desatualizado": seg is None or seg > limite_min * 60,
+    }
+
+
+def _pior(niveis: List[str]) -> str:
+    return min(niveis, key=lambda n: ORDEM_NIVEL.get(n, 9)) if niveis else "ok"
+
+
+def equipamentos_do_tipo(ctx: ContextoDados, tipo: str, ids: List[UUID]) -> List[tuple]:
+    """(máquina, equipamento) ativos do tipo, só das máquinas do cliente; ids de fora são ignorados."""
+    filtro = set(ids) if ids else None
+    saida = []
+    for m in ctx.maquinas:
+        for e in equipamentos_ativos(m):
+            if (e.tipo or "").upper() != tipo:
+                continue
+            if filtro is not None and e.id not in filtro:
+                continue
+            saida.append((m, e))
+    return saida
+
+
+# ─── Antenas Wi-Fi (ANTENA) ─────────────────────────────────────────────
+LIMIAR_ANTENA_CRITICA_S = 10 * 60   # igual a LIMIAR_ANTENA_OFFLINE_MIN da notificação
+LIMITE_ANTENA_DADOS_MIN = 20        # igual a LIMIAR_ANTENA_SEM_DADOS_MIN (o agente envia a cada 3 min)
+SITUACOES_ANTENA = ("ONLINE", "OFFLINE", "SEM_REGISTRO", "ERRO")
+
+
+def antena_publico(raw: Any, agora: datetime) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    contagem = {"online": 0, "offline": 0, "sem_registro": 0, "erro": 0}
+    antenas = []
+    for a in (raw.get("antenas") or [])[:200]:
+        if not isinstance(a, dict):
+            continue
+        status = str(a.get("status") or "").upper()
+        if status not in SITUACOES_ANTENA:
+            status = "ERRO"
+        contagem[status.lower()] += 1
+        fora_s = None
+        if status != "ONLINE":
+            fora_s = segundos_desde(agora, _data_status(a.get("offline_desde")))
+        if status == "ONLINE":
+            nivel = "ok"
+        elif status in ("OFFLINE", "ERRO") and fora_s is not None and fora_s > LIMIAR_ANTENA_CRITICA_S:
+            nivel = "critico"
+        else:
+            nivel = "atencao"
+        antenas.append({
+            "nome": _texto(a.get("nome"), 120) or "Antena",
+            "marca": _texto(a.get("marca"), 40),
+            "status": status,
+            "nivel": nivel,
+            "ping_ms": _num(a.get("ping_ms")),
+            "fora_segundos": fora_s,
+            "ultimo_online": iso(_data_status(a.get("ultimo_online"))),
+        })
+    antenas.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], -(x["fora_segundos"] or 0), x["nome"].lower()))
+    return {
+        "falha_leitura": bool(raw.get("erro")),
+        "total": len(antenas),
+        **contagem,
+        "antenas": antenas,
+    }
+
+
+class ConfigAntenas(BaseModel):
+    model_config = {"extra": "forbid"}
+    equipamentos: List[UUID] = Field(default_factory=list, max_length=200)
+    mostrar_latencia: bool = True
+
+
+def construir_antenas(ctx: ContextoDados, config: ConfigAntenas) -> Dict[str, Any]:
+    total = {"total": 0, "online": 0, "offline": 0, "sem_registro": 0, "erro": 0}
+    itens = []
+    for m, e in equipamentos_do_tipo(ctx, "ANTENA", config.equipamentos):
+        dados = antena_publico(e.antena_status, ctx.agora)
+        atual = _atualidade(ctx, e.antena_status, LIMITE_ANTENA_DADOS_MIN)
+        antenas = (dados or {}).get("antenas") or []
+        if not config.mostrar_latencia:
+            for a in antenas:
+                a.pop("ping_ms", None)
+        niveis = [a["nivel"] for a in antenas]
+        if dados is None or dados["falha_leitura"] or atual["desatualizado"]:
+            niveis.append("atencao")
+        for k in total:
+            total[k] += (dados or {}).get(k, 0)
+        itens.append({
+            "id": str(e.id),
+            "nome": e.name,
+            "maquina": m.name,
+            **atual,
+            "sem_status": dados is None,
+            "falha_leitura": bool(dados and dados["falha_leitura"]),
+            "total": (dados or {}).get("total", 0),
+            "online": (dados or {}).get("online", 0),
+            "nivel": _pior(niveis),
+            "antenas": antenas,
+        })
+    itens.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], x["nome"].lower()))
+    return {"mostrar_latencia": config.mostrar_latencia, "total": total, "equipamentos": itens}
+
+
+# ─── OLTs e ONUs (OLT) ──────────────────────────────────────────────────
+LIMITE_OLT_DADOS_MIN = 15           # o agente envia a cada 5 min
+LIMIAR_OLT_FORA_PCT = 5             # mais que isso de ONUs fora (offline + falha + sem energia) = vermelho
+LIMIAR_LICENCA_ATENCAO_DIAS = 10    # igual a LIMIAR_LICENCA_DIAS da notificação
+CHAVES_CONTAGEM_ONU = ("total", "online", "offline", "falha", "sem_energia", "sinal_ruim")
+
+
+def _contagem_onus(raw: Any) -> Dict[str, int]:
+    raw = raw if isinstance(raw, dict) else {}
+    return {k: _inteiro(raw.get(k)) for k in CHAVES_CONTAGEM_ONU}
+
+
+def olt_publico(raw: Any, nome_padrao: str) -> List[Dict[str, Any]]:
+    """Uma entrada por OLT, só com contagens (sem ONU individual, serial, MAC, IP nem nome de assinante)."""
+    if not isinstance(raw, dict):
+        return []
+    olts = []
+    for o in (raw.get("olts") or [])[:32]:
+        if not isinstance(o, dict):
+            continue
+        falha = bool(o.get("erro"))
+        totais = _contagem_onus(o.get("totais"))
+        fora = totais["offline"] + totais["falha"] + totais["sem_energia"]
+        pct = round(fora * 100 / totais["total"], 1) if totais["total"] else 0.0
+        pons = []
+        for p in o.get("por_pon") or []:
+            if not isinstance(p, dict):
+                continue
+            c = _contagem_onus(p)
+            if c["offline"] + c["falha"] + c["sem_energia"] + c["sinal_ruim"] == 0:
+                continue
+            pons.append({"slot": _inteiro(p.get("slot")), "pon": _inteiro(p.get("pon")), **c})
+        pons.sort(key=lambda p: (-(p["offline"] + p["falha"] + p["sem_energia"]), -p["sinal_ruim"], p["slot"], p["pon"]))
+        if falha or pct > LIMIAR_OLT_FORA_PCT:
+            nivel = "critico"
+        elif fora or totais["sinal_ruim"]:
+            nivel = "atencao"
+        else:
+            nivel = "ok"
+        olts.append({
+            "nome": _texto(o.get("nome"), 120) or nome_padrao,
+            "fabricante": _texto(o.get("fabricante"), 30),
+            "modelo": _texto(o.get("modelo"), 60),
+            "falha_leitura": falha,
+            "temperatura": _num(o.get("temperatura")),
+            "totais": totais,
+            "percentual_fora": pct,
+            "pons": pons[:64],
+            "pons_com_problema": len(pons),
+            "nivel": nivel,
+        })
+    olts.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], x["nome"].lower()))
+    return olts
+
+
+class ConfigStatusOlt(BaseModel):
+    model_config = {"extra": "forbid"}
+    equipamentos: List[UUID] = Field(default_factory=list, max_length=200)
+    mostrar_pons: bool = True
+    mostrar_licenca: bool = True
+
+
+def construir_status_olt(ctx: ContextoDados, config: ConfigStatusOlt) -> Dict[str, Any]:
+    from services.licenca_unm import licenca_da_config
+
+    total = {k: 0 for k in CHAVES_CONTAGEM_ONU}
+    itens = []
+    for m, e in equipamentos_do_tipo(ctx, "OLT", config.equipamentos):
+        olts = olt_publico(e.olt_status, e.name)
+        if not config.mostrar_pons:
+            for o in olts:
+                o["pons"] = []
+        atual = _atualidade(ctx, e.olt_status, LIMITE_OLT_DADOS_MIN)
+        licenca = None
+        if config.mostrar_licenca:
+            lic = licenca_da_config(e.config_extra)
+            if lic:
+                dias = lic["dias_restantes"]
+                licenca = {
+                    "fim": lic["fim"],
+                    "dias_restantes": dias,
+                    "nivel": "critico" if dias < 0 else "atencao" if dias <= LIMIAR_LICENCA_ATENCAO_DIAS else "ok",
+                }
+        niveis = [o["nivel"] for o in olts]
+        if licenca:
+            niveis.append(licenca["nivel"])
+        if not olts or atual["desatualizado"]:
+            niveis.append("atencao")
+        for o in olts:
+            for k in total:
+                total[k] += o["totais"][k]
+        itens.append({
+            "id": str(e.id),
+            "nome": e.name,
+            "maquina": m.name,
+            **atual,
+            "sem_status": not isinstance(e.olt_status, dict),
+            "licenca": licenca,
+            "nivel": _pior(niveis),
+            "olts": olts,
+        })
+    itens.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], x["nome"].lower()))
+    return {"total": total, "equipamentos": itens}
+
+
+# ─── Centrais de alarme (DEFENSE) ───────────────────────────────────────
+LIMITE_ALARME_DADOS_MIN = 20        # igual a LIMIAR_ALARME_SEM_DADOS_MIN (o agente envia a cada 5 min)
+
+
+def alarme_publico(raw: Any, publico: bool) -> Optional[Dict[str, Any]]:
+    """Centrais e partições. No link público não sai se a partição está armada (diria quando o local está
+    desprotegido): só disparo e desconexão."""
+    if not isinstance(raw, dict):
+        return None
+    centrais = []
+    totais = {"centrais": 0, "desconectadas": 0, "disparos": 0, "particoes": 0, "armadas": 0}
+    for c in (raw.get("alarmes") or [])[:50]:
+        if not isinstance(c, dict):
+            continue
+        conectada = c.get("status") == 1
+        particoes = []
+        disparos = 0
+        for p in (c.get("particoes") or [])[:32]:
+            if not isinstance(p, dict):
+                continue
+            disparada = bool(p.get("disparada"))
+            armada = bool(p.get("armada"))
+            disparos += disparada
+            totais["particoes"] += 1
+            totais["armadas"] += armada
+            item = {"nome": _texto(p.get("nome"), 80) or "Partição", "disparada": disparada}
+            if not publico:
+                item["armada"] = armada
+            particoes.append(item)
+        particoes.sort(key=lambda p: (not p["disparada"], p["nome"].lower()))
+        totais["centrais"] += 1
+        totais["desconectadas"] += not conectada
+        totais["disparos"] += disparos
+        centrais.append({
+            "nome": _texto(c.get("nome"), 120) or "Central de alarme",
+            "modelo": _texto(c.get("modelo"), 40),
+            "conectada": conectada,
+            "disparos": disparos,
+            "nivel": "critico" if disparos else "atencao" if not conectada else "ok",
+            "particoes": particoes,
+        })
+    centrais.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], x["nome"].lower()))
+    incendio = [
+        {"nome": _texto(i.get("nome"), 120) or "Central de incêndio", "modelo": _texto(i.get("modelo"), 40)}
+        for i in (raw.get("incendio") or [])[:50]
+        if isinstance(i, dict)
+    ]
+    if publico:
+        totais.pop("armadas")
+    return {"falha_leitura": bool(raw.get("erro")), "totais": totais, "centrais": centrais, "incendio": incendio}
+
+
+class ConfigAlarmesDefense(BaseModel):
+    model_config = {"extra": "forbid"}
+    equipamentos: List[UUID] = Field(default_factory=list, max_length=200)
+    mostrar_particoes: bool = True
+    mostrar_incendio: bool = True
+
+
+def construir_alarmes_defense(ctx: ContextoDados, config: ConfigAlarmesDefense) -> Dict[str, Any]:
+    total = {"centrais": 0, "desconectadas": 0, "disparos": 0}
+    itens = []
+    for m, e in equipamentos_do_tipo(ctx, "DEFENSE", config.equipamentos):
+        dados = alarme_publico(e.last_alarm_status, ctx.publico)
+        atual = _atualidade(ctx, e.last_alarm_status, LIMITE_ALARME_DADOS_MIN)
+        centrais = (dados or {}).get("centrais") or []
+        if not config.mostrar_particoes:
+            for c in centrais:
+                c["particoes"] = []
+        niveis = [c["nivel"] for c in centrais]
+        if dados is None or dados["falha_leitura"] or atual["desatualizado"]:
+            niveis.append("atencao")
+        if dados:
+            for k in total:
+                total[k] += dados["totais"][k]
+        itens.append({
+            "id": str(e.id),
+            "nome": e.name,
+            "maquina": m.name,
+            **atual,
+            "sem_status": dados is None,
+            "falha_leitura": bool(dados and dados["falha_leitura"]),
+            "nivel": _pior(niveis),
+            "centrais": centrais,
+            "incendio": (dados or {}).get("incendio", []) if config.mostrar_incendio else [],
+        })
+    itens.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], x["nome"].lower()))
+    return {"mostra_armada": not ctx.publico, "total": total, "equipamentos": itens}
+
+
 # ─── Registro dos tipos de widget ──────────────────────────────────────────
 registrar(TipoWidget(
     tipo="resumo",
@@ -846,4 +1196,34 @@ registrar(TipoWidget(
     largura_padrao=6,
     altura_padrao=8,
     construir=construir_status_nvr,
+))
+
+registrar(TipoWidget(
+    tipo="antenas",
+    rotulo="Antenas Wi-Fi",
+    descricao="Antenas online e fora do ar (com há quanto tempo), problemas primeiro",
+    config_model=ConfigAntenas,
+    largura_padrao=6,
+    altura_padrao=6,
+    construir=construir_antenas,
+))
+
+registrar(TipoWidget(
+    tipo="status_olt",
+    rotulo="OLTs e ONUs",
+    descricao="ONUs online, fora do ar e com sinal ruim por OLT, PONs com problema e licença da UNM2000",
+    config_model=ConfigStatusOlt,
+    largura_padrao=6,
+    altura_padrao=7,
+    construir=construir_status_olt,
+))
+
+registrar(TipoWidget(
+    tipo="alarmes_defense",
+    rotulo="Centrais de alarme",
+    descricao="Disparos, centrais desconectadas e partições das centrais de alarme do Defense",
+    config_model=ConfigAlarmesDefense,
+    largura_padrao=6,
+    altura_padrao=6,
+    construir=construir_alarmes_defense,
 ))

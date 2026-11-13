@@ -16,8 +16,8 @@ from .widgets import (
 logger = logging.getLogger(__name__)
 
 
-def montar_dados(db: Session, customer: Customer, layout: DashboardLayout) -> Dict[str, Any]:
-    ctx = carregar_contexto(db, customer, layout.filtros.periodo)
+def montar_dados(db: Session, customer: Customer, layout: DashboardLayout, publico: bool = False) -> Dict[str, Any]:
+    ctx = carregar_contexto(db, customer, layout.filtros.periodo, publico=publico)
     resultado: Dict[str, Any] = {}
 
     for w in layout.widgets:

@@ -36,6 +36,7 @@ O backup (`run_backup` em `src/application/backup_job.py`) busca os equipamentos
    - `TIPOS` e `TIPO_ICONE_EMOJI` em `pages/Machines/MachineDetail/utils.ts`;
    - campos e validação no `EquipamentoFormModal.tsx` e em `buildEqPayload`;
    - ícone e cor em `components/EqCard.tsx`.
+4. **Dashboard por Cliente**: se o tipo manda status próprio (coluna JSON nova, envio periódico), use a skill `especialista-dashboard` para propor e perguntar ao usuário o que mostrar ao cliente.
 
 ## Contrato do processador
 

@@ -33,7 +33,7 @@ def get_public_dashboard(
     _cabecalhos(response)
     dashboard = acesso.dashboard
     layout = layout_do_banco(dashboard)
-    dados = montar_dados(db, dashboard.customer, layout)
+    dados = montar_dados(db, dashboard.customer, layout, publico=True)
 
     return PublicoResposta(
         cliente_nome=dashboard.customer.name,
@@ -54,7 +54,7 @@ def get_public_dashboard_data(
     _cabecalhos(response)
     dashboard = acesso.dashboard
     layout = layout_do_banco(dashboard)
-    dados = montar_dados(db, dashboard.customer, layout)
+    dados = montar_dados(db, dashboard.customer, layout, publico=True)
 
     return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
 
@@ -86,7 +86,7 @@ def preview_public_dashboard_layout(
         raise HTTPException(status_code=403, detail="Edição não permitida para este link.")
 
     validar_referencias(db, acesso.dashboard.customer_id, body.layout)
-    dados = montar_dados(db, acesso.dashboard.customer, body.layout)
+    dados = montar_dados(db, acesso.dashboard.customer, body.layout, publico=True)
     return DadosResposta(gerado_em=dados["gerado_em"], widgets=dados["widgets"])
 
 

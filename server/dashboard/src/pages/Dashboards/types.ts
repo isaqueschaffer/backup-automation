@@ -12,7 +12,10 @@ export type TipoWidget =
   | "telemetria_equipamentos"
   | "equipamentos"
   | "texto"
-  | "status_nvr";
+  | "status_nvr"
+  | "antenas"
+  | "status_olt"
+  | "alarmes_defense";
 
 export interface WidgetInstancia {
   id: string;
@@ -118,6 +121,8 @@ export interface DadosResumo {
   gravadores_com_telemetria: number;
   discos_total: number;
   discos_com_problema: number;
+  antenas_total?: number;
+  antenas_online?: number;
 }
 
 export interface DadosTelemetriaEquipamentos {
@@ -232,4 +237,82 @@ export interface DadosStatusNvr {
   visual: "por_equipamento" | "agregado";
   total: ContagemStatusCameras;
   equipamentos: ({ id: string; nome: string; tipo: string; maquina: string } & ContagemStatusCameras)[];
+}
+
+// Cor de cada item dos status periódicos (ANTENA, OLT, DEFENSE), calculada no servidor
+export type NivelStatus = "critico" | "atencao" | "ok" | "neutro";
+
+export interface AtualidadeStatus {
+  id: string;
+  nome: string;
+  maquina: string;
+  atualizado_em: string | null;
+  segundos_desde_atualizacao: number | null;
+  desatualizado: boolean;
+  sem_status: boolean;
+  nivel: NivelStatus;
+}
+
+export interface DadosAntenas {
+  mostrar_latencia: boolean;
+  total: { total: number; online: number; offline: number; sem_registro: number; erro: number };
+  equipamentos: (AtualidadeStatus & {
+    falha_leitura: boolean;
+    total: number;
+    online: number;
+    antenas: {
+      nome: string;
+      marca: string | null;
+      status: "ONLINE" | "OFFLINE" | "SEM_REGISTRO" | "ERRO";
+      nivel: NivelStatus;
+      ping_ms?: number | null;
+      fora_segundos: number | null;
+      ultimo_online: string | null;
+    }[];
+  })[];
+}
+
+export interface ContagemOnus {
+  total: number;
+  online: number;
+  offline: number;
+  falha: number;
+  sem_energia: number;
+  sinal_ruim: number;
+}
+
+export interface DadosStatusOlt {
+  total: ContagemOnus;
+  equipamentos: (AtualidadeStatus & {
+    licenca: { fim: string; dias_restantes: number; nivel: NivelStatus } | null;
+    olts: {
+      nome: string;
+      fabricante: string | null;
+      modelo: string | null;
+      falha_leitura: boolean;
+      temperatura: number | null;
+      totais: ContagemOnus;
+      percentual_fora: number;
+      pons: ({ slot: number; pon: number } & ContagemOnus)[];
+      pons_com_problema: number;
+      nivel: NivelStatus;
+    }[];
+  })[];
+}
+
+export interface DadosAlarmesDefense {
+  mostra_armada: boolean;
+  total: { centrais: number; desconectadas: number; disparos: number };
+  equipamentos: (AtualidadeStatus & {
+    falha_leitura: boolean;
+    centrais: {
+      nome: string;
+      modelo: string | null;
+      conectada: boolean;
+      disparos: number;
+      nivel: NivelStatus;
+      particoes: { nome: string; disparada: boolean; armada?: boolean }[];
+    }[];
+    incendio: { nome: string; modelo: string | null }[];
+  })[];
 }

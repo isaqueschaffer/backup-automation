@@ -82,6 +82,16 @@ export default function ResumoWidget({ dados }: Props) {
     );
   }
 
+  const antTotal = dados.antenas_total || 0;
+  if (antTotal > 0) {
+    const antOnline = dados.antenas_online || 0;
+    tiles.push({
+      rotulo: "Antenas online",
+      valor: `${antOnline}/${antTotal}`,
+      cor: antOnline === antTotal ? "var(--ok)" : antOnline === 0 ? "var(--err)" : "var(--warn)",
+    });
+  }
+
   return (
     <div
       style={{

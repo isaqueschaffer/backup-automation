@@ -1119,6 +1119,16 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-13] — Dashboard por Cliente: widgets de antenas, OLT e centrais de alarme; skill `especialista-dashboard`
+
+**Alteração:** três tipos de widget novos em `services/dashboards/widgets.py`, cada um com a sua lista branca e com nível de cor (`critico`/`atencao`/`ok`) calculado no servidor:
+- `antenas` ("Antenas Wi-Fi", lê `antena_status`): "X/Y online" por equipamento e lista das antenas com o pior estado no topo. Vermelha quando está fora do ar ou com erro há mais de 10 min (mesmo limiar da notificação ANTENA_OFFLINE); amarela quando caiu há menos tempo ou está sem registro. A latência é opcional. O `resumo` ganha `antenas_total`/`antenas_online` (cartão "Antenas online" aparece só quando há antenas).
+- `status_olt` ("OLTs e ONUs", lê `olt_status`): totais de ONUs por OLT (online, offline, falha, sem energia, sinal ruim), PONs com problema e licença da UNM2000. Vermelho com falha de leitura ou mais de 5% das ONUs fora; amarelo com qualquer ONU fora ou com sinal ruim. A licença fica amarela a 10 dias do vencimento e vermelha depois de vencida. Só contagens: nome de assinante, serial, MAC e IP das ONUs não saem.
+- `alarmes_defense` ("Centrais de alarme", lê `last_alarm_status`): centrais com disparo (vermelho), desconectadas (amarelo) e partições. Desarmada é estado normal (cinza). **No link público o estado armada/desarmada não é enviado** (só disparo e desconexão): o `ContextoDados` ganhou `publico` (preenchido por `montar_dados(..., publico=True)` em `routers/public_dashboard.py`). As centrais de incêndio aparecem só pelo nome, porque o significado do `status` delas não foi confirmado.
+
+Nos três, os dados com mais de 20 min (antenas e alarmes) ou 15 min (OLT) aparecem como "Sem atualização". `ids_referenciados` (`layout.py`) passa a cobrir a chave `equipamentos` dos três tipos, para manter o 422 de isolamento. Front: `AntenasWidget`, `StatusOltWidget`, `AlarmesDefenseWidget` e as peças comuns em `widgets/statusComum.tsx`. Testes em `server/api/tests/test_dashboard_status_equipamentos.py` (lista branca, níveis, filtro, link público, isolamento) e em `tools/teste_dashboards_e2e.py` (422 com equipamento de outro cliente). Nenhum histórico novo: os três tipos continuam guardando só o último status.
+**Skill:** nova skill do Claude `especialista-dashboard` (`.claude/skills/`). Ela descobre o que um equipamento novo envia, pergunta ao usuário o que mostrar e mantém a tabela de cobertura por tipo. A `criar-novo-agente` passou a apontar para ela.
+
 ### [2026-11-13] — Merge do ramo `helena` (antenas Wi-Fi via MikroTik e galeria do Defense) — agente 1.1.54
 
 **Incorporado:** `bd3b3bc` (galeria do Defense: "Sincronizar da máquina" passa a trazer as câmeras que o Defense lista e a Galeria não tem, a partir do relatório do agente; `cameras_do_relatorio_sem_par` em `services/galeria_vms.py`), `914fcc5` (merge de `integracao-equipamentos` em `helena`) e `727c770` (equipamento tipo ANTENA, entrada abaixo).
