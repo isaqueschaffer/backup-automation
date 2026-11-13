@@ -25,6 +25,7 @@ from schemas import (
     NVRPlanilhaEntrada, NVRPlanilhaResposta, ConexaoTesteResponse, ComandoAlarmeRequest, ComandoAlarmeResultado,
 )
 from services.agent_logs import registrar_alteracao
+from services.antenas import normalizar_config as normalizar_config_antena
 from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
 from services.segredos_config import proteger_segredos
@@ -118,6 +119,10 @@ def create_equipamento(
             detail=f"Tipo inválido. Tipos suportados: {TIPOS_EQUIPAMENTO}",
         )
 
+    config_extra = body.config_extra
+    if tipo == "ANTENA":
+        config_extra = _config_antena(config_extra)
+
     equipamento = NVR(
         machine_id=machine_id,
         tipo=tipo,
@@ -125,7 +130,7 @@ def create_equipamento(
         ip=body.ip,
         username=body.username,
         password=encrypt(body.password),
-        config_extra=proteger_segredos(body.config_extra),
+        config_extra=proteger_segredos(config_extra),
         active=body.active,
     )
     db.add(equipamento)
@@ -159,6 +164,8 @@ def update_equipamento(
         if field == "password" and value:
             eq.password = encrypt(value)
         elif field == "config_extra":
+            if (body.tipo or eq.tipo or "").upper() == "ANTENA":
+                value = _config_antena(value)
             eq.config_extra = proteger_segredos(value, eq.config_extra)
         elif field == "tipo" and value:
             if value.upper() not in TIPOS_EQUIPAMENTO:
@@ -450,6 +457,31 @@ def andamento_teste_conexao(
     if estado is None or estado["equipamento_id"] != str(equipamento_id):
         raise HTTPException(status_code=404, detail="Teste não encontrado (expirou ou o servidor reiniciou).")
     return estado
+
+
+def _config_antena(config: Optional[dict]) -> Optional[dict]:
+    """Valida o cadastro de um equipamento ANTENA (MACs, porta SSH, prefixos); erro vira 400 com a mensagem do painel."""
+    try:
+        return normalizar_config_antena(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{id}/antena-status")
+def get_antena_status(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Último status das antenas de um equipamento ANTENA (lido pelo agente no MikroTik). Vazio se ainda não chegou."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "").upper() != "ANTENA":
+        raise HTTPException(status_code=400, detail="Este equipamento não é do tipo ANTENA.")
+    return nvr.antena_status or {"atualizado_em": None, "erro": None, "mikrotik": {}, "antenas": [], "descobertas": []}
 
 
 @router.get("/{id}/olt-status")

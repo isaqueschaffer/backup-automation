@@ -1,4 +1,4 @@
-import { AlertTriangle, AlertOctagon, Siren, VideoOff, WifiOff, Sparkles } from "lucide-react";
+import { AlertTriangle, AlertOctagon, RadioTower, Siren, VideoOff, WifiOff, Sparkles } from "lucide-react";
 import { TipoNotificacao } from "../api/types";
 
 // Cor e ícone por tipo (usados no pop-up de login e na aba Notificações)
@@ -9,6 +9,7 @@ export const ICONE_NOTIFICACAO: Record<TipoNotificacao, typeof AlertTriangle> = 
   PERSONALIZADA: Sparkles,
   CAMERA_OFFLINE: VideoOff,
   ALARME: Siren,
+  ANTENA_OFFLINE: RadioTower,
 };
 
 export const COR_NOTIFICACAO: Record<TipoNotificacao, string> = {
@@ -18,6 +19,7 @@ export const COR_NOTIFICACAO: Record<TipoNotificacao, string> = {
   PERSONALIZADA: "var(--ok)",
   CAMERA_OFFLINE: "var(--err)",
   ALARME: "var(--err)",
+  ANTENA_OFFLINE: "var(--err)",
 };
 
 export const LABEL_NOTIFICACAO: Record<TipoNotificacao, string> = {
@@ -27,4 +29,5 @@ export const LABEL_NOTIFICACAO: Record<TipoNotificacao, string> = {
   PERSONALIZADA: "Personalizada",
   CAMERA_OFFLINE: "Câmera offline",
   ALARME: "Alarme",
+  ANTENA_OFFLINE: "Antena offline",
 };
