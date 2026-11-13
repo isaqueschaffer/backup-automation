@@ -9,6 +9,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { apiErrorMessage } from "../../utils/errors";
 import {
   DadosDashboard,
@@ -68,6 +69,7 @@ export default function DashboardWorkspace({
   barraExtra,
 }: Props) {
   const { toast } = useToast();
+  const confirmar = useConfirm();
 
   const [modo, setModo] = useState<"ver" | "editar" | "previa">("ver");
   const [opcoes, setOpcoes] = useState<OpcoesDashboard | null>(null);
@@ -139,9 +141,15 @@ export default function DashboardWorkspace({
     };
   }, [dirty, modo]);
 
-  const handleDescartar = () => {
+  const handleDescartar = async () => {
     if (dirty) {
-      if (!confirm("Descartar alterações não salvas?")) return;
+      if (!(await confirmar({
+        title: "Descartar alterações",
+        message: "Descartar alterações não salvas? O que você mudou neste dashboard será perdido.",
+        confirmLabel: "Descartar",
+        cancelLabel: "Continuar editando",
+        variant: "warning",
+      }))) return;
     }
     descartar();
     setModo("ver");
@@ -175,9 +183,12 @@ export default function DashboardWorkspace({
 
   const handleRestaurar = async () => {
     if (!restaurar) return;
-    if (!confirm("Restaurar o layout padrão? Suas alterações não salvas serão perdidas.")) {
-      return;
-    }
+    if (!(await confirmar({
+      title: "Restaurar layout padrão",
+      message: "Restaurar o layout padrão? Suas alterações não salvas serão perdidas.",
+      confirmLabel: "Restaurar",
+      variant: "warning",
+    }))) return;
     setSalvando(true);
     try {
       const res = await restaurar();

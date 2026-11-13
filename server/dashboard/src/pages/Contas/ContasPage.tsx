@@ -24,6 +24,7 @@ import {
 import { Conta, Plano, Usuario } from "../../api/types";
 import Modal from "../../components/Modal";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { useAuth } from "../../contexts/AuthContext";
 import { fmtDate } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
@@ -33,6 +34,7 @@ import PlanosModal from "./PlanosModal";
 
 function SuperAdminsSection() {
   const { toast } = useToast();
+  const confirmar = useConfirm();
   const [superAdmins, setSuperAdmins] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +102,12 @@ function SuperAdminsSection() {
       ? `Desativar o administrador "${u.nome}"? Ele não conseguirá mais acessar a plataforma.`
       : `Ativar o administrador "${u.nome}"?`;
 
-    if (!confirm(msg)) return;
+    if (!(await confirmar({
+      title: u.ativo ? "Desativar administrador" : "Ativar administrador",
+      message: msg,
+      confirmLabel: u.ativo ? "Desativar" : "Ativar",
+      variant: u.ativo ? "danger" : "info",
+    }))) return;
 
     setTogglingId(u.id);
     try {

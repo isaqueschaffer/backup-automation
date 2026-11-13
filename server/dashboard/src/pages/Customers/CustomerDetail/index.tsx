@@ -8,6 +8,7 @@ import { fetchContas, moverClienteDeConta } from "../../../api/contas";
 import { Conta, Customer, CustomerRun, Machine } from "../../../api/types";
 import Modal from "../../../components/Modal";
 import { useToast } from "../../../components/Toast";
+import { useConfirm } from "../../../components/ConfirmDialog";
 import { fmtSchedule } from "../../../utils/date";
 import { apiErrorMessage } from "../../../utils/errors";
 import CustomerFormModal, { CustomerForm, parseEmailList } from "../components/CustomerFormModal";
@@ -26,6 +27,7 @@ export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const confirmar = useConfirm();
   const { contaSelecionadaId } = useAuth();
 
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -155,7 +157,12 @@ export default function CustomerDetail() {
       const msg = c.machines_total > 0
         ? `Excluir o ${singularMin} "${c.name}"?\nAs ${c.machines_total} máquina(s) dele continuam cadastradas, mas ficarão sem ${singularMin}.`
         : `Excluir o ${singularMin} "${c.name}"?`;
-      if (!confirm(msg)) return;
+      if (!(await confirmar({
+        title: `Excluir ${singularMin}`,
+        message: msg,
+        confirmLabel: "Excluir",
+        variant: "danger",
+      }))) return;
       try {
         await deleteCustomer(c.id);
         toast(`${singular} excluído.`, "success");
@@ -163,7 +170,12 @@ export default function CustomerDetail() {
       } catch (e) { toast(apiErrorMessage(e, `Erro ao excluir ${singularMin}.`), "error"); }
       return;
     }
-    if (action === "backup" && !confirm(`Iniciar o backup em fila das ${c.machines_total} máquina(s) de "${c.name}"?\nElas farão o backup uma por vez, na ordem da fila.`)) return;
+    if (action === "backup" && !(await confirmar({
+      title: "Iniciar backup em fila",
+      message: `Iniciar o backup em fila das ${c.machines_total} máquina(s) de "${c.name}"?\nElas farão o backup uma por vez, na ordem da fila.`,
+      confirmLabel: "Iniciar backup",
+      variant: "info",
+    }))) return;
     setBusy(action);
     try {
       if (action === "backup") {
@@ -232,7 +244,12 @@ export default function CustomerDetail() {
   };
 
   const handleDetach = async (m: Machine) => {
-    if (!confirm(`Remover a máquina "${m.name}" do ${singularMin} "${c.name}"?\nEla continua cadastrada em Máquinas, fica sem ${singularMin} e mantém o horário atual.`)) return;
+    if (!(await confirmar({
+      title: "Remover máquina",
+      message: `Remover a máquina "${m.name}" do ${singularMin} "${c.name}"?\nEla continua cadastrada em Máquinas, fica sem ${singularMin} e mantém o horário atual.`,
+      confirmLabel: "Remover",
+      variant: "warning",
+    }))) return;
     setQueueSaving(true);
     try {
       applyCustomer(await detachMachine(c.id, m.id));

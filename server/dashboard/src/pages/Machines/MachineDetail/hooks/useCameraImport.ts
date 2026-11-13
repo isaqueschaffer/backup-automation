@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { createEquipamento, deleteEquipamento } from "../../../../api/client";
 import { NVR } from "../../../../api/types";
 import { ToastFn } from "../utils";
+import { useConfirm } from "../../../../components/ConfirmDialog";
 
 // Parser robusto de CSV (suporta aspas e delimitadores no meio do texto)
 export function parseCsv(text: string): string[][] {
@@ -466,6 +467,7 @@ export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: 
   reload: () => void;
   toast: ToastFn;
 }) {
+  const confirmar = useConfirm();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [modalImport, setModalImport] = useState<ModalImportCamerasState | null>(null);
 
@@ -549,7 +551,12 @@ export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: 
   const deleteAll = async () => {
     if (!machineId) return;
     if (cameras.length === 0) return toast("Nenhuma câmera para apagar.", "error");
-    if (!window.confirm(`Tem certeza que deseja apagar as ${cameras.length} câmeras? Isso não pode ser desfeito.`)) return;
+    if (!(await confirmar({
+      title: "Apagar todas as câmeras",
+      message: `Tem certeza que deseja apagar as ${cameras.length} câmeras? Isso não pode ser desfeito.`,
+      confirmLabel: "Apagar câmeras",
+      variant: "danger",
+    }))) return;
     setBusy(true);
     try {
       let ok = 0;

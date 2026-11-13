@@ -4,6 +4,7 @@ import api from "../../../../api/client";
 import { NvrCamera, PlanilhaVms, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { useToast } from "../../../../components/Toast";
+import { useConfirm } from "../../../../components/ConfirmDialog";
 import { fmtDate, fmtOfflineHa } from "../../../../utils/date";
 import {
   colunasDeSenha,
@@ -81,6 +82,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
   onClose: () => void,
 }) {
   const { toast } = useToast();
+  const confirmar = useConfirm();
   const isVms = eqTipo === "DIGIFORT" || eqTipo === "DEFENSE";
   const [cameras, setCameras] = useState<NvrCamera[]>([]);
   const [loading, setLoading] = useState(true);
@@ -322,7 +324,12 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
   };
 
   const removerPlanilhaSalva = async () => {
-    if (!confirm("Tem certeza que deseja remover a planilha salva deste equipamento?")) return;
+    if (!(await confirmar({
+      title: "Remover planilha salva",
+      message: "Tem certeza que deseja remover a planilha salva deste equipamento?",
+      confirmLabel: "Remover",
+      variant: "danger",
+    }))) return;
     setCarregandoPlanilhaSalva(true);
     try {
       await api.delete(`/machines/${machineId}/equipamentos/${nvrId}/planilha`);
@@ -338,10 +345,13 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
   // Apaga a planilha guardada e todas as câmeras da galeria, para importar uma nova do zero
   const limparPlanilha = async () => {
     const total = cameras.length;
-    if (!confirm(
-      `Limpar a planilha deste equipamento?\n\nIsso apaga a planilha guardada e as ${total} câmera(s) da galeria, ` +
-      "com as imagens de referência e da noite. Não dá para desfazer.",
-    )) return;
+    if (!(await confirmar({
+      title: "Limpar planilha",
+      message: `Limpar a planilha deste equipamento?\n\nIsso apaga a planilha guardada e as ${total} câmera(s) da galeria, ` +
+        "com as imagens de referência e da noite. Não dá para desfazer.",
+      confirmLabel: "Limpar tudo",
+      variant: "danger",
+    }))) return;
     setVmsBusy(true);
     try {
       await api.delete(`/machines/${machineId}/equipamentos/${nvrId}/cameras`);
@@ -488,7 +498,12 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
 ${AVISO_FORA_DA_NOITE}` : ""}`
         : "Busca na gravação: pode levar até 2 min por câmera.";
     const oque = somenteFaltantes ? `das ${alvo.length} câmera(s) sem ${TIPO_LABEL[tipo]}` : `de TODAS as ${alvo.length} câmera(s), substituindo as atuais`;
-    if (!confirm(`Capturar a ${TIPO_LABEL[tipo]} ${oque}?\n${tempo}`)) return;
+    if (!(await confirmar({
+      title: "Capturar imagens",
+      message: `Capturar a ${TIPO_LABEL[tipo]} ${oque}?\n${tempo}`,
+      confirmLabel: "Capturar",
+      variant: somenteFaltantes ? "info" : "warning",
+    }))) return;
 
     cancelLote.current = false;
     const falhas: string[] = [];

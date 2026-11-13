@@ -5,6 +5,7 @@ import api from "../../../../api/client";
 import { EqForm, NvrCamera, PlanilhaPendente, PlanilhaVms } from "../../../../api/types";
 import { aplicarOpcaoNome, lerPlanilhaVms, mensagemDeErro } from "../planilhaVms";
 import PlanilhaVmsModal from "./PlanilhaVmsModal";
+import { useConfirm } from "../../../../components/ConfirmDialog";
 
 const dataBr = (iso?: string) => (iso ? new Date(iso).toLocaleDateString("pt-BR") : "");
 
@@ -18,6 +19,7 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
   onPreviaAberta: (aberta: boolean) => void;
   onErro: (mensagem: string) => void;
 }) {
+  const confirmar = useConfirm();
   const inputRef = useRef<HTMLInputElement>(null);
   const [existentes, setExistentes] = useState<NvrCamera[]>([]);
   const [previa, setPrevia] = useState<PlanilhaPendente | null>(null);
@@ -73,10 +75,13 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
       return;
     }
     if (!nvrId) return;
-    if (!window.confirm(
-      `Limpar a planilha deste equipamento?\n\nIsso apaga a planilha guardada e as ${existentes.length} câmera(s) da Galeria, ` +
-      "com as imagens de referência e da noite. Não dá para desfazer.",
-    )) return;
+    if (!(await confirmar({
+      title: "Limpar planilha",
+      message: `Limpar a planilha deste equipamento?\n\nIsso apaga a planilha guardada e as ${existentes.length} câmera(s) da Galeria, ` +
+        "com as imagens de referência e da noite. Não dá para desfazer.",
+      confirmLabel: "Limpar tudo",
+      variant: "danger",
+    }))) return;
     setLendo(true);
     try {
       await api.delete(`/machines/${machineId}/equipamentos/${nvrId}/cameras`);

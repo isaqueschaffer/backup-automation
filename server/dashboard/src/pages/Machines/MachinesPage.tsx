@@ -6,6 +6,7 @@ import {
 import { Customer, Machine } from "../../api/types";
 import StatusBadge from "../../components/StatusBadge";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { fmtDate, fmtSchedule } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
 import { Plus, Trash2, Eye, RotateCcw, Play } from "lucide-react";
@@ -29,6 +30,7 @@ export default function MachinesPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const confirmar = useConfirm();
 
   const load = useCallback(() => {
     fetchMachines()
@@ -67,7 +69,12 @@ export default function MachinesPage() {
   };
 
   const handleDelete = async (m: Machine) => {
-    if (!confirm(`Excluir a máquina "${m.name}"? Todos os equipamentos e backups dela serão perdidos.`)) return;
+    if (!(await confirmar({
+      title: "Excluir máquina",
+      message: `Excluir a máquina "${m.name}"? Todos os equipamentos e backups dela serão perdidos.`,
+      confirmLabel: "Excluir",
+      variant: "danger",
+    }))) return;
     try {
       await deleteMachine(m.id);
       toast("Máquina excluída.", "success");
@@ -78,7 +85,12 @@ export default function MachinesPage() {
   const handleBulk = async (action: "restart" | "backup") => {
     const online = machines.filter(m => m.active && m.is_online).length;
     const texto = action === "restart" ? "Reiniciar o agente" : "Iniciar o backup";
-    if (!confirm(`${texto} de ${online} máquina(s) online?\nMáquinas offline serão ignoradas.`)) return;
+    if (!(await confirmar({
+      title: action === "restart" ? "Reiniciar agentes" : "Iniciar backups",
+      message: `${texto} de ${online} máquina(s) online?\nMáquinas offline serão ignoradas.`,
+      confirmLabel: action === "restart" ? "Reiniciar" : "Iniciar backup",
+      variant: action === "restart" ? "warning" : "info",
+    }))) return;
     setBulkBusy(true);
     try {
       const r = action === "restart" ? await restartAgentAll() : await triggerBackupAll();

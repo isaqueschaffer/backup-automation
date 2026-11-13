@@ -1,19 +1,26 @@
 import { useEffect, useState } from "react";
 import { fetchSettings, updateSettings, fetchAgentVersions, createAgentVersion, toggleAgentVersion, deleteAgentVersion, editAgentVersion } from "../api/client";
 import { useToast } from "../components/Toast";
+import { useConfirm } from "../components/ConfirmDialog";
 import { AgentVersion } from "../api/types";
 import { Save, Mail, Lock, Database, UploadCloud, Trash2, Power, PowerOff } from "lucide-react";
 
 function OtaManager() {
   const [versions, setVersions] = useState<AgentVersion[]>([]);
   const { toast } = useToast();
+  const confirmar = useConfirm();
 
   const loadVersions = () => fetchAgentVersions().then(setVersions).catch(() => toast("Erro ao carregar OTA", "error"));
 
   useEffect(() => { loadVersions(); }, []);
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Deletar esta versão para sempre?")) return;
+    if (!(await confirmar({
+      title: "Apagar versão do agente",
+      message: "Deletar esta versão para sempre? Esta ação não pode ser desfeita.",
+      confirmLabel: "Apagar versão",
+      variant: "danger",
+    }))) return;
     try {
       await deleteAgentVersion(id);
       toast("Versão apagada!", "success");

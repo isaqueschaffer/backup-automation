@@ -5,6 +5,7 @@ import { downloadCustomerRunZip, resendCustomerRunEmail } from "../../../../api/
 import { CustomerRun } from "../../../../api/types";
 import StatusBadge from "../../../../components/StatusBadge";
 import { useToast } from "../../../../components/Toast";
+import { useConfirm } from "../../../../components/ConfirmDialog";
 import { fmtDate } from "../../../../utils/date";
 import { extractBlobError } from "../../../../utils/download";
 import { apiErrorMessage } from "../../../../utils/errors";
@@ -26,6 +27,7 @@ export default function CustomerRuns({
 }) {
   const { singularMin } = useRotulos();
   const { toast } = useToast();
+  const confirmar = useConfirm();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [verTodas, setVerTodas] = useState(false);
@@ -52,14 +54,14 @@ export default function CustomerRuns({
   };
 
   const handleResend = async (run: CustomerRun) => {
-    if (
-      !confirm(
-        `Reenviar o e-mail da rodada de ${fmtDate(run.started_at)} (${runTriggerLabel(
-          run
-        )}) para os e-mails do ${singularMin} "${customerName}"?`
-      )
-    )
-      return;
+    if (!(await confirmar({
+      title: "Reenviar e-mail da rodada",
+      message: `Reenviar o e-mail da rodada de ${fmtDate(run.started_at)} (${runTriggerLabel(
+        run
+      )}) para os e-mails do ${singularMin} "${customerName}"?`,
+      confirmLabel: "Reenviar e-mail",
+      variant: "info",
+    }))) return;
     setResendingId(run.id);
     try {
       const r = await resendCustomerRunEmail(customerId, run.id);

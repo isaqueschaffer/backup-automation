@@ -576,6 +576,29 @@ tbody td {
   color: var(--text-primary);
 }
 
+/* ── Confirmação (substitui o confirm() do navegador) ─── */
+.confirm-overlay { z-index: 1500; }
+.confirm-dialog {
+  max-width: 440px; padding: 24px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.confirm-dialog .confirm-icon {
+  width: 44px; height: 44px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-glow); color: var(--accent-light);
+}
+.confirm-dialog.danger  { border-color: rgba(239,68,68,0.35); }
+.confirm-dialog.danger  .confirm-icon { background: var(--err-bg);  color: var(--err); }
+.confirm-dialog.warning .confirm-icon { background: var(--warn-bg); color: var(--warn); }
+.confirm-title { font-size: 17px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+.confirm-message {
+  font-size: 13.5px; color: var(--text-secondary); line-height: 1.55;
+  white-space: pre-line; overflow-wrap: anywhere;
+}
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.btn-danger-solid { background: var(--err); color: #fff; box-shadow: 0 2px 8px rgba(239,68,68,0.3); }
+.btn-danger-solid:hover { background: #dc2626; }
+
 /* ── Toast ────────────────────────────────────────────── */
 .toast-container {
   position: fixed;

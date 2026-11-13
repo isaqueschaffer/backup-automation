@@ -4,6 +4,7 @@ import { fetchPlanos, createPlano, updatePlano } from "../../api/contas";
 import { Plano } from "../../api/types";
 import Modal from "../../components/Modal";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { apiErrorMessage } from "../../utils/errors";
 
 interface PlanosModalProps {
@@ -13,6 +14,7 @@ interface PlanosModalProps {
 
 export default function PlanosModal({ onClose, onChanged }: PlanosModalProps) {
   const { toast } = useToast();
+  const confirmar = useConfirm();
 
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,7 +94,12 @@ export default function PlanosModal({ onClose, onChanged }: PlanosModalProps) {
       ? `Desativar o plano "${p.nome}"? Ele não aparecerá mais para novas contas ou renovações.`
       : `Ativar o plano "${p.nome}"?`;
 
-    if (!confirm(confirmMsg)) return;
+    if (!(await confirmar({
+      title: p.ativo ? "Desativar plano" : "Ativar plano",
+      message: confirmMsg,
+      confirmLabel: p.ativo ? "Desativar" : "Ativar",
+      variant: p.ativo ? "warning" : "info",
+    }))) return;
 
     setTogglingId(p.id);
     try {

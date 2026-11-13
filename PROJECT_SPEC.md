@@ -1117,6 +1117,10 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-13] — Avisos de confirmação no padrão do sistema (dashboard)
+
+Os 28 `confirm()` do navegador foram trocados por um diálogo próprio: `components/ConfirmDialog.tsx` (`ConfirmProvider` no `App.tsx` e hook `useConfirm()`, que devolve `Promise<boolean>`). Opções: `title`, `message`, `confirmLabel`, `cancelLabel` e `variant` (`danger` vermelho, `warning` âmbar, `info` roxo). Esc e clique fora cancelam. Regra: não usar `alert/confirm/prompt` nativos; usar `useConfirm()` (confirmações) e `useToast()` (avisos). Só dashboard, sem mudança no agente nem na API.
+
 ### [2026-11-12] — Atualização automática (OTA) do agente Linux no Mikrotik (agente 1.1.52)
 
 O agente Linux do container RouterOS não tinha OTA (o do Windows troca `.exe` com `.bat`/`sc`), então ficava na

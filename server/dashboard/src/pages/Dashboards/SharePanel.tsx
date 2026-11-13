@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Copy, Link2, RefreshCw, Trash2 } from "lucide-react";
 import Modal from "../../components/Modal";
 import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
 import { apiErrorMessage } from "../../utils/errors";
 import { fmtDate, localDateStr } from "../../utils/date";
 import { Compartilhamento, LinkGerado } from "./types";
@@ -26,6 +27,7 @@ export default function SharePanel({
   onClose,
 }: Props) {
   const { toast } = useToast();
+  const confirmar = useConfirm();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [comp, setComp] = useState<Compartilhamento>(compartilhamento);
@@ -139,7 +141,12 @@ export default function SharePanel({
   };
 
   const handleGerarNovoLink = async () => {
-    if (!confirm("Gerar um novo link? O link atual deixará de funcionar.")) return;
+    if (!(await confirmar({
+      title: "Gerar novo link",
+      message: "Gerar um novo link? O link atual deixará de funcionar.",
+      confirmLabel: "Gerar novo link",
+      variant: "warning",
+    }))) return;
     const expira = calcularExpiracao();
     if (expira === undefined) return;
     setOcupado(true);
@@ -159,7 +166,12 @@ export default function SharePanel({
   };
 
   const handleRevogarLink = async () => {
-    if (!confirm("Revogar o link? Quem o possui perderá o acesso imediatamente.")) return;
+    if (!(await confirmar({
+      title: "Revogar link",
+      message: "Revogar o link? Quem o possui perderá o acesso imediatamente.",
+      confirmLabel: "Revogar",
+      variant: "danger",
+    }))) return;
     setOcupado(true);
     try {
       await revokeShareLink(customerId);
