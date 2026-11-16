@@ -1121,6 +1121,12 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-16] — Agente 1.1.56: log do agente do Mikrotik (Linux) no painel
+
+**Problema:** o agente Linux (`service_linux.py`) só escrevia o log na saída do processo, dentro do Mikrotik; a teste-mk-maquina não tinha nenhum evento do agente no painel. Os pedidos de backup com `TRILAN_ENABLE_BACKUPS` desligado eram ignorados sem aviso visível (e o servidor dispara todo dia um backup de recuperação pelo das 02:00 que não rodou).
+**Alteração:** `service_linux.py` instala o `log_remoto` logo após carregar a configuração e roda `logs_loop` (envio a cada 20 s, mesma rotina do Windows, log completo da 1.1.55); ao parar (reinício, OTA) faz um último envio. O aviso de backup desativado passa a dizer em português que o pedido foi ignorado. Sem mudança em `requirements-linux.txt` (a OTA do Linux aceita a versão). Agentes Windows: sem mudança de comportamento.
+**Arquivos:** agent/service_linux.py, agent/tests/test_log_linux.py (novo), agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md.
+
 ### [2026-11-16] — Agente 1.1.55: log completo do agente no painel
 
 **Problema:** o agente só mandava ao servidor avisos, erros e marcos do backup; para saber o passo a passo (o que o backup fez antes de falhar, testes, OLT, alarmes) era preciso abrir o `servico.log` no cliente.
