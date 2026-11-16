@@ -32,8 +32,10 @@ def _central(status=1, armada=True, disparada=False, cid=3):
 
 
 def _cenario(db, alarmes=None, erro=None, marcadas=("3",), coletado=AGORA):
-    conta = Conta(id=uuid.uuid4(), nome="Conta Teste")
-    machine = Machine(id=uuid.uuid4(), conta_id=conta.id, name="Maquina Teste", backup_hour=2, backup_minute=0, active=True)
+    conta = Conta(id=uuid.uuid4(), nome="Conta Teste", tipo="INTEGRADOR")
+    mid = uuid.uuid4()
+    machine = Machine(id=mid, conta_id=conta.id, name="Maquina Teste", api_key_hash=mid.hex, api_key_prefix="sk_t",
+                      backup_hour=2, backup_minute=0, active=True)
     nvr = NVR(id=uuid.uuid4(), machine_id=machine.id, tipo="DEFENSE", name="Defense Teste", ip="127.0.0.1",
               username="system", password="x", active=True, alarmes_notificar=list(marcadas))
     nvr.last_alarm_status = {"atualizado_em": coletado.strftime("%Y-%m-%dT%H:%M:%S"), "ip": "127.0.0.1",

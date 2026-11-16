@@ -27,9 +27,10 @@ _TABELAS = [Base.metadata.tables[n] for n in ("contas", "clients", "nvrs", "nvr_
 
 
 def _montar_cenario(db, offline_desde=None, status_comunicacao="OFFLINE", notificar=True):
-    conta = Conta(id=uuid.uuid4(), nome="Conta Teste")
-    machine = Machine(id=uuid.uuid4(), conta_id=conta.id, name="Maquina Teste", backup_hour=2, backup_minute=0,
-                       active=True)
+    conta = Conta(id=uuid.uuid4(), nome="Conta Teste", tipo="INTEGRADOR")
+    mid = uuid.uuid4()
+    machine = Machine(id=mid, conta_id=conta.id, name="Maquina Teste", api_key_hash=mid.hex, api_key_prefix="sk_t",
+                       backup_hour=2, backup_minute=0, active=True)
     nvr = NVR(id=uuid.uuid4(), machine_id=machine.id, tipo="DEFENSE", name="Defense Teste", ip="127.0.0.1",
               username="x", password="x", active=True)
     camera = NVRCamera(id=uuid.uuid4(), nvr_id=nvr.id, canal=1, nome="Cam Portaria", notificar_offline=notificar)
@@ -113,9 +114,10 @@ def test_camera_nvr_tradicional_pareia_por_canal():
     # tem que escolher essa regra sozinho a partir de `nvr.tipo`.
     db = _preparar_db()
     try:
-        conta = Conta(id=uuid.uuid4(), nome="Conta Teste NVR")
-        machine = Machine(id=uuid.uuid4(), conta_id=conta.id, name="Maquina NVR", backup_hour=2, backup_minute=0,
-                           active=True)
+        conta = Conta(id=uuid.uuid4(), nome="Conta Teste NVR", tipo="INTEGRADOR")
+        mid = uuid.uuid4()
+        machine = Machine(id=mid, conta_id=conta.id, name="Maquina NVR", api_key_hash=mid.hex, api_key_prefix="sk_t",
+                           backup_hour=2, backup_minute=0, active=True)
         nvr = NVR(id=uuid.uuid4(), machine_id=machine.id, tipo="NVR", name="NVR Teste", ip="127.0.0.1",
                   username="x", password="x", active=True)
         camera = NVRCamera(id=uuid.uuid4(), nvr_id=nvr.id, canal=3, nome="Nome Qualquer Na Galeria",

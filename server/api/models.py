@@ -118,7 +118,7 @@ class Customer(Base):
     queue_active = Column(Boolean, default=False, nullable=False)
     queue_current_index = Column(Integer, nullable=True)
     # Destinatários do e-mail único por rodada de backup do Cliente
-    email_to = Column(ARRAY(String), default=[], nullable=False)
+    email_to = Column(ARRAY(String).with_variant(JSON, "sqlite"), default=[], nullable=False)
     # Senha do ZIP do cliente (Fernet-encrypted); None = sem senha
     zip_password = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -185,7 +185,7 @@ class Machine(Base):
     backup_hour = Column(Integer, default=2)
     backup_minute = Column(Integer, default=0)
     zip_password = Column(Text, nullable=True)  # Fernet-encrypted
-    email_to = Column(ARRAY(String), default=[], nullable=False)
+    email_to = Column(ARRAY(String).with_variant(JSON, "sqlite"), default=[], nullable=False)
     active = Column(Boolean, default=True, nullable=False)
     last_seen = Column(DateTime, nullable=True)
     last_backup_at = Column(DateTime, nullable=True)

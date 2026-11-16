@@ -47,6 +47,7 @@ def _notificacao_aberta(db: Session, conta_id, tipo: str, machine_id=None, nvr_i
 def abrir_ou_atualizar(db: Session, conta_id, tipo: str, titulo: str, mensagem: str, machine_id=None, nvr_id=None, definicao_id=None,
                        camera_id=None, referencia=None) -> Notificacao:
     """Cria a notificação se não houver uma aberta igual; se já houver, só atualiza o texto (ex.: dias restantes)."""
+    titulo = (titulo or "")[:255]
     existente = _notificacao_aberta(db, conta_id, tipo, machine_id, nvr_id, definicao_id, camera_id, referencia)
     if existente:
         existente.titulo, existente.mensagem = titulo, mensagem
@@ -81,25 +82,44 @@ def _enviar_email(db: Session, conta: Conta, assunto: str, texto_puro: str, corp
     return _smtp_send(msg, cfg, para)
 
 
+def _origem_equipamento(nvr: NVR) -> str:
+    """Retorna a identificação de origem do equipamento: 'do cliente <Nome>' ou 'da máquina <Nome>'."""
+    machine = getattr(nvr, "machine", None)
+    customer = getattr(machine, "customer", None) if machine else None
+    if customer and getattr(customer, "name", None):
+        return f"do cliente '{customer.name}'"
+    if machine and getattr(machine, "name", None):
+        return f"da máquina '{machine.name}'"
+    return ""
+
+
 def _enviar_email_licenca(db: Session, conta: Conta, nvr: NVR, dias_restantes: int) -> bool:
+    origem = _origem_equipamento(nvr)
+    sufixo = f" {origem}" if origem else ""
     nome_escapado = html.escape(nvr.name)
+    origem_escapada = html.escape(origem)
+    sufixo_html = f" {origem_escapada}" if origem_escapada else ""
     if dias_restantes < 0:
-        assunto = f"Licença da UNM2000 '{nvr.name}' vencida"
-        texto_puro = f"A licença da UNM2000 '{nvr.name}' venceu há {-dias_restantes} dia(s). Renove para não perder o monitoramento."
-        corpo_html = f"<p>A licença da UNM2000 <strong>{nome_escapado}</strong> venceu há {-dias_restantes} dia(s). Renove para não perder o monitoramento.</p>"
+        assunto = f"Licença da UNM2000 '{nvr.name}'{sufixo} vencida"
+        texto_puro = f"A licença da UNM2000 '{nvr.name}'{sufixo} venceu há {-dias_restantes} dia(s). Renove para não perder o monitoramento."
+        corpo_html = f"<p>A licença da UNM2000 <strong>{nome_escapado}</strong>{sufixo_html} venceu há {-dias_restantes} dia(s). Renove para não perder o monitoramento.</p>"
     else:
-        assunto = f"Licença da UNM2000 '{nvr.name}' vence em {dias_restantes} dia(s)"
-        texto_puro = f"A licença da UNM2000 '{nvr.name}' vence em {dias_restantes} dia(s). Renove para não perder o monitoramento."
-        corpo_html = f"<p>A licença da UNM2000 <strong>{nome_escapado}</strong> vence em {dias_restantes} dia(s). Renove para não perder o monitoramento.</p>"
-    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Licença da UNM2000 '{nvr.name}'")
+        assunto = f"Licença da UNM2000 '{nvr.name}'{sufixo} vence em {dias_restantes} dia(s)"
+        texto_puro = f"A licença da UNM2000 '{nvr.name}'{sufixo} vence em {dias_restantes} dia(s). Renove para não perder o monitoramento."
+        corpo_html = f"<p>A licença da UNM2000 <strong>{nome_escapado}</strong>{sufixo_html} vence em {dias_restantes} dia(s). Renove para não perder o monitoramento.</p>"
+    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Licença da UNM2000 '{nvr.name}'{sufixo}")
 
 
 def _enviar_email_camera_offline(db: Session, conta: Conta, nvr: NVR, camera_nome: str, tempo_texto: str) -> bool:
+    origem = _origem_equipamento(nvr)
+    sufixo = f" {origem}" if origem else ""
     nome_eq, nome_cam = html.escape(nvr.name), html.escape(camera_nome)
-    assunto = f"Câmera '{camera_nome}' offline em '{nvr.name}'"
-    texto_puro = f"A câmera '{camera_nome}' do equipamento '{nvr.name}' está offline {tempo_texto}."
-    corpo_html = f"<p>A câmera <strong>{nome_cam}</strong> do equipamento <strong>{nome_eq}</strong> está offline {tempo_texto}.</p>"
-    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Câmera offline '{camera_nome}' em '{nvr.name}'")
+    origem_escapada = html.escape(origem)
+    sufixo_html = f" {origem_escapada}" if origem_escapada else ""
+    assunto = f"Câmera '{camera_nome}' offline em '{nvr.name}'{sufixo}"
+    texto_puro = f"A câmera '{camera_nome}' do equipamento '{nvr.name}'{sufixo} está offline {tempo_texto}."
+    corpo_html = f"<p>A câmera <strong>{nome_cam}</strong> do equipamento <strong>{nome_eq}</strong>{sufixo_html} está offline {tempo_texto}.</p>"
+    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Câmera offline '{camera_nome}' em '{nvr.name}'{sufixo}")
 
 
 def _enviar_email_alarme(db: Session, conta: Conta, titulo: str, mensagem: str) -> bool:
@@ -132,12 +152,14 @@ def verificar_licencas_unm2000(db: Session, hoje: Optional[date] = None) -> int:
                 resolver(db, conta_id, "LICENCA_UNM2000", nvr_id=nvr.id)
                 continue
 
+            origem = _origem_equipamento(nvr)
+            sufixo = f" {origem}" if origem else ""
             if dias < 0:
-                titulo = f"Licença da UNM2000 '{nvr.name}' vencida"
-                mensagem = f"A licença venceu há {-dias} dia(s) (validade {licenca['fim']})."
+                titulo = f"Licença da UNM2000 '{nvr.name}'{sufixo} vencida"
+                mensagem = f"A licença da UNM2000 '{nvr.name}'{sufixo} venceu há {-dias} dia(s) (validade {licenca['fim']})."
             else:
-                titulo = f"Licença da UNM2000 '{nvr.name}' vence em {dias} dia(s)"
-                mensagem = f"A licença vence em {dias} dia(s) ({licenca['fim']})."
+                titulo = f"Licença da UNM2000 '{nvr.name}'{sufixo} vence em {dias} dia(s)"
+                mensagem = f"A licença da UNM2000 '{nvr.name}'{sufixo} vence em {dias} dia(s) ({licenca['fim']})."
             notif = abrir_ou_atualizar(db, conta_id, "LICENCA_UNM2000", titulo, mensagem, nvr_id=nvr.id)
 
             if notif.ultimo_email_em != hoje:
@@ -223,9 +245,11 @@ def verificar_cameras_offline(db: Session, agora: Optional[datetime] = None) -> 
                 if segundos is None or segundos < limite_s:
                     resolver(db, conta_id, "CAMERA_OFFLINE", nvr_id=nvr.id, camera_id=camera.id)
                     continue
+                origem = _origem_equipamento(nvr)
+                sufixo = f" {origem}" if origem else ""
                 tempo_texto = formatar_offline_ha(segundos, aprox)
-                titulo = f"Câmera '{camera.nome}' offline em '{nvr.name}'"
-                mensagem = f"A câmera '{camera.nome}' do equipamento '{nvr.name}' está offline {tempo_texto}."
+                titulo = f"Câmera '{camera.nome}' offline em '{nvr.name}'{sufixo}"
+                mensagem = f"A câmera '{camera.nome}' do equipamento '{nvr.name}'{sufixo} está offline {tempo_texto}."
                 notif = abrir_ou_atualizar(db, conta_id, "CAMERA_OFFLINE", titulo, mensagem, nvr_id=nvr.id, camera_id=camera.id)
                 if notif.ultimo_email_em != agora.date():
                     conta = nvr.machine.conta
@@ -258,6 +282,8 @@ def situacoes_alarme(nvr: NVR) -> Optional[dict]:
     if status.get("erro"):
         return None
     saida = {}
+    origem = _origem_equipamento(nvr)
+    sufixo = f" {origem}" if origem else ""
     for central in status.get("alarmes") or []:
         if not isinstance(central, dict):
             continue
@@ -267,8 +293,8 @@ def situacoes_alarme(nvr: NVR) -> Optional[dict]:
         nome_c = central.get("nome") or "Central sem nome"
         if central.get("status") != 1:
             saida[f"{cid}:DESCONECTADA"] = (
-                f"Central de alarme '{nome_c}' desconectada",
-                f"A central de alarme '{nome_c}' do equipamento '{nvr.name}' está desconectada.",
+                f"Central de alarme '{nome_c}' desconectada{sufixo}",
+                f"A central de alarme '{nome_c}' do equipamento '{nvr.name}'{sufixo} está desconectada.",
             )
         for particao in central.get("particoes") or []:
             if not isinstance(particao, dict):
@@ -277,13 +303,13 @@ def situacoes_alarme(nvr: NVR) -> Optional[dict]:
             nome_p = particao.get("nome") or "Partição"
             if particao.get("disparada"):
                 saida[f"{cid}:{pid}:DISPARO"] = (
-                    f"Alarme disparado: '{nome_c}' / '{nome_p}'",
-                    f"A partição '{nome_p}' da central '{nome_c}' ({nvr.name}) está em disparo.",
+                    f"Alarme disparado: '{nome_c}' / '{nome_p}'{sufixo}",
+                    f"A partição '{nome_p}' da central '{nome_c}' ({nvr.name}){sufixo} está em disparo.",
                 )
             if not particao.get("armada"):
                 saida[f"{cid}:{pid}:DESARMADA"] = (
-                    f"Partição desarmada: '{nome_c}' / '{nome_p}'",
-                    f"A partição '{nome_p}' da central '{nome_c}' ({nvr.name}) está desarmada.",
+                    f"Partição desarmada: '{nome_c}' / '{nome_p}'{sufixo}",
+                    f"A partição '{nome_p}' da central '{nome_c}' ({nvr.name}){sufixo} está desarmada.",
                 )
     return saida
 
@@ -311,9 +337,11 @@ def verificar_alarmes_equipamento(db: Session, nvr: NVR, agora: Optional[datetim
     situacoes = situacoes_alarme(nvr)
     falhou = situacoes is None
     if falhou:
+        origem = _origem_equipamento(nvr)
+        sufixo = f" {origem}" if origem else ""
         situacoes = {"FALHA": (
-            f"Falha ao consultar alarmes em '{nvr.name}'",
-            f"O agente não conseguiu consultar o painel de alarmes de '{nvr.name}': {status.get('erro')}",
+            f"Falha ao consultar alarmes em '{nvr.name}'{sufixo}",
+            f"O agente não conseguiu consultar o painel de alarmes de '{nvr.name}'{sufixo}: {status.get('erro')}",
         )}
 
     for notif in abertas:
@@ -417,6 +445,8 @@ def situacoes_antena(nvr: NVR, agora: datetime) -> Optional[dict]:
     if status.get("erro"):
         return None
     saida = {}
+    origem = _origem_equipamento(nvr)
+    sufixo = f" {origem}" if origem else ""
     for a in status.get("antenas") or []:
         if not isinstance(a, dict) or a.get("status") == "ONLINE" or a.get("notificar") is False:
             continue
@@ -427,8 +457,8 @@ def situacoes_antena(nvr: NVR, agora: datetime) -> Optional[dict]:
         onde = f" (MAC {a.get('mac')}" + (f", IP {a['ip']}" if a.get("ip") else "") + ")"
         tempo = formatar_offline_ha(int((agora - desde).total_seconds()))
         saida[str(a.get("mac") or nome)[:120]] = (
-            f"Antena '{nome}' offline em '{nvr.name}'",
-            f"A antena '{nome}'{onde} do equipamento '{nvr.name}' está offline {tempo}.",
+            f"Antena '{nome}' offline em '{nvr.name}'{sufixo}",
+            f"A antena '{nome}'{onde} do equipamento '{nvr.name}'{sufixo} está offline {tempo}.",
         )
     return saida
 
@@ -459,10 +489,12 @@ def verificar_antenas_equipamento(db: Session, nvr: NVR, agora: Optional[datetim
 
     situacoes = situacoes_antena(nvr, agora)
     falhou = situacoes is None
+    origem = _origem_equipamento(nvr)
+    sufixo = f" {origem}" if origem else ""
     if falhou:
         situacoes = {"FALHA": (
-            f"Falha ao ler o MikroTik de '{nvr.name}'",
-            f"O agente não conseguiu ler o MikroTik do equipamento '{nvr.name}': {status.get('erro')}",
+            f"Falha ao ler o MikroTik de '{nvr.name}'{sufixo}",
+            f"O agente não conseguiu ler o MikroTik do equipamento '{nvr.name}'{sufixo}: {status.get('erro')}",
         )}
 
     enviados = 0
@@ -475,10 +507,10 @@ def verificar_antenas_equipamento(db: Session, nvr: NVR, agora: Optional[datetim
         if notif.ultimo_email_em is not None and conta:
             antena = next((a for a in status.get("antenas") or [] if isinstance(a, dict) and a.get("mac") == notif.referencia), None)
             if notif.referencia == "FALHA":
-                titulo, msg = f"MikroTik de '{nvr.name}' voltou a responder", f"O agente voltou a ler o MikroTik do equipamento '{nvr.name}'."
+                titulo, msg = f"MikroTik de '{nvr.name}'{sufixo} voltou a responder", f"O agente voltou a ler o MikroTik do equipamento '{nvr.name}'{sufixo}."
             elif antena and antena.get("status") == "ONLINE":
                 nome = antena.get("nome") or notif.referencia
-                titulo, msg = f"Antena '{nome}' voltou em '{nvr.name}'", f"A antena '{nome}' do equipamento '{nvr.name}' voltou a responder."
+                titulo, msg = f"Antena '{nome}' voltou em '{nvr.name}'{sufixo}", f"A antena '{nome}' do equipamento '{nvr.name}'{sufixo} voltou a responder."
             else:
                 continue  # removida do cadastro ou desligada da notificação: fecha sem avisar "voltou"
             if _enviar_email_antena(db, conta, titulo, msg):
@@ -543,6 +575,8 @@ def _onu_no_problema(categoria: str, onu: dict) -> bool:
 
 def _texto_alerta_olt(categoria: str, nvr: NVR, nome_olt: str, onus: list) -> tuple:
     """(titulo, mensagem) do alerta de uma OLT com as ONUs que estão no problema há mais do limiar."""
+    origem = _origem_equipamento(nvr)
+    sufixo = f" {origem}" if origem else ""
     onde = nome_olt if nome_olt == nvr.name else f"{nome_olt} ({nvr.name})"
     lista = []
     for o in onus[:MAX_ONUS_NA_MENSAGEM]:
@@ -557,11 +591,11 @@ def _texto_alerta_olt(categoria: str, nvr: NVR, nome_olt: str, onus: list) -> tu
         for o in onus:
             contagem[o["estado"]] = contagem.get(o["estado"], 0) + 1
         partes = ", ".join(f"{n} {ESTADOS_ONU_OFFLINE[e]}" for e, n in contagem.items())
-        titulo = f"{len(onus)} ONU(s) offline na OLT '{onde}'"
-        mensagem = f"{len(onus)} ONU(s) offline há mais de {LIMIAR_OLT_MIN} min ({partes}): {'; '.join(lista)}{resto}."
+        titulo = f"{len(onus)} ONU(s) offline na OLT '{onde}'{sufixo}"
+        mensagem = f"{len(onus)} ONU(s) offline na OLT '{onde}'{sufixo} há mais de {LIMIAR_OLT_MIN} min ({partes}): {'; '.join(lista)}{resto}."
     else:
-        titulo = f"{len(onus)} ONU(s) com sinal óptico crítico na OLT '{onde}'"
-        mensagem = (f"{len(onus)} ONU(s) com sinal óptico crítico (-27 dBm ou pior) há mais de {LIMIAR_OLT_MIN} min: "
+        titulo = f"{len(onus)} ONU(s) com sinal óptico crítico na OLT '{onde}'{sufixo}"
+        mensagem = (f"{len(onus)} ONU(s) com sinal óptico crítico (-27 dBm ou pior) na OLT '{onde}'{sufixo} há mais de {LIMIAR_OLT_MIN} min: "
                     f"{'; '.join(lista)}{resto}.")
     return titulo[:255], mensagem
 
