@@ -176,6 +176,39 @@ export default function NotificacoesPage() {
     }
   };
 
+  // Ativa ou desativa de uma vez todos os itens de uma máquina dentro de uma categoria (só chama o servidor para
+  // os que mudam). Se todos já estão ativos, o botão desativa; caso contrário, ativa todos.
+  const alternarTodos = async (chave: string, alvo: boolean, tarefas: (() => Promise<unknown>)[]) => {
+    setSalvando(chave);
+    try {
+      await Promise.all(tarefas.map((t) => t()));
+      toast(alvo ? "Notificações ativadas." : "Notificações desativadas.", "success");
+    } catch {
+      toast("Não foi possível alterar todas as notificações.", "error");
+    } finally {
+      setSalvando(null);
+      carregar();
+    }
+  };
+
+  const botaoTodos = (chave: string, itens: { ativo: boolean; aplicar: (alvo: boolean) => Promise<unknown> }[]) => {
+    if (somenteLeitura || itens.length === 0) return null;
+    const alvo = !itens.every((i) => i.ativo);
+    return (
+      <button
+        type="button"
+        className={`btn btn-sm ${alvo ? "btn-primary" : "btn-secondary"}`}
+        disabled={salvando === chave}
+        title={alvo ? "Ativar todas desta máquina" : "Desativar todas desta máquina"}
+        onClick={() => alternarTodos(chave, alvo, itens.filter((i) => i.ativo !== alvo).map((i) => () => i.aplicar(alvo)))}
+        style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}
+      >
+        {alvo ? <Power size={13} /> : <PowerOff size={13} />}
+        {alvo ? "Ativar todas" : "Desativar todas"}
+      </button>
+    );
+  };
+
   const apagarPersonalizada = async (p: NotificacaoPersonalizada) => {
     if (!(await confirmar({
       title: "Apagar notificação",
@@ -302,14 +335,14 @@ export default function NotificacoesPage() {
                   (soma, eq) => soma + eq.cameras.filter((c) => c.status_comunicacao === "OFFLINE").length, 0);
                 return (
                 <div key={maquina.machine_id}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
-                      borderBottom: aberta ? "none" : "1px solid var(--border)",
                     }}
                   >
                     {aberta ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -317,6 +350,10 @@ export default function NotificacoesPage() {
                     <span style={SELO_NEUTRO}>{totalCameras} câmera(s)</span>
                     {totalOffline > 0 && <span style={SELO_ERRO}>{totalOffline} offline</span>}
                   </button>
+                  {botaoTodos(`todas:camera:${maquina.machine_id}`, maquina.equipamentos.flatMap((eq) => eq.cameras.map((c) => ({
+                    ativo: c.notificar_offline, aplicar: (alvo: boolean) => atualizarCameraNotificacao(c.id, alvo),
+                  }))))}
+                  </div>
                   {aberta && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingLeft: 20, marginTop: 10, marginBottom: 10, borderLeft: "2px solid var(--border)" }}>
                     {maquina.equipamentos.map((eq) => (
@@ -387,14 +424,14 @@ export default function NotificacoesPage() {
                 const totalSinal = maquina.equipamentos.reduce((s, eq) => s + eq.onus_sinal_critico, 0);
                 return (
                 <div key={maquina.machine_id}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
-                      borderBottom: aberta ? "none" : "1px solid var(--border)",
                     }}
                   >
                     {aberta ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -403,6 +440,11 @@ export default function NotificacoesPage() {
                     {totalOffline > 0 && <span style={SELO_ERRO}>{totalOffline} ONU(s) offline</span>}
                     {totalSinal > 0 && <span style={SELO_ERRO}>{totalSinal} com sinal crítico</span>}
                   </button>
+                  {botaoTodos(`todas:olt:${maquina.machine_id}`, maquina.equipamentos.map((eq) => ({
+                    ativo: eq.onu_offline && eq.sinal_critico,
+                    aplicar: (alvo: boolean) => atualizarOltNotificacao(eq.nvr_id, { onu_offline: alvo, sinal_critico: alvo }),
+                  })))}
+                  </div>
                   {aberta && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingLeft: 20, marginTop: 10, marginBottom: 10, borderLeft: "2px solid var(--border)" }}>
                     {maquina.equipamentos.map((eq) => {
@@ -498,14 +540,14 @@ export default function NotificacoesPage() {
                   + maquina.equipamentos.filter((eq) => eq.erro).length;
                 return (
                 <div key={maquina.machine_id}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
-                      borderBottom: aberta ? "none" : "1px solid var(--border)",
                     }}
                   >
                     {aberta ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -514,6 +556,10 @@ export default function NotificacoesPage() {
                     {totalDisparadas > 0 && <span style={SELO_ERRO}>{totalDisparadas} em disparo</span>}
                     {totalComProblema > 0 && <span style={SELO_ERRO}>{totalComProblema} sem comunicação</span>}
                   </button>
+                  {botaoTodos(`todas:alarme:${maquina.machine_id}`, maquina.equipamentos.flatMap((eq) => eq.centrais.map((c) => ({
+                    ativo: c.notificar, aplicar: (alvo: boolean) => atualizarCentralNotificacao(eq.nvr_id, c.central_id, alvo),
+                  }))))}
+                  </div>
                   {aberta && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingLeft: 20, marginTop: 10, marginBottom: 10, borderLeft: "2px solid var(--border)" }}>
                     {maquina.equipamentos.map((eq) => (

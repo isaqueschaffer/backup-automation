@@ -1076,11 +1076,34 @@ class PlanoResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# Tipos de notificação que saem por e-mail (o usuário escolhe quais recebe)
+TIPOS_EMAIL_NOTIFICACAO = (
+    "LICENCA_UNM2000", "CAMERA_OFFLINE", "ALARME", "ANTENA_OFFLINE", "ONU_OFFLINE", "SINAL_OPTICO", "PERSONALIZADA",
+)
+
+
+def _validar_tipos_notificacao(v):
+    if v is None:
+        return None
+    invalidos = [t for t in v if t not in TIPOS_EMAIL_NOTIFICACAO]
+    if invalidos:
+        raise ValueError(f"Tipo de notificação inválido: {invalidos[0]}")
+    return list(dict.fromkeys(v))
+
+
 class UsuarioCreate(BaseModel):
     nome: str
     email: str
     senha: str
     papel: str
+    # None = padrão do papel (admin recebe, os demais não)
+    notif_email: Optional[bool] = None
+    notif_tipos: Optional[List[str]] = None  # None = todos os tipos
+
+    @field_validator("notif_tipos")
+    @classmethod
+    def _check_notif_tipos(cls, v):
+        return _validar_tipos_notificacao(v)
     # VISUALIZADOR/LEITURA: máquinas que o usuário vê (vazio ou ausente = todas); ignorado para ADMIN
     maquinas: Optional[List[UUID]] = Field(default=None, max_length=2000)
 
@@ -1110,6 +1133,13 @@ class UsuarioUpdate(BaseModel):
     papel: Optional[str] = None
     ativo: Optional[bool] = None
     senha: Optional[str] = None
+    notif_email: Optional[bool] = None
+    notif_tipos: Optional[List[str]] = None  # enviado como null = todos os tipos; ausente = não mexe
+
+    @field_validator("notif_tipos")
+    @classmethod
+    def _check_notif_tipos(cls, v):
+        return _validar_tipos_notificacao(v)
     # None = não mexe; [] = volta a ver todas as máquinas
     maquinas: Optional[List[UUID]] = Field(default=None, max_length=2000)
 
@@ -1136,6 +1166,8 @@ class UsuarioResponse(BaseModel):
     papel: str
     ativo: bool
     maquinas: List[UUID] = []  # vazio = vê todas as máquinas da conta
+    notif_email: bool = False
+    notif_tipos: Optional[List[str]] = None
     ultimo_login: Optional[datetime] = None
     criado_em: datetime
 

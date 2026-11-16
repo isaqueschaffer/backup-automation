@@ -86,6 +86,11 @@ class Usuario(Base):
     token_versao = Column(Integer, default=1, nullable=False)
     ultimo_login = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Recebe por e-mail as notificações (câmera, OLT, alarme, antena, licença, personalizadas); o e-mail de backup é
+    # outro (lista de cada máquina/cliente). notif_tipos: lista dos tipos que recebe (None = todos). O escopo segue
+    # as máquinas do usuário (vazio = todas; ADMIN sempre todas).
+    notif_email = Column(Boolean, default=False, nullable=False)
+    notif_tipos = Column(JSON, nullable=True)
 
     conta = relationship("Conta", back_populates="usuarios")
     # VISUALIZADOR/LEITURA: máquinas que o usuário vê (vazio = todas as da conta); o ADMIN sempre vê todas

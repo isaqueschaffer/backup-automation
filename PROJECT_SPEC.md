@@ -1121,6 +1121,15 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-16] — Notificações por e-mail escolhidas por usuário; botão "Ativar/Desativar todas" por máquina
+
+- **Quem recebe** (`services/notificacoes.destinatarios_notificacao(db, conta, tipo, machine_id)`): o e-mail de contato da conta (sempre) + os usuários **ativos** da conta com `usuarios.notif_email` ligado, que aceitam o tipo (`usuarios.notif_tipos`: lista, `NULL` = todos) e enxergam a máquina (ADMIN vê todas; VISUALIZADOR/LEITURA sem máquinas marcadas veem todas; notificação personalizada não tem máquina). Antes saía sempre para o contato + todos os admins. Tipos: `LICENCA_UNM2000`, `CAMERA_OFFLINE`, `ALARME`, `ANTENA_OFFLINE`, `ONU_OFFLINE`, `SINAL_OPTICO`, `PERSONALIZADA` (`schemas.TIPOS_EMAIL_NOTIFICACAO`; `BACKUP_FALHOU` e `AGENTE_OFFLINE` só aparecem no painel). O aviso de vencimento da conta (`services/avisos_conta.destinatarios`) não mudou (contato + admins).
+- **E-mail de backup continua separado**: usa só as listas `email_to` da máquina/cliente. Decisão: **não** incluir o admin automaticamente (mandaria um relatório por máquina/rodada a quem não pediu, e as listas podem ter contatos do cliente); o admin que quiser coloca o próprio e-mail na lista. Um opt-in "receber relatório de backup" por usuário fica como evolução possível.
+- **Migração**: colunas `usuarios.notif_email BOOLEAN NOT NULL DEFAULT FALSE` e `usuarios.notif_tipos JSON`; na criação da coluna, os admins atuais ficam ligados (nada muda no primeiro dia) e os demais desligados. Usuário novo: ADMIN liga por padrão, os outros não.
+- **API/painel**: `UsuarioCreate/Update/Response` ganham `notif_email` e `notif_tipos` (em `PUT`, `notif_tipos: null` = todos e ausente = não mexe; tipo inválido = 422). Tela Usuários: coluna "Notificações" e o campo `NotificacoesUsuarioCampo` (liga/desliga, "todos os tipos" ou só os marcados).
+- **Notificações (painel)**: em cada máquina das seções Câmeras offline, OLTs e Alarmes, botão **Ativar todas / Desativar todas** (só os itens que mudam são enviados; some para somente leitura/visualizador).
+- **Testes**: `server/api/tests/test_destinatarios_notificacao.py` (6). **Arquivos:** server/api/{models.py,main.py,schemas.py,routers/conta.py,services/notificacoes.py}, server/dashboard/src/{api/types.ts,api/contas.ts,pages/Contas/{UsuariosSection.tsx,NotificacoesUsuarioCampo.tsx},pages/Notificacoes/NotificacoesPage.tsx}.
+
 ### [2026-11-13] — Merge do ramo `helena` (perfil Visualizador, isolamento por máquina e avisos de OLT)
 
 **Incorporado:** `7595a31` (Notificações: seção "OLTs" com avisos de ONU offline e de sinal óptico crítico, tipos `ONU_OFFLINE`/`SINAL_OPTICO`) e `532fe4a` (perfil `VISUALIZADOR` e isolamento por máquina para Visualizador/Somente leitura, tabela `usuario_maquinas`). Detalhes nas entradas abaixo.

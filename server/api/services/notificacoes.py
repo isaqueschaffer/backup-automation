@@ -9,8 +9,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from models import ConfiguracaoNotificacao, Conta, Machine, NotificacaoPersonalizada, NVR, Notificacao
-from services.avisos_conta import destinatarios
+from models import ConfiguracaoNotificacao, Conta, Machine, NotificacaoPersonalizada, NVR, Notificacao, Usuario
+from services.email_service import _clean_recipients
 from services.camera_offline import formatar_offline_ha, segundos_offline
 from services.email_service import _smtp_config, _smtp_send
 from services.galeria_vms import status_por_camera
@@ -67,11 +67,29 @@ def resolver(db: Session, conta_id, tipo: str, machine_id=None, nvr_id=None, def
         existente.resolvido_em = datetime.utcnow()
 
 
-def _enviar_email(db: Session, conta: Conta, assunto: str, texto_puro: str, corpo_html: str, contexto: str) -> bool:
+def destinatarios_notificacao(db: Session, conta: Conta, tipo: Optional[str] = None, machine_id=None) -> list:
+    """Quem recebe o e-mail de uma notificação: o e-mail de contato da conta (sempre) + os usuários ativos da conta com
+    `notif_email` ligado que aceitam esse tipo (`notif_tipos` None = todos) e enxergam a máquina (ADMIN vê todas;
+    VISUALIZADOR/LEITURA sem máquinas marcadas veem todas). O e-mail de backup é outro: lista de cada máquina/cliente."""
+    emails = [conta.email_contato] if conta.email_contato else []
+    usuarios = db.query(Usuario).filter(
+        Usuario.conta_id == conta.id, Usuario.ativo == True, Usuario.notif_email == True,  # noqa: E712
+    ).order_by(Usuario.email.asc()).all()
+    for u in usuarios:
+        if tipo and u.notif_tipos is not None and tipo not in u.notif_tipos:
+            continue
+        if machine_id is not None and u.papel != "ADMIN" and u.maquinas and machine_id not in u.maquinas:
+            continue
+        emails.append(u.email)
+    return _clean_recipients(emails)
+
+
+def _enviar_email(db: Session, conta: Conta, assunto: str, texto_puro: str, corpo_html: str, contexto: str,
+                  tipo: Optional[str] = None, machine_id=None) -> bool:
     cfg = _smtp_config(db)
     if cfg is None:
         return False
-    para = destinatarios(db, conta)
+    para = destinatarios_notificacao(db, conta, tipo, machine_id)
     if not para:
         logger.warning("%s (conta %s) sem destinatários para o e-mail.", contexto, conta.id)
         return False
@@ -107,7 +125,8 @@ def _enviar_email_licenca(db: Session, conta: Conta, nvr: NVR, dias_restantes: i
         assunto = f"Licença da UNM2000 '{nvr.name}'{sufixo} vence em {dias_restantes} dia(s)"
         texto_puro = f"A licença da UNM2000 '{nvr.name}'{sufixo} vence em {dias_restantes} dia(s). Renove para não perder o monitoramento."
         corpo_html = f"<p>A licença da UNM2000 <strong>{nome_escapado}</strong>{sufixo_html} vence em {dias_restantes} dia(s). Renove para não perder o monitoramento.</p>"
-    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Licença da UNM2000 '{nvr.name}'{sufixo}")
+    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Licença da UNM2000 '{nvr.name}'{sufixo}",
+                         "LICENCA_UNM2000", nvr.machine_id)
 
 
 def _enviar_email_camera_offline(db: Session, conta: Conta, nvr: NVR, camera_nome: str, tempo_texto: str) -> bool:
@@ -119,17 +138,19 @@ def _enviar_email_camera_offline(db: Session, conta: Conta, nvr: NVR, camera_nom
     assunto = f"Câmera '{camera_nome}' offline em '{nvr.name}'{sufixo}"
     texto_puro = f"A câmera '{camera_nome}' do equipamento '{nvr.name}'{sufixo} está offline {tempo_texto}."
     corpo_html = f"<p>A câmera <strong>{nome_cam}</strong> do equipamento <strong>{nome_eq}</strong>{sufixo_html} está offline {tempo_texto}.</p>"
-    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Câmera offline '{camera_nome}' em '{nvr.name}'{sufixo}")
+    return _enviar_email(db, conta, assunto, texto_puro, corpo_html, f"Câmera offline '{camera_nome}' em '{nvr.name}'{sufixo}",
+                         "CAMERA_OFFLINE", nvr.machine_id)
 
 
-def _enviar_email_alarme(db: Session, conta: Conta, titulo: str, mensagem: str) -> bool:
-    return _enviar_email(db, conta, titulo, mensagem, f"<p>{html.escape(mensagem)}</p>", f"Alarme '{titulo}'")
+def _enviar_email_alarme(db: Session, conta: Conta, titulo: str, mensagem: str, tipo: str = "ALARME", machine_id=None) -> bool:
+    return _enviar_email(db, conta, titulo, mensagem, f"<p>{html.escape(mensagem)}</p>", f"Alarme '{titulo}'", tipo, machine_id)
 
 
 def _enviar_email_personalizada(db: Session, conta: Conta, definicao: NotificacaoPersonalizada, titulo: str, mensagem: str) -> bool:
     texto_puro = f"{mensagem}\n\n(Notificação personalizada criada no painel: '{definicao.titulo}'.)"
     corpo_html = f"<p>{html.escape(mensagem)}</p><p style='color:#888;font-size:12px'>Notificação personalizada criada no painel: '{html.escape(definicao.titulo)}'.</p>"
-    return _enviar_email(db, conta, titulo, texto_puro, corpo_html, f"Notificação personalizada '{definicao.titulo}'")
+    return _enviar_email(db, conta, titulo, texto_puro, corpo_html, f"Notificação personalizada '{definicao.titulo}'",
+                         "PERSONALIZADA")
 
 
 def verificar_licencas_unm2000(db: Session, hoje: Optional[date] = None) -> int:
@@ -355,7 +376,7 @@ def verificar_alarmes_equipamento(db: Session, nvr: NVR, agora: Optional[datetim
         notif = abrir_ou_atualizar(db, conta_id, "ALARME", titulo, mensagem, nvr_id=nvr.id, referencia=referencia[:120])
         if notif.ultimo_email_em != agora.date():
             conta = nvr.machine.conta
-            if conta and _enviar_email_alarme(db, conta, titulo, mensagem):
+            if conta and _enviar_email_alarme(db, conta, titulo, mensagem, "ALARME", nvr.machine_id):
                 notif.ultimo_email_em = agora.date()
                 enviados += 1
     return enviados
@@ -433,8 +454,9 @@ def verificar_personalizadas(db: Session, agora: Optional[datetime] = None, hoje
     return enviados
 
 
-def _enviar_email_antena(db: Session, conta: Conta, titulo: str, mensagem: str) -> bool:
-    return _enviar_email(db, conta, titulo, mensagem, f"<p>{html.escape(mensagem)}</p>", f"Antena '{titulo}'")
+def _enviar_email_antena(db: Session, conta: Conta, titulo: str, mensagem: str, machine_id=None) -> bool:
+    return _enviar_email(db, conta, titulo, mensagem, f"<p>{html.escape(mensagem)}</p>", f"Antena '{titulo}'",
+                         "ANTENA_OFFLINE", machine_id)
 
 
 def situacoes_antena(nvr: NVR, agora: datetime) -> Optional[dict]:
@@ -513,14 +535,14 @@ def verificar_antenas_equipamento(db: Session, nvr: NVR, agora: Optional[datetim
                 titulo, msg = f"Antena '{nome}' voltou em '{nvr.name}'{sufixo}", f"A antena '{nome}' do equipamento '{nvr.name}'{sufixo} voltou a responder."
             else:
                 continue  # removida do cadastro ou desligada da notificação: fecha sem avisar "voltou"
-            if _enviar_email_antena(db, conta, titulo, msg):
+            if _enviar_email_antena(db, conta, titulo, msg, nvr.machine_id):
                 enviados += 1
 
     for referencia, (titulo, mensagem) in situacoes.items():
         titulo = titulo[:255]
         notif = abrir_ou_atualizar(db, conta_id, "ANTENA_OFFLINE", titulo, mensagem, nvr_id=nvr.id, referencia=referencia[:120])
         if notif.ultimo_email_em != agora.date():
-            if conta and _enviar_email_antena(db, conta, titulo, mensagem):
+            if conta and _enviar_email_antena(db, conta, titulo, mensagem, nvr.machine_id):
                 notif.ultimo_email_em = agora.date()
                 enviados += 1
     return enviados
@@ -664,7 +686,7 @@ def verificar_olt_equipamento(db: Session, nvr: NVR, agora: Optional[datetime] =
             chaves = sorted(k for k, _ in vencidas)
             ja_avisadas = set(avisadas_antes.get(nome_olt) or [])
             if set(chaves) - ja_avisadas:
-                if conta and _enviar_email_alarme(db, conta, titulo, mensagem):
+                if conta and _enviar_email_alarme(db, conta, titulo, mensagem, tipo, nvr.machine_id):
                     notif.ultimo_email_em = agora.date()
                     enviados += 1
                     ja_avisadas = set(chaves)

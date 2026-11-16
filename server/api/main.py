@@ -237,6 +237,9 @@ _MIGRACOES_COLUNAS = [
     # Notificação de ONUs offline e sinal óptico crítico (OLT): avisos ligados e estado dos alertas
     ("nvrs", "olt_notificar", "ALTER TABLE nvrs ADD COLUMN olt_notificar JSON;"),
     ("nvrs", "olt_alertas", "ALTER TABLE nvrs ADD COLUMN olt_alertas JSON;"),
+    # Notificações por e-mail escolhidas por usuário (admins atuais começam ligados, ver abaixo)
+    ("usuarios", "notif_email", "ALTER TABLE usuarios ADD COLUMN notif_email BOOLEAN NOT NULL DEFAULT FALSE;"),
+    ("usuarios", "notif_tipos", "ALTER TABLE usuarios ADD COLUMN notif_tipos JSON;"),
 ]
 
 _colunas_cache: dict = {}
@@ -293,6 +296,10 @@ def _popular_email_to_clientes() -> None:
 
 if ("client_groups", "email_to") in _colunas_criadas:
     _popular_email_to_clientes()
+
+# Só na criação da coluna: os admins atuais já recebiam as notificações, então continuam recebendo
+if ("usuarios", "notif_email") in _colunas_criadas:
+    _run_ddl("UPDATE usuarios SET notif_email = TRUE WHERE papel = 'ADMIN';", "usuarios.notif_email dos admins")
 
 # Índices das colunas de conta (o create_all só cria índices em tabelas novas)
 _INDICES = [

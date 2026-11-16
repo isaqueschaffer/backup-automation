@@ -477,6 +477,9 @@ export interface Usuario {
   criado_em: string;
   // Visualizador / Somente leitura: máquinas que vê (vazio = todas as da conta)
   maquinas?: string[];
+  // Recebe notificações por e-mail; notif_tipos null = todos os tipos
+  notif_email?: boolean;
+  notif_tipos?: string[] | null;
 }
 
 
