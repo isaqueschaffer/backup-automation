@@ -14,6 +14,11 @@ DIAS_RETENCAO = 30
 MAX_PINGS = 50
 MAX_LOGS_POR_MAQUINA = 5000
 DIAS_RETENCAO_AUDITORIA = 365  # ações de usuários no painel (tela de Auditoria) ficam bem mais que os eventos do agente
+# Log completo do agente (linhas INFO comuns): volume alto, então prazo e teto próprios, separados dos eventos
+# principais (avisos, erros, marcos), que assim não são empurrados para fora pelas linhas de detalhe.
+EVENTO_DETALHE = "agent_log_detalhe"
+DIAS_RETENCAO_DETALHE = 7
+MAX_LOGS_DETALHE_POR_MAQUINA = 20000
 
 
 EVENTO_ALTERACAO = "alteracao_usuario"
@@ -48,6 +53,8 @@ def podar_logs(db: Session, machine_id: UUID, agora: datetime) -> None:
     (c) Mantém apenas os MAX_LOGS_POR_MAQUINA eventos que NÃO são ping mais recentes.
     (d) Ações de usuários no painel (usuario preenchido) não entram em (b) nem em (c): ficam por
         DIAS_RETENCAO_AUDITORIA dias, pois são o histórico da tela de Auditoria.
+    (e) O log completo (EVENTO_DETALHE) não entra em (c): fica DIAS_RETENCAO_DETALHE dias, no máximo
+        MAX_LOGS_DETALHE_POR_MAQUINA linhas.
     """
     db.flush()
 
@@ -81,8 +88,28 @@ def podar_logs(db: Session, machine_id: UUID, agora: datetime) -> None:
     # (c) Eventos que NÃO são ping além dos MAX_LOGS_POR_MAQUINA mais recentes
     ids_logs_antigos = (
         select(AgentLog.id)
-        .where(AgentLog.machine_id == machine_id, AgentLog.event_type != "ping", AgentLog.usuario.is_(None))
+        .where(
+            AgentLog.machine_id == machine_id,
+            AgentLog.event_type.notin_(("ping", EVENTO_DETALHE)),
+            AgentLog.usuario.is_(None),
+        )
         .order_by(AgentLog.created_at.desc())
         .offset(MAX_LOGS_POR_MAQUINA)
     )
     db.execute(delete(AgentLog).where(AgentLog.id.in_(ids_logs_antigos)))
+
+    # (e) Log completo: prazo e teto próprios
+    db.execute(
+        delete(AgentLog).where(
+            AgentLog.machine_id == machine_id,
+            AgentLog.event_type == EVENTO_DETALHE,
+            AgentLog.created_at < agora - timedelta(days=DIAS_RETENCAO_DETALHE),
+        )
+    )
+    ids_detalhe_antigos = (
+        select(AgentLog.id)
+        .where(AgentLog.machine_id == machine_id, AgentLog.event_type == EVENTO_DETALHE)
+        .order_by(AgentLog.created_at.desc())
+        .offset(MAX_LOGS_DETALHE_POR_MAQUINA)
+    )
+    db.execute(delete(AgentLog).where(AgentLog.id.in_(ids_detalhe_antigos)))

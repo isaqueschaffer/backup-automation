@@ -35,7 +35,7 @@ from schemas import (
     TIPOS_EQUIPAMENTO,
 )
 from routers.machines import check_machine_online
-from services.agent_logs import podar_logs
+from services.agent_logs import EVENTO_DETALHE, podar_logs
 from services.crypto_service import decrypt
 from services.galeria_vms import (
     parear_cameras,
@@ -910,12 +910,13 @@ def receive_agent_logs(
     machine: Machine = Depends(get_current_machine),
     db: Session = Depends(get_db),
 ):
-    """Recebe lote de logs de aviso/erro ou marcos de backup emitidos pelo agente Windows."""
+    """Recebe lote de logs do agente Windows: avisos, erros e marcos ("agent_log") e, nos agentes que mandam o
+    log inteiro, as demais linhas INFO ("agent_log_detalhe", podadas à parte em podar_logs)."""
     agora = datetime.utcnow()
     for item in body.logs:
         db.add(AgentLog(
             machine_id=machine.id,
-            event_type="agent_log",
+            event_type=EVENTO_DETALHE if (item.detalhe and item.nivel == "INFO") else "agent_log",
             nivel=item.nivel,
             equipamento=item.equipamento,
             message=item.mensagem,

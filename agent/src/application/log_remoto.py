@@ -12,7 +12,8 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 INTERVALO_ENVIO_S = 20
-MAX_FILA = 500
+# Fila maior desde que o agente passou a mandar o log inteiro: aguenta um backup grande ou um tempo sem servidor
+MAX_FILA = 5000
 MAX_POR_ENVIO = 100
 TAMANHO_MAX_MENSAGEM = 4000
 JANELA_DEDUP_S = 600
@@ -106,8 +107,13 @@ def ocultar_segredos(texto: str, extras: tuple = ()) -> str:
 
 class ManipuladorLogRemoto(logging.Handler):
     """
-    Handler de logging que enfileira avisos, erros e marcos de backup
-    para envio em lote ao servidor Trilan.
+    Handler de logging que enfileira TODAS as linhas do log do agente (INFO para cima) para envio em lote
+    ao servidor Trilan, para ver no painel o que aconteceu sem acessar o cliente.
+
+    - Avisos, erros e marcos (extra enviar_servidor=True) vão como antes.
+    - As demais linhas INFO vão com detalhe=True: o servidor as guarda com limite e prazo próprios,
+      para não empurrar os erros para fora do histórico.
+    - extra={"enviar_servidor": False} deixa a linha só no arquivo local (ex.: o ping de 15 em 15 s).
     """
 
     def __init__(self):
@@ -133,10 +139,12 @@ class ManipuladorLogRemoto(logging.Handler):
             ):
                 return
 
-            # (2) Aceita apenas >= WARNING ou se explicitamente marcado para envio
-            enviar_servidor = bool(getattr(record, "enviar_servidor", False))
-            if record.levelno < logging.WARNING and not enviar_servidor:
+            # (2) Aceita tudo de INFO para cima, menos o que foi marcado para ficar só no arquivo local
+            marcado = getattr(record, "enviar_servidor", None)
+            if marcado is False or record.levelno < logging.INFO:
                 return
+            enviar_servidor = bool(marcado)
+            detalhe = record.levelno < logging.WARNING and not enviar_servidor
 
             # (3) Obtém mensagem, formata exceção se houver, mascara segredos e trunca
             mensagem = record.getMessage()
@@ -187,6 +195,7 @@ class ManipuladorLogRemoto(logging.Handler):
                 "nivel": nivel,
                 "mensagem": mensagem,
                 "equipamento": equipamento,
+                "detalhe": detalhe,
                 "_t": agora,
             }
             with self.trava_fila:
@@ -243,6 +252,7 @@ def enviar_pendentes(conf: dict) -> int:
             "mensagem": item["mensagem"],
             "equipamento": item["equipamento"],
             "segundos_atras": segundos_atras,
+            "detalhe": bool(item.get("detalhe", False)),
         })
 
     # Importação tardia para evitar dependência circular

@@ -614,6 +614,9 @@ class LogAgenteItem(BaseModel):
     mensagem: str
     equipamento: Optional[str] = None
     segundos_atras: int = Field(0, ge=0, le=86400)
+    # Linha comum do log (INFO que não é marco): guardada como "agent_log_detalhe", com limite e prazo próprios.
+    # Agentes antigos não mandam o campo e continuam gravando como "agent_log".
+    detalhe: bool = False
 
     @field_validator("mensagem", mode="before")
     @classmethod

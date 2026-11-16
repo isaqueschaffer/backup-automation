@@ -12,7 +12,7 @@ from datetime import datetime
 
 from src.core.config import load_conf
 from src.application.api_client import fetch_server_config, ping_server
-from src.application import updater_linux
+from src.application import log_remoto, updater_linux
 
 LOG = logging.getLogger("trilan.linux")
 STOP = threading.Event()
@@ -41,7 +41,7 @@ def schedule(conf):
 
 def run_backup(trigger):
     if not enabled("TRILAN_ENABLE_BACKUPS"):
-        LOG.warning("Backup disabled; ignoring command")
+        LOG.warning("Backup desativado neste agente (TRILAN_ENABLE_BACKUPS nao ligado); pedido de backup ignorado")
         return
     if not BACKUP_LOCK.acquire(blocking=False):
         LOG.warning("Backup already running")
@@ -86,12 +86,32 @@ def heartbeat(conf, pending):
             LOG.warning("Heartbeat failed: %s", exc)
         STOP.wait(max(0, 15 - (time.monotonic() - started)))
 
+def logs_loop(conf):
+    """Envia ao servidor, a cada 20 s, o log do agente (1.1.56; antes o agente do Mikrotik não mandava log):
+    mesma rotina do agente Windows (log_remoto), visível nos Eventos do Agente do painel."""
+    while not STOP.is_set():
+        try:
+            while not STOP.is_set() and log_remoto.enviar_pendentes(conf) >= log_remoto.MAX_POR_ENVIO:
+                pass
+        except Exception:
+            pass
+        STOP.wait(log_remoto.INTERVALO_ENVIO_S)
+
+def enviar_logs_restantes(conf):
+    """Última tentativa de envio ao parar (reinício, OTA), para não perder as últimas linhas."""
+    try:
+        log_remoto.enviar_pendentes(conf)
+    except Exception:
+        pass
+
 def main():
     logging.basicConfig(level=os.getenv("TRILAN_LOG_LEVEL", "INFO").upper(),
                         format="%(asctime)s %(levelname)s %(message)s")
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
     signal.signal(signal.SIGINT, lambda *_: STOP.set())
     conf = load_conf()
+    log_remoto.instalar(conf)
+    threading.Thread(target=logs_loop, args=(conf,), daemon=True).start()
     if not conf["server_url"].startswith("https://") and not enabled("TRILAN_ALLOW_INSECURE_HTTP"):
         raise RuntimeError("HTTPS required (HTTP override for isolated testing only)")
     LOG.info("Experimental ARMv7 agent starting; backups=%s", enabled("TRILAN_ENABLE_BACKUPS"))
@@ -136,6 +156,7 @@ def main():
         STOP.wait(2)
     STOP.set()
     LOG.info("Agent stopped")
+    enviar_logs_restantes(conf)
     return exit_code
 
 if __name__ == "__main__":

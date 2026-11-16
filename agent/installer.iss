@@ -2,7 +2,7 @@
 
 [Setup]
 AppName=Trilan NVR Backup Agent
-AppVersion=1.1.54
+AppVersion=1.1.56
 DefaultDirName={pf}\Trilan NVR Backup Agent
 DefaultGroupName=Trilan NVR
 OutputBaseFilename=TrilanAgentSetup

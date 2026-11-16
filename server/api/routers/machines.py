@@ -11,7 +11,7 @@ from auth import generate_api_key, Contexto, get_contexto
 from database import get_db
 from models import Machine, Customer, Backup, AgentLog
 from schemas import MachineCreate, MachineUpdate, MachineResponse, MachineWithKey, AgentLogResponse
-from services.agent_logs import registrar_alteracao
+from services.agent_logs import EVENTO_DETALHE, registrar_alteracao
 from services.crypto_service import encrypt
 from services.escopo import (
     filtrar_maquinas,
@@ -336,8 +336,9 @@ def get_machine_logs(
     machine_id: UUID,
     db: Session = Depends(get_db),
     ctx: Contexto = Depends(get_contexto),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=1000),
     incluir_pings: bool = True,
+    incluir_detalhe: bool = True,
     nivel: Optional[str] = Query(None),
     q: Optional[str] = Query(None, max_length=100),
     equipamento: Optional[str] = Query(None, max_length=255),
@@ -346,6 +347,8 @@ def get_machine_logs(
     query_logs = db.query(AgentLog).filter(AgentLog.machine_id == machine_id)
     if not incluir_pings:
         query_logs = query_logs.filter(AgentLog.event_type != "ping")
+    if not incluir_detalhe:
+        query_logs = query_logs.filter(AgentLog.event_type != EVENTO_DETALHE)
 
     if nivel is not None:
         partes = [p.strip().upper() for p in nivel.split(",")]

@@ -74,6 +74,8 @@ export const restartAgentAll = () =>
   api.post("/machines/restart-agent-all").then((r) => r.data);
 export interface FiltrosLogs {
   incluirPings?: boolean;
+  // false esconde o log completo do agente (linhas INFO comuns, "agent_log_detalhe")
+  incluirDetalhe?: boolean;
   nivel?: string;
   q?: string;
   equipamento?: string;
@@ -82,9 +84,9 @@ export interface FiltrosLogs {
 
 export const fetchMachineLogs = (
   id: string,
-  { incluirPings = true, nivel, q, equipamento, limit }: FiltrosLogs = {}
+  { incluirPings = true, incluirDetalhe = true, nivel, q, equipamento, limit }: FiltrosLogs = {}
 ): Promise<AgentLog[]> => {
-  const params: Record<string, unknown> = { incluir_pings: incluirPings };
+  const params: Record<string, unknown> = { incluir_pings: incluirPings, incluir_detalhe: incluirDetalhe };
   if (nivel) params.nivel = nivel;
   if (q && q.trim()) params.q = q.trim();
   if (equipamento && equipamento.trim()) params.equipamento = equipamento.trim();

@@ -8,6 +8,7 @@ export type NivelFiltroLog = "todos" | "erro" | "aviso";
 
 export interface FiltrosLogsState {
   mostrarPings: boolean;
+  mostrarDetalhe: boolean;
   nivel: NivelFiltroLog;
   busca: string;
   equipamentoLog: string;
@@ -32,6 +33,7 @@ const TIPO_LABELS: Record<string, string> = {
   email_sent: "E-mail enviado",
   email_error: "Erro de e-mail",
   agent_log: "Agente",
+  agent_log_detalhe: "Log",
   alarme_comando: "Alarme",
   alteracao_usuario: "Alteração",
 };
@@ -45,6 +47,10 @@ function tipoStyle(tipo: string, nivel?: string): { background: string; color: s
       return { background: "rgba(245, 158, 11, 0.15)", color: "#f59e0b" };
     }
     return { background: "rgba(59, 130, 246, 0.15)", color: "#3b82f6" };
+  }
+  // Linha comum do log completo do agente: discreta, para os eventos principais se destacarem
+  if (tipo === "agent_log_detalhe") {
+    return { background: "rgba(148, 163, 184, 0.12)", color: "var(--text-muted)" };
   }
   // Alteração feita por um usuário/admin no painel: roxo, para se destacar dos eventos do agente
   if (tipo === "alteracao_usuario") {
@@ -244,6 +250,28 @@ export default function AgentLogs({
                 style={{ cursor: "pointer" }}
               />
               Mostrar pings
+            </label>
+
+            <label
+              title="Todas as linhas do log do agente, não só avisos, erros e marcos do backup (guardadas por 7 dias)"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                cursor: "pointer",
+                userSelect: "none",
+                color: "var(--text-secondary)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={filtros.mostrarDetalhe}
+                onChange={(e) => onFiltrosChange({ mostrarDetalhe: e.target.checked })}
+                style={{ cursor: "pointer" }}
+              />
+              Log completo
             </label>
           </div>
 

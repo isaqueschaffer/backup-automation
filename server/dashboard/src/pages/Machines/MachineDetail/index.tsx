@@ -36,6 +36,9 @@ import AntenasModal from "./components/AntenasModal";
 import ImportCamerasModal from "./components/ImportCamerasModal";
 import { usePodeTestar, useSomenteLeitura } from "../../../contexts/AuthContext";
 
+// Teto do "Ver mais" dos Eventos do Agente (mesmo limite do GET /machines/{id}/logs)
+const LIMITE_MAX_LOGS = 1000;
+
 export default function MachineDetail() {
   const somenteLeitura = useSomenteLeitura();
   const podeTestar = usePodeTestar();
@@ -56,12 +59,14 @@ export default function MachineDetail() {
   // Filtros de logs com refs espelho para o polling contínuo
   const [filtrosLogs, setFiltrosLogs] = useState<FiltrosLogsState>({
     mostrarPings: false,
+    mostrarDetalhe: true,
     nivel: "todos",
     busca: "",
     equipamentoLog: "",
   });
   const filtrosLogsRef = useRef<FiltrosLogsState>({
     mostrarPings: false,
+    mostrarDetalhe: true,
     nivel: "todos",
     busca: "",
     equipamentoLog: "",
@@ -115,6 +120,7 @@ export default function MachineDetail() {
         fetchBackups({ machine_id: reqId, size: 10 }),
         fetchMachineLogs(reqId, {
           incluirPings: f.mostrarPings,
+          incluirDetalhe: f.mostrarDetalhe,
           nivel: apiNivel,
           q: f.busca || undefined,
           equipamento: f.equipamentoLog || undefined,
@@ -144,7 +150,7 @@ export default function MachineDetail() {
   }, [load]);
 
   const handleVerMaisLogs = useCallback(() => {
-    const prox = Math.min(limiteLogsRef.current + 100, 500);
+    const prox = Math.min(limiteLogsRef.current + 200, LIMITE_MAX_LOGS);
     limiteLogsRef.current = prox;
     setLimiteLogs(prox);
     load(true);
@@ -205,7 +211,7 @@ export default function MachineDetail() {
     return Array.from(nomes).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
   }, [equipamentos]);
 
-  const podeVerMaisLogs = logs.length >= limiteLogs && limiteLogs < 500;
+  const podeVerMaisLogs = logs.length >= limiteLogs && limiteLogs < LIMITE_MAX_LOGS;
 
   const gruposEquipamentos = (() => {
     const porTipo = new Map<string, NVR[]>();
