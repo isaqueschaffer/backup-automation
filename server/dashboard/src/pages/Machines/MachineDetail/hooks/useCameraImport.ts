@@ -377,6 +377,38 @@ export function rowsToCameras(
   return out;
 }
 
+// Gravadores (DVR/NVR) da planilha de dispositivos do Defense (tipo DVR/iMHDX, NVR/iNVD...): a linha é o gravador, não uma
+// câmera. Ela não entra na lista de câmeras: os canais vêm do Defense pelo "Sincronizar da Máquina", com modelo ONVIF.
+// (O servidor lê as mesmas linhas da planilha guardada para ligar cada canal ao nome e ao IP do gravador.)
+export interface GravadorLido { nome: string; ip: string }
+
+export function gravadoresDaPlanilha(rows: unknown[][]): GravadorLido[] {
+  if (!rows || rows.length === 0) return [];
+  const idxCab = linhaDoCabecalho(rows);
+  const headers = (rows[idxCab] || []).map(h => cleanCell(h).toLowerCase());
+  const idxTipo = headers.findIndex(h => h === "tipo" || (h.includes("tipo") && (h.includes("dispositivo") || h.includes("equipamento"))));
+  const idxNome = headers.findIndex(h => h.includes("nome") && !["usu", "identificador", "dom"].some(x => h.includes(x)));
+  const idxIp = headers.findIndex(h => h.includes("identificador") || h === "ip" || h.includes("endere"));
+  if (idxTipo < 0 || idxNome < 0 || idxIp < 0) return [];
+  const saida: GravadorLido[] = [];
+  for (let i = idxCab + 1; i < rows.length; i++) {
+    const cols = rows[i];
+    if (!cols) continue;
+    const tipo = cleanCell(cols[idxTipo]).toLowerCase();
+    const nome = cleanCell(cols[idxNome]);
+    const ip = cleanCell(cols[idxIp]);
+    if (nome && ip.includes(".") && ["dvr", "nvr", "imhdx", "invd", "gravador"].some(t => tipo.includes(t))) saida.push({ nome, ip });
+  }
+  return saida;
+}
+
+export function textoDeGravadores(gravadores: GravadorLido[] | undefined): string {
+  if (!gravadores || gravadores.length === 0) return "";
+  const nomes = gravadores.map(g => `${g.nome} (${g.ip})`).join(", ");
+  return ` · ${gravadores.length} gravador(es) DVR/NVR reconhecido(s) (${nomes}): não viram câmera; os canais deles vêm do ` +
+    `"Sincronizar da Máquina", com modelo ONVIF`;
+}
+
 // Raiz comum da coluna "Diretório de gravação" da planilha do Digifort (preenche sozinho o campo
 // "Local de gravação das câmeras" do equipamento); "" se a planilha não tiver essa coluna.
 export function raizGravacaoDaPlanilha(rows: unknown[][]): string {

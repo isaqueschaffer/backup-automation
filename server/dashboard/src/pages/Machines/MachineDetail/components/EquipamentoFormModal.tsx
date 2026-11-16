@@ -307,9 +307,6 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
                 value={eqForm.porta_alarme ?? ""}
                 onChange={e => setEqForm({ ...eqForm, porta_alarme: e.target.value })}
               />
-              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-                Painel das centrais de alarme (botão "Alarmes"). Usa o mesmo usuário e senha da API.
-              </span>
             </div>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Usuário da API *</label>

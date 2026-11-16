@@ -77,8 +77,18 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     eh_grandstream = "GRANDSTREAM" in mod_upper or "GRANDSTREAM" in marca_upper or mod_upper.startswith("GXV")
     eh_intelbras = "INTELBRAS" in mod_upper or "INTELBRAS" in marca_upper or mod_upper.startswith("VIP")
 
+    # Canal de DVR/NVR (Galeria do Defense/Digifort, câmera com `canal_rtsp`): o modelo padrão é ONVIF e o canal tem de
+    # entrar na URL; as URLs de câmera ONVIF avulsa (profile1...) devolveriam sempre a imagem do canal 1
+    gravador = bool(task.get("gravador"))
+
     urls_candidatas = []
-    if eh_motorola and not direct_cam and canal and int(canal) > 1:
+    if eh_onvif and gravador:
+        ch = canal if canal else 1
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype=0&unicast=true&proto=Onvif")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype=0")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch}01")
+        urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/profile{ch}")
+    elif eh_motorola and not direct_cam and canal and int(canal) > 1:
         # NVR tradicional Motorola (NVMS-9000) com canais de hardware
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/chID={canal}&streamType=main")
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/?chID={canal}&streamType=main")
@@ -748,6 +758,7 @@ def capturar_imagens_noite_vms(equipamento_nome: str, cameras_lista: list, conf:
             "modelo": cam.get("modelo") or "Hikvision",
             "canal": cam.get("canal_rtsp"),
             "stream_principal": True,
+            "gravador": bool(cam.get("canal_rtsp")),
         })
 
         if res.get("success") and res.get("image_base64"):

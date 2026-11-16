@@ -135,6 +135,8 @@ export interface PlanilhaPendente {
   cams: CameraLidaPlanilha[];
   // Raiz comum dos caminhos da coluna "Diretório de gravação" (vazio se a planilha não tiver essa coluna)
   raizGravacoes?: string;
+  // DVR/NVR da planilha do Defense (não viram câmera; orientam os canais do "Sincronizar da Máquina")
+  gravadores?: { nome: string; ip: string }[];
 }
 
 export interface PlanilhaSalvaInfo {

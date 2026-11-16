@@ -4,6 +4,7 @@ import { Trash2, Upload } from "lucide-react";
 import api from "../../../../api/client";
 import { EqForm, NvrCamera, PlanilhaPendente, PlanilhaVms } from "../../../../api/types";
 import { aplicarOpcaoNome, lerPlanilhaVms, mensagemDeErro } from "../planilhaVms";
+import { textoDeGravadores } from "../hooks/useCameraImport";
 import PlanilhaVmsModal from "./PlanilhaVmsModal";
 import { useConfirm } from "../../../../components/ConfirmDialog";
 
@@ -136,7 +137,7 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
           colunasSenha={previa.colunasSenha}
           mostrarSenhas={mostrarSenhas}
           onMostrarSenhas={setMostrarSenhas}
-          info={`${previa.cams.length} câmera(s) identificada(s)`}
+          info={`${previa.cams.length} câmera(s) identificada(s)${textoDeGravadores(previa.gravadores)}`}
           camerasLidas={previa.cams}
           confirmarLabel="Usar esta planilha"
           onConfirmar={() => {

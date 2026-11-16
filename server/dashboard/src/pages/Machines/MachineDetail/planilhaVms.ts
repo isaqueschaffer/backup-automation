@@ -9,6 +9,7 @@ import {
   planilhaTemNomeEDescricao,
   raizGravacaoDaPlanilha,
   readRowsFromFile,
+  gravadoresDaPlanilha,
   rowsToCameras,
 } from "./hooks/useCameraImport";
 
@@ -47,6 +48,7 @@ export async function lerPlanilhaVms(file: File, existentes: NvrCamera[]): Promi
     exemploDescricao: descricao,
     cams,
     raizGravacoes: raizGravacaoDaPlanilha(rows),
+    gravadores: gravadoresDaPlanilha(rows),
   };
 }
 

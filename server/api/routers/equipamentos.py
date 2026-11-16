@@ -41,6 +41,7 @@ from services.galeria_vms import (
 )
 from services.planilha_vms import (
     casar_cameras_por_ip,
+    gravadores_da_planilha,
     colunas_senha,
     mascarar_senhas,
     empacotar,
@@ -318,6 +319,7 @@ async def test_equipamento_rtsp(
             "username": cam_db.username or "admin",
             "password": cam_password,
             "canal": cam_db.canal_rtsp or 1,
+            "gravador": bool(cam_db.canal_rtsp),  # canal de DVR/NVR: com modelo ONVIF o canal entra na URL
             "stream_principal": True,
             "direct_camera": True,
             "modo": modo,
@@ -396,6 +398,18 @@ async def test_equipamento_rtsp(
             db.commit()
 
     return result
+
+
+def _gravadores_da_planilha_guardada(db: Session, nvr_id: UUID) -> list:
+    """DVR/NVR da última planilha importada neste equipamento (lista vazia sem planilha ou se ela não puder ser lida)."""
+    pl = db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == nvr_id).first()
+    if pl is None:
+        return []
+    try:
+        return gravadores_da_planilha(desempacotar(pl.dados), pl.linha_cabecalho)
+    except Exception:
+        logger.warning("Não foi possível ler os gravadores da planilha guardada do equipamento %s", nvr_id)
+        return []
 
 
 def _salvar_imagem_noite(db: Session, nvr_id: UUID, canal: int, nome: Optional[str], result: RTSPTestResponse) -> None:
@@ -786,7 +800,8 @@ def import_cameras(
             todas_galeria = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).all()
             itens += [
                 NVRCameraConfigItem(**dados)
-                for dados in cameras_do_relatorio_sem_par(todas_galeria, nvr.last_recording_status or [])
+                for dados in cameras_do_relatorio_sem_par(
+                    todas_galeria, nvr.last_recording_status or [], _gravadores_da_planilha_guardada(db, id))
                 if dados["nome"].lower() not in ja_tem
             ]
         if not itens:

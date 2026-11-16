@@ -706,6 +706,8 @@ def _montar_status_cameras_defense(equipamento: dict, conf: dict = None) -> list
             entrada["modelo"] = (c["cam"].get("modelo") or "").strip()
             if c["cam"].get("canal_rtsp"):
                 entrada["canal_rtsp"] = c["cam"]["canal_rtsp"]
+                # Gravador de origem: o painel o liga à linha DVR/NVR da planilha (nome e IP do gravador)
+                entrada["dispositivo"] = (c["cam"].get("dev_name") or "").strip()
         status_cameras.append(entrada)
 
     return status_cameras
