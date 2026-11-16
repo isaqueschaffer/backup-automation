@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from auth import Contexto, get_contexto
 from database import get_db
-from models import AgentLog, Machine
-from schemas import AuditoriaItem, PaginatedAuditoria
+from models import AgentLog, Machine, Usuario
+from schemas import AuditoriaItem, PaginatedAuditoria, UsuarioAuditoriaOpcao
 from services.agent_logs import DIAS_RETENCAO_AUDITORIA
 from services.escopo import filtrar_por_conta
 
@@ -63,14 +63,29 @@ def listar_auditoria(
 
     total = consulta.count()
     registros = consulta.order_by(AgentLog.created_at.desc()).offset((page - 1) * size).limit(size).all()
+
+    # Mapeia emails para nomes dos usuários da tabela usuarios
+    usuarios_distintos = {r.usuario for r in registros if r.usuario}
+    mapa_nomes: dict = {}
+    if usuarios_distintos:
+        emails_busca = {u.lower() for u in usuarios_distintos} | set(usuarios_distintos)
+        users = db.query(Usuario).filter(Usuario.email.in_(emails_busca)).all()
+        for u in users:
+            mapa_nomes[u.email.lower()] = u.nome
+            mapa_nomes[u.email] = u.nome
+
     itens: List[AuditoriaItem] = []
     for r in registros:
         maquina = r.machine
         cliente = maquina.customer if maquina else None
+        nome_resolvido = mapa_nomes.get(r.usuario.lower() if r.usuario else "") or mapa_nomes.get(r.usuario or "")
+        if not nome_resolvido:
+            nome_resolvido = "Administrador" if (r.usuario or "").lower() == "admin" else (r.usuario or "—")
         itens.append(AuditoriaItem(
             id=r.id,
             created_at=r.created_at,
             usuario=r.usuario,
+            usuario_nome=nome_resolvido,
             message=r.message,
             equipamento=r.equipamento,
             machine_id=r.machine_id,
@@ -84,9 +99,24 @@ def listar_auditoria(
     )
 
 
-@router.get("/usuarios", response_model=List[str])
+@router.get("/usuarios", response_model=List[UsuarioAuditoriaOpcao])
 def listar_usuarios_da_auditoria(db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
     """Quem já fez alguma alteração nas máquinas da conta (para o filtro de usuário)."""
     _exigir_acesso(ctx)
     base = _consulta_base(db, ctx).with_entities(AgentLog.usuario).distinct().order_by(AgentLog.usuario)
-    return [u for (u,) in base.all()]
+    usuarios_raw = [u for (u,) in base.all() if u]
+    if not usuarios_raw:
+        return []
+    emails_busca = {u.lower() for u in usuarios_raw} | set(usuarios_raw)
+    users = db.query(Usuario).filter(Usuario.email.in_(emails_busca)).all()
+    mapa_nomes = {u.email.lower(): u.nome for u in users}
+    mapa_nomes.update({u.email: u.nome for u in users})
+
+    resultado = []
+    for u in usuarios_raw:
+        nome = mapa_nomes.get(u.lower()) or mapa_nomes.get(u)
+        if not nome:
+            nome = "Administrador" if u.lower() == "admin" else u
+        resultado.append(UsuarioAuditoriaOpcao(usuario=u, nome=nome))
+    resultado.sort(key=lambda x: x.nome.lower())
+    return resultado

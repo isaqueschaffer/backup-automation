@@ -312,12 +312,18 @@ export interface AuditoriaItem {
   id: string;
   created_at: string;
   usuario: string;
+  usuario_nome?: string | null;
   message: string;
   equipamento: string | null;
   machine_id: string;
   machine_name: string | null;
   customer_id: string | null;
   customer_name: string | null;
+}
+
+export interface UsuarioAuditoriaOpcao {
+  usuario: string;
+  nome: string;
 }
 
 export interface PaginatedAuditoria {

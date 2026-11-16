@@ -643,12 +643,18 @@ class AuditoriaItem(BaseModel):
     id: UUID
     created_at: datetime
     usuario: str
+    usuario_nome: Optional[str] = None
     message: str
     equipamento: Optional[str] = None
     machine_id: UUID
     machine_name: Optional[str] = None
     customer_id: Optional[UUID] = None
     customer_name: Optional[str] = None
+
+
+class UsuarioAuditoriaOpcao(BaseModel):
+    usuario: str
+    nome: str
 
 
 class PaginatedAuditoria(BaseModel):
