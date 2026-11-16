@@ -70,12 +70,16 @@ def _garantir_logging():
         pass
 
 
-def log(msg, is_error=False, enviar=False):
+def log(msg, is_error=False, enviar=False, remoto=True):
+    """enviar=True: marco (guardado como evento principal no servidor). remoto=False: só no arquivo local,
+    para linhas repetitivas que o servidor já registra por conta própria (ex.: ping bem-sucedido)."""
     _garantir_logging()
     if is_error:
         logging.error(msg)
     elif enviar:
         logging.info(msg, extra={"enviar_servidor": True})
+    elif not remoto:
+        logging.info(msg, extra={"enviar_servidor": False})
     else:
         logging.info(msg)
     try:
@@ -466,7 +470,8 @@ class TrilanAgentService(win32serviceutil.ServiceFramework):
                 # "comando_alarme": o servidor só entrega o alarme_task (leva a senha do DEFENSE) a quem declara
                 ping_resp = ping_server(conf, recursos_extra=("comando_alarme",))
                 if ping_resp:
-                    log(f"Ping recebido pelo servidor. Instrucoes: {self._resumo_ping(ping_resp)}")
+                    # O servidor já registra cada ping: esta linha fica só no arquivo local
+                    log(f"Ping recebido pelo servidor. Instrucoes: {self._resumo_ping(ping_resp)}", remoto=False)
                     self._disparar_conexao(ping_resp, conf)
                     if time.monotonic() - last_successful_ping > 300:
                         log("Servidor voltou a responder apos periodo de desconexao!")

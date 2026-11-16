@@ -660,7 +660,7 @@ X-Dashboard-Token: dsh_<token>      (somente nas rotas /api/v1/public/dashboard/
 |---|---|---|
 | GET | `/api/v1/agent/config` | Retorna configuracao completa do cliente (`client_name` = nome da máquina; `customer_name` = nome do Cliente da máquina, opcional) |
 | POST | `/api/v1/agent/ping` | Heartbeat; body opcional `{"telemetry": {...}}`; retorna flags `restart` e `backup`. A telemetria do agente >= 1.1.34 traz `utc_offset_min` (fuso local em minutos, ex.: -180), usado na recuperação de backup perdido (inteiro de -720 a 840; ausente ou inválido = -180). O agente >= 1.1.49 manda `versao` (ex.: `"1.1.49"`), gravada em `clients.agent_version` (cortada em 20 caracteres; ausente = mantém a anterior) e devolvida como `agent_version` nas respostas de máquina |
-| POST | `/api/v1/agent/logs` | Agente envia lote (até 100) de avisos/erros e marcos do backup: `{"logs": [{"nivel": "INFO\|WARNING\|ERROR", "mensagem", "equipamento", "segundos_atras"}]}`; o servidor calcula `created_at` (REGRA-005); aceita também conta bloqueada |
+| POST | `/api/v1/agent/logs` | Agente envia lote (até 100) do seu log: `{"logs": [{"nivel": "INFO\|WARNING\|ERROR", "mensagem", "equipamento", "segundos_atras", "detalhe"}]}`; avisos, erros e marcos viram `agent_log`; linhas INFO comuns (`detalhe: true`) viram `agent_log_detalhe` (7 dias, até 20.000 por máquina); o servidor calcula `created_at` (REGRA-005); aceita também conta bloqueada |
 | POST | `/api/v1/agent/backup/report` | Agente reporta resultado do backup. Equipamento com `status` ERRO e `cameras` nulo ou vazio (agente >= 1.1.34 manda `null` quando o equipamento não informou câmeras; os antigos mandam `[]`) não apaga `last_recording_status`: as câmeras conhecidas ficam com `status_comunicacao`/`status_gravacao` = `NAO_VERIFICADO` e `online` nulo |
 | POST | `/api/v1/agent/backup/upload/{backup_id}` | Agente faz upload do ZIP (limite `MAX_UPLOAD_MB`, 413 acima) |
 | GET | `/api/v1/agent/update-check` | Verifica se ha nova versao OTA (maior versao ativa). A mesma máquina recebe `has_update: true` no máximo 1 vez por hora (`INTERVALO_OFERTA_ATUALIZACAO`, em memória; reiniciar a API zera). Com `OTA_PILOTO_MAQUINAS` preenchido, só essas máquinas recebem. Para `current_version` < 1.1.35, `version` leva também os comandos que encerram o processo antigo (ver changelog de 30/10/2026). `plataforma=linux` (agente do Mikrotik, >= 1.1.52): só versões com `url_linux`/`sha256_linux`, e a resposta traz só esses campos |
@@ -1120,6 +1120,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-16] — Agente 1.1.55: log completo do agente no painel
+
+**Problema:** o agente só mandava ao servidor avisos, erros e marcos do backup; para saber o passo a passo (o que o backup fez antes de falhar, testes, OLT, alarmes) era preciso abrir o `servico.log` no cliente.
+**Alteração (agente 1.1.55):** `log_remoto.ManipuladorLogRemoto` passa a enfileirar todas as linhas de INFO para cima; as INFO comuns vão com `detalhe: true`. `extra={"enviar_servidor": False}` (em `service.log(..., remoto=False)`) deixa a linha só no arquivo local: usado no ping de 15 em 15 s, que o servidor já registra. Fila local de 500 para 5.000 itens; deduplicação de 10 min e ocultação de segredos continuam valendo para todas as linhas.
+**Servidor:** `LogAgenteItem.detalhe` (padrão `false`; agentes antigos seguem iguais). Linhas de detalhe gravadas como `agent_log_detalhe` e podadas à parte em `podar_logs` (7 dias, até 20.000 por máquina), sem contar no teto de 5.000 dos eventos principais. `GET /machines/{id}/logs` ganha `incluir_detalhe` (padrão `true`) e `limit` até 1.000.
+**Painel:** Eventos do Agente ganham o filtro "Log completo" (marcado por padrão) e o rótulo cinza "Log" para essas linhas; "Ver mais" de 200 em 200 até 1.000.
+**Arquivos:** agent/src/application/log_remoto.py, agent/service.py, agent/tests/test_log_remoto.py (novo), server/api/{schemas.py,routers/agent.py,routers/machines.py,services/agent_logs.py}, server/api/tests/test_log_completo_agente.py (novo), server/dashboard/src/api/client.ts, server/dashboard/src/pages/Machines/MachineDetail/{index.tsx,components/AgentLogs.tsx}, agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md.
 
 ### [2026-11-13] — Merge do ramo `helena` (perfil Visualizador, isolamento por máquina e avisos de OLT)
 
