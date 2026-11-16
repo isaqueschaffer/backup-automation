@@ -1121,6 +1121,11 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-16] — Agente 1.1.57 (teste local)
+
+- Reúne o que dependia de agente novo: **coleta de ANTENAS** (`_antena_loop`, leitura SSH do MikroTik, ping, marca detectada), **Defense**: gravadores DVR/NVR com `dispositivo` no relatório e captura **ONVIF com o canal** (`rtsp_client`, tarefa com `gravador`). Versão em `updater.py`, `installer.iss` e `package.json`.
+- Build local gerado em `agent/dist` para teste na API local (127.0.0.1:7005); sem release no GitHub nem cadastro na produção.
+
 ### [2026-11-16] — Notificações por e-mail escolhidas por usuário; botão "Ativar/Desativar todas" por máquina
 
 - **Quem recebe** (`services/notificacoes.destinatarios_notificacao(db, conta, tipo, machine_id)`): o e-mail de contato da conta (sempre) + os usuários **ativos** da conta com `usuarios.notif_email` ligado, que aceitam o tipo (`usuarios.notif_tipos`: lista, `NULL` = todos) e enxergam a máquina (ADMIN vê todas; VISUALIZADOR/LEITURA sem máquinas marcadas veem todas; notificação personalizada não tem máquina). Antes saía sempre para o contato + todos os admins. Tipos: `LICENCA_UNM2000`, `CAMERA_OFFLINE`, `ALARME`, `ANTENA_OFFLINE`, `ONU_OFFLINE`, `SINAL_OPTICO`, `PERSONALIZADA` (`schemas.TIPOS_EMAIL_NOTIFICACAO`; `BACKUP_FALHOU` e `AGENTE_OFFLINE` só aparecem no painel). O aviso de vencimento da conta (`services/avisos_conta.destinatarios`) não mudou (contato + admins).
