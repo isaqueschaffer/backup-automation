@@ -5,8 +5,9 @@ import Modal from "../../../../components/Modal";
 import { TIPOS, TIPO_ICONE_EMOJI } from "../utils";
 import PlanilhaCamerasCampo from "./PlanilhaCamerasCampo";
 
-export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, editingEqId, saving, onSave, onClose, onErro }: {
+export default function EquipamentoFormModal({ machineId, agenteTipo, eqForm, setEqForm, editingEqId, saving, onSave, onClose, onErro }: {
   machineId: string;
+  agenteTipo?: "WINDOWS" | "MIKROTIK";
   eqForm: EqForm;
   setEqForm: React.Dispatch<React.SetStateAction<EqForm>>;
   editingEqId: string | null;
@@ -237,7 +238,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
               <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
                 A UNM2000 não informa a validade da licença por nenhuma consulta; informe a data para o painel mostrar os dias restantes.
               </span>
-              <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />
+              {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
             </>
           )}
 
@@ -270,7 +271,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
               O tempo gravado e os dias sem gravação saem desses arquivos. Sem esta pasta, o agente só testa se a câmera responde ao ping.
             </span>
           </div>
-          <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />
+          {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
           <PlanilhaCamerasCampo
             machineId={machineId} nvrId={editingEqId} eqForm={eqForm} setEqForm={setEqForm}
             onPreviaAberta={setPreviaAberta} onErro={onErro} />

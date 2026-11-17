@@ -191,6 +191,8 @@ class MachineBase(BaseModel):
     backup_minute: int = Field(0, ge=0, le=59)
     email_to: List[str] = []
     active: bool = True
+    # Onde o agente roda: na própria máquina (WINDOWS) ou no MikroTik (acessa cada equipamento pelo IP)
+    agente_tipo: Literal["WINDOWS", "MIKROTIK"] = "WINDOWS"
 
 
 class MachineCreate(MachineBase):
@@ -207,6 +209,7 @@ class MachineUpdate(BaseModel):
     email_to: Optional[List[str]] = None
     active: Optional[bool] = None
     zip_password: Optional[str] = None
+    agente_tipo: Optional[Literal["WINDOWS", "MIKROTIK"]] = None
 
 
 class MachineResponse(MachineBase):

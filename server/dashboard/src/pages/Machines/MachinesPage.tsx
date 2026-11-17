@@ -58,6 +58,7 @@ export default function MachinesPage() {
         backup_minute: customer ? customer.backup_minute : form.backup_minute,
         email_to: form.email_to.split(",").map(e => e.trim()).filter(Boolean),
         zip_password: form.zip_password || undefined,
+        agente_tipo: form.agente_tipo,
         active: true,
         ...(customer ? { customer_id: customer.id } : {}),
       });

@@ -1121,6 +1121,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-17] — Agente no MikroTik: captura RTSP, leitura de pastas por SSH/SMB e escolha "onde o agente roda"
+
+- **Máquina**: nova coluna `clients.agente_tipo` (`WINDOWS` padrão | `MIKROTIK`, migração inline em `main.py`); `MachineCreate/Update/Response` ganham `agente_tipo`. Na criação da máquina o painel pergunta onde o agente roda; com `MIKROTIK`, o formulário de UNM2000/Digifort mostra o acesso remoto e exige o IP da máquina (`smb_host`).
+- **Agente Linux** (`service_linux.py`, `rtsp_client.py`, `Dockerfile.mikrotik`): `rtsp_task` do ping e laço da imagem da noite (DIGIFORT/DEFENSE) agora rodam no Linux, sequenciais (`RTSP_LOCK`); ffmpeg do sistema no container, `-update 1` nas saídas.
+- **Pastas remotas** (`smb_storage.py`, `smb_ssh_provisioner.py`): leitura por SMB; com `config_extra.ssh_usuario/ssh_senha/ssh_porta` o agente entra por SSH, cria o usuário somente leitura `trilan_leitura` e um share oculto por pasta, guarda a credencial em `data/smb_leitura.json` e recria sozinho se o acesso falhar (backup e teste de conexão). `ssh_senha` entra em `SEGREDOS` (Fernet).
+- Breaking change: nenhum (campos opcionais; agentes antigos ignoram). Branch: `helena`.
+
 ### [2026-11-16] — Agente 1.1.57 (teste local)
 
 - Reúne o que dependia de agente novo: **coleta de ANTENAS** (`_antena_loop`, leitura SSH do MikroTik, ping, marca detectada), **Defense**: gravadores DVR/NVR com `dispositivo` no relatório e captura **ONVIF com o canal** (`rtsp_client`, tarefa com `gravador`). Versão em `updater.py`, `installer.iss` e `package.json`.

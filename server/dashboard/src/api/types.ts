@@ -266,6 +266,8 @@ export type Equipamento = NVR;
 export interface Machine {
   id: string;
   name: string;
+  // Onde o agente roda: na própria máquina Windows ou no MikroTik (acessa cada equipamento pelo IP)
+  agente_tipo?: "WINDOWS" | "MIKROTIK";
   api_key_prefix: string;
   backup_hour: number;
   backup_minute: number;

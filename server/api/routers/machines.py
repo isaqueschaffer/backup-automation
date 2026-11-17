@@ -122,6 +122,7 @@ def create_machine(
         zip_password=encrypt(body.zip_password) if body.zip_password else None,
         email_to=body.email_to,
         active=body.active,
+        agente_tipo=body.agente_tipo,
         customer_id=customer.id if customer else None,
         queue_order=queue_order,
     )
@@ -149,6 +150,7 @@ def get_machine(
 _ROTULOS_MAQUINA = {
     "name": "nome", "backup_hour": "horário do backup", "backup_minute": "horário do backup",
     "email_to": "e-mails do relatório", "active": "ativa/inativa", "zip_password": "senha do ZIP",
+    "agente_tipo": "onde o agente roda",
 }
 
 

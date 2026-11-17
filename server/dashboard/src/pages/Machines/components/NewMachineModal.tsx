@@ -12,6 +12,7 @@ export interface NewMachineForm {
   backup_minute: number;
   email_to: string;
   zip_password: string;
+  agente_tipo: "WINDOWS" | "MIKROTIK";
 }
 
 export default function NewMachineModal({ customers, initialCustomerId, saving, onSave, onClose }: {
@@ -23,7 +24,7 @@ export default function NewMachineModal({ customers, initialCustomerId, saving, 
 }) {
   const { singular, singularMin } = useRotulos();
   const [form, setForm] = useState<NewMachineForm>({
-    name: "", customer_id: initialCustomerId || "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
+    name: "", customer_id: initialCustomerId || "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "", agente_tipo: "WINDOWS",
   });
   const customer = customers.find(c => c.id === form.customer_id);
 
@@ -33,6 +34,19 @@ export default function NewMachineModal({ customers, initialCustomerId, saving, 
         <label className="form-label">Nome da máquina *</label>
         <input className="form-input" placeholder="Ex: Servidor Loja Centro" value={form.name}
           onChange={e => setForm({ ...form, name: e.target.value })} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Onde o agente vai rodar *</label>
+        <select className="form-input" value={form.agente_tipo}
+          onChange={e => setForm({ ...form, agente_tipo: e.target.value as NewMachineForm["agente_tipo"] })}>
+          <option value="WINDOWS">Na própria máquina (Windows)</option>
+          <option value="MIKROTIK">No MikroTik (container Linux)</option>
+        </select>
+        <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+          {form.agente_tipo === "MIKROTIK"
+            ? "O agente acessa cada equipamento pelo IP dele: informe o IP em todos os equipamentos (UNM2000 e Digifort também acessam a pasta pela rede)."
+            : "O agente roda na própria máquina e lê as pastas locais."}
+        </div>
       </div>
       <div className="form-group">
         <label className="form-label">{singular} (opcional)</label>
