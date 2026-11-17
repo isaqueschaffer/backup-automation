@@ -30,13 +30,51 @@ def test_painel_nunca_recebe_a_senha():
 
 
 def test_em_branco_mantem_a_senha_anterior():
-    antigo = proteger_segredos({"telnet_senha": "abc", "telnet_enable": "xyz"})
+    antigo = proteger_segredos({"telnet_senha": "abc", "telnet_enable": "xyz", "smb_senha": "senha_antiga"})
     # o painel devolve o que recebeu: marcadores e campos em branco
-    novo = proteger_segredos({"telnet_usuario": "G2", "telnet_senha": "", "telnet_senha_definida": True, "telnet_enable": "nova"}, antigo)
+    novo = proteger_segredos({
+        "telnet_usuario": "G2",
+        "telnet_senha": "",
+        "telnet_senha_definida": True,
+        "telnet_enable": "nova",
+        "smb_senha": "",
+        "smb_senha_definida": True,
+    }, antigo)
     assert novo["telnet_senha_enc"] == antigo["telnet_senha_enc"]
     assert novo["telnet_enable_enc"] != antigo["telnet_enable_enc"]
+    assert novo["smb_senha_enc"] == antigo["smb_senha_enc"]
     assert "telnet_senha_definida" not in novo
+    assert "smb_senha_definida" not in novo
     assert config_extra_para_agente(novo)["telnet_enable"] == "nova"
+    assert config_extra_para_agente(novo)["smb_senha"] == "senha_antiga"
+
+
+def test_smb_senha_criptografada_e_mascarada():
+    gravado = proteger_segredos({
+        "pasta_origem": "D:UNM2000/emsback",
+        "smb_host": "192.168.1.50",
+        "smb_usuario": "admin",
+        "smb_senha": "smb_secret_password",
+    })
+    assert "smb_senha" not in gravado
+    assert "smb_senha_enc" in gravado
+    assert gravado["smb_senha_enc"] != "smb_secret_password"
+
+    # Painel recebe apenas marcador smb_senha_definida
+    painel = mascarar_segredos(gravado)
+    assert painel == {
+        "pasta_origem": "D:UNM2000/emsback",
+        "smb_host": "192.168.1.50",
+        "smb_usuario": "admin",
+        "smb_senha_definida": True,
+    }
+
+    # Agente recebe a senha descriptografada
+    agente = config_extra_para_agente(gravado)
+    assert agente["smb_senha"] == "smb_secret_password"
+    assert "smb_senha_enc" not in agente
+    assert agente["pasta_origem"] == "D:UNM2000/emsback"
+    assert agente["smb_host"] == "192.168.1.50"
 
 
 def test_config_sem_segredos_passa_igual():

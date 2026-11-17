@@ -44,14 +44,26 @@ class Validator:
         """
         Verifica se os arquivos do grupo pararam de crescer.
         """
-        tamanhos_iniciais = {f.path: f.size_bytes for f in group.files}
+        tamanhos_iniciais = {}
+        for f in group.files:
+            chave = f.remote_path if (f.is_smb and f.remote_path) else f.path
+            tamanhos_iniciais[chave] = f.size_bytes
         
         # Espera um pouco para ver se os arquivos estão sendo escritos
         time.sleep(wait_seconds)
         
         for f in group.files:
-            tamanho_atual = f.size_bytes
-            if tamanho_atual != tamanhos_iniciais[f.path]:
+            chave = f.remote_path if (f.is_smb and f.remote_path) else f.path
+            if f.is_smb and f.remote_path:
+                try:
+                    from src.backup.smb_storage import SmbStorage
+                    tamanho_atual = SmbStorage.get_file_size(f.remote_path)
+                except Exception:
+                    tamanho_atual = f.size_bytes
+            else:
+                tamanho_atual = f.size_bytes
+
+            if tamanho_atual != tamanhos_iniciais[chave]:
                 logging.warning(f"  Arquivo instável (sendo escrito): {f.path.name}")
                 return False
                 

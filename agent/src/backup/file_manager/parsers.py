@@ -8,18 +8,29 @@ from src.backup.file_manager.models import BackupFile, BackupGroup
 from src.backup.file_manager.utils import parse_backup_date
 
 class BaseParser:
-    def find_backups(self, pasta_origem: Path) -> List[BackupGroup]:
+    def find_backups(self, pasta_origem) -> List[BackupGroup]:
         raise NotImplementedError
 
 class UNM2000Parser(BaseParser):
-    def find_backups(self, pasta_origem: Path) -> List[BackupGroup]:
+    def find_backups(self, pasta_origem) -> List[BackupGroup]:
         """
         Encontra backups do UNM2000 (YYYYMMDD_HHMMSS) e Digifort (diretórios YYYYMMDD).
+        Aceita pasta_origem como Path local ou SmbTarget.
         """
+        try:
+            from src.backup.smb_storage import SmbTarget
+            if isinstance(pasta_origem, SmbTarget):
+                return self._find_backups_smb(pasta_origem)
+        except ImportError:
+            pass
+
         extensoes_aceitas = {".zip", ".tar", ".gz", ".7z"}
         grupos = []
 
         try:
+            if not isinstance(pasta_origem, Path):
+                pasta_origem = Path(pasta_origem)
+
             if not pasta_origem.is_dir():
                 logging.error(f"  [UNM2000] Pasta de origem não existe ou não é diretório: {pasta_origem}")
                 return grupos
@@ -60,6 +71,64 @@ class UNM2000Parser(BaseParser):
             return grupos
 
         # Ordenar do mais recente para o mais antigo
+        grupos.sort(key=lambda x: x.date, reverse=True)
+        return grupos
+
+    def _find_backups_smb(self, target) -> List[BackupGroup]:
+        """Varredura de backups via conexão SMB."""
+        from src.backup.smb_storage import SmbStorage
+        extensoes_aceitas = {".zip", ".tar", ".gz", ".7z"}
+        grupos = []
+
+        try:
+            storage = SmbStorage()
+            entries = storage.scandir(target)
+
+            for entry in entries:
+                if entry.is_dir:
+                    match = re.match(r'^(\d{8})$', entry.name)
+                    if match:
+                        data_str = match.group(1)
+                        data_obj = parse_backup_date(data_str)
+                        if data_obj:
+                            bf = BackupFile(
+                                path=Path(entry.name),
+                                file_type="DIGIFORT_DIR",
+                                remote_path=entry.unc_path,
+                                is_smb=True,
+                                _size=entry.size,
+                            )
+                            bg = BackupGroup(date=data_obj, files=[bf], group_id=data_str)
+                            grupos.append(bg)
+                    continue
+
+                sufixo = Path(entry.name).suffix.lower()
+                if sufixo not in extensoes_aceitas:
+                    continue
+
+                padrao = r'(\d{8}_\d{6})'
+                match = re.search(padrao, entry.name)
+                if not match:
+                    continue
+
+                data_str = match.group(1)
+                data_obj = parse_backup_date(data_str)
+                if not data_obj:
+                    continue
+
+                bf = BackupFile(
+                    path=Path(entry.name),
+                    file_type="ZIP",
+                    remote_path=entry.unc_path,
+                    is_smb=True,
+                    _size=entry.size,
+                )
+                bg = BackupGroup(date=data_obj, files=[bf], group_id=data_str)
+                grupos.append(bg)
+        except Exception as e:
+            logging.error(f"  [UNM2000/SMB] Erro ao acessar a pasta de origem remota '{target.unc_path}': {e}")
+            return grupos
+
         grupos.sort(key=lambda x: x.date, reverse=True)
         return grupos
 

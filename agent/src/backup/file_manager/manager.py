@@ -135,6 +135,38 @@ class FileManager:
             logging.error(f"  [{tipo_parser}] config_extra.pasta_origem não informado.")
             return {"nome": nome_original, "status": BackupStatus.ERRO.value, "cameras": None}
 
+        # Detecção de acesso remoto via SMB
+        from src.backup.smb_storage import is_smb_path, parse_smb_target
+        eq_ip = (equipamento.get("ip") or "").strip()
+        smb_detectado = is_smb_path(pasta_origem_str, config_extra=config_extra, ip=eq_ip)
+        
+        target_smb = None
+        if smb_detectado:
+            smb_host = (
+                config_extra.get("smb_host")
+                or config_extra.get("nomes_db_host")
+                or (eq_ip if eq_ip not in ("127.0.0.1", "localhost", "") else None)
+            )
+            smb_user = config_extra.get("smb_usuario") or equipamento.get("username") or os.environ.get("TRILAN_SMB_USER")
+            smb_pass = config_extra.get("smb_senha") or equipamento.get("password") or os.environ.get("TRILAN_SMB_PASSWORD")
+            try:
+                smb_porta = int(config_extra.get("smb_porta") or 445)
+            except (ValueError, TypeError):
+                smb_porta = 445
+
+            try:
+                target_smb = parse_smb_target(
+                    pasta_origem_str,
+                    host=smb_host,
+                    user=smb_user,
+                    password=smb_pass,
+                    port=smb_porta,
+                )
+                logging.info(f"  [SMB] Origem remota configurada: {target_smb.unc_path}")
+            except Exception as e:
+                logging.error(f"  [SMB] Falha ao interpretar caminho SMB '{pasta_origem_str}': {e}")
+                return {"nome": nome_original, "status": BackupStatus.ERRO.value, "cameras": None}
+
         pasta_origem = Path(pasta_origem_str)
         
         # Garante pasta de destino para este equipamento
@@ -147,10 +179,11 @@ class FileManager:
             return {"nome": nome_original, "status": BackupStatus.ERRO.value, "cameras": None}
 
         # 1. Busca Backups (já ordenados do mais recente para o mais antigo)
-        grupos = parser.find_backups(pasta_origem)
+        origem_busca = target_smb if target_smb is not None else pasta_origem
+        grupos = parser.find_backups(origem_busca)
         
         if not grupos:
-            logging.error(f"  [{tipo_parser}] Nenhum backup encontrado em: {pasta_origem}")
+            logging.error(f"  [{tipo_parser}] Nenhum backup encontrado em: {origem_busca.unc_path if hasattr(origem_busca, 'unc_path') else origem_busca}")
             return {"nome": nome_original, "status": BackupStatus.NAO_ENCONTRADO.value, "cameras": None}
 
         # 2. Avalia o grupo mais recente
@@ -180,11 +213,11 @@ class FileManager:
             elif f.file_type == "DIGIFORT_DIR":
                 nome_destino = f.path.name
             else:
-                ext = f.path.suffix if f.path.is_file() else ""
+                ext = f.path.suffix if (f.path.suffix or f.is_smb) else ""
                 nome_destino = f"{prefixo}{nome_safe}_{grupo_recente.date.strftime('%Y%m%d_%H%M%S')}{ext}"
                 
             caminho_destino = pasta_eq / nome_destino
-            arquivos_para_copiar.append((f.path, caminho_destino))
+            arquivos_para_copiar.append((f, caminho_destino))
             
             if not caminho_destino.exists():
                 ja_processado = False
@@ -204,8 +237,9 @@ class FileManager:
         arquivos_copiados = []
         for origem, destino in arquivos_para_copiar:
             sucesso_copia, status_copia = self.copier.copy_file(origem, destino)
+            nome_arq = origem.path.name if hasattr(origem, "path") else origem.name
             if not sucesso_copia:
-                logging.error(f"  Falha ao copiar: {origem.name}")
+                logging.error(f"  Falha ao copiar: {nome_arq}")
                 return {"nome": nome_original, "status": status_copia.value, "cameras": None}
             arquivos_copiados.append(destino.name)
 

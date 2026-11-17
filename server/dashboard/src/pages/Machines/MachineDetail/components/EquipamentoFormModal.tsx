@@ -237,6 +237,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
               <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
                 A UNM2000 não informa a validade da licença por nenhuma consulta; informe a data para o painel mostrar os dias restantes.
               </span>
+              <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />
             </>
           )}
 
@@ -269,6 +270,7 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
               O tempo gravado e os dias sem gravação saem desses arquivos. Sem esta pasta, o agente só testa se a câmera responde ao ping.
             </span>
           </div>
+          <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />
           <PlanilhaCamerasCampo
             machineId={machineId} nvrId={editingEqId} eqForm={eqForm} setEqForm={setEqForm}
             onPreviaAberta={setPreviaAberta} onErro={onErro} />
@@ -361,5 +363,67 @@ export default function EquipamentoFormModal({ machineId, eqForm, setEqForm, edi
         </button>
       </div>
     </Modal>
+  );
+}
+
+function SmbConfigSection({
+  eqForm,
+  setEqForm,
+}: {
+  eqForm: EqForm;
+  setEqForm: React.Dispatch<React.SetStateAction<EqForm>>;
+}) {
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "12px 14px",
+        borderRadius: 8,
+        background: "var(--surface-2)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <label className="form-label" style={{ marginBottom: 8, display: "block", fontWeight: 600 }}>
+        Acesso Remoto / SMB (caso o agente rode fora da máquina, ex: MikroTik) — opcional
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Host / IP do Windows</label>
+          <input
+            className="form-input"
+            type="text"
+            autoComplete="off"
+            placeholder="192.168.1.50"
+            value={eqForm.smb_host || ""}
+            onChange={e => setEqForm({ ...eqForm, smb_host: e.target.value })}
+          />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Usuário do Windows</label>
+          <input
+            className="form-input"
+            type="text"
+            autoComplete="off"
+            placeholder="Administrador"
+            value={eqForm.smb_usuario || ""}
+            onChange={e => setEqForm({ ...eqForm, smb_usuario: e.target.value })}
+          />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Senha do Windows</label>
+          <input
+            className="form-input"
+            type="password"
+            autoComplete="new-password"
+            placeholder={eqForm.smb_senha_definida ? "•••••• (vazio mantém)" : "Senha"}
+            value={eqForm.smb_senha || ""}
+            onChange={e => setEqForm({ ...eqForm, smb_senha: e.target.value })}
+          />
+        </div>
+      </div>
+      <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
+        Se o agente estiver em container no MikroTik ou outro servidor, informe o IP e as credenciais da máquina Windows. A pasta de origem pode ser informada como D:UNM2000/emsback, D:\UNM2000\emsback ou \\192.168.1.50\D$\UNM2000\emsback.
+      </span>
+    </div>
   );
 }
