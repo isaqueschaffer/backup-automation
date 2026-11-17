@@ -35,6 +35,10 @@ export function emptyEqForm(overrides: Partial<EqForm> = {}): EqForm {
     porta_alarme: 3001,
     porta_ssh: 22,
     prefixos_mac: "",
+    smb_host: "",
+    smb_usuario: "",
+    smb_senha: "",
+    smb_senha_definida: false,
     ...overrides,
   };
 }
@@ -70,6 +74,10 @@ export function eqToForm(eq: NVR): EqForm {
     porta_ssh: cfg?.porta_ssh ?? 22,
     prefixos_mac: cfg?.prefixos_mac || "",
     antenas: cfg?.antenas || [],
+    smb_host: cfg?.smb_host || "",
+    smb_usuario: cfg?.smb_usuario || "",
+    smb_senha: "",
+    smb_senha_definida: !!cfg?.smb_senha_definida,
   };
 }
 
@@ -108,12 +116,16 @@ export function buildEqPayload(
     payload.ip = "127.0.0.1";
     payload.username = "digifort";
     payload.password = "digifort";
-    payload.config_extra = {
+    const cfg: EquipamentoConfig = {
       pasta_origem: eqForm.pasta_origem.trim(),
       caminho_csv: eqForm.caminho_csv?.trim() || "",
       caminho_log_csv: eqForm.caminho_log_csv?.trim() || "",
       pasta_gravacoes: eqForm.pasta_gravacoes?.trim() || "",
     };
+    if (eqForm.smb_host?.trim()) cfg.smb_host = eqForm.smb_host.trim();
+    if (eqForm.smb_usuario?.trim()) cfg.smb_usuario = eqForm.smb_usuario.trim();
+    if (eqForm.smb_senha) cfg.smb_senha = eqForm.smb_senha;
+    payload.config_extra = cfg;
   } else if (eqForm.tipo === "OLT") {
     if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
     const cfg: EquipamentoConfig = { fabricante_olt: eqForm.fabricante_olt };
@@ -133,6 +145,9 @@ export function buildEqPayload(
       if (eqForm.nomes_db_senha) cfg.nomes_db_senha = eqForm.nomes_db_senha;
       cfg.licenca_inicio = eqForm.licenca_inicio || "";
       cfg.licenca_fim = eqForm.licenca_fim || "";
+      if (eqForm.smb_host?.trim()) cfg.smb_host = eqForm.smb_host.trim();
+      if (eqForm.smb_usuario?.trim()) cfg.smb_usuario = eqForm.smb_usuario.trim();
+      if (eqForm.smb_senha) cfg.smb_senha = eqForm.smb_senha;
       if (cfg.olts) {
         if (!cfg.telnet_usuario) return { error: "Para monitorar as OLTs, informe o usuário do Telnet." };
         if (!eqForm.telnet_senha && !(editingEqId && eqForm.telnet_senha_definida)) return { error: "Para monitorar as OLTs, informe a senha do Telnet." };

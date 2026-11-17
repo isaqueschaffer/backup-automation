@@ -123,6 +123,8 @@ export const createUsuarioConta = (
     senha: string;
     papel: "ADMIN" | "VISUALIZADOR" | "LEITURA";
     maquinas?: string[];
+    notif_email?: boolean;
+    notif_tipos?: string[] | null;
   },
   contaId?: string
 ): Promise<Usuario> => {
@@ -136,6 +138,8 @@ export const updateUsuarioConta = (
     nome?: string;
     papel?: "ADMIN" | "VISUALIZADOR" | "LEITURA";
     maquinas?: string[];
+    notif_email?: boolean;
+    notif_tipos?: string[] | null;
     ativo?: boolean;
     senha?: string;
   },

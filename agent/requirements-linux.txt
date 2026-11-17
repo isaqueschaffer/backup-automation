@@ -9,4 +9,5 @@ pysnmp>=7.1,<8
 openpyxl>=3.1,<4
 pymysql>=1.1,<2
 Pillow>=10.3,<12
+smbprotocol>=1.15,<2
 # FFmpeg/RTSP intentionally deferred until verified on ARMv7.

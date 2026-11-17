@@ -22,9 +22,22 @@ class BackupStatus(str, Enum):
 class BackupFile:
     path: Path
     file_type: str  # "ZIP", "TAR", "CONFIGURATION", "DB", etc.
+    remote_path: Optional[str] = None
+    is_smb: bool = False
+    _size: Optional[int] = None
     
     @property
     def size_bytes(self) -> int:
+        if self.is_smb:
+            if self._size is not None:
+                return self._size
+            if self.remote_path:
+                try:
+                    from src.backup.smb_storage import SmbStorage
+                    return SmbStorage.get_file_size(self.remote_path)
+                except Exception:
+                    return 0
+            return 0
         if not self.path.exists():
             return 0
         if self.path.is_file():

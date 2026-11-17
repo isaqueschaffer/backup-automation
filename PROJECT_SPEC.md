@@ -1121,6 +1121,23 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-17] — Merge do ramo `helena` — agente 1.1.57 (SMB, Defense/ONVIF por canal, captura no Mikrotik, notificações por usuário)
+
+- Reúne o que dependia de agente novo: **coleta de ANTENAS** (`_antena_loop`, leitura SSH do MikroTik, ping, marca detectada), **Defense**: gravadores DVR/NVR com `dispositivo` no relatório e captura **ONVIF com o canal** (`rtsp_client`, tarefa com `gravador`). Versão em `updater.py`, `installer.iss` e `package.json`.
+- **Backup em pasta de rede (SMB)**: `agent/src/backup/smb_storage.py` (`smbprotocol`), usado pelo copiador, validadores, parsers e pelo teste de conexão; `smb_senha`/`smb_password` entram em `segredos_config.SEGREDOS` (cifrados no banco).
+- **Agente Linux (Mikrotik)**: atende `rtsp_task` da Galeria (uma captura por vez, `RTSP_LOCK`) e roda a imagem da noite das câmeras Digifort/Defense (`noite_loop`); `rtsp_client._ffmpeg_exe()` usa o ffmpeg do sistema fora do Windows; `Dockerfile.mikrotik` instala `ffmpeg`. **Precisa de imagem nova do container** (ffmpeg e `smbprotocol` em `requirements-linux.txt`: a OTA do Linux recusa a versão até a troca). Teste local em ARMv7: ao vivo e referência OK; a imagem com o ffmpeg do Debian ocupa ~482 MB, acima do livre no RB4011 (~479 MB), a reduzir antes da troca.
+- **Auditoria**: mostra o nome do usuário (`usuario_nome`, `UsuarioAuditoriaOpcao`); no merge, a busca dos nomes passou a filtrar pela conta (REGRA-010).
+- No merge, as entradas 1.1.55 e 1.1.56 abaixo (que o ramo tinha sobrescrito) foram restauradas.
+
+### [2026-11-16] — Notificações por e-mail escolhidas por usuário; botão "Ativar/Desativar todas" por máquina
+
+- **Quem recebe** (`services/notificacoes.destinatarios_notificacao(db, conta, tipo, machine_id)`): o e-mail de contato da conta (sempre) + os usuários **ativos** da conta com `usuarios.notif_email` ligado, que aceitam o tipo (`usuarios.notif_tipos`: lista, `NULL` = todos) e enxergam a máquina (ADMIN vê todas; VISUALIZADOR/LEITURA sem máquinas marcadas veem todas; notificação personalizada não tem máquina). Antes saía sempre para o contato + todos os admins. Tipos: `LICENCA_UNM2000`, `CAMERA_OFFLINE`, `ALARME`, `ANTENA_OFFLINE`, `ONU_OFFLINE`, `SINAL_OPTICO`, `PERSONALIZADA` (`schemas.TIPOS_EMAIL_NOTIFICACAO`; `BACKUP_FALHOU` e `AGENTE_OFFLINE` só aparecem no painel). O aviso de vencimento da conta (`services/avisos_conta.destinatarios`) não mudou (contato + admins).
+- **E-mail de backup continua separado**: usa só as listas `email_to` da máquina/cliente. Decisão: **não** incluir o admin automaticamente (mandaria um relatório por máquina/rodada a quem não pediu, e as listas podem ter contatos do cliente); o admin que quiser coloca o próprio e-mail na lista. Um opt-in "receber relatório de backup" por usuário fica como evolução possível.
+- **Migração**: colunas `usuarios.notif_email BOOLEAN NOT NULL DEFAULT FALSE` e `usuarios.notif_tipos JSON`; na criação da coluna, os admins atuais ficam ligados (nada muda no primeiro dia) e os demais desligados. Usuário novo: ADMIN liga por padrão, os outros não.
+- **API/painel**: `UsuarioCreate/Update/Response` ganham `notif_email` e `notif_tipos` (em `PUT`, `notif_tipos: null` = todos e ausente = não mexe; tipo inválido = 422). Tela Usuários: coluna "Notificações" e o campo `NotificacoesUsuarioCampo` (liga/desliga, "todos os tipos" ou só os marcados).
+- **Notificações (painel)**: em cada máquina das seções Câmeras offline, OLTs e Alarmes, botão **Ativar todas / Desativar todas** (só os itens que mudam são enviados; some para somente leitura/visualizador).
+- **Testes**: `server/api/tests/test_destinatarios_notificacao.py` (6). **Arquivos:** server/api/{models.py,main.py,schemas.py,routers/conta.py,services/notificacoes.py}, server/dashboard/src/{api/types.ts,api/contas.ts,pages/Contas/{UsuariosSection.tsx,NotificacoesUsuarioCampo.tsx},pages/Notificacoes/NotificacoesPage.tsx}.
+
 ### [2026-11-16] — Agente 1.1.56: log do agente do Mikrotik (Linux) no painel
 
 **Problema:** o agente Linux (`service_linux.py`) só escrevia o log na saída do processo, dentro do Mikrotik; a teste-mk-maquina não tinha nenhum evento do agente no painel. Os pedidos de backup com `TRILAN_ENABLE_BACKUPS` desligado eram ignorados sem aviso visível (e o servidor dispara todo dia um backup de recuperação pelo das 02:00 que não rodou).

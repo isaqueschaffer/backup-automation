@@ -13,6 +13,7 @@ import { fmtDate } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
 import { PAPEL_LABEL } from "./contaUi";
 import MaquinasUsuarioCampo from "./MaquinasUsuarioCampo";
+import NotificacoesUsuarioCampo from "./NotificacoesUsuarioCampo";
 
 interface UsuariosSectionProps {
   contaId?: string;
@@ -35,6 +36,8 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
   const [novoPapel, setNovoPapel] = useState<"ADMIN" | "VISUALIZADOR" | "LEITURA">("ADMIN");
   const [novoRestringir, setNovoRestringir] = useState(false);
   const [novoMaquinas, setNovoMaquinas] = useState<string[]>([]);
+  const [novoNotif, setNovoNotif] = useState(true);
+  const [novoNotifTipos, setNovoNotifTipos] = useState<string[] | null>(null);
   const [novoSaving, setNovoSaving] = useState(false);
 
   // Modal Editar Usuário
@@ -44,6 +47,8 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
   const [editSenha, setEditSenha] = useState("");
   const [editRestringir, setEditRestringir] = useState(false);
   const [editMaquinas, setEditMaquinas] = useState<string[]>([]);
+  const [editNotif, setEditNotif] = useState(false);
+  const [editNotifTipos, setEditNotifTipos] = useState<string[] | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
   // Ação Ativar/Desativar
@@ -73,6 +78,8 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
     setNovoPapel("ADMIN");
     setNovoRestringir(false);
     setNovoMaquinas([]);
+    setNovoNotif(true);
+    setNovoNotifTipos(null);
     setShowNovoModal(true);
   };
 
@@ -97,6 +104,10 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
       toast("Marque pelo menos uma máquina, ou escolha \"Todas as máquinas da conta\".", "error");
       return;
     }
+    if (novoNotif && novoNotifTipos !== null && novoNotifTipos.length === 0) {
+      toast("Marque pelo menos um tipo de notificação, ou escolha \"Todos os tipos\".", "error");
+      return;
+    }
 
     setNovoSaving(true);
     try {
@@ -107,6 +118,8 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
           senha: novaSenha,
           papel: novoPapel,
           maquinas: novoPapel !== "ADMIN" && novoRestringir ? novoMaquinas : [],
+          notif_email: novoNotif,
+          notif_tipos: novoNotif ? novoNotifTipos : null,
         },
         contaId
       );
@@ -127,6 +140,8 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
     setEditSenha("");
     setEditRestringir((u.maquinas || []).length > 0);
     setEditMaquinas(u.maquinas || []);
+    setEditNotif(!!u.notif_email);
+    setEditNotifTipos(u.notif_tipos ?? null);
   };
 
   const handleEditarUsuario = async (e: FormEvent) => {
@@ -148,6 +163,10 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
       toast("Marque pelo menos uma máquina, ou escolha \"Todas as máquinas da conta\".", "error");
       return;
     }
+    if (editNotif && editNotifTipos !== null && editNotifTipos.length === 0) {
+      toast("Marque pelo menos um tipo de notificação, ou escolha \"Todos os tipos\".", "error");
+      return;
+    }
 
     setEditSaving(true);
     try {
@@ -158,6 +177,8 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
           papel: editPapel,
           senha: senhaTrim || undefined,
           maquinas: editPapel !== "ADMIN" && editRestringir ? editMaquinas : [],
+          notif_email: editNotif,
+          notif_tipos: editNotif ? editNotifTipos : null,
         },
         contaId
       );
@@ -267,6 +288,7 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
                 <th>E-mail</th>
                 <th>Papel</th>
                 <th>Máquinas</th>
+                <th>Notificações</th>
                 <th>Situação</th>
                 <th>Último acesso</th>
                 {podeEditar && <th>Ações</th>}
@@ -284,6 +306,9 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
                     {u.papel === "ADMIN" || u.papel === "SUPER_ADMIN" || !(u.maquinas || []).length
                       ? "Todas"
                       : `${(u.maquinas || []).length} máquina(s)`}
+                  </td>
+                  <td className="text-sm">
+                    {!u.notif_email ? "Não recebe" : u.notif_tipos ? `${u.notif_tipos.length} tipo(s)` : "Todas"}
                   </td>
                   <td>
                     {u.ativo ? (
@@ -385,9 +410,11 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
               <select
                 className="form-input"
                 value={novoPapel}
-                onChange={(e) =>
-                  setNovoPapel(e.target.value as "ADMIN" | "VISUALIZADOR" | "LEITURA")
-                }
+                onChange={(e) => {
+                  const papel = e.target.value as "ADMIN" | "VISUALIZADOR" | "LEITURA";
+                  setNovoPapel(papel);
+                  setNovoNotif(papel === "ADMIN"); // padrão: admin recebe, os demais não
+                }}
               >
                 <option value="ADMIN">Administrador</option>
                 <option value="VISUALIZADOR">Visualizador (vê e testa, não altera)</option>
@@ -398,6 +425,7 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
               <MaquinasUsuarioCampo contaId={contaId} restringir={novoRestringir} onRestringir={setNovoRestringir}
                 selecionadas={novoMaquinas} onSelecionadas={setNovoMaquinas} />
             )}
+            <NotificacoesUsuarioCampo ativo={novoNotif} onAtivo={setNovoNotif} tipos={novoNotifTipos} onTipos={setNovoNotifTipos} />
             <div
               className="flex gap-3 mt-4"
               style={{ justifyContent: "flex-end" }}
@@ -463,6 +491,7 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
               <MaquinasUsuarioCampo contaId={contaId} restringir={editRestringir} onRestringir={setEditRestringir}
                 selecionadas={editMaquinas} onSelecionadas={setEditMaquinas} />
             )}
+            <NotificacoesUsuarioCampo ativo={editNotif} onAtivo={setEditNotif} tipos={editNotifTipos} onTipos={setEditNotifTipos} />
             <div className="form-group">
               <label className="form-label">Nova senha (opcional)</label>
               <input

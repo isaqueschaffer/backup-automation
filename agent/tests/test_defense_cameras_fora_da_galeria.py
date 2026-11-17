@@ -87,6 +87,9 @@ class TestCamerasSoNoDefense(unittest.TestCase):
         self.assertEqual((res[1]["modelo"], res[1]["canal_rtsp"], res[1]["ip"]), ("MHDX 1008", 1, "10.0.40.47"))
         self.assertEqual(res[2]["canal_rtsp"], 5)
         self.assertEqual(res[2]["status_comunicacao"], "OFFLINE")
+        # o gravador de origem vai junto (o painel o liga à linha DVR/NVR da planilha); câmera da Galeria não leva
+        self.assertEqual((res[1]["dispositivo"], res[2]["dispositivo"]), ("DVR-CATANDUVA", "DVR-CATANDUVA"))
+        self.assertNotIn("dispositivo", res[0])
 
 
 if __name__ == "__main__":

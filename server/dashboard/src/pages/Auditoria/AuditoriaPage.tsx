@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
 import { AuditoriaQuery, fetchAuditoria, fetchCustomers, fetchMachines, fetchUsuariosAuditoria } from "../../api/client";
-import { Customer, Machine, PaginatedAuditoria } from "../../api/types";
+import { Customer, Machine, PaginatedAuditoria, UsuarioAuditoriaOpcao } from "../../api/types";
 import { useToast } from "../../components/Toast";
 import { useRotulos } from "../../contexts/AuthContext";
 import { fmtDate } from "../../utils/date";
@@ -15,7 +15,7 @@ export default function AuditoriaPage() {
   const [data, setData] = useState<PaginatedAuditoria | null>(null);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [usuarios, setUsuarios] = useState<string[]>([]);
+  const [usuarios, setUsuarios] = useState<UsuarioAuditoriaOpcao[]>([]);
   const [loading, setLoading] = useState(true);
   const loadSeq = useRef(0);
 
@@ -107,7 +107,7 @@ export default function AuditoriaPage() {
           onChange={e => { setUsuarioFilter(e.target.value); setPage(1); }}
         >
           <option value="">Todos os usuários</option>
-          {usuarios.map(u => <option key={u} value={u}>{u}</option>)}
+          {usuarios.map(u => <option key={u.usuario} value={u.usuario}>{u.nome}</option>)}
         </select>
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="text-xs text-muted">Início</span>
@@ -172,7 +172,7 @@ export default function AuditoriaPage() {
                 {data.items.map(item => (
                   <tr key={item.id}>
                     <td className="text-sm" style={{ whiteSpace: "nowrap" }}>{fmtDate(item.created_at)}</td>
-                    <td className="text-sm" style={{ fontWeight: 600 }}>{item.usuario}</td>
+                    <td className="text-sm" style={{ fontWeight: 600 }}>{item.usuario_nome || item.usuario}</td>
                     <td>
                       <div style={{ fontWeight: 600 }}>
                         <Link to={`/maquinas/${item.machine_id}`} style={{ color: "var(--text-primary)" }}>
@@ -189,7 +189,15 @@ export default function AuditoriaPage() {
                     </td>
                     <td className="text-sm" style={{ wordBreak: "break-word" }}>
                       {/* A mensagem já começa com o usuário; a coluna dele mostra isso, então corta o prefixo */}
-                      {item.message.startsWith(item.usuario + " ") ? item.message.slice(item.usuario.length + 1) : item.message}
+                      {(() => {
+                        const msgLower = item.message.toLowerCase();
+                        for (const p of [item.usuario_nome, item.usuario]) {
+                          if (p && msgLower.startsWith(p.toLowerCase() + " ")) {
+                            return item.message.slice(p.length + 1);
+                          }
+                        }
+                        return item.message;
+                      })()}
                     </td>
                   </tr>
                 ))}

@@ -14,8 +14,10 @@ import {
   linhasParaTexto,
   planilhaTemNomeEDescricao,
   raizGravacaoDaPlanilha,
+  gravadoresDaPlanilha,
   readRowsFromFile,
   rowsToCameras,
+  textoDeGravadores,
   DigifortNameOption,
 } from "../hooks/useCameraImport";
 import CameraImagePanel from "./CameraImagePanel";
@@ -117,6 +119,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
     colunasSenha: number[];
     temOpcaoNomeDescricao: boolean;
     opcaoNome: DigifortNameOption;
+    gravadores?: { nome: string; ip: string }[];
     exemploNome?: string;
     exemploDescricao?: string;
     cams: Array<{
@@ -229,6 +232,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       const camsComSituacao = mapearSituacaoCams(cams, cameras);
 
       setPrevia({
+        gravadores: gravadoresDaPlanilha(rows),
         nomeArquivo: file.name,
         linhas,
         linhasBrutas: rows,
@@ -960,7 +964,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
           colunasSenha={previa.colunasSenha}
           mostrarSenhas={previaMostrarSenhas}
           onMostrarSenhas={setPreviaMostrarSenhas}
-          info={`${previa.cams.length} câmera(s) identificada(s)`}
+          info={`${previa.cams.length} câmera(s) identificada(s)${textoDeGravadores(previa.gravadores)}`}
           camerasLidas={previa.cams}
           confirmarLabel="Importar câmeras"
           confirmando={vmsBusy}

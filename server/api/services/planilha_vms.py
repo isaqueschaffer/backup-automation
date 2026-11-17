@@ -5,6 +5,37 @@ import json
 from typing import List
 
 
+# Tipos de dispositivo do export do Defense que são gravadores (DVR/iMHDX, NVR/iNVD...): a linha é o gravador, não uma câmera
+_TIPOS_GRAVADOR = ("dvr", "nvr", "imhdx", "invd", "gravador")
+
+
+def gravadores_da_planilha(linhas: List[List[str]], linha_cabecalho: int) -> List[dict]:
+    """Gravadores (DVR/NVR) de uma planilha de dispositivos do Defense: [{'nome', 'ip'}]. A linha do gravador não vira
+    câmera da Galeria (os canais dele vêm do Defense pelo "Sincronizar da Máquina"); o nome e o IP dela dizem a que
+    gravador cada canal pertence."""
+    if linha_cabecalho < 0 or linha_cabecalho >= len(linhas):
+        return []
+    cab = [str(c or "").strip().lower() for c in linhas[linha_cabecalho]]
+
+    def achar(teste) -> int:
+        return next((i for i, h in enumerate(cab) if teste(h)), -1)
+
+    i_tipo = achar(lambda h: h == "tipo" or ("tipo" in h and ("dispositivo" in h or "equipamento" in h)))
+    i_nome = achar(lambda h: "nome" in h and not any(x in h for x in ("usu", "identificador", "dom")))
+    i_ip = achar(lambda h: "identificador" in h or h == "ip" or "endere" in h)
+    if min(i_tipo, i_nome, i_ip) < 0:
+        return []
+
+    saida: List[dict] = []
+    for linha in linhas[linha_cabecalho + 1:]:
+        if max(i_tipo, i_nome, i_ip) >= len(linha):
+            continue
+        tipo, nome, ip = (str(linha[i] or "").strip() for i in (i_tipo, i_nome, i_ip))
+        if nome and ip and "." in ip and any(t in tipo.lower() for t in _TIPOS_GRAVADOR):
+            saida.append({"nome": nome, "ip": ip})
+    return saida
+
+
 def casar_cameras_por_ip(itens: List, cameras_db: List) -> List:
     """Para cada item da planilha devolve a câmera já existente que ele substitui (ou None se for nova).
 

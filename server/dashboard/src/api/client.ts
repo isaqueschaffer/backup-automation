@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, EquipamentoOltNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedAuditoria, PaginatedBackups, TipoNotificacao } from "./types";
+import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, EquipamentoOltNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedAuditoria, PaginatedBackups, TipoNotificacao, UsuarioAuditoriaOpcao } from "./types";
 import { saveBlob } from "../utils/download";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -131,8 +131,16 @@ export interface AuditoriaQuery {
 }
 export const fetchAuditoria = (params?: AuditoriaQuery): Promise<PaginatedAuditoria> =>
   api.get("/auditoria", { params }).then((r) => r.data);
-export const fetchUsuariosAuditoria = (): Promise<string[]> =>
-  api.get("/auditoria/usuarios").then((r) => r.data);
+export const fetchUsuariosAuditoria = (): Promise<UsuarioAuditoriaOpcao[]> =>
+  api.get("/auditoria/usuarios").then((r) => {
+    if (!Array.isArray(r.data)) return [];
+    return r.data.map((item: UsuarioAuditoriaOpcao | string) => {
+      if (typeof item === "string") {
+        return { usuario: item, nome: item === "admin" ? "Administrador" : item };
+      }
+      return { usuario: item.usuario, nome: item.nome || item.usuario };
+    });
+  });
 
 export const fetchBackups = (params?: BackupQuery): Promise<PaginatedBackups> =>
   api.get("/backups", { params }).then((r) => r.data);

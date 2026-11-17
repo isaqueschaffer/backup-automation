@@ -75,20 +75,42 @@ def marca_pelo_modelo(modelo) -> str:
     return "Hikvision"
 
 
-def cameras_do_relatorio_sem_par(cameras_db: list, relatorio: list) -> List[dict]:
+MODELO_CANAL_DE_GRAVADOR = "ONVIF"
+
+
+def gravador_do_canal(st: dict, gravadores: Optional[list]) -> Optional[dict]:
+    """Gravador (linha DVR/NVR da planilha: {nome, ip}) a que um canal do relatório pertence: pelo nome do dispositivo que
+    o agente informa (`dispositivo`) ou, sem ele, pelo nome do canal começando com o nome do gravador ("DVR X - FRENTE")."""
+    dispositivo, nome = _norm(st.get("dispositivo")), _norm(st.get("nome"))
+    for g in gravadores or []:
+        gn = _norm(g.get("nome"))
+        if gn and (dispositivo == gn or (not dispositivo and nome.startswith(gn))):
+            return g
+    return None
+
+
+def cameras_do_relatorio_sem_par(cameras_db: list, relatorio: list, gravadores: Optional[list] = None) -> List[dict]:
     """Câmeras do relatório do agente que não casam com nenhuma da Galeria e têm IP: {nome, ip, modelo, canal_rtsp}.
-    São as que o Defense lista e a planilha não trouxe (ex.: canais de DVR/NVR); o "Sincronizar da Máquina" as cria."""
+    São as que o Defense lista e a planilha não trouxe (ex.: canais de DVR/NVR); o "Sincronizar da Máquina" as cria.
+
+    Canal de DVR/NVR (tem `canal_rtsp` ou pertence a um gravador da planilha) nasce com modelo ONVIF; o IP do gravador da
+    planilha vale quando o Defense não informou um IP válido. Câmera de IP próprio segue a marca pelo modelo dela."""
     saida = []
     for _, st, c, _ in parear_cameras(cameras_db, relatorio):
         if st is None or c is not None:
             continue
-        nome, ip = (st.get("nome") or "").strip(), ip_valido(st.get("ip"))
+        nome = (st.get("nome") or "").strip()
+        gravador = gravador_do_canal(st, gravadores)
+        ip = ip_valido(st.get("ip")) or (ip_valido(gravador.get("ip")) if gravador else "")
         if not nome or not ip:
             continue
         canal_rtsp = canal_int(st.get("canal_rtsp"))
+        canal_rtsp = canal_rtsp if canal_rtsp and 1 <= canal_rtsp <= 512 else None
+        eh_canal_de_gravador = canal_rtsp is not None or gravador is not None
         saida.append({
-            "nome": nome, "ip": ip, "modelo": marca_pelo_modelo(st.get("modelo")),
-            "canal_rtsp": canal_rtsp if canal_rtsp and 1 <= canal_rtsp <= 512 else None,
+            "nome": nome, "ip": ip,
+            "modelo": MODELO_CANAL_DE_GRAVADOR if eh_canal_de_gravador else marca_pelo_modelo(st.get("modelo")),
+            "canal_rtsp": canal_rtsp,
         })
     return saida
 

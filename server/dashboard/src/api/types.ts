@@ -71,6 +71,11 @@ export interface EquipamentoConfig {
   porta_ssh?: number;
   prefixos_mac?: string;
   antenas?: AntenaCadastro[];
+  // SMB (acesso remoto a pastas do Windows como UNM2000 / Digifort)
+  smb_host?: string;
+  smb_usuario?: string;
+  smb_senha?: string;
+  smb_senha_definida?: boolean;
   [key: string]: unknown;
 }
 
@@ -105,6 +110,11 @@ export interface EqForm {
   porta_ssh?: number | string;
   prefixos_mac?: string;
   antenas?: AntenaCadastro[];
+  // SMB (acesso remoto a pastas do Windows como UNM2000 / Digifort)
+  smb_host?: string;
+  smb_usuario?: string;
+  smb_senha?: string;
+  smb_senha_definida?: boolean;
   // Planilha das câmeras do Digifort lida no formulário (enviada à Galeria ao salvar)
   planilhaNova?: PlanilhaPendente | null;
   // Digifort já cadastrado: o que a Galeria do equipamento já tem (exigência satisfeita sem nova planilha)
@@ -135,6 +145,8 @@ export interface PlanilhaPendente {
   cams: CameraLidaPlanilha[];
   // Raiz comum dos caminhos da coluna "Diretório de gravação" (vazio se a planilha não tiver essa coluna)
   raizGravacoes?: string;
+  // DVR/NVR da planilha do Defense (não viram câmera; orientam os canais do "Sincronizar da Máquina")
+  gravadores?: { nome: string; ip: string }[];
 }
 
 export interface PlanilhaSalvaInfo {
@@ -310,12 +322,18 @@ export interface AuditoriaItem {
   id: string;
   created_at: string;
   usuario: string;
+  usuario_nome?: string | null;
   message: string;
   equipamento: string | null;
   machine_id: string;
   machine_name: string | null;
   customer_id: string | null;
   customer_name: string | null;
+}
+
+export interface UsuarioAuditoriaOpcao {
+  usuario: string;
+  nome: string;
 }
 
 export interface PaginatedAuditoria {
@@ -469,6 +487,9 @@ export interface Usuario {
   criado_em: string;
   // Visualizador / Somente leitura: máquinas que vê (vazio = todas as da conta)
   maquinas?: string[];
+  // Recebe notificações por e-mail; notif_tipos null = todos os tipos
+  notif_email?: boolean;
+  notif_tipos?: string[] | null;
 }
 
 

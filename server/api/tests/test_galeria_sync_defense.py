@@ -7,7 +7,7 @@ from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from services.galeria_vms import cameras_do_relatorio_sem_par, marca_pelo_modelo
+from services.galeria_vms import cameras_do_relatorio_sem_par, gravador_do_canal, marca_pelo_modelo
 
 
 def _cam(nome, ip, canal):
@@ -53,3 +53,33 @@ def test_marca_pelo_modelo():
     assert marca_pelo_modelo("iNVD 3016") == "Intelbras"
     assert marca_pelo_modelo("VIPC-1230-D-G2") == "Intelbras"
     assert marca_pelo_modelo(None) == "Hikvision"
+
+
+GRAVADORES = [{"nome": "DVR-CATANDUVA", "ip": "10.0.40.47"}, {"nome": "NVR INTELBRAS", "ip": "192.168.75.6"}]
+
+
+def test_canal_de_gravador_nasce_com_onvif_e_camera_de_ip_proprio_segue_o_modelo():
+    novas = {c["nome"]: c for c in cameras_do_relatorio_sem_par([], RELATORIO)}
+    assert novas["DVR - FRENTE"]["modelo"] == "ONVIF" and novas["DVR - LATERAL"]["modelo"] == "ONVIF"
+    assert novas["LATERAL TERRENO"]["modelo"] == "Intelbras"  # IP próprio: continua pela marca do modelo
+
+
+def test_canal_do_gravador_da_planilha_vira_onvif_mesmo_sem_canal_rtsp():
+    rel = [{"nome": "DVR-CATANDUVA - FRENTE", "ip": "10.0.40.47", "modelo": "MHDX 1008", "dispositivo": "DVR-CATANDUVA"}]
+    (cam,) = cameras_do_relatorio_sem_par([], rel, GRAVADORES)
+    assert (cam["modelo"], cam["canal_rtsp"]) == ("ONVIF", None)
+
+
+def test_ip_do_gravador_da_planilha_vale_quando_o_defense_nao_informa():
+    rel = [{"nome": "NVR INTELBRAS - CAM 2", "ip": "N/A", "dispositivo": "NVR INTELBRAS", "canal_rtsp": 2}]
+    assert cameras_do_relatorio_sem_par([], rel) == []  # sem a planilha não há IP: descartada
+    (cam,) = cameras_do_relatorio_sem_par([], rel, GRAVADORES)
+    assert (cam["ip"], cam["modelo"], cam["canal_rtsp"]) == ("192.168.75.6", "ONVIF", 2)
+
+
+def test_gravador_do_canal_casa_pelo_dispositivo_ou_pelo_prefixo_do_nome():
+    assert gravador_do_canal({"dispositivo": "dvr-catanduva", "nome": "FRENTE"}, GRAVADORES)["ip"] == "10.0.40.47"
+    assert gravador_do_canal({"nome": "NVR INTELBRAS - CAM 1"}, GRAVADORES)["ip"] == "192.168.75.6"
+    assert gravador_do_canal({"dispositivo": "OUTRO", "nome": "NVR INTELBRAS - CAM 1"}, GRAVADORES) is None
+    assert gravador_do_canal({"nome": "TERRENO 01"}, GRAVADORES) is None
+    assert gravador_do_canal({"nome": "x"}, None) is None

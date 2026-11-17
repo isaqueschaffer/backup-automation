@@ -18,6 +18,7 @@ from types import SimpleNamespace as NS
 
 from services.planilha_vms import (
     casar_cameras_por_ip,
+    gravadores_da_planilha,
     colunas_senha,
     mascarar_senhas,
     empacotar,
@@ -151,3 +152,29 @@ def test_ip_repetido_no_equipamento_casa_pelo_nome():
 
 def test_camera_sem_correspondencia_e_nova():
     assert casar_cameras_por_ip([_cam("Nova", "10.0.0.7", None)], [_cam("CAM 01", "10.0.0.1", 1)]) == [None]
+
+
+CABECALHO_DEFENSE = ["Categoria do dispositivo*", "Tipo do dispositivo*", "Protocolo de acesso*", "Modo de adição*", "Nome do dispositivo",
+                     "Identificador (IP/Nome de domínio/ID de registro)*", "Porta do dispositivo*", "Organização", "Servidor",
+                     "Nome de usuário*", "Senha*"]
+
+
+def _linha(tipo, nome, ip, categoria="Encoder"):
+    return [categoria, tipo, "Intelbras", "Endereço IP", nome, ip, "37777", "Local Atual", "10.0.0.1", "admin", "x"]
+
+
+def test_gravadores_da_planilha_do_defense():
+    linhas = [["Lista"], CABECALHO_DEFENSE,
+              _linha("Terminal de acesso por reconhecimento", "FACIAL", "10.0.40.32", "Controladora de acesso"),
+              _linha("DVR/iMHDX", "ESTOQUE CATANDUVA", "10.0.40.41"),
+              _linha("NVR/iNVD", "NVR INTELBRAS", "192.168.75.6"),
+              _linha("Câmera IP", "TERRENO 01", "192.168.75.10"),
+              _linha("DVR/iMHDX", "SEM IP", "")]
+    assert gravadores_da_planilha(linhas, 1) == [{"nome": "ESTOQUE CATANDUVA", "ip": "10.0.40.41"},
+                                                  {"nome": "NVR INTELBRAS", "ip": "192.168.75.6"}]
+
+
+def test_planilha_sem_coluna_de_tipo_ou_cabecalho_ruim_nao_tem_gravadores():
+    assert gravadores_da_planilha([["Nome", "IP", "Senha"], ["CAM", "1.1.1.1", "x"]], 0) == []
+    assert gravadores_da_planilha([], 0) == []
+    assert gravadores_da_planilha([CABECALHO_DEFENSE], 5) == []

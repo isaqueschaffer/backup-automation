@@ -122,11 +122,60 @@ def _tcp(t: _Teste, etapa_id: str, host: str, porta: int):
     t.ok(etapa_id, f"{host}:{porta} respondeu em {int((time.monotonic() - inicio) * 1000)} ms")
 
 
-def _pasta(t: _Teste, etapa_id: str, caminho: str):
+def _pasta(t: _Teste, etapa_id: str, caminho: str, eq: dict = None, cfg: dict = None):
     t.iniciar(etapa_id, caminho)
     if not caminho:
         t.erro(etapa_id, "Pasta de origem não informada")
         raise _Falha("O cadastro está sem a pasta de origem dos backups.")
+
+    from src.backup.smb_storage import is_smb_path, parse_smb_target, SmbStorage
+
+    cfg_dict = cfg or {}
+    eq_dict = eq or {}
+    eq_ip = (eq_dict.get("ip") or "").strip()
+
+    if is_smb_path(caminho, config_extra=cfg_dict, ip=eq_ip):
+        smb_host = (
+            cfg_dict.get("smb_host")
+            or cfg_dict.get("nomes_db_host")
+            or (eq_ip if eq_ip not in ("127.0.0.1", "localhost", "") else None)
+        )
+        smb_user = (
+            cfg_dict.get("smb_usuario")
+            or eq_dict.get("username")
+            or os.environ.get("TRILAN_SMB_USER")
+        )
+        smb_pass = (
+            cfg_dict.get("smb_senha")
+            or eq_dict.get("password")
+            or os.environ.get("TRILAN_SMB_PASSWORD")
+        )
+        try:
+            smb_porta = int(cfg_dict.get("smb_porta") or 445)
+        except (ValueError, TypeError):
+            smb_porta = 445
+
+        try:
+            target = parse_smb_target(
+                caminho,
+                host=smb_host,
+                user=smb_user,
+                password=smb_pass,
+                port=smb_porta,
+            )
+        except Exception as e:
+            t.erro(etapa_id, f"Caminho SMB inválido: {e}")
+            raise _Falha(f"Formato de caminho SMB inválido ({caminho}): {e}")
+
+        storage = SmbStorage()
+        ok, msg, qtd = storage.test_connection(target)
+        if not ok:
+            t.erro(etapa_id, t._sem_senha(msg))
+            raise _Falha(t._sem_senha(f"Falha de acesso SMB em {target.unc_path}: {msg}"))
+
+        t.ok(etapa_id, f"{qtd} item(ns) em {target.unc_path} via SMB")
+        return
+
     pasta = Path(caminho)
     if not pasta.is_dir():
         t.erro(etapa_id, f"{caminho} não existe ou não está acessível para o serviço")
@@ -244,7 +293,7 @@ def _testar_olt(t: _Teste, eq: dict, cfg: dict, conf: dict) -> str:
     t.planejar(*etapas)
 
     if "unm" in fabricante and cfg.get("pasta_origem"):
-        _pasta(t, "pasta", cfg.get("pasta_origem"))
+        _pasta(t, "pasta", cfg.get("pasta_origem"), eq, cfg)
     for item in hosts:
         _tcp(t, item[0], *item[1])
     if not hosts:
@@ -397,7 +446,7 @@ def _testar_defense(t: _Teste, eq: dict, cfg: dict) -> str:
 
 def _testar_digifort(t: _Teste, eq: dict, cfg: dict) -> str:
     t.planejar(("pasta", "Pasta de origem dos backups do Digifort"))
-    _pasta(t, "pasta", cfg.get("pasta_origem") or "")
+    _pasta(t, "pasta", cfg.get("pasta_origem") or "", eq, cfg)
     return "Pasta de origem dos backups do Digifort acessível."
 
 

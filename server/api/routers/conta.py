@@ -103,6 +103,8 @@ def criar_usuario(
         papel=body.papel,
         conta_id=ctx.conta_id,
         ativo=True,
+        notif_email=body.notif_email if body.notif_email is not None else body.papel == "ADMIN",
+        notif_tipos=body.notif_tipos,
     )
     _definir_maquinas(db, ctx, usuario, body.maquinas)
     db.add(usuario)
@@ -160,6 +162,11 @@ def atualizar_usuario(
 
     if "nome" in body.model_fields_set and body.nome is not None:
         usuario.nome = body.nome
+
+    if body.notif_email is not None:
+        usuario.notif_email = body.notif_email
+    if "notif_tipos" in body.model_fields_set:
+        usuario.notif_tipos = body.notif_tipos
 
     if body.maquinas is not None or usuario.papel == "ADMIN":
         _definir_maquinas(db, ctx, usuario, body.maquinas if body.maquinas is not None else usuario.maquinas)
