@@ -155,13 +155,36 @@ class FileManager:
                 smb_porta = 445
 
             try:
-                target_smb = parse_smb_target(
-                    pasta_origem_str,
-                    host=smb_host,
-                    user=smb_user,
-                    password=smb_pass,
-                    port=smb_porta,
-                )
+                from src.backup.smb_ssh_provisioner import alvo_por_ssh, usa_provisionamento_ssh
+                if usa_provisionamento_ssh(config_extra):
+                    target_smb, msg_ssh = alvo_por_ssh(pasta_origem_str, smb_host, config_extra)
+                    if target_smb is None:
+                        logging.error(f"  [SMB/SSH] {msg_ssh}")
+                        return {"nome": nome_original, "status": BackupStatus.ERRO.value, "cameras": None}
+                    logging.info(f"  [SMB/SSH] {msg_ssh}")
+                    from src.backup.smb_storage import SmbStorage
+                    ok_smb, msg_smb, _ = SmbStorage().test_connection(target_smb)
+                    if not ok_smb:
+                        # usuário apagado ou senha trocada no cliente: recria por SSH uma vez
+                        logging.warning(f"  [SMB/SSH] Acesso de leitura falhou ({msg_smb}); recriando o usuário por SSH...")
+                        novo, msg_ssh = alvo_por_ssh(pasta_origem_str, smb_host, config_extra, forcar=True)
+                        if novo is None:
+                            logging.error(f"  [SMB/SSH] {msg_ssh}")
+                            return {"nome": nome_original, "status": BackupStatus.ERRO.value, "cameras": None}
+                        target_smb = novo
+                        try:
+                            import smbclient
+                            smbclient.reset_connection_cache()  # descarta sessão com a senha antiga
+                        except Exception:
+                            pass
+                else:
+                    target_smb = parse_smb_target(
+                        pasta_origem_str,
+                        host=smb_host,
+                        user=smb_user,
+                        password=smb_pass,
+                        port=smb_porta,
+                    )
                 logging.info(f"  [SMB] Origem remota configurada: {target_smb.unc_path}")
             except Exception as e:
                 logging.error(f"  [SMB] Falha ao interpretar caminho SMB '{pasta_origem_str}': {e}")

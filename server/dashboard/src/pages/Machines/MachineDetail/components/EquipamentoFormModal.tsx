@@ -421,6 +421,30 @@ function SmbConfigSection({
           />
         </div>
       </div>
+      <label className="form-label" style={{ margin: "12px 0 8px", display: "block", fontWeight: 600 }}>
+        Criar usuário de leitura por SSH (alternativa a informar usuário/senha SMB acima)
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px", gap: 12 }}>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Administrador (SSH)</label>
+          <input className="form-input" type="text" autoComplete="off" placeholder="Administrador"
+            value={eqForm.ssh_usuario || ""} onChange={e => setEqForm({ ...eqForm, ssh_usuario: e.target.value })} />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Senha do administrador</label>
+          <input className="form-input" type="password" autoComplete="new-password"
+            placeholder={eqForm.ssh_senha_definida ? "•••••• (vazio mantém)" : "Senha"}
+            value={eqForm.ssh_senha || ""} onChange={e => setEqForm({ ...eqForm, ssh_senha: e.target.value })} />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Porta</label>
+          <input className="form-input" type="number" placeholder="22"
+            value={eqForm.ssh_porta ?? ""} onChange={e => setEqForm({ ...eqForm, ssh_porta: e.target.value })} />
+        </div>
+      </div>
+      <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
+        O agente entra por SSH uma vez, cria o usuário somente leitura "trilan_leitura" e compartilha só a pasta de origem; depois lê por SMB com esse usuário. Exige SSH e SMB (porta 445) liberados na máquina e a pasta em um drive (ex.: D:UNM2000/emsback).
+      </span>
       <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
         Se o agente estiver em container no MikroTik ou outro servidor, informe o IP e as credenciais da máquina Windows. A pasta de origem pode ser informada como D:UNM2000/emsback, D:\UNM2000\emsback ou \\192.168.1.50\D$\UNM2000\emsback.
       </span>
