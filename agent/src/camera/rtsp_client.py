@@ -4,6 +4,7 @@ import re
 import socket
 import urllib.parse
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from typing import Dict, Any
@@ -11,6 +12,17 @@ from typing import Dict, Any
 def _mascarar(txt: str) -> str:
     """Oculta credenciais de URLs (rtsp://user:senha@host) antes de logar/enviar stderr do ffmpeg."""
     return re.sub(r'//[^@/\s]*@', '//***@', txt or "")
+
+
+def _ffmpeg_exe() -> str:
+    """ffmpeg do sistema (Linux/Mikrotik: o imageio-ffmpeg não traz binário ARM); no Windows, o do imageio-ffmpeg."""
+    import shutil
+    if sys.platform != "win32":
+        achado = shutil.which("ffmpeg")
+        if achado:
+            return achado
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
 
 
 def _capturar_frame_ffmpeg(ffmpeg_exe: str, rtsp_url: str, transport: str = "tcp",
@@ -26,6 +38,7 @@ def _capturar_frame_ffmpeg(ffmpeg_exe: str, rtsp_url: str, transport: str = "tcp
     cmd.extend([
         "-i", rtsp_url,
         "-vframes", "1",
+        "-update", "1",
         "-f", "image2pipe",
         "-vcodec", "mjpeg",
         "-"
@@ -127,8 +140,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     # Garante remoção de URLs duplicadas preservando a ordem
     urls_candidatas = list(dict.fromkeys(urls_candidatas))
 
-    import imageio_ffmpeg
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_exe = _ffmpeg_exe()
 
     # A porta 554 só é conferida depois que a 1ª tentativa falha, nunca antes do ffmpeg: Hikvision antigas
     # (ex.: DS-2CD2012-I) ficam ~18s sem atender o RTSP depois de uma conexão TCP aberta e fechada sem
@@ -268,7 +280,7 @@ def _frame_motorola(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, timeout=15)
     )
     cmd = [
         ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
-        "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
+        "-i", rtsp_url, "-vframes", "1", "-update", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
     ]
     result = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if result.returncode == 0 and len(result.stdout) > 1000:
@@ -285,7 +297,6 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
     por horários fixos usa timeout curto.
     `prazo` (time.monotonic) interrompe as tentativas (captura pedida pelo painel).
     """
-    import imageio_ffmpeg
     import logging
     from datetime import datetime, timedelta
     from src.nvr.motorola.recordings import buscar_trechos_motorola
@@ -299,7 +310,7 @@ def capture_night_image_motorola(ip: str, usuario: str, senha_pura: str, canal: 
         return result_dict
 
     senha_enc = urllib.parse.quote(senha_pura, safe='')
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_exe = _ffmpeg_exe()
     ideal = data_obj.replace(hour=2)
 
     inicio_madrugada = data_obj
@@ -389,7 +400,6 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
     Tenta conectar via RTSP no stream de playback do NVR Hikvision
     e captura um frame da madrugada. Retorna um dicionário com o status e motivo.
     """
-    import imageio_ffmpeg
     from datetime import datetime, timedelta
     from src.nvr.hikvision.recordings import buscar_trechos
 
@@ -397,7 +407,7 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
 
     senha_enc = urllib.parse.quote(senha_pura, safe='')
     canal_str = f"{canal}01"
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_exe = _ffmpeg_exe()
 
     try:
         data_obj = datetime.strptime(date_str, "%Y-%m-%d")
@@ -462,7 +472,7 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
         try:
             cmd = [
                 ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
-                "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
+                "-i", rtsp_url, "-vframes", "1", "-update", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"
             ]
             result = subprocess.run(cmd, capture_output=True, timeout=25)
 
@@ -533,7 +543,7 @@ def _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho
         f"?starttime={alvo:%Y%m%dT%H%M%S}Z&endtime={fim:%Y%m%dT%H%M%S}Z"
     )
     cmd = [ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
-           "-i", rtsp_url, "-vframes", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]
+           "-i", rtsp_url, "-vframes", "1", "-update", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]
     result = subprocess.run(cmd, capture_output=True, timeout=25)
     if result.returncode == 0 and len(result.stdout) > 1000:
         return result.stdout, ""
@@ -542,14 +552,13 @@ def _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho
 
 def _gravacao_recente_hikvision(task, prazo) -> dict:
     """Frame do fim do trecho gravado mais recente, buscando em janelas de 6h do agora para trás."""
-    import imageio_ffmpeg
     from datetime import datetime, timedelta
     from src.nvr.hikvision.recordings import buscar_trechos
 
     ip, usuario, senha = task.get("ip", "").strip(), task.get("username", "admin"), task.get("password", "")
     canal = int(task["canal"])
     r = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_exe = _ffmpeg_exe()
     senha_enc = urllib.parse.quote(senha, safe='')
 
     fim_janela = datetime.now().replace(microsecond=0)
@@ -594,7 +603,6 @@ def _gravacao_recente_hikvision(task, prazo) -> dict:
 
 def _gravacao_recente_motorola(task, sessao, prazo) -> dict:
     """Frame do fim do trecho gravado mais recente (queryChlRecLog dos últimos DIAS_BUSCA dias)."""
-    import imageio_ffmpeg
     from datetime import datetime, timedelta
     from src.nvr.motorola.recordings import buscar_trechos_motorola
 
@@ -611,7 +619,7 @@ def _gravacao_recente_motorola(task, sessao, prazo) -> dict:
         r["motivo"] = f"Sem gravação nos últimos {DIAS_BUSCA} dias"
         return r
 
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_exe = _ffmpeg_exe()
     senha_enc = urllib.parse.quote(senha, safe='')
     modos = ["local", "utc"]
     if _MODO_HORARIO_MOTOROLA.get(ip) == "utc":

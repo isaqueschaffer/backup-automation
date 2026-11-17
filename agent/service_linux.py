@@ -17,6 +17,8 @@ from src.application import log_remoto, updater_linux
 LOG = logging.getLogger("trilan.linux")
 STOP = threading.Event()
 BACKUP_LOCK = threading.Lock()
+# O roteador tem pouca RAM: capturas RTSP (sob demanda e da noite) rodam uma de cada vez
+RTSP_LOCK = threading.Lock()
 # OTA (>= 1.1.52): 1ª verificação 2 min após subir, depois a cada 1 h (o servidor também limita a 1 oferta/h)
 OTA_PRIMEIRA_S = 120
 OTA_INTERVALO_S = 3600
@@ -64,6 +66,34 @@ def run_connection_test(conf, task):
     except Exception:
         LOG.exception("Connection test failed")
 
+def run_rtsp_task(conf, task):
+    """Teste/captura RTSP pedido pelo painel (mesma rotina do agente Windows), sempre sequencial."""
+    try:
+        from src.camera.rtsp_client import executar_tarefa_rtsp
+        from src.application.api_client import send_rtsp_result
+        with RTSP_LOCK:
+            result = executar_tarefa_rtsp(task)
+        send_rtsp_result(conf, result)
+        LOG.info("RTSP task done and sent: success=%s", result.get("success"))
+    except Exception:
+        LOG.exception("RTSP task failed")
+
+def noite_loop(conf):
+    """Imagem da noite das câmeras DIGIFORT/DEFENSE (19h30-4h), igual ao agente Windows, uma câmera por vez."""
+    from src.application.captura_noite_vms import INTERVALO_CICLO_S, capturar_noite_vms, na_janela_noite
+    if STOP.wait(120):
+        return
+    while not STOP.is_set():
+        try:
+            if na_janela_noite(datetime.now()) and not BACKUP_LOCK.locked():
+                cfg = fetch_server_config(conf)
+                equipamentos = cfg.get("equipamentos") or cfg.get("nvrs") or []
+                with RTSP_LOCK:
+                    capturar_noite_vms(equipamentos, conf)
+        except Exception:
+            LOG.exception("Night image cycle failed")
+        STOP.wait(INTERVALO_CICLO_S)
+
 def heartbeat(conf, pending):
     while not STOP.is_set():
         started = time.monotonic()
@@ -78,8 +108,8 @@ def heartbeat(conf, pending):
                     return
                 if response.get("backup"):
                     pending.set()
-                if response.get("rtsp_task"):
-                    LOG.warning("RTSP tasks not yet implemented for ARMv7 pilot")
+                if isinstance(response.get("rtsp_task"), dict):
+                    threading.Thread(target=run_rtsp_task, args=(conf, response["rtsp_task"]), daemon=True).start()
                 if isinstance(response.get("conexao_task"), dict):
                     threading.Thread(target=run_connection_test, args=(conf, response["conexao_task"]), daemon=True).start()
         except Exception as exc:
@@ -118,6 +148,7 @@ def main():
     hour, minute = schedule(conf)
     pending = threading.Event()
     threading.Thread(target=heartbeat, args=(conf, pending), daemon=True).start()
+    threading.Thread(target=noite_loop, args=(conf,), daemon=True).start()
     started_at = time.monotonic()
     sync_at = started_at + 3600
     ota_at = started_at + OTA_PRIMEIRA_S
