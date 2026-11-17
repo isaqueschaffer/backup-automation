@@ -384,47 +384,14 @@ function SmbConfigSection({
       }}
     >
       <label className="form-label" style={{ marginBottom: 8, display: "block", fontWeight: 600 }}>
-        Acesso Remoto / SMB (caso o agente rode fora da máquina, ex: MikroTik) — opcional
+        Acesso remoto à pasta (agente fora da máquina, ex.: MikroTik) — opcional
       </label>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr 90px", gap: 12 }}>
         <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Host / IP do Windows</label>
-          <input
-            className="form-input"
-            type="text"
-            autoComplete="off"
-            placeholder="192.168.1.50"
-            value={eqForm.smb_host || ""}
-            onChange={e => setEqForm({ ...eqForm, smb_host: e.target.value })}
-          />
+          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>IP da máquina Windows *</label>
+          <input className="form-input" type="text" autoComplete="off" placeholder="192.168.1.50"
+            value={eqForm.smb_host || ""} onChange={e => setEqForm({ ...eqForm, smb_host: e.target.value })} />
         </div>
-        <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Usuário do Windows</label>
-          <input
-            className="form-input"
-            type="text"
-            autoComplete="off"
-            placeholder="Administrador"
-            value={eqForm.smb_usuario || ""}
-            onChange={e => setEqForm({ ...eqForm, smb_usuario: e.target.value })}
-          />
-        </div>
-        <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Senha do Windows</label>
-          <input
-            className="form-input"
-            type="password"
-            autoComplete="new-password"
-            placeholder={eqForm.smb_senha_definida ? "•••••• (vazio mantém)" : "Senha"}
-            value={eqForm.smb_senha || ""}
-            onChange={e => setEqForm({ ...eqForm, smb_senha: e.target.value })}
-          />
-        </div>
-      </div>
-      <label className="form-label" style={{ margin: "12px 0 8px", display: "block", fontWeight: 600 }}>
-        Criar usuário de leitura por SSH (alternativa a informar usuário/senha SMB acima)
-      </label>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px", gap: 12 }}>
         <div className="form-group" style={{ margin: 0 }}>
           <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Administrador (SSH)</label>
           <input className="form-input" type="text" autoComplete="off" placeholder="Administrador"
@@ -437,16 +404,13 @@ function SmbConfigSection({
             value={eqForm.ssh_senha || ""} onChange={e => setEqForm({ ...eqForm, ssh_senha: e.target.value })} />
         </div>
         <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Porta</label>
+          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Porta SSH</label>
           <input className="form-input" type="number" placeholder="22"
             value={eqForm.ssh_porta ?? ""} onChange={e => setEqForm({ ...eqForm, ssh_porta: e.target.value })} />
         </div>
       </div>
       <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
-        O agente entra por SSH uma vez, cria o usuário somente leitura "trilan_leitura" e compartilha só a pasta de origem; depois lê por SMB com esse usuário. Exige SSH e SMB (porta 445) liberados na máquina e a pasta em um drive (ex.: D:UNM2000/emsback).
-      </span>
-      <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
-        Se o agente estiver em container no MikroTik ou outro servidor, informe o IP e as credenciais da máquina Windows. A pasta de origem pode ser informada como D:UNM2000/emsback, D:\UNM2000\emsback ou \\192.168.1.50\D$\UNM2000\emsback.
+        O agente entra por SSH uma vez, cria o usuário somente leitura "trilan_leitura" e compartilha só a pasta de origem; depois lê por SMB (porta 445) com esse usuário. Use a pasta com drive (ex.: D:UNM2000/emsback). O IP vale para todas as pastas deste equipamento.
       </span>
     </div>
   );

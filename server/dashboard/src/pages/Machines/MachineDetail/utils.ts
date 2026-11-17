@@ -136,6 +136,7 @@ export function buildEqPayload(
     if (eqForm.ssh_usuario?.trim()) cfg.ssh_usuario = eqForm.ssh_usuario.trim();
     if (eqForm.ssh_senha) cfg.ssh_senha = eqForm.ssh_senha;
     if (eqForm.ssh_porta) cfg.ssh_porta = Number(eqForm.ssh_porta);
+    if (cfg.ssh_usuario && !cfg.smb_host) return { error: "Informe o IP da máquina Windows para acessar a pasta por SSH/SMB." };
     payload.config_extra = cfg;
   } else if (eqForm.tipo === "OLT") {
     if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
@@ -162,6 +163,7 @@ export function buildEqPayload(
       if (eqForm.ssh_usuario?.trim()) cfg.ssh_usuario = eqForm.ssh_usuario.trim();
       if (eqForm.ssh_senha) cfg.ssh_senha = eqForm.ssh_senha;
       if (eqForm.ssh_porta) cfg.ssh_porta = Number(eqForm.ssh_porta);
+      if (cfg.ssh_usuario && !cfg.smb_host) return { error: "Informe o IP da máquina Windows para acessar a pasta por SSH/SMB." };
       if (cfg.olts) {
         if (!cfg.telnet_usuario) return { error: "Para monitorar as OLTs, informe o usuário do Telnet." };
         if (!eqForm.telnet_senha && !(editingEqId && eqForm.telnet_senha_definida)) return { error: "Para monitorar as OLTs, informe a senha do Telnet." };
