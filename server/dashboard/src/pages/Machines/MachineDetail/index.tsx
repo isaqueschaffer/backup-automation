@@ -249,7 +249,7 @@ export default function MachineDetail() {
   };
 
   const handleSaveEquipamento = async () => {
-    const { error, payload } = buildEqPayload(eqForm, editingEqId);
+    const { error, payload } = buildEqPayload(eqForm, editingEqId, machine?.agente_tipo);
     if (error || !payload) { toast(error || "Dados inválidos.", "error"); return; }
 
     setSaving(true);
@@ -548,7 +548,7 @@ export default function MachineDetail() {
       {/* ── Modal: Adicionar/Editar Equipamento ── */}
       {showEqModal && (
         <EquipamentoFormModal
-          machineId={id!} eqForm={eqForm} setEqForm={setEqForm} editingEqId={editingEqId}
+          machineId={id!} agenteTipo={machine?.agente_tipo} eqForm={eqForm} setEqForm={setEqForm} editingEqId={editingEqId}
           saving={saving} onSave={handleSaveEquipamento} onClose={() => setShowEqModal(false)}
           onErro={mensagem => toast(mensagem, "error")}
         />

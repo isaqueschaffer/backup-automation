@@ -189,6 +189,7 @@ _MIGRACOES_COLUNAS = [
     ("clients", "backup_requested", "ALTER TABLE clients ADD COLUMN backup_requested BOOLEAN NOT NULL DEFAULT FALSE;"),
     ("clients", "telemetry", "ALTER TABLE clients ADD COLUMN telemetry JSON;"),
     ("clients", "agent_version", "ALTER TABLE clients ADD COLUMN agent_version VARCHAR(20);"),
+    ("clients", "agente_tipo", "ALTER TABLE clients ADD COLUMN agente_tipo VARCHAR(20) NOT NULL DEFAULT 'WINDOWS';"),
     ("agent_versions", "url_linux", "ALTER TABLE agent_versions ADD COLUMN url_linux TEXT;"),
     ("agent_versions", "sha256_linux", "ALTER TABLE agent_versions ADD COLUMN sha256_linux VARCHAR(64);"),
     ("clients", "group_id", "ALTER TABLE clients ADD COLUMN group_id UUID REFERENCES client_groups(id) ON DELETE SET NULL;"),

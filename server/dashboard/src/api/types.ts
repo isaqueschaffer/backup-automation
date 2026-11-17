@@ -76,6 +76,11 @@ export interface EquipamentoConfig {
   smb_usuario?: string;
   smb_senha?: string;
   smb_senha_definida?: boolean;
+  // SSH do administrador do Windows: usado só para criar o usuário de leitura (trilan_leitura)
+  ssh_usuario?: string;
+  ssh_senha?: string;
+  ssh_senha_definida?: boolean;
+  ssh_porta?: number | string;
   [key: string]: unknown;
 }
 
@@ -115,6 +120,11 @@ export interface EqForm {
   smb_usuario?: string;
   smb_senha?: string;
   smb_senha_definida?: boolean;
+  // SSH do administrador do Windows: usado só para criar o usuário de leitura (trilan_leitura)
+  ssh_usuario?: string;
+  ssh_senha?: string;
+  ssh_senha_definida?: boolean;
+  ssh_porta?: number | string;
   // Planilha das câmeras do Digifort lida no formulário (enviada à Galeria ao salvar)
   planilhaNova?: PlanilhaPendente | null;
   // Digifort já cadastrado: o que a Galeria do equipamento já tem (exigência satisfeita sem nova planilha)
@@ -256,6 +266,8 @@ export type Equipamento = NVR;
 export interface Machine {
   id: string;
   name: string;
+  // Onde o agente roda: na própria máquina Windows ou no MikroTik (acessa cada equipamento pelo IP)
+  agente_tipo?: "WINDOWS" | "MIKROTIK";
   api_key_prefix: string;
   backup_hour: number;
   backup_minute: number;

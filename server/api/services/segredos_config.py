@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from services.crypto_service import decrypt, encrypt
 
-SEGREDOS = ("telnet_senha", "telnet_enable", "nomes_db_senha", "smb_senha", "smb_password")
+SEGREDOS = ("telnet_senha", "telnet_enable", "nomes_db_senha", "smb_senha", "smb_password", "ssh_senha")
 
 
 def tem_segredos(config: Optional[dict]) -> bool:

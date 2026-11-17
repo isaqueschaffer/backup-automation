@@ -39,6 +39,10 @@ export function emptyEqForm(overrides: Partial<EqForm> = {}): EqForm {
     smb_usuario: "",
     smb_senha: "",
     smb_senha_definida: false,
+    ssh_usuario: "",
+    ssh_senha: "",
+    ssh_senha_definida: false,
+    ssh_porta: "",
     ...overrides,
   };
 }
@@ -78,6 +82,10 @@ export function eqToForm(eq: NVR): EqForm {
     smb_usuario: cfg?.smb_usuario || "",
     smb_senha: "",
     smb_senha_definida: !!cfg?.smb_senha_definida,
+    ssh_usuario: cfg?.ssh_usuario || "",
+    ssh_senha: "",
+    ssh_senha_definida: !!cfg?.ssh_senha_definida,
+    ssh_porta: cfg?.ssh_porta ?? "",
   };
 }
 
@@ -92,7 +100,8 @@ export interface EqPayload {
 
 export function buildEqPayload(
   eqForm: EqForm,
-  editingEqId: string | null
+  editingEqId: string | null,
+  agenteTipo?: "WINDOWS" | "MIKROTIK"
 ): { error?: string; payload?: EqPayload } {
   if (!eqForm.name.trim()) return { error: "Preencha o nome do equipamento." };
   const payload: EqPayload = { tipo: eqForm.tipo, name: eqForm.name.trim(), ip: "", username: "", password: "", config_extra: null };
@@ -125,6 +134,10 @@ export function buildEqPayload(
     if (eqForm.smb_host?.trim()) cfg.smb_host = eqForm.smb_host.trim();
     if (eqForm.smb_usuario?.trim()) cfg.smb_usuario = eqForm.smb_usuario.trim();
     if (eqForm.smb_senha) cfg.smb_senha = eqForm.smb_senha;
+    if (eqForm.ssh_usuario?.trim()) cfg.ssh_usuario = eqForm.ssh_usuario.trim();
+    if (eqForm.ssh_senha) cfg.ssh_senha = eqForm.ssh_senha;
+    if (eqForm.ssh_porta) cfg.ssh_porta = Number(eqForm.ssh_porta);
+    if ((agenteTipo === "MIKROTIK" || cfg.ssh_usuario) && !cfg.smb_host) return { error: "Agente no MikroTik: informe o IP da máquina deste equipamento para acessar a pasta." };
     payload.config_extra = cfg;
   } else if (eqForm.tipo === "OLT") {
     if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
@@ -148,6 +161,10 @@ export function buildEqPayload(
       if (eqForm.smb_host?.trim()) cfg.smb_host = eqForm.smb_host.trim();
       if (eqForm.smb_usuario?.trim()) cfg.smb_usuario = eqForm.smb_usuario.trim();
       if (eqForm.smb_senha) cfg.smb_senha = eqForm.smb_senha;
+      if (eqForm.ssh_usuario?.trim()) cfg.ssh_usuario = eqForm.ssh_usuario.trim();
+      if (eqForm.ssh_senha) cfg.ssh_senha = eqForm.ssh_senha;
+      if (eqForm.ssh_porta) cfg.ssh_porta = Number(eqForm.ssh_porta);
+      if ((agenteTipo === "MIKROTIK" || cfg.ssh_usuario) && !cfg.smb_host) return { error: "Agente no MikroTik: informe o IP da máquina deste equipamento para acessar a pasta." };
       if (cfg.olts) {
         if (!cfg.telnet_usuario) return { error: "Para monitorar as OLTs, informe o usuário do Telnet." };
         if (!eqForm.telnet_senha && !(editingEqId && eqForm.telnet_senha_definida)) return { error: "Para monitorar as OLTs, informe a senha do Telnet." };

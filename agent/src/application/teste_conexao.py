@@ -155,20 +155,41 @@ def _pasta(t: _Teste, etapa_id: str, caminho: str, eq: dict = None, cfg: dict = 
         except (ValueError, TypeError):
             smb_porta = 445
 
+        from src.backup.smb_ssh_provisioner import alvo_por_ssh, usa_provisionamento_ssh
+        por_ssh = usa_provisionamento_ssh(cfg_dict)
         try:
-            target = parse_smb_target(
-                caminho,
-                host=smb_host,
-                user=smb_user,
-                password=smb_pass,
-                port=smb_porta,
-            )
+            if por_ssh:
+                target, msg_ssh = alvo_por_ssh(caminho, smb_host, cfg_dict)
+                if target is None:
+                    t.erro(etapa_id, t._sem_senha(msg_ssh))
+                    raise _Falha(t._sem_senha(f"Não foi possível criar o acesso de leitura por SSH: {msg_ssh}"))
+            else:
+                target = parse_smb_target(
+                    caminho,
+                    host=smb_host,
+                    user=smb_user,
+                    password=smb_pass,
+                    port=smb_porta,
+                )
+        except _Falha:
+            raise
         except Exception as e:
             t.erro(etapa_id, f"Caminho SMB inválido: {e}")
             raise _Falha(f"Formato de caminho SMB inválido ({caminho}): {e}")
 
         storage = SmbStorage()
         ok, msg, qtd = storage.test_connection(target)
+        if not ok and por_ssh:
+            # usuário apagado/senha trocada no cliente: recria por SSH uma vez
+            novo, _ = alvo_por_ssh(caminho, smb_host, cfg_dict, forcar=True)
+            if novo is not None:
+                target = novo
+                try:
+                    import smbclient
+                    smbclient.reset_connection_cache()
+                except Exception:
+                    pass
+                ok, msg, qtd = storage.test_connection(target)
         if not ok:
             t.erro(etapa_id, t._sem_senha(msg))
             raise _Falha(t._sem_senha(f"Falha de acesso SMB em {target.unc_path}: {msg}"))
