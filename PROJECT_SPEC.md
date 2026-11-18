@@ -1123,6 +1123,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-18] — Painel: trocar "onde o agente roda" (Windows/MikroTik) de uma máquina já criada
+
+**Problema:** o tipo do agente (`clients.agente_tipo`, WINDOWS | MIKROTIK) só era escolhido na criação da máquina; se o cliente trocasse (ex.: tirou o Windows e passou a usar o MikroTik, ou o contrário), era preciso criar outra máquina e perder o histórico. O backend já aceitava o campo no `PUT /api/v1/machines/{id}` (`MachineUpdate.agente_tipo`) e já o registrava nos Eventos do Agente ("onde o agente roda"), mas o modal "Editar Máquina" não mostrava o campo.
+**Alteração (painel):** `EditMachineModal` ganha o seletor "Onde o agente roda" (mesmos textos da criação) e, quando o valor muda, um aviso do que fazer: instalar o agente no novo lugar com o mesmo Client ID/API Key da máquina (histórico preservado), revisar os equipamentos (IP de cada um; UNM2000/Digifort com o IP da máquina da pasta) e, no MikroTik, que só o backup em túnel de UNM2000/Digifort roda. `MachineDetail` envia `agente_tipo` no salvar.
+**Testes:** `server/api/tests/test_agente_tipo_edicao.py` (novo, 3: troca nos dois sentidos com registro do evento, editar outro campo não muda o tipo, valor inválido recusado); `tsc` e build do painel OK.
+**Arquivos:** server/dashboard/src/pages/Machines/MachineDetail/{index.tsx,components/EditMachineModal.tsx}, server/api/tests/test_agente_tipo_edicao.py (novo), PROJECT_SPEC.md.
+
 ### [2026-11-18] — Agente 1.1.58: Mikrotik como túnel (backup em fluxo, nada gravado no roteador), coletas e OTA que instala biblioteca nova
 
 **Decisão:** o Mikrotik é **ponte** até o servidor: pouco processamento e nada gravado no roteador. Faz backup só **em túnel** (lê do cliente por SMB e envia ao servidor em fluxo, sem arquivo no roteador; decisão de 18/11, ver abaixo), não roda os webhooks Defense/Digifort (gravam CSV que só o relatório do backup lê) e a imagem da noite só sai quando pedida na Galeria (o ciclo automático da madrugada liga só com `TRILAN_NOITE_AUTOMATICA=true`).

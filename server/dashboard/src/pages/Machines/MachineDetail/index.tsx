@@ -89,7 +89,7 @@ export default function MachineDetail() {
   const [testeConexao, setTesteConexao] = useState<{ eqId: string; eqNome: string; eqTipo: string; origem: "salvar" | "card" } | null>(null);
   const [editingEqId, setEditingEqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditMachineForm>({
-    name: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "",
+    name: "", backup_hour: 2, backup_minute: 0, email_to: "", zip_password: "", agente_tipo: "WINDOWS",
   });
   const [saving, setSaving] = useState(false);
   // E-mails efetivos quando vêm do cliente (null = ainda não carregados ou máquina sem cliente)
@@ -317,6 +317,7 @@ export default function MachineDetail() {
       backup_minute: machine.backup_minute,
       email_to: ((machine.email_from_customer && customerEmails) || machine.email_to || []).join(", "),
       zip_password: "",
+      agente_tipo: machine.agente_tipo || "WINDOWS",
     });
     setShowEditModal(true);
   };
@@ -330,6 +331,7 @@ export default function MachineDetail() {
       const payload: Record<string, unknown> = {
         name: editForm.name,
         zip_password: editForm.zip_password || undefined,
+        agente_tipo: editForm.agente_tipo,
       };
       if (!machine?.email_from_customer) payload.email_to = parseEmails(editForm.email_to);
       if (!machine?.schedule_from_customer) {
@@ -558,6 +560,7 @@ export default function MachineDetail() {
       {showEditModal && (
         <EditMachineModal
           form={editForm} setForm={setEditForm}
+          agenteTipoAtual={machine.agente_tipo || "WINDOWS"}
           customerName={machine.schedule_from_customer ? (machine.customer_name || "vinculado") : null}
           emailCustomerName={machine.email_from_customer ? (machine.customer_name || "vinculado") : null}
           saving={saving} onSave={handleEditSave} onClose={() => setShowEditModal(false)}
