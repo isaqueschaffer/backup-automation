@@ -88,8 +88,33 @@ class TesteUpdaterLinux(unittest.TestCase):
         self.assertFalse(self._rodar(_pacote("9.9.8")))
         self.assertFalse((self.codigo / "atual").exists())
 
-    def test_requisitos_diferentes_recusa(self):
-        self.assertFalse(self._rodar(_pacote("9.9.9", requisitos="requests\nnova-lib\n")))
+    def test_requisitos_ja_instalados_nao_chamam_pip(self):
+        with mock.patch.object(updater_linux, "_instalar_com_pip") as pip:
+            self.assertTrue(self._rodar(_pacote("9.9.9", requisitos="requests>=2  # comentario\nurllib3\n")))
+        pip.assert_not_called()
+
+    def test_biblioteca_nova_instalada_pelo_pip(self):
+        instaladas = set()
+
+        def pip(faltam):
+            instaladas.update(faltam)
+            return True
+
+        satisfeito = updater_linux._satisfeito
+        with mock.patch.object(updater_linux, "_instalar_com_pip", side_effect=pip), \
+                mock.patch.object(updater_linux, "_satisfeito", side_effect=lambda l: l in instaladas or satisfeito(l)):
+            self.assertTrue(self._rodar(_pacote("9.9.9", requisitos="requests\nnova-lib-trilan>=1\n")))
+        self.assertEqual(instaladas, {"nova-lib-trilan>=1"})
+
+    def test_biblioteca_que_o_pip_nao_instala_recusa(self):
+        with mock.patch.object(updater_linux, "_instalar_com_pip", return_value=False):
+            self.assertFalse(self._rodar(_pacote("9.9.9", requisitos="requests\nnova-lib-trilan\n")))
+        self.assertFalse((self.codigo / "atual").exists())
+
+    def test_versao_instalada_fora_da_faixa_conta_como_faltando(self):
+        self.assertFalse(updater_linux._satisfeito("requests<1"))
+        self.assertTrue(updater_linux._satisfeito("requests>=2"))
+        self.assertTrue(updater_linux._satisfeito('pywin32>=300; sys_platform == "win32"') or sys.platform == "win32")
 
     def test_sintaxe_errada_recusa(self):
         self.assertFalse(self._rodar(_pacote("9.9.9", extra={"src/x.py": "def (:\n"})))

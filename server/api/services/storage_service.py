@@ -189,6 +189,43 @@ def save_zip_stream(
     return target, total
 
 
+async def save_zip_async_stream(
+    machine_id: UUID,
+    machine_name: str,
+    date_str: str,
+    device_type: str,
+    filename: str,
+    chunks,
+    max_bytes: int,
+    customer=None,
+) -> tuple[Path, int]:
+    """Como `save_zip_stream`, mas a partir de um iterador assíncrono de bytes (corpo da requisição em pedaços).
+
+    Usado pelo envio em túnel do agente do Mikrotik: o ZIP é montado enquanto passa, então não existe arquivo
+    do lado do agente e o tamanho final só se sabe ao fim. Se o agente cair no meio (ou passar de `max_bytes`),
+    o `.part` é removido e o ZIP anterior (se houver) continua intacto.
+    """
+    target = _resolve_zip_target(machine_id, machine_name, date_str, device_type, filename, customer=customer)
+    tmp = target.with_name(target.name + ".part")
+    total = 0
+    try:
+        with open(tmp, "wb") as out:
+            async for chunk in chunks:
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > max_bytes:
+                    raise UploadTooLargeError()
+                out.write(chunk)
+        if total == 0:
+            raise ValueError("corpo vazio")
+        tmp.replace(target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return target, total
+
+
 def get_zip_path(
     machine_id: UUID,
     machine_name: str,

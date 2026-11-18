@@ -1,26 +1,57 @@
 # Build with: docker buildx build --platform linux/arm/v7 -f agent/Dockerfile.mikrotik -t trilan-agent:armv7 ./agent --load
+#
+# Imagem do agente Linux (1.1.58), ponte leve até o servidor: tem tudo o que as rotinas dele usam, para as versões
+# novas chegarem pela OTA sem trocar a imagem. Python 3.14, o mesmo do build do Windows (evita código que só um dos dois aceita).
+# Troca de imagem só para biblioteca compilada sem wheel ARMv7 ou programa novo do sistema; biblioteca Python pura
+# nova a OTA instala sozinha (pip --user em /app/data/pyuser). O RB4011 tem ~479 MB livres: nada de compilador,
+# documentação ou Perl na imagem final.
 
-# Estágio 1: compila os pacotes que não têm wheel ARMv7 no PyPI (pynacl, pycryptodome, psutil, Pillow...).
-# O compilador fica só aqui; a imagem final não o leva (importante: o RB4011 tem ~479 MB livres).
-FROM python:3.11-slim-bookworm AS builder
+# Estágio 1: bibliotecas sem wheel ARMv7 no PyPI (psutil, Pillow, pycryptodome...) e um ffmpeg mínimo.
+FROM python:3.14-slim-trixie AS builder
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc make libc6-dev libffi-dev libssl-dev libjpeg-dev zlib1g-dev \
+       pkg-config curl xz-utils ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements-linux.txt /tmp/requirements-linux.txt
 RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements-linux.txt
 
-# Estágio 2: imagem final, só com as bibliotecas de execução.
-FROM python:3.11-slim-bookworm
+# ffmpeg só com o que o rtsp_client usa: RTSP/RTP (TCP e UDP), H.264/H.265/MJPEG/MPEG-4 e 1 JPEG na saída.
+# O do Debian (com todas as bibliotecas) ocupava ~420 MB; este fica em poucos MB e não depende de nenhuma .so extra.
+ARG FFMPEG_VERSAO=7.1.1
+ARG FFMPEG_SHA256=733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1
+RUN curl -fsSL -o /tmp/ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSAO}.tar.xz \
+    && echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum -c - \
+    && mkdir /tmp/ffmpeg && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1 \
+    && cd /tmp/ffmpeg \
+    && ./configure --prefix=/opt/ffmpeg --enable-small --disable-debug --disable-doc --disable-autodetect \
+       --disable-everything --disable-ffplay --disable-ffprobe --enable-ffmpeg \
+       --enable-protocol=tcp,udp,rtp,file,pipe \
+       --enable-demuxer=rtsp,rtp,sdp,h264,hevc,mjpeg,image2 \
+       --enable-decoder=h264,hevc,mjpeg,mpeg4 \
+       --enable-parser=h264,hevc,mjpeg,mpeg4video \
+       --enable-encoder=mjpeg \
+       --enable-muxer=image2,image2pipe,mjpeg \
+       --enable-filter=scale,format,null,buffer,buffersink,trim,setpts \
+    && make -j"$(nproc)" && make install && strip /opt/ffmpeg/bin/ffmpeg
+
+# Estágio 2: imagem final. O Mikrotik é PONTE: monitora, testa e captura imagem sob demanda, tudo em memória, e
+# não grava nada (sem backup, sem mysqldump, sem CSV de webhook; backup fica com os agentes Windows, que alcançam
+# outras máquinas por SMB). ping (antenas), fuso de São Paulo (horários dos logs e da imagem da noite).
+FROM python:3.14-slim-trixie
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TRILAN_ENABLE_BACKUPS=false TRILAN_LOG_LEVEL=INFO \
-    TRILAN_AGENT_DIR=/app TRILAN_CODE_DIR=/app/data/code
+    TRILAN_AGENT_DIR=/app TRILAN_CODE_DIR=/app/data/code PYTHONUSERBASE=/app/data/pyuser \
+    TZ=America/Sao_Paulo
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libffi8 libjpeg62-turbo zlib1g ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends libjpeg62-turbo zlib1g iputils-ping tzdata \
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
 COPY --from=builder /install /usr/local
+COPY --from=builder /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
 WORKDIR /app
 RUN mkdir -p /app/data && chmod 700 /app/data
-COPY agent.py service_linux.py launcher_linux.py requirements-linux.txt /app/
+COPY agent.py service_linux.py launcher_linux.py verificar_imagem.py requirements-linux.txt /app/
 COPY src/ /app/src/
+# Reprova a imagem se faltar programa, fuso, biblioteca, ou se algum módulo do agente não compilar/importar
+RUN python verificar_imagem.py && find /app -name __pycache__ -prune -exec rm -rf {} +
 # Mount /app/agent.conf securely; never bake credentials into the image.
 # launcher_linux.py (>= 1.1.52): roda o código da OTA (/app/data/code/atual) ou o da imagem, religa o agente
 # quando ele encerra e desfaz uma versão nova que não sobe. Ver README_MIKROTIK.md.

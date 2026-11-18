@@ -104,11 +104,17 @@ class FileManager:
     def __init__(self, check_hash: bool = True):
         self.copier = SafeCopier(check_hash=check_hash)
 
-    def process_equipment(self, equipamento: dict, pasta_destino: Path, tipo_parser: str, conf: dict = None) -> Dict[str, Any]:
-        """Backup do equipamento a partir da pasta de origem (ver _processar_backup). No Digifort, o status das
+    def process_equipment(self, equipamento: dict, pasta_destino: Path, tipo_parser: str, conf: dict = None,
+                          somente_preparar: bool = False) -> Dict[str, Any]:
+        """Backup do equipamento a partir da pasta de origem (ver _processar_backup).
+        `somente_preparar` (agente do Mikrotik, que não grava nada): faz tudo até a verificação de estabilidade e
+        devolve status "PRONTO" com `arquivos_origem` = [(BackupFile, nome_no_zip)] em vez de copiar para o disco;
+        quem chamou lê esses arquivos em fluxo (backup/tunel.py). Não cria pastas nem lê o status das câmeras. No Digifort, o status das
         cameras (ping e tempo de gravacao) vai no relatorio em qualquer desfecho do backup, e nao so quando um
         backup novo foi copiado: BACKUP_ANTIGO, JA_PROCESSADO ou NAO_ENCONTRADO nao escondem mais as gravacoes."""
-        resultado = self._processar_backup(equipamento, pasta_destino, tipo_parser, conf)
+        resultado = self._processar_backup(equipamento, pasta_destino, tipo_parser, conf, somente_preparar)
+        if somente_preparar:
+            return resultado
         if (equipamento.get("tipo") or "").upper() == "DIGIFORT" and resultado.get("cameras") is None:
             try:
                 pasta_destino.mkdir(parents=True, exist_ok=True)
@@ -119,7 +125,8 @@ class FileManager:
                 logging.warning("  [DIGIFORT] Falha ao obter o status das cameras.", exc_info=True)
         return resultado
 
-    def _processar_backup(self, equipamento: dict, pasta_destino: Path, tipo_parser: str, conf: dict = None) -> Dict[str, Any]:
+    def _processar_backup(self, equipamento: dict, pasta_destino: Path, tipo_parser: str, conf: dict = None,
+                          somente_preparar: bool = False) -> Dict[str, Any]:
         """
         Orquestra o backup de um equipamento lendo da pasta de origem.
         """
@@ -194,7 +201,8 @@ class FileManager:
         
         # Garante pasta de destino para este equipamento
         pasta_eq = pasta_destino
-        pasta_eq.mkdir(parents=True, exist_ok=True)
+        if not somente_preparar:
+            pasta_eq.mkdir(parents=True, exist_ok=True)
 
         parser = self._get_parser(tipo_parser)
         if not parser:
@@ -242,7 +250,7 @@ class FileManager:
             caminho_destino = pasta_eq / nome_destino
             arquivos_para_copiar.append((f, caminho_destino))
             
-            if not caminho_destino.exists():
+            if somente_preparar or not caminho_destino.exists():
                 ja_processado = False
 
         if ja_processado:
@@ -253,6 +261,15 @@ class FileManager:
         if not Validator.is_stable(grupo_recente):
             logging.warning(f"  Ação: Cópia ignorada. Motivo: {BackupStatus.EM_PROCESSAMENTO.value}")
             return {"nome": nome_original, "status": BackupStatus.EM_PROCESSAMENTO.value, "cameras": None}
+
+        if somente_preparar:
+            return {
+                "nome": nome_original,
+                "status": "PRONTO",
+                "arquivos_origem": [(origem, destino.name) for origem, destino in arquivos_para_copiar],
+                "tamanho_mb": grupo_recente.total_size_mb,
+                "cameras": None,
+            }
 
         # 5. Cópia Segura
         logging.info(f"  Iniciando cópia segura ({grupo_recente.total_size_mb:.2f} MB total)")

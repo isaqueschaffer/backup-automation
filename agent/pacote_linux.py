@@ -9,7 +9,7 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 SAIDA = BASE / "dist" / "TrilanAgentLinux.tar.gz"
-ARQUIVOS = ["agent.py", "service_linux.py", "requirements-linux.txt"]
+ARQUIVOS = ["agent.py", "service_linux.py", "requirements-linux.txt", "verificar_imagem.py"]
 
 
 def _filtro(info: tarfile.TarInfo):

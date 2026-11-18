@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request, Query
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -794,6 +795,56 @@ def receive_backup_report(
 
 # Rota síncrona (def): o FastAPI a executa no threadpool, então DB, disco e SMTP
 # (que pode levar dezenas de segundos) não bloqueiam o event loop.
+def _registrar_zip_recebido(db, request, machine, backup, backup_id, zip_path, zip_size, date_str):
+    """Passos de depois de gravar o ZIP: tamanho no registro, e-mail do relatório (ou rodada do Cliente).
+    Compartilhado pelo envio comum (multipart) e pelo envio em túnel (corpo em pedaços)."""
+    backup.zip_filename = zip_path.name
+    backup.zip_size = (backup.zip_size or 0) + zip_size
+    db.commit()
+
+    # Máquina com Cliente: o e-mail sai 1 vez por rodada (ao fechar), não por upload.
+    # O JSON de resposta ao agente é o mesmo (email_sent=False aqui).
+    if machine.customer_id is not None and backup.run_id is not None:
+        return {"status": "ok", "zip_size": zip_size, "email_sent": False}
+
+    # Send email (máquina sem Cliente)
+    nvr_results = backup.nvr_results or []
+
+    email_sent = send_backup_report(
+        machine_name=machine.name,
+        date_str=date_str,
+        nvr_results=nvr_results,
+        recipients=machine.email_to or [],
+        db=db,
+        zip_path=zip_path,
+        backup_id=backup_id,
+        base_url=str(request.base_url),
+        public_url=settings.PUBLIC_URL,
+        machine_id=machine.id,
+    )
+    backup.email_sent = email_sent or backup.email_sent
+
+    if email_sent:
+        recipients_str = ", ".join(machine.email_to) if machine.email_to else "destinatários configurados"
+        db.add(AgentLog(
+            machine_id=machine.id,
+            event_type="email_sent",
+            message=f"E-mail de relatório enviado com sucesso para: {recipients_str}."
+        ))
+    else:
+        recipients_str = ", ".join(machine.email_to) if machine.email_to else "nenhum destinatário cadastrado"
+        db.add(AgentLog(
+            machine_id=machine.id,
+            event_type="email_error",
+            nivel="ERROR",
+            message=f"Falha no envio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
+        ))
+
+    db.commit()
+
+    return {"status": "ok", "zip_size": zip_size, "email_sent": email_sent}
+
+
 @router.post("/backup/upload/{backup_id}")
 def upload_backup_zip(
     backup_id: str,
@@ -857,51 +908,116 @@ def upload_backup_zip(
     except ValueError:
         raise HTTPException(status_code=400, detail="Nome de arquivo inválido")
 
-    backup.zip_filename = zip_path.name
-    backup.zip_size = (backup.zip_size or 0) + zip_size
-    db.commit()
-
-    # Máquina com Cliente: o e-mail sai 1 vez por rodada (ao fechar), não por upload.
-    # O JSON de resposta ao agente é o mesmo (email_sent=False aqui).
-    if machine.customer_id is not None and backup.run_id is not None:
-        return {"status": "ok", "zip_size": zip_size, "email_sent": False}
-
-    # Send email (máquina sem Cliente)
-    nvr_results = backup.nvr_results or []
-
-    email_sent = send_backup_report(
-        machine_name=machine.name,
-        date_str=date_str,
-        nvr_results=nvr_results,
-        recipients=machine.email_to or [],
-        db=db,
-        zip_path=zip_path,
-        backup_id=backup_id,
-        base_url=str(request.base_url),
-        public_url=settings.PUBLIC_URL,
-        machine_id=machine.id,
+    return _registrar_zip_recebido(
+        db, request, machine, backup, backup_id, zip_path, zip_size, date_str,
     )
-    backup.email_sent = email_sent or backup.email_sent
 
-    if email_sent:
-        recipients_str = ", ".join(machine.email_to) if machine.email_to else "destinatários configurados"
-        db.add(AgentLog(
-            machine_id=machine.id,
-            event_type="email_sent",
-            message=f"E-mail de relatório enviado com sucesso para: {recipients_str}."
-        ))
+
+@router.put("/backup/upload-stream/{backup_id}")
+async def upload_backup_zip_stream(
+    backup_id: str,
+    request: Request,
+    device_type: str = Query("MIXED", description="Tipo de equipamento ou MIXED"),
+    nome: str = Query("", description="Nome do arquivo ZIP"),
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Envio em túnel (agente do Mikrotik): o corpo é o ZIP, enviado enquanto é montado, sem arquivo no agente.
+    Mesmas regras do envio comum; se a conexão cair no meio, nada é gravado (o `.part` é descartado)."""
+    from starlette.concurrency import run_in_threadpool
+    from starlette.requests import ClientDisconnect
+    from services.storage_service import save_zip_async_stream
+
+    if maquina_bloqueada(machine):
+        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
+    try:
+        backup_uuid = UUID(backup_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="Backup record not found")
+    backup = db.query(Backup).filter(Backup.id == backup_uuid, Backup.machine_id == machine.id).first()
+    if not backup:
+        raise HTTPException(status_code=404, detail="Backup record not found")
+
+    clean_device_type = device_type.strip().upper()
+    if clean_device_type not in TIPOS_EQUIPAMENTO and clean_device_type != "MIXED":
+        raise HTTPException(status_code=400, detail=f"Tipo de equipamento inválido: '{clean_device_type}'.")
+
+    date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
+    clean_machine = _sanitize_name(machine.name)
+    raw_filename = nome or f"backup_{clean_device_type.lower()}_{date_str}.zip"
+    if clean_machine.lower() not in raw_filename.lower():
+        if raw_filename.startswith("backup_"):
+            filename = f"backup_{clean_machine}_{raw_filename[7:]}"
+        else:
+            filename = f"backup_{clean_machine}_{raw_filename}"
     else:
-        recipients_str = ", ".join(machine.email_to) if machine.email_to else "nenhum destinatário cadastrado"
-        db.add(AgentLog(
+        filename = raw_filename
+
+    try:
+        zip_path, zip_size = await save_zip_async_stream(
             machine_id=machine.id,
-            event_type="email_error",
-            nivel="ERROR",
-            message=f"Falha no envio de e-mail de relatório ({recipients_str}). Verifique configurações SMTP e destinatários."
-        ))
+            machine_name=machine.name,
+            date_str=date_str,
+            device_type=clean_device_type,
+            filename=filename,
+            chunks=request.stream(),
+            max_bytes=settings.MAX_UPLOAD_MB * 1024 * 1024,
+            customer=machine.customer,
+        )
+    except UploadTooLargeError:
+        raise HTTPException(status_code=413, detail=f"Arquivo excede o limite de {settings.MAX_UPLOAD_MB} MB")
+    except ClientDisconnect:
+        logger.warning("Envio em túnel interrompido pelo agente (backup %s); nada foi gravado", backup_id)
+        raise HTTPException(status_code=400, detail="Envio interrompido")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Nome de arquivo inválido ou corpo vazio")
 
+    return await run_in_threadpool(
+        _registrar_zip_recebido, db, request, machine, backup, backup_id, zip_path, zip_size, date_str,
+    )
+
+
+class ResultadoEquipamento(BaseModel):
+    nome: str
+    status: str = Field(..., min_length=1, max_length=40)
+
+
+@router.post("/backup/{backup_id}/resultado")
+def corrigir_resultado_equipamento(
+    backup_id: str,
+    body: ResultadoEquipamento,
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Agente em túnel (Mikrotik): o relatório sai antes do envio, com o status provisório; se a leitura ou o envio
+    falhar no meio (tamanho/hash divergente, SMB caiu), o agente corrige o status do equipamento aqui."""
+    try:
+        backup_uuid = UUID(backup_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="Backup record not found")
+    backup = db.query(Backup).filter(Backup.id == backup_uuid, Backup.machine_id == machine.id).first()
+    if not backup:
+        raise HTTPException(status_code=404, detail="Backup record not found")
+
+    novo = body.status.strip().upper()
+    itens = [dict(i) if isinstance(i, dict) else i for i in (backup.nvr_results or [])]
+    achou = False
+    for item in itens:
+        if isinstance(item, dict) and item.get("nome") == body.nome:
+            item["status"] = novo
+            achou = True
+    if not achou:
+        raise HTTPException(status_code=404, detail="Equipamento não consta neste backup")
+
+    statuses = [i.get("status") for i in itens if isinstance(i, dict)]
+    geral = ("OK" if all(s == "OK" for s in statuses) else
+             "ERROR" if all(s == "ERRO" for s in statuses) else "PARTIAL")
+    backup.nvr_results = itens          # reatribui: o JSON só é gravado se o objeto mudar
+    backup.status = geral
+    if machine.last_backup_at is not None and backup.finished_at is not None             and abs((machine.last_backup_at - backup.finished_at).total_seconds()) < 1:
+        machine.last_backup_status = geral
     db.commit()
-
-    return {"status": "ok", "zip_size": zip_size, "email_sent": email_sent}
+    return {"status": "ok", "geral": geral}
 
 
 @router.post("/logs")

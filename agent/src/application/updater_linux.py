@@ -1,7 +1,9 @@
 """OTA do agente Linux (container no Mikrotik, >= 1.1.52).
 
 Diferente do Windows, não troca executável: baixa só o CÓDIGO do agente (TrilanAgentLinux.tar.gz, Python puro)
-e o grava numa pasta persistente. As bibliotecas compiladas para ARM continuam as da imagem.
+e o grava numa pasta persistente. As bibliotecas compiladas para ARM continuam as da imagem; uma biblioteca nova
+do requirements-linux.txt é instalada com pip --user em PYTHONUSERBASE (/app/data/pyuser) quando há wheel pronta
+(>= 1.1.58). Imagem nova só para biblioteca compilada sem wheel ARMv7 ou programa novo do sistema.
 
 Pastas (em TRILAN_CODE_DIR, padrão /app/data/code):
 - atual/     código em uso (o launcher_linux.py roda daqui quando é mais novo que o da imagem)
@@ -13,10 +15,14 @@ Fluxo: update-check (plataforma=linux) -> download -> SHA-256 -> extração segu
 -> troca as pastas -> o serviço encerra e o launcher sobe o código novo -> o 1º ping bem-sucedido confirma.
 """
 import hashlib
+import importlib
 import logging
 import os
 import re
 import shutil
+import site
+import subprocess
+import sys
 import tarfile
 import time
 from pathlib import Path
@@ -35,6 +41,7 @@ PENDENTE = DIR_CODIGO / "pendente"
 FALHOU = DIR_CODIGO / "falhou"
 TAMANHO_MAXIMO = 20 * 1024 * 1024        # o pacote tem ~1 MB; o roteador tem pouco espaço
 BLOQUEIO_FALHA_S = 24 * 3600
+PIP_TIMEOUT_S = 900                      # pip no ARMv7 é lento; só roda quando a versão pede biblioteca nova
 _RE_VERSAO = re.compile(r"^\d+\.\d+\.\d+$")
 _RE_CURRENT = re.compile(r'^CURRENT_VERSION\s*=\s*"([^"]+)"', re.M)
 
@@ -77,11 +84,83 @@ def _versao_do_codigo(pasta: Path) -> str:
 
 
 def _requisitos(pasta: Path):
+    """Linhas do requirements-linux.txt, sem comentários (None se o arquivo não existe)."""
     try:
         linhas = (pasta / "requirements-linux.txt").read_text(encoding="utf-8").splitlines()
     except OSError:
         return None
-    return sorted(l.strip().lower() for l in linhas if l.strip() and not l.strip().startswith("#"))
+    return [l.split("#", 1)[0].strip() for l in linhas if l.split("#", 1)[0].strip()]
+
+
+def _requirement(linha: str):
+    try:
+        from packaging.requirements import Requirement
+    except ImportError:
+        from pip._vendor.packaging.requirements import Requirement
+    return Requirement(linha)
+
+
+def _satisfeito(linha: str) -> bool:
+    """True se a biblioteca está instalada (imagem ou pasta da OTA) numa versão que atende a linha."""
+    import importlib.metadata as md
+    try:
+        req = _requirement(linha)
+    except Exception:
+        LOG.warning("[OTA] Linha do requirements-linux.txt não entendida: %r", linha[:80])
+        return False
+    if req.marker is not None and not req.marker.evaluate():
+        return True
+    try:
+        versao = md.version(req.name)
+    except md.PackageNotFoundError:
+        return False
+    return req.specifier.contains(versao, prereleases=True)
+
+
+def _pasta_pip_user() -> Path:
+    base = Path(os.environ.setdefault("PYTHONUSERBASE", "/app/data/pyuser"))
+    return base / "lib" / f"python{sys.version_info[0]}.{sys.version_info[1]}" / "site-packages"
+
+
+def _instalar_com_pip(faltam: list) -> bool:
+    """Instala as que faltam com pip --user na pasta persistente, só com wheel pronta (nada é compilado no
+    roteador): bibliotecas Python puras passam; uma compilada sem wheel ARMv7 falha e pede imagem nova."""
+    cmd = [sys.executable, "-m", "pip", "install", "--user", "--only-binary=:all:", "--no-cache-dir",
+           "--disable-pip-version-check", "--no-warn-script-location", "--quiet", *faltam]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=PIP_TIMEOUT_S,
+                           env=dict(os.environ))
+    except Exception as exc:
+        LOG.error("[OTA] pip não rodou: %s", exc)
+        return False
+    if r.returncode != 0:
+        LOG.error("[OTA] pip falhou (código %s): %s", r.returncode, (r.stderr or r.stdout or "").strip()[-500:])
+        return False
+    pasta = _pasta_pip_user()
+    if pasta.is_dir() and str(pasta) not in sys.path:
+        site.addsitedir(str(pasta))
+    importlib.invalidate_caches()
+    return True
+
+
+def garantir_requisitos(pasta: Path) -> bool:
+    """Confere se as bibliotecas pedidas pela versão nova estão instaladas e instala as que faltam (>= 1.1.58).
+    Antes, qualquer mudança no requirements-linux.txt exigia imagem nova do container."""
+    linhas = _requisitos(pasta)
+    if not linhas:
+        return True
+    faltam = [l for l in linhas if not _satisfeito(l)]
+    if not faltam:
+        return True
+    LOG.warning("[OTA] Bibliotecas que a versão nova pede e a imagem não tem: %s. Instalando...", ", ".join(faltam))
+    if not _instalar_com_pip(faltam):
+        return False
+    ainda = [l for l in faltam if not _satisfeito(l)]
+    if ainda:
+        LOG.error("[OTA] Continuam faltando depois do pip: %s", ", ".join(ainda))
+        return False
+    LOG.info("[OTA] Bibliotecas instaladas: %s", ", ".join(faltam))
+    return True
 
 
 def _bloqueada(versao: str) -> bool:
@@ -172,14 +251,12 @@ def verificar_e_instalar(conf: dict) -> bool:
         if _versao_do_codigo(NOVO) != versao:
             LOG.error("[OTA] Pacote é da versão %r, não da %s. Cancelado.", _versao_do_codigo(NOVO), versao)
             return False
-        # Biblioteca nova exige imagem nova (compilada para ARM): o código sozinho não basta
-        imagem = Path(os.getenv("TRILAN_AGENT_DIR", "/app"))
-        req_img, req_novo = _requisitos(imagem), _requisitos(NOVO)
-        if req_img is not None and req_novo is not None and req_img != req_novo:
-            LOG.error("[OTA] A versão %s muda o requirements-linux.txt: precisa de imagem nova do container. "
-                      "Atualização ignorada.", versao)
-            return False
         if not _sintaxe_ok(NOVO):
+            return False
+        # Biblioteca nova: instalada aqui se for Python puro; compilada sem wheel ARMv7 exige imagem nova
+        if not garantir_requisitos(NOVO):
+            LOG.error("[OTA] A versão %s pede biblioteca que não deu para instalar: precisa de imagem nova do "
+                      "container. Atualização ignorada.", versao)
             return False
         # Troca: atual -> anterior, novo -> atual. O processo encerra logo em seguida.
         shutil.rmtree(ANTERIOR, ignore_errors=True)

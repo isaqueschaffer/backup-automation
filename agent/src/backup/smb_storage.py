@@ -249,7 +249,8 @@ class SmbStorage:
                     mtime = datetime.fromtimestamp(item.stat().st_mtime)
                 except Exception:
                     pass
-                item_unc = f"{caminho_unc.rstrip('\\')}\\{item.name}"
+                # Sem "\\" dentro das chaves do f-string: o Python < 3.12 recusa (imagem antiga do Mikrotik)
+                item_unc = caminho_unc.rstrip("\\") + "\\" + item.name
                 entries.append(SmbEntry(
                     name=item.name,
                     unc_path=item_unc,

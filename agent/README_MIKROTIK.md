@@ -2,16 +2,62 @@
 
 The Windows version in branch `isaque` is unchanged. This branch adds a separate Linux runner and Dockerfile. **Not production ready**.
 
-## Implemented
-- Reuses existing client configuration, `/api/v1/agent/config`, and `/api/v1/agent/ping`.
-- Heartbeats roughly every 15 seconds (API latency permitting).
-- Remote restart command stops the agent; `launcher_linux.py` starts it again (>= 1.1.52).
-- OTA of the agent code (>= 1.1.52): see "Atualização automática" below.
-- Manual and scheduled backup dispatch exists, but is **disabled by default**.
+## Imagem completa (1.1.58) — o que o agente Linux faz
+
+**O Mikrotik é uma PONTE/TÚNEL até o servidor:** pouco processamento e nada gravado no roteador, nem arquivo
+temporário. Tudo o que ele faz é em memória e o resultado vai direto ao servidor. **Faz backup só em túnel** (ver
+abaixo): lê o backup do UNM2000/Digifort do cliente por SMB e o envia em fluxo ao servidor. NVR, PABX, VSOL, Huawei e
+demais tipos que gravam em disco ficam com os agentes Windows. Não roda os webhooks Defense/Digifort (gravam CSV).
+A imagem leva tudo o que as rotinas dele usam, para as versões seguintes chegarem pela OTA sem trocar a imagem:
+
+| Rotina (1.1.58) | Usa |
+|---|---|
+| Ping, reinício pelo painel, OTA, log no painel | — |
+| Captura da Galeria sob demanda (ao vivo, referência, noite; uma por vez) | `ffmpeg` mínimo (JPEG por pipe, sem arquivo) |
+| Presença das câmeras, status das OLTs (SNMP), antenas (SSH no MikroTik + ping), alarmes do Defense e armar/desarmar central | `ping`, `pysnmp`, `paramiko` |
+| Teste de conexão pedido pelo painel | — |
+| Backup em túnel (UNM2000 e Digifort por pasta de rede, no horário e sob demanda) | `smbprotocol`, `pyzipper` |
+
+- Ciclo automático da imagem da noite (19h30–4h, um frame de cada câmera a cada 10 min): desligado no Mikrotik;
+  `TRILAN_NOITE_AUTOMATICA=true` liga. O backup em túnel vem ligado; `TRILAN_ENABLE_BACKUPS=false` desliga.
+
+### Backup em túnel (`src/backup/tunel.py`)
+
+```
+pasta do UNM2000/Digifort --SMB--> montador do ZIP (memória) --fila ~2 MB--> PUT em pedaços --> servidor
+```
+
+- **Nada vai ao disco do roteador:** o ZIP com a senha da máquina e o `backup.zip` de cada equipamento são montados
+  enquanto os bytes passam (mesma estrutura do agente Windows: `<TIPO>/backup_<tipo>_<nome>/backup.zip`). A fila
+  é pequena e bloqueia a leitura quando o envio está lento: a memória fica em poucos MB, seja qual for o tamanho.
+- **Servidor:** `PUT /api/v1/agent/backup/upload-stream/{backup_id}` (corpo em pedaços; mesmas regras do envio
+  comum: limite de tamanho, ZIP só substitui o anterior ao terminar, e-mail do relatório). Se a conexão cair no meio,
+  o `.part` é descartado. `POST /api/v1/agent/backup/{backup_id}/resultado` corrige o status de um equipamento.
+- **Ordem:** o relatório sai antes do envio, com os equipamentos prontos como OK (provisório). Se a leitura de um
+  deles falhar ou o tamanho lido divergir do informado pelo cliente (`CORROMPIDO`), o servidor descarta o parcial, o
+  status é corrigido e o ZIP é refeito sem ele. Falha de rede: uma nova tentativa; depois, `ERRO` nos pendentes.
+- **Conferência:** só pelo tamanho (não há cópia local para comparar o hash). Compressão desligada (os backups já
+  vêm comprimidos e a CPU do roteador é pouca); `TRILAN_TUNEL_COMPRESSAO=deflate` liga.
+- **Não entra no túnel** (grava arquivo em disco): NVR, PABX, VSOL, Huawei, Mikrotik, Defense (status `TIPO_NAO_SUPORTADO`
+  no relatório). O status das câmeras do Digifort que o agente Windows lê dos arquivos copiados (tempo de gravação)
+  também não sai pelo túnel: precisa dos arquivos em disco.
+- `verificar_imagem.py` monta um ZIP com senha em fluxo no build e reprova a imagem se falhar (pega problema de
+  zipfile/cripto no ARMv7 antes de chegar ao roteador).
+
+- **Python 3.14**, o mesmo do build do Windows (a 1.1.57 trazia código que o 3.11 da imagem antiga não compilava).
+- **Fuso** `TZ=America/Sao_Paulo` na imagem (sem ele o container ficava em UTC: horário do backup e janela da noite
+  3 h adiantados).
+- **ffmpeg mínimo** compilado no build (só RTSP/RTP, H.264/H.265/MJPEG/MPEG-4 e saída JPEG): o do Debian ocupava
+  ~420 MB e não cabia no RB4011.
+- **`verificar_imagem.py`** roda no fim do build e reprova a imagem se faltar programa, fuso, biblioteca ou se algum
+  módulo não compilar/importar. Num container em uso: `python /app/verificar_imagem.py`.
+- **OTA com biblioteca nova:** em vez de recusar toda mudança no `requirements-linux.txt`, a OTA confere se cada
+  biblioteca está instalada na versão pedida e instala as que faltam com `pip --user --only-binary=:all:` em
+  `/app/data/pyuser` (Python puro passa; nada é compilado no roteador). Imagem nova só para biblioteca compilada sem
+  wheel ARMv7 ou programa novo do sistema.
 
 ## Disabled / unvalidated
-- NVR, OLT, PABX, VMS backup routines have NOT been certified on ARMv7.
-- RTSP/FFmpeg, camera/OLT monitoring, Huawei inbound FTP, Defense webhooks, UNM2000 local-file access are not enabled in this pilot.
+- The router never stores a backup (bridge design): the tunnel streams it through memory (see "Backup em túnel").
 - Existing API client has `verify=False`. Correct certificate validation before production.
 - Existing timeout implementation can leave Python threads alive; introduce process-based cancellation before production.
 - Some Python dependencies or base image variants may not support ARMv7; build and runtime testing are still required.
@@ -90,8 +136,8 @@ isaqueschaffer/backup-automation`), sem commit. Anexo de release aceita até 2 G
 - Montar um `agent.conf` em `/app/agent.conf`, de preferência de uma **máquina de teste** criada no painel (nunca de
   cliente real). URL: `https://server.suportetrilan.com.br` (o piloto recusa `http://` sem
   `TRILAN_ALLOW_INSECURE_HTTP=true`).
-- O piloto só faz o ping a cada 15 s (a máquina aparece online no painel) e trata o reinício (encerra o processo; o
-  RouterOS precisa religar o container). Backups, câmeras, OLTs, RTSP, webhooks e OTA estão desligados.
+- (Até a 1.1.51 o piloto só fazia o ping. Desde a 1.1.58 roda todas as rotinas da tabela "Imagem completa"; só o
+  backup continua desligado por padrão.)
 
 ## Atualização automática (OTA, desde a 1.1.52)
 
@@ -100,8 +146,9 @@ A imagem passa a rodar `launcher_linux.py` em vez do `service_linux.py` direto:
 - O agente consulta `GET /api/v1/agent/update-check?plataforma=linux` 2 min depois de subir e a cada hora. A versão
   só é oferecida se tiver o pacote Linux cadastrado (`url_linux` + `sha256_linux`, via `publish_version.ps1 -UrlLinux`).
 - O pacote `TrilanAgentLinux.tar.gz` (anexo da release) leva só o código Python. As bibliotecas compiladas para ARM
-  continuam as da imagem. Por isso uma versão que muda o `requirements-linux.txt` é recusada (log "precisa de imagem
-  nova") e exige gerar e importar a imagem de novo.
+  continuam as da imagem. Até a 1.1.57, uma versão que mudava o `requirements-linux.txt` era recusada (log "precisa
+  de imagem nova"); desde a 1.1.58 a OTA instala a biblioteca que falta quando há wheel pronta (ver acima) e só recusa
+  se o pip não conseguir.
 - Fica em `/app/data/code/`: `atual/` (em uso), `anterior/`, `pendente` (versão ainda não confirmada) e `falhou`.
   O 1º ping bem-sucedido confirma a versão. Se ela cair 3 vezes ou não pingar em 10 min, o launcher volta para a
   anterior (ou para a da imagem) e não a baixa de novo por 24 h.

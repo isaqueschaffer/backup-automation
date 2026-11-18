@@ -372,6 +372,48 @@ def upload_zip(conf: dict, backup_id: str, zip_path: Path, device_type: str = "N
         return False
 
 
+def upload_zip_stream(conf: dict, backup_id: str, nome_zip: str, pedacos, device_type: str = "MIXED") -> bool:
+    """Envio em túnel (agente do Mikrotik): `pedacos` é um iterador de bytes (o ZIP sendo montado) e o corpo vai em
+    pedaços (Transfer-Encoding: chunked), sem arquivo no disco. Se o iterador falhar no meio, a conexão cai e o
+    servidor descarta o que recebeu."""
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"], "Content-Type": "application/zip"}
+    try:
+        r = requests.put(
+            f"{conf['server_url']}/api/v1/agent/backup/upload-stream/{backup_id}",
+            params={"device_type": device_type, "nome": nome_zip},
+            headers=headers,
+            data=pedacos,
+            timeout=TIMEOUT_SERVER,
+            verify=False,
+        )
+        r.raise_for_status()
+        try:
+            resp_json = r.json()
+        except ValueError:
+            resp_json = r.text[:100]
+        logging.info(f"  ZIP ({device_type}) enviado ao servidor em fluxo. Resposta: {resp_json}")
+        return True
+    except Exception as e:
+        logging.error(f"  Erro ao enviar ZIP em fluxo ({device_type}): {e}")
+        return False
+
+
+def corrigir_resultado(conf: dict, backup_id: str, nome: str, status: str) -> bool:
+    """Corrige no servidor o status de um equipamento do relatório (o do túnel sai antes do envio, provisório)."""
+    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
+    try:
+        r = requests.post(
+            f"{conf['server_url']}/api/v1/agent/backup/{backup_id}/resultado",
+            json={"nome": nome, "status": status},
+            headers=headers, timeout=30, verify=False,
+        )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"  Erro ao corrigir o resultado de {nome}: {e}")
+        return False
+
+
 def send_logs(conf: dict, logs: list) -> bool:
     """Envia lote de logs do agente para a API do servidor."""
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}

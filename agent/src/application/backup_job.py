@@ -158,8 +158,12 @@ def processar_olt(
     equipamento: dict,
     pasta_data: Path,
     conf: dict = None,
-    trigger: str = "scheduled"
+    trigger: str = "scheduled",
+    somente_preparar: bool = False,
 ) -> dict:
+    """`somente_preparar`: só o caminho de pasta de rede (UNM2000/Digifort) e sem gravar nada (agente do Mikrotik);
+    devolve status "PRONTO" com `arquivos_origem` para o túnel ler em fluxo. VSOL e Huawei (telnet/SSH com arquivo
+    em disco) respondem TIPO_NAO_SUPORTADO."""
 
     tipo = (equipamento.get("tipo") or "").lower()
 
@@ -189,6 +193,10 @@ def processar_olt(
         f"[OLT] Tipo={tipo} | Fabricante={fabricante}"
     )
 
+    if somente_preparar and fabricante not in ("unm", "unm2000"):
+        logging.warning(f"  [OLT] Fabricante '{fabricante}' grava arquivo em disco: fora do túnel do Mikrotik.")
+        return {"nome": equipamento.get("name", "OLT"), "status": "TIPO_NAO_SUPORTADO", "cameras": None}
+
     if fabricante == "vsol":
         return realizar_backup_vsol(
             equipamento,
@@ -207,7 +215,8 @@ def processar_olt(
             equipamento,
             pasta_data,
             conf,
-            trigger
+            trigger,
+            somente_preparar=somente_preparar,
         )
 
     logging.error(
