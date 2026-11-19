@@ -108,8 +108,9 @@ Desde a 1.1.34 todas as versões do `agent/requirements.txt` são fixas (`==`); 
 trilan-nvr-backup-automation/
 ├── PROJECT_SPEC.md              <- ESTE ARQUIVO (fonte de verdade)
 ├── README.md
-├── agent/                       <- Agente Windows (PyInstaller)
+├── agent/                       <- Agente Windows (PyInstaller) e Linux (MikroTik container)
 │   ├── service.py               <- Entry point do serviço Windows (ping em thread + loop principal)
+│   ├── service_linux.py         <- Entry point do container no MikroTik
 │   ├── tray.py                  <- Entry point do app de bandeja
 │   ├── agent.py                 <- Orquestrador de backup (reexporta run_backup)
 │   ├── agent.conf               <- Configuração local do agente (NAO versionar)
@@ -118,6 +119,9 @@ trilan-nvr-backup-automation/
 │   ├── publish_version.ps1
 │   ├── installer.iss            <- Instalador Inno Setup (versão do agente)
 │   ├── requirements.txt
+│   ├── requirements-linux.txt
+│   ├── Dockerfile.mikrotik      <- Imagem ARMv7 do agente no MikroTik
+│   ├── mikrotik/                <- Imagem do container (anexo de release) e scripts RouterOS (setup.rsc)
 │   ├── dist/                    <- EXEs compilados (NAO versionados; vão por upload no OTA Manager)
 │   └── src/
 │       ├── application/
@@ -1122,6 +1126,18 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-19] — Merge do ramo `helena` — script `setup.rsc` e provisionamento de rede/firewall no MikroTik
+
+- **Provisionamento MikroTik (`agent/mikrotik/setup.rsc`)**: script idempotente para RouterOS v7 que provisiona as regras de firewall e encaminhamento necessárias quando o container do agente roda no próprio MikroTik:
+  - Libera entrada SSH (TCP/22) vindo da bridge do container (`br-trilan`, sub-rede `172.30.250.0/30`) antes do primeiro drop da chain input (`TRILAN-SSH-ANTENAS`);
+  - Inclui a sub-rede no `available-from` do serviço `/ip service ssh` se houver restrição configurada;
+  - Libera encaminhamento (`forward`) da bridge para alcançar antenas e equipamentos em outras sub-redes (`TRILAN-FORWARD-CONTAINER`);
+  - Aplica regra de NAT `masquerade` para a sub-rede do container alcançar a rede das antenas (`TRILAN-NAT-CONTAINER`).
+- **Documentação (`agent/README_MIKROTIK.md`)**: adicionada seção detalhada "Regras de rede e firewall (SSH e Antenas)" instruindo a execução do script `/import setup.rsc`.
+- **Auditoria**: sem datas com fuso, sem segredos ou credenciais, sem conflitos com regras do projeto.
+- **Sem alteração em código executável do agente, servidor ou painel**: nenhuma nova versão do agente foi gerada.
+- **Arquivos**: agent/mikrotik/setup.rsc (novo), agent/README_MIKROTIK.md, PROJECT_SPEC.md.
 
 ### [2026-11-18] — Painel: trocar "onde o agente roda" (Windows/MikroTik) de uma máquina já criada
 
