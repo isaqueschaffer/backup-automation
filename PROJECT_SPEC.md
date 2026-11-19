@@ -1127,6 +1127,13 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-19] — Merge do ramo `helena` — alarme_task no schema PingResponse
+
+- **Schema da API (`server/api/schemas.py`)**: adicionado `alarme_task: Optional[dict] = None` ao schema `PingResponse`. O endpoint de ping (`routers/agent.py`) já retornava `alarme_task=comando["task"]` para despachar comandos de armar/desarmar central do DEFENSE (agente >= 1.1.50), e agora o campo está explicitamente declarado no modelo de resposta Pydantic.
+- **Auditoria**: sem datas com fuso, sem segredos ou credenciais, sem impacto em regras de isolamento.
+- **Sem alteração em código executável do agente ou painel**: nenhuma nova versão do agente foi gerada.
+- **Arquivos**: server/api/schemas.py, PROJECT_SPEC.md.
+
 ### [2026-11-19] — Merge do ramo `helena` — script `setup.rsc` e provisionamento de rede/firewall no MikroTik
 
 - **Provisionamento MikroTik (`agent/mikrotik/setup.rsc`)**: script idempotente para RouterOS v7 que provisiona as regras de firewall e encaminhamento necessárias quando o container do agente roda no próprio MikroTik:
