@@ -150,7 +150,7 @@ export default function Sidebar({ aberta = false, onFechar }: SidebarProps) {
                 to={to}
                 end={to === "/"}
                 onClick={onFechar}
-            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+                className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
               >
                 <Icon size={16} style={{ flexShrink: 0 }} />
                 {label}

@@ -1000,3 +1000,13 @@ body.dash-arrastando * { cursor: grabbing !important; }
   .page-header > * { max-width: 100%; }
   .page-header .btn { flex: 1 1 auto; justify-content: center; }
 }
+
+/* Ajustes conferidos em 390px (19/11/2026): filas de botões do cabeçalho quebram linha; grid sem colunas
+   declaradas (coluna "auto") não cresce além da tela; textos em linhas flex podem encolher e quebrar. */
+@media (max-width: 768px) {
+  .page-header, .page-header .flex { flex-wrap: wrap; }
+  .main-content [style*="display: grid"]:not([style*="grid-template-columns"]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .card [style*="display: flex"] > *, .modal [style*="display: flex"] > * { min-width: 0; overflow-wrap: break-word; }
+}
