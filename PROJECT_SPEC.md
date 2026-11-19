@@ -1127,6 +1127,12 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-19] — Agente 1.1.59: compatibilização de comandos e script de provisionamento RouterOS
+
+- **Versão**: bumped para 1.1.59 em `updater.py` (`CURRENT_VERSION`), `installer.iss` (`AppVersion`) e `server/dashboard/package.json`.
+- **Conteúdo da versão**: incorpora script `agent/mikrotik/setup.rsc` para provisionamento no RouterOS e alinhamento do schema `PingResponse` (`alarme_task`).
+- **Arquivos**: agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md.
+
 ### [2026-11-19] — Merge do ramo `helena` — alarme_task no schema PingResponse
 
 - **Schema da API (`server/api/schemas.py`)**: adicionado `alarme_task: Optional[dict] = None` ao schema `PingResponse`. O endpoint de ping (`routers/agent.py`) já retornava `alarme_task=comando["task"]` para despachar comandos de armar/desarmar central do DEFENSE (agente >= 1.1.50), e agora o campo está explicitamente declarado no modelo de resposta Pydantic.
