@@ -336,6 +336,8 @@ class PingResponse(BaseModel):
     rtsp_task: Optional[dict] = None
     # "Testar conexão" do painel (agente >= 1.1.44; os antigos ignoram o campo)
     conexao_task: Optional[dict] = None
+    # Armar/desarmar central do DEFENSE (agente >= 1.1.50; os antigos não recebem)
+    alarme_task: Optional[dict] = None
 
 
 class EtapaConexao(BaseModel):
