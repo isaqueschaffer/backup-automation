@@ -32,7 +32,12 @@ function getPapelLabel(papel: string): string {
   }
 }
 
-export default function Sidebar() {
+interface SidebarProps {
+  aberta?: boolean;
+  onFechar?: () => void;
+}
+
+export default function Sidebar({ aberta = false, onFechar }: SidebarProps) {
   const { me, logout, contaSelecionadaId, escolherConta } = useAuth();
   const { plural } = useRotulos();
   const isSuperAdmin = useSuperAdmin();
@@ -69,7 +74,7 @@ export default function Sidebar() {
   ];
 
   return (
-    <aside className="sidebar">
+    <aside id="menu-lateral" className={`sidebar${aberta ? " aberta" : ""}`}>
       <div className="sidebar-logo">
         <div className="sidebar-logo-mark">
           <div className="sidebar-logo-icon">
@@ -128,6 +133,7 @@ export default function Sidebar() {
             key={to}
             to={to}
             end={to === "/"}
+            onClick={onFechar}
             className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
           >
             <Icon size={16} style={{ flexShrink: 0 }} />
@@ -143,6 +149,7 @@ export default function Sidebar() {
                 key={to}
                 to={to}
                 end={to === "/"}
+                onClick={onFechar}
                 className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
               >
                 <Icon size={16} style={{ flexShrink: 0 }} />
