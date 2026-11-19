@@ -158,6 +158,30 @@ def _copiar_pasta(smb, zf_interno: zipfile.ZipFile, remoto: str, prefixo: str, i
     return total
 
 
+def _copiar_arquivo_local(zf_interno: zipfile.ZipFile, local: Path, nome_no_zip: str, item: str, parar=None) -> int:
+    """Lê um arquivo local (ex.: download de NVR) direto para o ZIP interno."""
+    try:
+        esperado = local.stat().st_size
+        lidos = 0
+        with open(local, "rb") as origem:
+            with zf_interno.open(nome_no_zip, "w", force_zip64=True) as destino:
+                while True:
+                    if parar is not None and parar():
+                        raise _Abortado()
+                    bloco = origem.read(BLOCO)
+                    if not bloco:
+                        break
+                    destino.write(bloco)
+                    lidos += len(bloco)
+    except (_Abortado, _Divergente):
+        raise
+    except Exception as e:
+        raise _FalhaLeitura(item, f"falha ao ler {local}: {e}") from e
+    if lidos != esperado:
+        raise _Divergente(item, f"{local}: leu {lidos} bytes, esperava {esperado}")
+    return lidos
+
+
 def montar_zip(saida, prontos: List[dict], senha: Optional[str]) -> None:
     """Escreve em `saida` (só `write`) o ZIP global com um `backup.zip` por equipamento. `prontos` = resultados da
     preparação (`nome`, `tipo`, `pasta_zip`, `arquivos_origem` = [(BackupFile, nome_no_zip)])."""
@@ -169,7 +193,7 @@ def montar_zip(saida, prontos: List[dict], senha: Optional[str]) -> None:
     else:
         ext = zipfile.ZipFile(saida, "w", compression=comp)
     with ext:
-        smb = _smbclient()
+        smb = None   # carrega só na primeira necessidade de SMB
         for res in prontos:
             nome = res["nome"]
             with ext.open(f"{res['pasta_zip']}/backup.zip", "w", force_zip64=True) as dentro:
@@ -177,11 +201,14 @@ def montar_zip(saida, prontos: List[dict], senha: Optional[str]) -> None:
                     for origem, nome_no_zip in res["arquivos_origem"]:
                         remoto = origem.remote_path or str(origem.path)
                         if not origem.is_smb:
-                            raise _FalhaLeitura(nome, f"{remoto}: pasta local não existe no Mikrotik")
-                        if origem.file_type == "DIGIFORT_DIR":
-                            _copiar_pasta(smb, interno, remoto, nome_no_zip, nome, parar)
+                            _copiar_arquivo_local(interno, origem.path, nome_no_zip, nome, parar)
                         else:
-                            _copiar_arquivo(smb, interno, remoto, nome_no_zip, nome, parar)
+                            if smb is None:
+                                smb = _smbclient()
+                            if origem.file_type == "DIGIFORT_DIR":
+                                _copiar_pasta(smb, interno, remoto, nome_no_zip, nome, parar)
+                            else:
+                                _copiar_arquivo(smb, interno, remoto, nome_no_zip, nome, parar)
             logging.info(f"  [TUNEL] {nome}: enviado ao fluxo")
 
 
@@ -222,6 +249,104 @@ def _status_da_falha(erro: BaseException) -> str:
     return "CORROMPIDO" if isinstance(erro, _Divergente) else "ERRO"
 
 
+def _preparar_nvr_tunel(eq: dict) -> dict:
+    """Baixa a config do NVR diretamente do device (HTTP) para arquivo temporário no agente."""
+    from src.backup.file_manager.models import BackupFile
+    from src.core.config import DIR_AGENT, parse_config_extra
+
+    nome = eq.get("name", "NVR")
+    ip = eq.get("ip", "")
+    user = eq.get("username", "admin")
+    pwd = eq.get("password", "")
+    config_extra = parse_config_extra(eq)
+    marca = (config_extra.get("marca") or "").upper()
+
+    if not ip:
+        return {"nome": nome, "status": "ERRO", "cameras": None}
+
+    if marca != "INTELBRAS":
+        logging.warning(f"  [NVR] {nome}: marca '{marca or 'desconhecida'}' não suportada no túnel (somente Intelbras).")
+        return {"nome": nome, "status": "TIPO_NAO_SUPORTADO", "cameras": None}
+
+    from src.nvr.intelbras.backup import baixar_configuracao_intelbras
+
+    pasta_tmp = DIR_AGENT / "data" / "tmp_nvr"
+    pasta_tmp.mkdir(parents=True, exist_ok=True)
+    data_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    # nome_seguro importado lazily via backup_job abaixo no preparar_equipamentos
+    import re as _re
+    nome_safe = _re.sub(r"[^\w.-]", "_", nome)
+    arquivo = pasta_tmp / f"CONFIG_INTELBRAS_{nome_safe}_{data_str}.backup"
+
+    ok = baixar_configuracao_intelbras(ip, user, pwd, arquivo)
+    if not ok or not arquivo.exists():
+        return {"nome": nome, "status": "ERRO", "cameras": None}
+
+    bf = BackupFile(path=arquivo, file_type="NVR_CONFIG", is_smb=False)
+    logging.info(f"  [NVR] {nome}: config baixada ({arquivo.stat().st_size:,} bytes)")
+    return {
+        "nome": nome,
+        "status": "PRONTO",
+        "arquivos_origem": [(bf, arquivo.name)],
+        "_tmp_files": [arquivo],
+        "cameras": None,
+    }
+
+
+def _preparar_defense_tunel(eq: dict) -> dict:
+    """Provisiona acesso SSH→SMB na máquina Windows e acha o arquivo de backup mais recente do Defense IA."""
+    from src.backup.file_manager.models import BackupFile
+    from src.backup.smb_ssh_provisioner import alvo_por_ssh, usa_provisionamento_ssh
+    from src.core.config import parse_config_extra
+    from pathlib import Path as _Path
+
+    nome = eq.get("name", "Defense")
+    config_extra = parse_config_extra(eq)
+    pasta_origem = config_extra.get("pasta_origem", "")
+    host = config_extra.get("smb_host") or eq.get("ip", "")
+
+    if not pasta_origem:
+        logging.warning(f"  [DEFENSE] {nome}: pasta_origem não configurada (necessário no túnel).")
+        return {"nome": nome, "status": "TIPO_NAO_SUPORTADO", "cameras": None}
+
+    if not usa_provisionamento_ssh(config_extra):
+        logging.warning(f"  [DEFENSE] {nome}: acesso SSH não configurado (necessário no túnel do MikroTik).")
+        return {"nome": nome, "status": "TIPO_NAO_SUPORTADO", "cameras": None}
+
+    alvo, msg = alvo_por_ssh(pasta_origem, host, config_extra)
+    if not alvo:
+        logging.warning(f"  [DEFENSE] {nome}: falha ao obter acesso SMB: {msg}")
+        return {"nome": nome, "status": "ERRO", "cameras": None}
+
+    try:
+        smb = _smbclient()
+        smb.register_session(server=alvo.host, username=alvo.username, password=alvo.password, port=alvo.port)
+
+        EXTS_BACKUP = {".enc", ".zip", ".dbk", ".bak"}
+        arquivos = [
+            e for e in smb.scandir(alvo.unc_path)
+            if not e.is_dir() and _Path(e.name).suffix.lower() in EXTS_BACKUP
+        ]
+        if not arquivos:
+            logging.warning(f"  [DEFENSE] {nome}: nenhum arquivo de backup em {alvo.unc_path}")
+            return {"nome": nome, "status": "SEM_ARQUIVOS", "cameras": None}
+
+        mais_recente = max(arquivos, key=lambda e: e.stat().st_mtime)
+        unc_arquivo = alvo.unc_path.rstrip("\\") + "\\" + mais_recente.name
+        bf = BackupFile(path=_Path(unc_arquivo), file_type="DEFENSE_BACKUP",
+                        remote_path=unc_arquivo, is_smb=True)
+        logging.info(f"  [DEFENSE] {nome}: arquivo encontrado — {mais_recente.name}")
+        return {
+            "nome": nome,
+            "status": "PRONTO",
+            "arquivos_origem": [(bf, mais_recente.name)],
+            "cameras": None,
+        }
+    except Exception as e:
+        logging.error(f"  [DEFENSE] {nome}: falha ao acessar backup via SMB: {e}", exc_info=True)
+        return {"nome": nome, "status": "ERRO", "cameras": None}
+
+
 def preparar_equipamentos(equipamentos: list, conf: dict, trigger: str) -> List[dict]:
     """Fase 1 (sem gravar nada): acha o backup mais recente de cada equipamento na pasta de rede do cliente e valida
     (data, completude, estabilidade). Quem está pronto volta com status "PRONTO"."""
@@ -237,6 +362,10 @@ def preparar_equipamentos(equipamentos: list, conf: dict, trigger: str) -> List[
                 with log_remoto.equipamento_atual(nome):
                     res = _executar_com_limite(processar_olt, LIMITE_EQUIPAMENTO_S, eq, PASTA_NENHUMA, conf, trigger,
                                                somente_preparar=True)
+            elif tipo == "NVR":
+                res = _preparar_nvr_tunel(eq)
+            elif tipo == "DEFENSE":
+                res = _preparar_defense_tunel(eq)
             else:
                 logging.warning(f"  Tipo '{tipo}' ({nome}) grava arquivos em disco: fora do túnel do Mikrotik "
                                 f"(o backup dele fica com um agente Windows).")
@@ -277,6 +406,8 @@ def executar_backup_tunel(trigger: str = "scheduled") -> None:
 
     started_at = datetime.utcnow()
     resultados = preparar_equipamentos(equipamentos, conf, trigger)
+    # Coleta arquivos temporários (ex.: downloads de NVR) para limpar após o envio
+    tmp_files: List[Path] = [f for r in resultados for f in r.pop("_tmp_files", [])]
     prontos = [r for r in resultados if r["status"] == "PRONTO"]
     for r in prontos:
         r["status"] = "OK"          # provisório: o relatório sai antes do envio; corrigido abaixo se algo falhar
@@ -315,6 +446,12 @@ def executar_backup_tunel(trigger: str = "scheduled") -> None:
                 r["status"] = "ERRO"
             break
         logging.warning("  [TUNEL] Envio falhou; tentando de novo.")
+
+    for f in tmp_files:
+        try:
+            f.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     logging.info(f"\nBackup em túnel concluído em {(datetime.utcnow() - started_at).total_seconds():.1f}s",
                  extra={"enviar_servidor": True})

@@ -355,6 +355,7 @@ export default function EquipamentoFormModal({ machineId, agenteTipo, eqForm, se
               Pasta onde o Defense IA salva os arquivos gerados no backup automático de banco de dados (opcional).
             </span>
           </div>
+          {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
         </>
       )}
       <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
