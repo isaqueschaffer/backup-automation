@@ -81,6 +81,12 @@ export interface EquipamentoConfig {
   ssh_senha?: string;
   ssh_senha_definida?: boolean;
   ssh_porta?: number | string;
+  // Método de acesso à máquina do cliente (agente do MikroTik): "sftp" (SSH somente leitura, nada é criado no cliente)
+  // ou "smb" (cria o usuário trilan_leitura e um share oculto por SSH). Chave privada é segredo (nunca volta ao painel).
+  acesso_remoto?: "sftp" | "smb" | string;
+  ssh_chave?: string;
+  ssh_chave_definida?: boolean;
+  ssh_fingerprint?: string;
   [key: string]: unknown;
 }
 
@@ -125,6 +131,12 @@ export interface EqForm {
   ssh_senha?: string;
   ssh_senha_definida?: boolean;
   ssh_porta?: number | string;
+  // Método de acesso à máquina do cliente (agente do MikroTik): "sftp" (SSH somente leitura, nada é criado no cliente)
+  // ou "smb" (cria o usuário trilan_leitura e um share oculto por SSH). Chave privada é segredo (nunca volta ao painel).
+  acesso_remoto?: "sftp" | "smb" | string;
+  ssh_chave?: string;
+  ssh_chave_definida?: boolean;
+  ssh_fingerprint?: string;
   // Planilha das câmeras do Digifort lida no formulário (enviada à Galeria ao salvar)
   planilhaNova?: PlanilhaPendente | null;
   // Digifort já cadastrado: o que a Galeria do equipamento já tem (exigência satisfeita sem nova planilha)

@@ -18,6 +18,7 @@ import logging
 import re
 import secrets
 import string
+import sys
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -114,11 +115,21 @@ def montar_script(usuario: str, senha: str, pastas: Dict[str, str]) -> str:
 
 def _executar_ssh(host: str, porta: int, admin_user: str, admin_senha: str, script: str, timeout: int = 60) -> str:
     import paramiko
-    cli = paramiko.SSHClient()
-    cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    if sys.platform != "win32":
+        # Agente do Mikrotik (Linux): a chave do host é verificada (TOFU em data/known_hosts_trilan ou
+        # ssh_fingerprint), sem AutoAddPolicy. O agente Windows segue como antes.
+        from src.backup.sftp_origem import ErroSftp, abrir_ssh
+        try:
+            cli = abrir_ssh(host, porta, admin_user, admin_senha, timeout=15)
+        except ErroSftp as e:
+            raise ProvisionamentoErro(str(e))
+    else:
+        cli = paramiko.SSHClient()
+        cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        cli.connect(host, port=porta, username=admin_user, password=admin_senha, timeout=15,
-                    banner_timeout=15, auth_timeout=15, look_for_keys=False, allow_agent=False)
+        if sys.platform == "win32":
+            cli.connect(host, port=porta, username=admin_user, password=admin_senha, timeout=15,
+                        banner_timeout=15, auth_timeout=15, look_for_keys=False, allow_agent=False)
         codificado = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
         _, out, err = cli.exec_command(f"powershell -NoProfile -NonInteractive -EncodedCommand {codificado}", timeout=timeout)
         saida = out.read().decode("utf-8", errors="ignore")

@@ -161,9 +161,8 @@ def processar_olt(
     trigger: str = "scheduled",
     somente_preparar: bool = False,
 ) -> dict:
-    """`somente_preparar`: só o caminho de pasta de rede (UNM2000/Digifort) e sem gravar nada (agente do Mikrotik);
-    devolve status "PRONTO" com `arquivos_origem` para o túnel ler em fluxo. VSOL e Huawei (telnet/SSH com arquivo
-    em disco) respondem TIPO_NAO_SUPORTADO."""
+    """`somente_preparar` (agente do Mikrotik, nada em disco): UNM2000/Digifort por pasta de rede ou SFTP, VSOL em
+    memória e Huawei por SSH (config em texto); devolve status "PRONTO" com `arquivos_origem` para o túnel ler."""
 
     tipo = (equipamento.get("tipo") or "").lower()
 
@@ -193,9 +192,18 @@ def processar_olt(
         f"[OLT] Tipo={tipo} | Fabricante={fabricante}"
     )
 
-    if somente_preparar and fabricante not in ("unm", "unm2000"):
-        logging.warning(f"  [OLT] Fabricante '{fabricante}' grava arquivo em disco: fora do túnel do Mikrotik.")
-        return {"nome": equipamento.get("name", "OLT"), "status": "TIPO_NAO_SUPORTADO", "cameras": None}
+    if somente_preparar:
+        # Túnel do Mikrotik: nada em disco. VSOL (HTTP) em memória; Huawei por SSH, config em texto; UNM2000/Digifort
+        # seguem abaixo (pasta de rede/SFTP, só lida em fluxo).
+        if fabricante == "vsol":
+            from src.backup.tunel_preparo import preparar_vsol
+            return preparar_vsol(equipamento)
+        if fabricante == "huawei":
+            from src.backup.tunel_preparo import preparar_huawei
+            return preparar_huawei(equipamento)
+        if fabricante not in ("unm", "unm2000"):
+            logging.warning(f"  [OLT] Fabricante '{fabricante}' não tem backup no túnel do Mikrotik.")
+            return {"nome": equipamento.get("name", "OLT"), "status": "TIPO_NAO_SUPORTADO", "cameras": None}
 
     if fabricante == "vsol":
         return realizar_backup_vsol(

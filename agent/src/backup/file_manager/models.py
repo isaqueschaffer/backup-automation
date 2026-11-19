@@ -2,7 +2,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Callable, List, Optional
 
 class BackupStatus(str, Enum):
     OK = "OK"
@@ -25,9 +25,34 @@ class BackupFile:
     remote_path: Optional[str] = None
     is_smb: bool = False
     _size: Optional[int] = None
-    
+    # Origens do túnel do Mikrotik (nada em disco): SFTP (PastaSftp da máquina do cliente), memória (bytes já
+    # baixados do equipamento) e fluxo HTTP (`abrir_fluxo()` devolve (iterador_de_blocos, tamanho_ou_None)).
+    is_sftp: bool = False
+    sftp: Any = None
+    dados: Optional[bytes] = None
+    abrir_fluxo: Optional[Callable[[], Any]] = None
+
+    @property
+    def origem(self) -> str:
+        if self.dados is not None:
+            return "memoria"
+        if self.abrir_fluxo is not None:
+            return "http"
+        if self.is_sftp:
+            return "sftp"
+        return "smb" if self.is_smb else "local"
+
     @property
     def size_bytes(self) -> int:
+        if self.dados is not None:
+            return len(self.dados)
+        if self.is_sftp:
+            if self._size is not None:
+                return self._size
+            try:
+                return self.sftp.tamanho(self.remote_path)
+            except Exception:
+                return 0
         if self.is_smb:
             if self._size is not None:
                 return self._size

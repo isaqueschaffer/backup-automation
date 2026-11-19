@@ -11,6 +11,8 @@ roteador (nem arquivo temporário). O Mikrotik só empurra os bytes:
   tamanho do backup.
 - Compressão desligada por padrão (os backups já são ZIP/TAR comprimidos e a CPU do roteador é pouca);
   `TRILAN_TUNEL_COMPRESSAO=deflate` liga.
+- Origens do ZIP: SMB, SFTP (SSH, em blocos, somente leitura), memória (bytes já baixados do equipamento, até
+  LIMITE_MEMORIA) e fluxo HTTP (PABX grande). Nunca o disco do roteador.
 - A verificação é pelo tamanho lido contra o tamanho do arquivo no cliente (não existe cópia local para conferir o
   hash). Se divergir, o envio é abortado: o servidor descarta o que chegou e o equipamento vira CORROMPIDO.
 """
@@ -182,9 +184,81 @@ def _copiar_arquivo_local(zf_interno: zipfile.ZipFile, local: Path, nome_no_zip:
     return lidos
 
 
-def montar_zip(saida, prontos: List[dict], senha: Optional[str]) -> None:
+def _ler_para_zip(zf_interno: zipfile.ZipFile, blocos, esperado: Optional[int], nome_no_zip: str, rotulo: str,
+                  item: str, parar=None) -> int:
+    """Copia o iterador `blocos` para `nome_no_zip` e confere o tamanho (se `esperado` for conhecido)."""
+    lidos = 0
+    try:
+        with zf_interno.open(nome_no_zip, "w", force_zip64=True) as destino:
+            for bloco in blocos:
+                if parar is not None and parar():
+                    raise _Abortado()
+                destino.write(bloco)
+                lidos += len(bloco)
+    except (_Abortado, _Divergente):
+        raise
+    except Exception as e:
+        raise _FalhaLeitura(item, f"falha ao ler {rotulo}: {e}") from e
+    if esperado is not None and lidos != esperado:
+        raise _Divergente(item, f"{rotulo}: leu {lidos} bytes, esperava {esperado}")
+    return lidos
+
+
+def _blocos_de(leitor, tamanho_bloco: int = BLOCO):
+    while True:
+        b = leitor.read(tamanho_bloco)
+        if not b:
+            return
+        yield b
+
+
+def _copiar_memoria(zf_interno: zipfile.ZipFile, dados: bytes, nome_no_zip: str, item: str, parar=None) -> int:
+    """Bytes já baixados do equipamento (config pequena): vão ao ZIP em pedaços; conferência = len."""
+    blocos = (dados[i:i + BLOCO] for i in range(0, len(dados), BLOCO))
+    return _ler_para_zip(zf_interno, blocos, len(dados), nome_no_zip, nome_no_zip, item, parar)
+
+
+def _copiar_http(zf_interno: zipfile.ZipFile, origem, nome_no_zip: str, item: str, parar=None) -> int:
+    """Download HTTP em fluxo (PABX grande): `abrir_fluxo()` -> (iterador, tamanho ou None)."""
+    try:
+        blocos, esperado = origem.abrir_fluxo()
+    except Exception as e:
+        raise _FalhaLeitura(item, f"falha ao baixar {nome_no_zip}: {e}") from e
+    return _ler_para_zip(zf_interno, blocos, esperado, nome_no_zip, nome_no_zip, item, parar)
+
+
+def _copiar_arquivo_sftp(pasta, zf_interno: zipfile.ZipFile, remoto: str, nome_no_zip: str, item: str,
+                         parar=None) -> int:
+    try:
+        esperado = pasta.stat(remoto).size
+        arq = pasta.abrir(remoto)
+    except Exception as e:
+        raise _FalhaLeitura(item, f"falha ao ler {remoto}: {e}") from e
+    try:
+        return _ler_para_zip(zf_interno, _blocos_de(arq), esperado, nome_no_zip, remoto, item, parar)
+    finally:
+        arq.close()
+
+
+def _copiar_pasta_sftp(pasta, zf_interno: zipfile.ZipFile, remoto: str, prefixo: str, item: str, parar=None) -> int:
+    total = 0
+    try:
+        entradas = pasta.listar(remoto)
+    except Exception as e:
+        raise _FalhaLeitura(item, f"falha ao listar {remoto}: {e}") from e
+    for entrada in entradas:
+        sub_zip = f"{prefixo}/{entrada.name}"
+        if entrada.is_dir:
+            total += _copiar_pasta_sftp(pasta, zf_interno, entrada.path, sub_zip, item, parar)
+        else:
+            total += _copiar_arquivo_sftp(pasta, zf_interno, entrada.path, sub_zip, item, parar)
+    return total
+
+
+def montar_zip(saida, prontos: List[dict], senha: Optional[str], extras: Optional[list] = None) -> None:
     """Escreve em `saida` (só `write`) o ZIP global com um `backup.zip` por equipamento. `prontos` = resultados da
-    preparação (`nome`, `tipo`, `pasta_zip`, `arquivos_origem` = [(BackupFile, nome_no_zip)])."""
+    preparação (`nome`, `tipo`, `pasta_zip`, `arquivos_origem` = [(BackupFile, nome_no_zip)]). `extras` =
+    [(caminho_no_zip, bytes)] entram direto no ZIP global (ex.: NVR/PLANILHA/*.xlsx)."""
     comp = _tipo_compressao()
     parar = getattr(saida, "abortado", None)
     if senha:
@@ -200,7 +274,16 @@ def montar_zip(saida, prontos: List[dict], senha: Optional[str]) -> None:
                 with zipfile.ZipFile(dentro, "w", compression=comp) as interno:
                     for origem, nome_no_zip in res["arquivos_origem"]:
                         remoto = origem.remote_path or str(origem.path)
-                        if not origem.is_smb:
+                        if getattr(origem, "dados", None) is not None:
+                            _copiar_memoria(interno, origem.dados, nome_no_zip, nome, parar)
+                        elif getattr(origem, "abrir_fluxo", None) is not None:
+                            _copiar_http(interno, origem, nome_no_zip, nome, parar)
+                        elif getattr(origem, "is_sftp", False):
+                            if origem.file_type == "DIGIFORT_DIR":
+                                _copiar_pasta_sftp(origem.sftp, interno, remoto, nome_no_zip, nome, parar)
+                            else:
+                                _copiar_arquivo_sftp(origem.sftp, interno, remoto, nome_no_zip, nome, parar)
+                        elif not origem.is_smb:
                             _copiar_arquivo_local(interno, origem.path, nome_no_zip, nome, parar)
                         else:
                             if smb is None:
@@ -210,11 +293,14 @@ def montar_zip(saida, prontos: List[dict], senha: Optional[str]) -> None:
                             else:
                                 _copiar_arquivo(smb, interno, remoto, nome_no_zip, nome, parar)
             logging.info(f"  [TUNEL] {nome}: enviado ao fluxo")
+        for caminho, dados in (extras or []):
+            ext.writestr(caminho, dados)
 
 
-def _produtor(fila: FilaSaida, prontos: List[dict], senha: Optional[str], falha: dict) -> None:
+def _produtor(fila: FilaSaida, prontos: List[dict], senha: Optional[str], falha: dict,
+              extras: Optional[list] = None) -> None:
     try:
-        montar_zip(fila, prontos, senha)
+        montar_zip(fila, prontos, senha, extras)
     except _Abortado:
         return
     except BaseException as e:      # leitura, tamanho ou qualquer outro erro derruba o envio: nunca sai ZIP incompleto
@@ -227,13 +313,13 @@ def _produtor(fila: FilaSaida, prontos: List[dict], senha: Optional[str], falha:
 
 
 def enviar_em_tunel(conf: dict, backup_id: str, nome_zip: str, prontos: List[dict],
-                    senha: Optional[str]) -> Tuple[bool, Optional[BaseException]]:
+                    senha: Optional[str], extras: Optional[list] = None) -> Tuple[bool, Optional[BaseException]]:
     """Monta e envia o ZIP de uma vez. Devolve (ok, erro_do_montador). `erro_do_montador` é preenchido quando foi a
     leitura do cliente que falhou (e não a rede/servidor): aí o equipamento culpado pode ser excluído e tentado de novo."""
     from src.application.api_client import upload_zip_stream
     fila = FilaSaida()
     falha: dict = {}
-    thread = threading.Thread(target=_produtor, args=(fila, prontos, senha, falha), daemon=True, name="tunel-zip")
+    thread = threading.Thread(target=_produtor, args=(fila, prontos, senha, falha, extras), daemon=True, name="tunel-zip")
     thread.start()
     try:
         ok = upload_zip_stream(conf, backup_id, nome_zip, fila.pedacos())
@@ -249,131 +335,38 @@ def _status_da_falha(erro: BaseException) -> str:
     return "CORROMPIDO" if isinstance(erro, _Divergente) else "ERRO"
 
 
-def _preparar_nvr_tunel(eq: dict) -> dict:
-    """Baixa a config do NVR diretamente do device (HTTP) para arquivo temporário no agente."""
-    from src.backup.file_manager.models import BackupFile
-    from src.core.config import DIR_AGENT, parse_config_extra
-
-    nome = eq.get("name", "NVR")
-    ip = eq.get("ip", "")
-    user = eq.get("username", "admin")
-    pwd = eq.get("password", "")
-    config_extra = parse_config_extra(eq)
-    marca = (config_extra.get("marca") or "").upper()
-
-    if not ip:
-        return {"nome": nome, "status": "ERRO", "cameras": None}
-
-    if marca != "INTELBRAS":
-        logging.warning(f"  [NVR] {nome}: marca '{marca or 'desconhecida'}' não suportada no túnel (somente Intelbras).")
-        return {"nome": nome, "status": "TIPO_NAO_SUPORTADO", "cameras": None}
-
-    from src.nvr.intelbras.backup import baixar_configuracao_intelbras
-
-    pasta_tmp = DIR_AGENT / "data" / "tmp_nvr"
-    pasta_tmp.mkdir(parents=True, exist_ok=True)
-    data_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    # nome_seguro importado lazily via backup_job abaixo no preparar_equipamentos
-    import re as _re
-    nome_safe = _re.sub(r"[^\w.-]", "_", nome)
-    arquivo = pasta_tmp / f"CONFIG_INTELBRAS_{nome_safe}_{data_str}.backup"
-
-    ok = baixar_configuracao_intelbras(ip, user, pwd, arquivo)
-    if not ok or not arquivo.exists():
-        return {"nome": nome, "status": "ERRO", "cameras": None}
-
-    bf = BackupFile(path=arquivo, file_type="NVR_CONFIG", is_smb=False)
-    logging.info(f"  [NVR] {nome}: config baixada ({arquivo.stat().st_size:,} bytes)")
-    return {
-        "nome": nome,
-        "status": "PRONTO",
-        "arquivos_origem": [(bf, arquivo.name)],
-        "_tmp_files": [arquivo],
-        "cameras": None,
-    }
-
-
-def _preparar_defense_tunel(eq: dict) -> dict:
-    """Provisiona acesso SSH→SMB na máquina Windows e acha o arquivo de backup mais recente do Defense IA."""
-    from src.backup.file_manager.models import BackupFile
-    from src.backup.smb_ssh_provisioner import alvo_por_ssh, usa_provisionamento_ssh
-    from src.core.config import parse_config_extra
-    from pathlib import Path as _Path
-
-    nome = eq.get("name", "Defense")
-    config_extra = parse_config_extra(eq)
-    pasta_origem = config_extra.get("pasta_origem", "")
-    host = config_extra.get("smb_host") or eq.get("ip", "")
-
-    if not pasta_origem:
-        logging.warning(f"  [DEFENSE] {nome}: pasta_origem não configurada (necessário no túnel).")
-        return {"nome": nome, "status": "TIPO_NAO_SUPORTADO", "cameras": None}
-
-    if not usa_provisionamento_ssh(config_extra):
-        logging.warning(f"  [DEFENSE] {nome}: acesso SSH não configurado (necessário no túnel do MikroTik).")
-        return {"nome": nome, "status": "TIPO_NAO_SUPORTADO", "cameras": None}
-
-    alvo, msg = alvo_por_ssh(pasta_origem, host, config_extra)
-    if not alvo:
-        logging.warning(f"  [DEFENSE] {nome}: falha ao obter acesso SMB: {msg}")
-        return {"nome": nome, "status": "ERRO", "cameras": None}
-
-    try:
-        smb = _smbclient()
-        smb.register_session(server=alvo.host, username=alvo.username, password=alvo.password, port=alvo.port)
-
-        EXTS_BACKUP = {".enc", ".zip", ".dbk", ".bak"}
-        arquivos = [
-            e for e in smb.scandir(alvo.unc_path)
-            if not e.is_dir() and _Path(e.name).suffix.lower() in EXTS_BACKUP
-        ]
-        if not arquivos:
-            logging.warning(f"  [DEFENSE] {nome}: nenhum arquivo de backup em {alvo.unc_path}")
-            return {"nome": nome, "status": "SEM_ARQUIVOS", "cameras": None}
-
-        mais_recente = max(arquivos, key=lambda e: e.stat().st_mtime)
-        unc_arquivo = alvo.unc_path.rstrip("\\") + "\\" + mais_recente.name
-        bf = BackupFile(path=_Path(unc_arquivo), file_type="DEFENSE_BACKUP",
-                        remote_path=unc_arquivo, is_smb=True)
-        logging.info(f"  [DEFENSE] {nome}: arquivo encontrado — {mais_recente.name}")
-        return {
-            "nome": nome,
-            "status": "PRONTO",
-            "arquivos_origem": [(bf, mais_recente.name)],
-            "cameras": None,
-        }
-    except Exception as e:
-        logging.error(f"  [DEFENSE] {nome}: falha ao acessar backup via SMB: {e}", exc_info=True)
-        return {"nome": nome, "status": "ERRO", "cameras": None}
-
-
-def preparar_equipamentos(equipamentos: list, conf: dict, trigger: str) -> List[dict]:
-    """Fase 1 (sem gravar nada): acha o backup mais recente de cada equipamento na pasta de rede do cliente e valida
-    (data, completude, estabilidade). Quem está pronto volta com status "PRONTO"."""
+def preparar_equipamentos(equipamentos: list, conf: dict, trigger: str, senha_zip: Optional[str] = None) -> List[dict]:
+    """Fase 1 (sem gravar nada): acha/baixa o backup de cada equipamento e valida (data, completude, estabilidade).
+    Quem está pronto volta com status "PRONTO" e `arquivos_origem` (SMB, SFTP, memória ou fluxo HTTP)."""
     from src.application import log_remoto
     from src.application.backup_job import LIMITE_EQUIPAMENTO_S, _executar_com_limite, nome_seguro, processar_olt
+    from src.backup import tunel_preparo as prep
 
+    despacho = {
+        "NVR": lambda eq: prep.preparar_nvr(eq, senha_zip),
+        "DEFENSE": prep.preparar_defense,
+        "PABX": prep.preparar_pabx,
+        "MIKROTIK": prep.preparar_mikrotik,
+    }
     resultados = []
     for eq in equipamentos:
         tipo = (eq.get("tipo") or "NVR").upper()
         nome = eq.get("name", "equipamento")
         try:
-            if tipo in ("OLT", "DIGIFORT"):
-                with log_remoto.equipamento_atual(nome):
+            with log_remoto.equipamento_atual(nome):
+                if tipo in ("OLT", "DIGIFORT"):
                     res = _executar_com_limite(processar_olt, LIMITE_EQUIPAMENTO_S, eq, PASTA_NENHUMA, conf, trigger,
                                                somente_preparar=True)
-            elif tipo == "NVR":
-                res = _preparar_nvr_tunel(eq)
-            elif tipo == "DEFENSE":
-                res = _preparar_defense_tunel(eq)
-            else:
-                logging.warning(f"  Tipo '{tipo}' ({nome}) grava arquivos em disco: fora do túnel do Mikrotik "
-                                f"(o backup dele fica com um agente Windows).")
-                res = {"nome": nome, "status": "TIPO_NAO_SUPORTADO", "cameras": None}
-        except Exception:
-            logging.error(f"  Falha inesperada ao preparar o backup de {nome}. Seguindo para o próximo.",
+                elif tipo in despacho:
+                    res = _executar_com_limite(despacho[tipo], LIMITE_EQUIPAMENTO_S, eq)
+                else:
+                    logging.warning(f"  Tipo '{tipo}' ({nome}) não tem backup no túnel do Mikrotik.")
+                    res = {"nome": nome, "status": "TIPO_NAO_SUPORTADO", "cameras": None}
+        except Exception as e:
+            logging.error(f"  Falha inesperada ao preparar o backup de {nome}: {type(e).__name__}. Seguindo para o próximo.",
                           exc_info=True, extra={"equipamento": nome})
             res = {"nome": nome, "status": "ERRO", "cameras": None}
+        res["nome"] = nome              # o relatório identifica o equipamento pelo nome cadastrado
         res["tipo"] = tipo
         res["pasta_zip"] = f"{tipo}/backup_{tipo.lower()}_{nome_seguro(nome)}"
         resultados.append(res)
@@ -405,12 +398,34 @@ def executar_backup_tunel(trigger: str = "scheduled") -> None:
     logging.info(f"Equipamentos : {len(equipamentos)}")
 
     started_at = datetime.utcnow()
-    resultados = preparar_equipamentos(equipamentos, conf, trigger)
-    # Coleta arquivos temporários (ex.: downloads de NVR) para limpar após o envio
-    tmp_files: List[Path] = [f for r in resultados for f in r.pop("_tmp_files", [])]
+    resultados = preparar_equipamentos(equipamentos, conf, trigger, senha)
+    limpezas = [f for r in resultados for f in r.pop("_limpeza", [])]     # ex.: apagar arquivos do roteador-alvo
+    try:
+        _enviar(conf, server_cfg, resultados, senha, client_name, started_at, trigger)
+    finally:
+        for f in limpezas:
+            try:
+                f()
+            except Exception as e:
+                logging.warning(f"  [TUNEL] Limpeza pendente falhou: {e}")
+        from src.backup import sftp_origem
+        sftp_origem.fechar_todas()
+    logging.info(f"\nBackup em túnel concluído em {(datetime.utcnow() - started_at).total_seconds():.1f}s",
+                 extra={"enviar_servidor": True})
+
+
+def _enviar(conf: dict, server_cfg: dict, resultados: List[dict], senha: Optional[str], client_name: str,
+            started_at: datetime, trigger: str) -> None:
+    from src.application.api_client import corrigir_resultado, post_report
+    from src.application.backup_job import nome_seguro
+    from src.backup.archiver import data_hoje
+    from src.backup.tunel_preparo import nomear_planilhas
+
     prontos = [r for r in resultados if r["status"] == "PRONTO"]
+    planilhas = {r["nome"]: r.pop("_planilha") for r in resultados if r.get("_planilha")}
+    extras = nomear_planilhas(planilhas, server_cfg.get("customer_name"), client_name)
     for r in prontos:
-        r["status"] = "OK"          # provisório: o relatório sai antes do envio; corrigido abaixo se algo falhar
+        r["status"] = r.get("status_final") or "OK"   # provisório: o relatório sai antes do envio; corrigido se algo falhar
 
     finished_at = datetime.utcnow()
     for r in resultados:
@@ -425,7 +440,7 @@ def executar_backup_tunel(trigger: str = "scheduled") -> None:
     tentativas_rede = 0
     while pendentes:
         logging.info(f"  [TUNEL] Enviando {len(pendentes)} equipamento(s) em {nome_zip}")
-        ok, erro_leitura = enviar_em_tunel(conf, backup_id, nome_zip, pendentes, senha)
+        ok, erro_leitura = enviar_em_tunel(conf, backup_id, nome_zip, pendentes, senha, extras)
         if ok:
             break
         if erro_leitura is not None and getattr(erro_leitura, "item", None):
@@ -446,12 +461,3 @@ def executar_backup_tunel(trigger: str = "scheduled") -> None:
                 r["status"] = "ERRO"
             break
         logging.warning("  [TUNEL] Envio falhou; tentando de novo.")
-
-    for f in tmp_files:
-        try:
-            f.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-    logging.info(f"\nBackup em túnel concluído em {(datetime.utcnow() - started_at).total_seconds():.1f}s",
-                 extra={"enviar_servidor": True})

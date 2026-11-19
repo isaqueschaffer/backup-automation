@@ -322,7 +322,8 @@ def _baixar_backup(session: requests.Session, base_url: str):
 # FUNÇÃO PRINCIPAL
 # ============================================================
 
-def realizar_backup_vsol(equipamento: dict, pasta_destino: Path) -> dict:
+def realizar_backup_vsol(equipamento: dict, pasta_destino: Path, em_memoria: bool = False) -> dict:
+    """`em_memoria` (túnel do Mikrotik): não cria pasta nem arquivo; devolve `_dados` = [(nome, bytes)]."""
     nome = equipamento.get("name", "OLT_desconhecida")
     config_extra = _obter_config_extra(equipamento)
 
@@ -360,7 +361,8 @@ def realizar_backup_vsol(equipamento: dict, pasta_destino: Path) -> dict:
 
     # Diretório e Arquivo de Destino
     pasta_eq = pasta_destino
-    pasta_eq.mkdir(parents=True, exist_ok=True)
+    if not em_memoria:
+        pasta_eq.mkdir(parents=True, exist_ok=True)
 
     agora = datetime.datetime.now()
     nome_arquivo = f"backup_olt_{agora.strftime('%Y-%m-%d_%H-%M-%S')}.conf"
@@ -416,6 +418,9 @@ def realizar_backup_vsol(equipamento: dict, pasta_destino: Path) -> dict:
         return {"nome": nome, "status": "ERRO", "cameras": None}
 
     # Salvamento
+    if em_memoria:
+        logging.info(f"   [VSOL] Backup em memória ({tamanho:,} bytes): {nome_arquivo}")
+        return {"nome": nome, "status": "OK", "cameras": None, "_dados": [(nome_arquivo, conteudo)]}
     try:
         with open(arquivo_destino, "wb") as arquivo:
             arquivo.write(conteudo)

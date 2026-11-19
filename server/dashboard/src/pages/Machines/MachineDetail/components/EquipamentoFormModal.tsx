@@ -375,6 +375,8 @@ function SmbConfigSection({
   eqForm: EqForm;
   setEqForm: React.Dispatch<React.SetStateAction<EqForm>>;
 }) {
+  const sftp = eqForm.acesso_remoto !== "smb";
+  const rotulo = { fontSize: 11, marginBottom: 4 } as const;
   return (
     <div
       style={{
@@ -386,34 +388,72 @@ function SmbConfigSection({
       }}
     >
       <label className="form-label" style={{ marginBottom: 8, display: "block", fontWeight: 600 }}>
-        Acesso remoto à pasta (agente fora da máquina, ex.: MikroTik) — opcional
+        Acesso remoto à máquina do cliente (agente fora da máquina, ex.: MikroTik)
       </label>
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr 90px", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>IP da máquina Windows *</label>
+          <label className="form-label" style={rotulo}>IP da máquina *</label>
           <input className="form-input" type="text" autoComplete="off" placeholder="192.168.1.50"
             value={eqForm.smb_host || ""} onChange={e => setEqForm({ ...eqForm, smb_host: e.target.value })} />
         </div>
         <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Administrador (SSH)</label>
-          <input className="form-input" type="text" autoComplete="off" placeholder="Administrador"
+          <label className="form-label" style={rotulo}>Método de acesso</label>
+          <select className="form-input" value={sftp ? "sftp" : "smb"}
+            onChange={e => setEqForm({ ...eqForm, acesso_remoto: e.target.value })}>
+            <option value="sftp">SFTP (recomendado)</option>
+            <option value="smb">SMB provisionado (cria usuário e share)</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px", gap: 12, marginTop: 12 }}>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={rotulo}>{sftp ? "Usuário SSH (só leitura) *" : "Administrador (SSH)"}</label>
+          <input className="form-input" type="text" autoComplete="off" placeholder={sftp ? "trilan_leitura" : "Administrador"}
             value={eqForm.ssh_usuario || ""} onChange={e => setEqForm({ ...eqForm, ssh_usuario: e.target.value })} />
         </div>
         <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Senha do administrador</label>
+          <label className="form-label" style={rotulo}>{sftp ? "Senha do usuário SSH" : "Senha do administrador"}</label>
           <input className="form-input" type="password" autoComplete="new-password"
             placeholder={eqForm.ssh_senha_definida ? "•••••• (vazio mantém)" : "Senha"}
             value={eqForm.ssh_senha || ""} onChange={e => setEqForm({ ...eqForm, ssh_senha: e.target.value })} />
         </div>
         <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={{ fontSize: 11, marginBottom: 4 }}>Porta SSH</label>
+          <label className="form-label" style={rotulo}>Porta SSH</label>
           <input className="form-input" type="number" placeholder="22"
             value={eqForm.ssh_porta ?? ""} onChange={e => setEqForm({ ...eqForm, ssh_porta: e.target.value })} />
         </div>
       </div>
-      <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
-        O agente entra por SSH uma vez, cria o usuário somente leitura "trilan_leitura" e compartilha só a pasta de origem; depois lê por SMB (porta 445) com esse usuário. Use a pasta com drive (ex.: D:UNM2000/emsback). O IP vale para todas as pastas deste equipamento.
-      </span>
+      {sftp ? (
+        <>
+          <div className="form-group" style={{ margin: "12px 0 0" }}>
+            <label className="form-label" style={rotulo}>Chave privada SSH (opcional; use no lugar da senha)</label>
+            <textarea className="form-input" rows={4} autoComplete="off" spellCheck={false}
+              style={{ fontFamily: "monospace", fontSize: 11, resize: "vertical" }}
+              placeholder={eqForm.ssh_chave_definida
+                ? "•••••• chave já cadastrada (vazio mantém; cole outra para trocar)"
+                : "-----BEGIN OPENSSH PRIVATE KEY-----"}
+              value={eqForm.ssh_chave || ""} onChange={e => setEqForm({ ...eqForm, ssh_chave: e.target.value })} />
+          </div>
+          <div className="form-group" style={{ margin: "12px 0 0" }}>
+            <label className="form-label" style={rotulo}>Impressão digital da chave do host (opcional)</label>
+            <input className="form-input" type="text" autoComplete="off" spellCheck={false} placeholder="SHA256:..."
+              value={eqForm.ssh_fingerprint || ""} onChange={e => setEqForm({ ...eqForm, ssh_fingerprint: e.target.value })} />
+          </div>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
+            No SFTP o agente entra por SSH e só lê o backup, em blocos: nada é criado na máquina do cliente (sem usuário novo, sem
+            compartilhamento, sem porta 445). Requer o OpenSSH Server no Windows (ou SSH no Linux). Recomendado: um usuário próprio, só com
+            leitura na pasta do backup (não o Administrador), e chave privada em vez de senha. Informe a pasta no formato do drive
+            (ex.: D:UNM2000/emsback). Na primeira conexão o agente grava a impressão digital da máquina e, se ela mudar, recusa o acesso;
+            se preencher a impressão digital acima, ela é exigida desde a primeira vez.
+          </span>
+        </>
+      ) : (
+        <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
+          O agente entra por SSH uma vez com o administrador, cria o usuário somente leitura "trilan_leitura" e um compartilhamento
+          oculto só da pasta de origem; depois lê por SMB (porta 445) com esse usuário. Use a pasta com drive (ex.: D:UNM2000/emsback).
+          O IP vale para todas as pastas deste equipamento.
+        </span>
+      )}
     </div>
   );
 }

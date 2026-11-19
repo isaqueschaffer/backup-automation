@@ -495,9 +495,10 @@ def gerar_planilha_hikvision(nvr_ip, usuario, senha, destino: Path) -> bool:
             logging.warning(f"  Planilha Hikvision: sem resposta do ISAPI em {nvr_ip}.")
             return False
         wb, n_canais = _montar_planilha(isapi, nvr_ip, info)
-        destino.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(destino, Path):       # BytesIO (túnel do Mikrotik) não tem pasta
+            destino.parent.mkdir(parents=True, exist_ok=True)
         wb.save(destino)
-        logging.info(f"  Planilha Hikvision OK ({n_canais} canal(is) -> {destino.name}).")
+        logging.info(f"  Planilha Hikvision OK ({n_canais} canal(is) -> {getattr(destino, 'name', 'memoria')}).")
         return True
     except Exception:
         logging.warning(f"  Falha ao gerar a planilha do NVR Hikvision {nvr_ip}.", exc_info=True)
