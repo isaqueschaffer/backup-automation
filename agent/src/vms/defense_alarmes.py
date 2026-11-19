@@ -6,7 +6,6 @@ o segredo padrao "secret-key"), manda no cookie `csrfToken` junto do `POST /api/
 token de sessao, que as consultas seguintes levam no cookie `token` (o header `Authorization` e recusado)."""
 import base64
 import hashlib
-import hmac as hmac_module
 import logging
 import secrets
 import string
@@ -26,10 +25,11 @@ def _texto(valor):
 
 
 def gerar_token_csrf(segredo: str = SEGREDO_CSRF_PADRAO) -> str:
-    """Mesmo formato do `Tokens.create()` do pacote npm `csrf`: "<sal>-<base64url(hmac-sha1(segredo, '<sal>-<segredo>'))>".
-    O pacote npm usa HMAC-SHA1 com o segredo como chave (não SHA1 simples)."""
+    """Mesmo formato do `Tokens.create()` do pacote npm `csrf`: "<sal>-<base64url(sha1('<sal>-<segredo>'))>".
+    SHA1 SIMPLES, sem HMAC: conferido no Defense IA real em 19/11/2026 (SHA1 -> 401 "credenciais inválidas", ou seja,
+    token aceito; HMAC-SHA1 -> 403 "Token CSRF inválido"). A 1.1.60 chegou a trocar para HMAC e quebrava o login."""
     sal = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
-    digest = hmac_module.new(segredo.encode(), f"{sal}-{segredo}".encode(), hashlib.sha1).digest()
+    digest = hashlib.sha1(f"{sal}-{segredo}".encode()).digest()
     assinatura = base64.b64encode(digest).decode().replace("+", "-").replace("/", "_").rstrip("=")
     return f"{sal}-{assinatura}"
 
