@@ -20,6 +20,12 @@ TASK = {"ip": "192.168.5.23", "username": "admin", "password": "navarro@123", "m
 
 
 class TestSondaPortaRtsp(unittest.TestCase):
+    def setUp(self):
+        # A foto pela API HTTP (depois que o RTSP falha) tem testes próprios em test_foto_hikvision.py
+        foto = patch.object(rc, "_foto_hikvision", return_value=(None, "sem resposta HTTP"))
+        foto.start()
+        self.addCleanup(foto.stop)
+
     def test_sucesso_nao_abre_conexao_antes_do_ffmpeg(self):
         with patch.object(rc, "_capturar_frame_ffmpeg", return_value=(b"x" * 2000, "")), \
                 patch.object(rc.socket, "create_connection") as conexao:

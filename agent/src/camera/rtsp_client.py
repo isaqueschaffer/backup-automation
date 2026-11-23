@@ -49,10 +49,42 @@ def _capturar_frame_ffmpeg(ffmpeg_exe: str, rtsp_url: str, transport: str = "tcp
             return res.stdout, ""
         stderr_txt = _mascarar(res.stderr.decode('utf-8', errors='ignore')) if res.stderr else "ffmpeg retornou vazio"
         return None, stderr_txt
-    except subprocess.TimeoutExpired:
-        return None, f"Tempo esgotado ({timeout}s) via {transport.upper()}"
+    except subprocess.TimeoutExpired as e:
+        # A última linha do ffmpeg diz até onde chegou (conectou? achou o vídeo?): sem ela o motivo era só o tempo
+        ultima = _ultima_linha(e.stderr)
+        return None, f"Tempo esgotado ({timeout}s) via {transport.upper()}" + (f" [ffmpeg: {ultima}]" if ultima else "")
     except Exception as e:
         return None, _mascarar(str(e))
+
+
+def _ultima_linha(stderr) -> str:
+    """Última linha não vazia da saída do ffmpeg, sem credenciais e curta (vai para o motivo no painel)."""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="ignore")
+    linhas = [linha.strip() for linha in (stderr or "").splitlines() if linha.strip()]
+    return _mascarar(linhas[-1])[:90] if linhas else ""
+
+
+def _foto_hikvision(ip: str, usuario: str, senha: str, canal) -> tuple:
+    """Foto da câmera pela API HTTP da Hikvision (ISAPI), sem RTSP: a câmera gera o JPEG na hora, então não depende
+    de quadro-chave nem da taxa de quadros (DS-2CD1101-I do CFTV 01 - Navarro: RTSP sempre em tempo esgotado e a
+    API HTTP respondendo). Retorna (bytes_jpeg | None, motivo)."""
+    import requests
+    from src.utils.http import fazer_get
+
+    ch = int(canal) if canal else 1
+    motivo = "a câmera não devolveu imagem"
+    for caminho in (f"/ISAPI/Streaming/channels/{ch}01/picture", f"/Streaming/channels/{ch}01/picture"):
+        try:
+            r = fazer_get(f"http://{ip}{caminho}", usuario, senha, timeout=5)
+        except requests.RequestException as e:
+            return None, f"sem resposta HTTP ({e.__class__.__name__})"
+        if r.status_code == 200 and r.content[:2] == b"\xff\xd8" and len(r.content) > 1000:
+            return r.content, ""
+        if r.status_code in (401, 403):
+            return None, "usuário ou senha recusados"  # para aqui: outra tentativa errada pode bloquear o usuário
+        motivo = f"HTTP {r.status_code}"
+    return None, motivo
 
 
 def _porta_rtsp_aberta(ip: str) -> bool:
@@ -95,6 +127,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     gravador = bool(task.get("gravador"))
 
     urls_candidatas = []
+    eh_hikvision = False
     if eh_onvif and gravador:
         ch = canal if canal else 1
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype=0&unicast=true&proto=Onvif")
@@ -128,6 +161,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
             urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/realmonitor?channel={ch}&subtype=1")
     else:
         # Hikvision e genéricos com fallback ONVIF
+        eh_hikvision = True
         ch_num = canal if canal else 1
         ch_str = f"{ch_num}01" if nvr_canal else f"{ch_num}02"
         urls_candidatas.append(f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/Channels/{ch_str}")
@@ -151,6 +185,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
     urls = urls_candidatas[:4]
     prazo_max = time.monotonic() + 40.0
     motivos = []
+    recusado = False
 
     for url in urls:
         caminho_curto = url.split(":554", 1)[-1]
@@ -169,6 +204,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
 
         stderr_txt = stderr_txt or "Falha desconhecida"
         if "401 Unauthorized" in stderr_txt:
+            recusado = True
             logging.warning(f"Câmera {ip} retornou 401 Unauthorized. Abortando imediatamente para prevenir lockout.")
             motivos.append(f"TCP {caminho_curto}: Usuário ou senha RTSP recusados pela câmera (interrompido na 1ª tentativa para evitar bloqueio)")
             break
@@ -210,6 +246,7 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
 
             stderr_txt_udp = stderr_txt_udp or "Falha desconhecida"
             if "401 Unauthorized" in stderr_txt_udp:
+                recusado = True
                 logging.warning(f"Câmera {ip} retornou 401 Unauthorized. Abortando imediatamente para prevenir lockout.")
                 motivos.append(f"UDP {caminho_curto}: Usuário ou senha RTSP recusados pela câmera (interrompido na 1ª tentativa para evitar bloqueio)")
                 break
@@ -220,6 +257,14 @@ def test_rtsp_camera(task: Dict[str, Any]) -> Dict[str, Any]:
             entrada_udp = f"UDP {caminho_curto}: {motivo_udp}"
             if not motivos or motivos[-1] != entrada_udp:
                 motivos.append(entrada_udp)
+
+    # Hikvision: o RTSP falhou (sem ser senha recusada, que já bloquearia a conta) -> foto pela API HTTP
+    if eh_hikvision and not recusado:
+        jpeg_http, motivo_http = _foto_hikvision(ip, usuario, senha_pura, canal)
+        if jpeg_http:
+            logging.info(f"Câmera {ip}: RTSP sem imagem; foto obtida pela API HTTP da Hikvision.")
+            return {"success": True, "error_message": None, "image_base64": base64.b64encode(jpeg_http).decode("utf-8")}
+        motivos.insert(0, f"Foto HTTP: {motivo_http}")
 
     if motivos:
         msg = "; ".join(motivos)

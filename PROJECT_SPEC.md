@@ -1127,6 +1127,12 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-23] — Agente 1.1.63: foto pela API HTTP da Hikvision quando o RTSP não entrega imagem
+
+- **Problema**: no Digifort do CFTV 01 - Navarro, 12 câmeras de elevador (Hikvision DS-2CD1101-I, 2º ao 13º andar) nunca tiveram imagem ideal nem da noite: todos os caminhos RTSP (Hikvision, Intelbras, ONVIF, Grandstream), em TCP e UDP, davam "Tempo esgotado". Não era modelo (o 1º andar, que funciona, é o mesmo DS-2CD1101-I), caminho (seria 404) nem senha (seria 401; as credenciais vieram todas da mesma importação de 11/11). Com o `-timeout` de 5 s do ffmpeg, câmera muda daria erro em 5 s: estourar os 18 s indica que o RTSP troca dados mas não sai quadro (provável taxa de quadros baixa ou intervalo de quadro-chave longo, com `-skip_frame nokey`). O tempo esgotado descartava a saída do ffmpeg, e o diagnóstico ficava cego.
+- **Correção** (`agent/src/camera/rtsp_client.py`): (1) o tempo esgotado do ffmpeg leva a última linha da saída dele (`[ffmpeg: ...]`, sem credenciais); (2) em câmera Hikvision/genérica, se o RTSP falhar sem 401, `test_rtsp_camera` pede a foto pela API HTTP (`/ISAPI/Streaming/channels/<ch>01/picture`, depois `/Streaming/channels/<ch>01/picture`), com autenticação digest e a mesma senha. Vale para ao vivo, referência e imagem da noite de VMS. 401/403 no HTTP para na hora (bloqueio de usuário); 401 no RTSP nem tenta o HTTP. Testes: `agent/tests/test_foto_hikvision.py`.
+- **Versão**: 1.1.63 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto.
+
 ### [2026-11-23] — Agente 1.1.62: câmeras do Defense no backup em túnel do MikroTik
 
 - **Problema**: na máquina do MikroTik, o teste de conexão do Defense listava as 20 câmeras, mas a Galeria e a Gravação do equipamento ficavam vazias. O `preparar_defense` do túnel (`agent/src/backup/tunel_preparo.py`) só achava o arquivo de backup e mandava `cameras: None` no relatório; no Windows, `realizar_backup_defense` também monta o status das câmeras pela API.
