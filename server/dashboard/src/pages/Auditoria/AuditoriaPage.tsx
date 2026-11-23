@@ -159,7 +159,7 @@ export default function AuditoriaPage() {
             {data.total} alteração(ões) · página {data.page} de {data.pages}
           </div>
           <div className="table-wrap" style={{ overflowX: "auto" }}>
-            <table>
+            <table className="tabela-cartoes">
               <thead>
                 <tr>
                   <th style={{ whiteSpace: "nowrap" }}>Data/Hora</th>

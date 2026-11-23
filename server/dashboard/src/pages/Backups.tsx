@@ -278,7 +278,7 @@ export default function Backups() {
             {data.total} backup(s) · página {data.page} de {data.pages}
           </div>
           <div className="table-wrap" style={{ overflowX: "auto" }}>
-            <table>
+            <table className="tabela-cartoes">
               <thead>
                 <tr>
                   <th>Máquina</th>

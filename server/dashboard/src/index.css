@@ -96,6 +96,7 @@ img { max-width: 100%; }
   margin-left: var(--sidebar-w);
   padding: 32px;
   max-width: 100%;
+  min-width: 0; /* sem isso uma tabela larga estica a área toda e a página rola de lado */
   animation: fadeIn 0.3s ease;
 }
 
@@ -455,6 +456,20 @@ img { max-width: 100%; }
 
 .btn-danger:hover { background: rgba(239,68,68,0.2); }
 
+.btn-success {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+.btn-success:hover { background: rgba(16,185,129,0.2); }
+
+.btn-sm { padding: 5px 10px; font-size: 12.5px; gap: 6px; }
+
+.btn:disabled, .btn-icon:disabled {
+  opacity: 0.45; cursor: not-allowed;
+  transform: none; box-shadow: none;
+}
+
 .btn-icon {
   width: 32px; height: 32px;
   padding: 0;
@@ -476,7 +491,7 @@ img { max-width: 100%; }
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto; /* tabela mais larga que a tela rola dentro do quadro, não a página */
 }
 
 table { width: 100%; border-collapse: collapse; }
@@ -1009,4 +1024,86 @@ body.dash-arrastando * { cursor: grabbing !important; }
     grid-template-columns: minmax(0, 1fr);
   }
   .card [style*="display: flex"] > *, .modal [style*="display: flex"] > * { min-width: 0; overflow-wrap: break-word; }
+}
+
+/* Revisão de 23/11/2026 (conferida em 390px e 1366px com dados reais).
+   - Tabelas de lista (classe tabela-cartoes) viram cartões no celular: nada some na rolagem lateral.
+     Os rótulos (data-label) vêm do <thead>, aplicados por utils/tabelaCartoes.ts.
+   - Cabeçalhos de seção "título + botões" quebram linha em vez de espremer o título.
+   - Filtros ocupam a largura toda; fila de backup do cliente quebra em duas linhas. */
+@media (max-width: 768px) {
+  .table-wrap:has(> table.tabela-cartoes) { overflow: visible; background: transparent; border: none; }
+  .table-wrap > table.tabela-cartoes { min-width: 0; }
+  table.tabela-cartoes, table.tabela-cartoes tbody, table.tabela-cartoes tr, table.tabela-cartoes td {
+    display: block; width: 100%;
+  }
+  .modal table.tabela-cartoes, .card table.tabela-cartoes { overflow: visible; }
+  table.tabela-cartoes thead { display: none; }
+  table.tabela-cartoes tbody tr {
+    background: var(--bg-surface);
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  table.tabela-cartoes tbody tr:hover { background: var(--bg-surface); }
+  table.tabela-cartoes tbody td {
+    display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px 10px;
+    padding: 5px 0 !important;
+    text-align: right !important;
+    min-width: 0; overflow-wrap: anywhere;
+    box-shadow: none !important;
+  }
+  table.tabela-cartoes tbody td > * { min-width: 0; }
+  table.tabela-cartoes tbody td::before {
+    content: attr(data-label);
+    flex-shrink: 0; max-width: 45%; margin-right: auto;
+    text-align: left;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  table.tabela-cartoes tbody td[data-label=""]::before { display: none; }
+  /* 1ª coluna (nome) é o título do cartão */
+  table.tabela-cartoes tbody td:first-child {
+    display: block; text-align: left !important;
+    font-size: 15px; padding: 0 0 8px !important; margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.tabela-cartoes tbody td:first-child::before { display: none; }
+  /* Célula de largura total (estado vazio, "carregando") */
+  table.tabela-cartoes tbody td[colspan] { display: block; text-align: center !important; border: none; }
+  table.tabela-cartoes tbody td .flex { justify-content: flex-end; flex-wrap: wrap; }
+
+  /* Cabeçalhos de seção com botões: o título fica em cima e os botões quebram linha */
+  .main-content .flex.items-center.justify-between { flex-wrap: wrap; gap: 10px; }
+  .main-content .flex.items-center.justify-between > .flex { flex-wrap: wrap; }
+  .main-content .flex.items-center.justify-between > .section-title { flex: 1 1 100%; flex-wrap: wrap; }
+
+  /* Filtros: um por linha, largura toda */
+  .filters-bar { gap: 10px; }
+  .filters-bar > *, .filters-bar .form-input, .filters-bar select { max-width: none !important; flex: 1 1 100%; }
+  .filters-bar > label, .filters-bar > div { display: flex; align-items: center; gap: 8px; }
+  .filters-bar > label .form-input, .filters-bar > div .form-input { flex: 1 1 auto; width: auto !important; min-width: 0; }
+  .filters-bar > label > span:first-child { min-width: 40px; }
+  .filters-bar > .btn { justify-content: center; }
+
+  /* Fila de backup do cliente: nome na 1ª linha, histórico e botões na 2ª */
+  .fila-linha { flex-wrap: wrap; row-gap: 10px !important; }
+  .fila-linha > .fila-info { flex: 1 1 calc(100% - 130px) !important; }
+  .eq-acoes { flex-basis: 100%; margin-left: 0 !important; }
+  /* Campos de largura fixa em linhas que quebram (filtros dentro de modais e páginas) ocupam a linha */
+  [style*="flex-wrap: wrap"] > .form-input[style*="width:"] { flex: 1 1 100%; width: 100% !important; }
+}
+
+/* Tablet / notebook estreito: menu lateral fixo mais fino e menos margem para sobrar espaço ao conteúdo */
+@media (min-width: 769px) and (max-width: 1100px) {
+  :root { --sidebar-w: 210px; }
+  .main-content { padding: 24px; }
+}
+
+/* Cabeçalho "título + botões" quebra linha em qualquer largura quando os botões não cabem */
+.main-content .flex.items-center.justify-between { flex-wrap: wrap; row-gap: 10px; }
+.main-content .flex.items-center.justify-between > .flex { flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 768px) {
+  .main-content .flex.items-center.justify-between > .flex { justify-content: flex-start; }
 }

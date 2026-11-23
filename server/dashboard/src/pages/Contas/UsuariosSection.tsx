@@ -281,7 +281,7 @@ export default function UsuariosSection({ contaId, podeEditar }: UsuariosSection
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead>
               <tr>
                 <th>Nome</th>

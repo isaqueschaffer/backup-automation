@@ -161,7 +161,7 @@ export default function MachinesPage() {
         <div className="empty-state">Nenhuma máquina para este filtro.</div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead>
               <tr>
                 <th>Máquina</th>

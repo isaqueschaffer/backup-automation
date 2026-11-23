@@ -136,6 +136,7 @@ export default function AgentLogs({
           margin: 0,
           cursor: "pointer",
           display: "flex",
+          flexWrap: "wrap",
           alignItems: "center",
           gap: 8,
           textAlign: "left",
@@ -149,7 +150,7 @@ export default function AgentLogs({
           <ChevronRight size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
         )}
         <CloudLightning size={15} style={{ flexShrink: 0, color: "var(--primary)" }} />
-        <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", whiteSpace: "nowrap" }}>
           Eventos do Agente
         </span>
         <span
@@ -160,6 +161,7 @@ export default function AgentLogs({
             borderRadius: 999,
             background: "rgba(255,255,255,0.06)",
             color: "var(--text-muted)",
+            whiteSpace: "nowrap",
           }}
         >
           {logs.length} eventos
@@ -169,6 +171,7 @@ export default function AgentLogs({
           style={{
             marginLeft: "auto",
             display: "flex",
+            flexWrap: "wrap",
             alignItems: "center",
             gap: 10,
           }}

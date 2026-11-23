@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { observarTabelasCartoes } from "../utils/tabelaCartoes";
 import { useLocation } from "react-router-dom";
 import { Menu, Server } from "lucide-react";
 import Sidebar from "./Sidebar";
@@ -23,6 +24,9 @@ export default function Layout({ children }: { children: ReactNode }) {
     return () => document.removeEventListener("keydown", fn);
   }, [menuAberto]);
 
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => (mainRef.current ? observarTabelasCartoes(mainRef.current) : undefined), []);
+
   return (
     <div className="app-layout">
       <header className="mobile-topbar">
@@ -46,7 +50,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         aria-hidden="true"
       />
       <Sidebar aberta={menuAberto} onFechar={() => setMenuAberto(false)} />
-      <main className="main-content">
+      <main className="main-content" ref={mainRef}>
         <AvisoConta />
         <NotificacoesPopup />
         {children}

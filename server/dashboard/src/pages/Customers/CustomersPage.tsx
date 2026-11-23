@@ -108,7 +108,7 @@ export default function CustomersPage() {
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead>
               <tr>
                 <th>{singular}</th>
