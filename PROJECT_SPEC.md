@@ -1127,6 +1127,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-23] — Agente 1.1.61: imagem da noite e de referência pela gravação em NVR Intelbras
+
+- **Problema**: na Galeria do NVR Intelbras 192.168.75.6 (iNVD 3016), "Capturar imagem da noite" respondia "NVR não entregou o trecho gravado" em todas as câmeras. A captura pela gravação (modos `noite` e `referencia` da tarefa RTSP) só tinha playback Hikvision e Motorola; sem marca Motorola, caía no playback Hikvision (`/Streaming/tracks/<canal>01`) e o NVR Dahua respondia 404. Não era do túnel do MikroTik: o agente Windows faria o mesmo.
+- **Correção** (`agent/src/camera/rtsp_client.py`, `agent/src/nvr/intelbras/recordings.py`): playback Dahua `rtsp://…:554/cam/playback?channel=N&subtype=0&starttime=AAAA_MM_DD_HH_MM_SS&endtime=…` (horário do relógio do NVR). Trechos pela busca `mediaFileFind.cgi` (`buscar_trechos_intelbras`: lista de (início, fim), `[]` sem gravação, `None` se a busca falhou). Noite: 02:00 limitado ao trecho, como no Hikvision; sem busca, horários fixos com tempo curto; desiste após `MAX_FALHAS_CAPTURA`. Referência: fim do trecho mais recente, em janelas de 6 h até `DIAS_BUSCA`.
+- **Escolha da marca** (`_eh_intelbras`): "Intelbras"/"Dahua" na marca ou no modelo do equipamento decide; "Motorola"/"Hikvision" exclui; marca vazia sonda `magicBox.cgi?action=getDeviceType` uma vez por tarefa. Câmera direta (VMS) segue só ao vivo. "INTELBRAS" saiu de `_sem_playback` (antes um NVR com "Intelbras" no modelo recebia "captura pela gravação não suportada").
+- **Testes**: `agent/tests/test_playback_intelbras.py` (8, com o CGI e o ffmpeg simulados). Não testado contra o NVR real antes da release.
+- **Versão**: 1.1.61 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto (a OTA do MikroTik aceita).
+
 ### [2026-11-19] — Agente 1.1.60: backup de todos os tipos no túnel do MikroTik (SFTP, memória, nada em disco)
 
 - **Versão**: 1.1.60 em `updater.py`, `installer.iss` e `server/dashboard/package.json` (este estava em 1.1.59 e foi corrigido). Sem biblioteca nova (`requirements-linux.txt` intacto: paramiko 3.4 já traz SFTP).

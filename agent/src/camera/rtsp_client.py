@@ -506,6 +506,79 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
     return result_dict
 
 
+# ─── Intelbras (CGI/RTSP Dahua) ────────────────────────────────────────────
+# Playback: rtsp://.../cam/playback?channel=N&subtype=0&starttime=AAAA_MM_DD_HH_MM_SS&endtime=...
+# no horário do relógio do NVR; os trechos vêm da busca mediaFileFind.cgi.
+
+def _frame_intelbras(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho, timeout=25):
+    """Lê um frame do playback Intelbras/Dahua em `alvo` (horário exibido no NVR). Retorna (jpeg|None, stderr)."""
+    from datetime import timedelta
+    fim = max(alvo + timedelta(seconds=2), min(alvo + timedelta(seconds=10), fim_trecho))
+    rtsp_url = (
+        f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/playback?channel={canal}&subtype=0"
+        f"&starttime={alvo:%Y_%m_%d_%H_%M_%S}&endtime={fim:%Y_%m_%d_%H_%M_%S}"
+    )
+    cmd = [ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
+           "-i", rtsp_url, "-vframes", "1", "-update", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    if result.returncode == 0 and len(result.stdout) > 1000:
+        return result.stdout, ""
+    return None, _mascarar(result.stderr.decode('utf-8', errors='ignore'))
+
+
+def capture_night_image_intelbras(ip: str, usuario: str, senha_pura: str, canal: int, date_str: str, prazo=None) -> dict:
+    """Frame da madrugada (00h-06h) pelo playback RTSP de um NVR/DVR Intelbras (Dahua)."""
+    from datetime import datetime, timedelta
+    from src.nvr.intelbras.recordings import buscar_trechos_intelbras
+
+    r = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
+    try:
+        data_obj = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        r["motivo"] = "Data inválida"
+        return r
+
+    inicio, fim = data_obj, data_obj.replace(hour=6)
+    trechos = buscar_trechos_intelbras(ip, usuario, senha_pura, canal, inicio, fim, max_results=40)
+    alvos = []  # (alvo, fim do trecho)
+    if trechos is None:
+        # Busca indisponível: horários fixos, com tempo curto (horário sem gravação não entrega vídeo)
+        for h in (2, 3, 4, 1, 0, 5):
+            a = data_obj.replace(hour=h)
+            alvos.append((a, a + timedelta(seconds=10)))
+    else:
+        for st, en in sorted(trechos):
+            st, en = max(st, inicio), min(en, fim)
+            alvo = min(max(data_obj.replace(hour=2), st + timedelta(seconds=2)), en - timedelta(seconds=5))
+            if st <= alvo <= en:
+                alvos.append((alvo, en))
+    if not alvos:
+        r.update(status="SEM_GRAVACAO", motivo="Sem gravação na madrugada (00h-06h)")
+        return r
+
+    ffmpeg_exe = _ffmpeg_exe()
+    senha_enc = urllib.parse.quote(senha_pura, safe='')
+    falhas = 0
+    for alvo, en in alvos:
+        if prazo is not None and time.monotonic() > prazo:
+            r["motivo"] = r["motivo"] or "Tempo limite da captura esgotado"
+            break
+        try:
+            jpeg, stderr = _frame_intelbras(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, en,
+                                            timeout=25 if trechos is not None else 12)
+        except subprocess.TimeoutExpired:
+            jpeg, stderr = None, "TIMEOUT_25S"
+        if jpeg:
+            return {"image": base64.b64encode(jpeg).decode('utf-8'), "horario": alvo.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "status": "OK", "motivo": None}
+        r["motivo"] = _motivo_ffmpeg(stderr)
+        logging.warning(f"Playback Intelbras canal {canal} ({alvo:%Y-%m-%d %H:%M:%S}): {stderr[-300:]}")
+        falhas += 1
+        if falhas >= MAX_FALHAS_CAPTURA:
+            break
+    return r
+
+
 # ─── Captura pela gravação (pedida pelo painel) ────────────────────────────
 # Câmera offline não tem vídeo ao vivo, mas o NVR pode ter gravação. O servidor espera
 # até 130s pela resposta; o agente encerra as tentativas em PRAZO_GRAVACAO_S.
@@ -524,7 +597,24 @@ def _sem_playback(task: Dict[str, Any]) -> bool:
     if task.get("direct_camera"):
         return True
     modelo = (task.get("modelo") or "").upper()
-    return any(m in modelo for m in ("GRANDSTREAM", "INTELBRAS", "ONVIF", "MTI"))
+    return any(m in modelo for m in ("GRANDSTREAM", "ONVIF", "MTI"))
+
+
+def _eh_intelbras(task: Dict[str, Any]) -> bool:
+    """NVR/DVR Intelbras (Dahua). Sem marca cadastrada, pergunta ao próprio equipamento (CGI magicBox)."""
+    if task.get("direct_camera"):
+        return False
+    if "_intelbras" not in task:
+        texto = f"{task.get('marca') or ''} {task.get('modelo') or ''}".upper()
+        if "INTELBRAS" in texto or "DAHUA" in texto:
+            task["_intelbras"] = True
+        elif "MOTOROLA" in texto or "HIKVISION" in texto:
+            task["_intelbras"] = False
+        else:
+            from src.nvr.intelbras.recordings import eh_nvr_intelbras
+            task["_intelbras"] = eh_nvr_intelbras(task.get("ip", "").strip(), task.get("username", "admin"),
+                                                  task.get("password", ""))
+    return task["_intelbras"]
 
 
 def _resultado(r: dict, origem: str) -> Dict[str, Any]:
@@ -601,6 +691,50 @@ def _gravacao_recente_hikvision(task, prazo) -> dict:
     return r
 
 
+def _gravacao_recente_intelbras(task, prazo) -> dict:
+    """Frame do fim do trecho gravado mais recente de um NVR Intelbras, em janelas de 6h do agora para trás."""
+    from datetime import datetime, timedelta
+    from src.nvr.intelbras.recordings import buscar_trechos_intelbras
+
+    ip, usuario, senha = task.get("ip", "").strip(), task.get("username", "admin"), task.get("password", "")
+    canal = int(task["canal"])
+    r = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
+    ffmpeg_exe = _ffmpeg_exe()
+    senha_enc = urllib.parse.quote(senha, safe='')
+
+    fim_janela = datetime.now().replace(microsecond=0)
+    limite = fim_janela - timedelta(days=DIAS_BUSCA)
+    while fim_janela > limite:
+        if time.monotonic() > prazo:
+            r["motivo"] = r["motivo"] or "Tempo limite da busca na gravação esgotado"
+            return r
+        inicio_janela = max(limite, fim_janela - timedelta(hours=6))
+        trechos = buscar_trechos_intelbras(ip, usuario, senha, canal, inicio_janela, fim_janela, max_results=100)
+        if trechos is None:
+            r["motivo"] = "NVR não respondeu à busca de gravações"
+            return r
+        for st, en in sorted(trechos, key=lambda t: t[1], reverse=True)[:2]:
+            if time.monotonic() > prazo:
+                break
+            en = min(en, fim_janela)
+            alvo = max(st + timedelta(seconds=1), en - timedelta(seconds=5))
+            try:
+                jpeg, stderr = _frame_intelbras(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, en)
+            except subprocess.TimeoutExpired:
+                jpeg, stderr = None, "TIMEOUT_25S"
+            if jpeg:
+                return {"image": base64.b64encode(jpeg).decode('utf-8'), "horario": alvo.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "status": "OK", "motivo": None}
+            r["motivo"] = _motivo_ffmpeg(stderr)
+            logging.warning(f"Captura da gravação Intelbras canal {canal} ({alvo}): {stderr[-300:]}")
+        if trechos:
+            return r  # havia gravação, mas o NVR não entregou o vídeo
+        fim_janela = inicio_janela
+    r["status"] = "SEM_GRAVACAO"
+    r["motivo"] = f"Sem gravação nos últimos {DIAS_BUSCA} dias"
+    return r
+
+
 def _gravacao_recente_motorola(task, sessao, prazo) -> dict:
     """Frame do fim do trecho gravado mais recente (queryChlRecLog dos últimos DIAS_BUSCA dias)."""
     from datetime import datetime, timedelta
@@ -664,6 +798,8 @@ def _noite_recente(task, sessao, prazo) -> dict:
         data_str = dia.strftime("%Y-%m-%d")
         if _eh_motorola(task):
             ret = capture_night_image_motorola(ip, usuario, senha, canal, data_str, sessao=sessao, prazo=prazo)
+        elif _eh_intelbras(task):
+            ret = capture_night_image_intelbras(ip, usuario, senha, canal, data_str, prazo=prazo)
         else:
             ret = capture_night_image(ip, usuario, senha, canal, data_str, prazo=prazo)
         if ret["status"] == "OK":
@@ -718,8 +854,12 @@ def executar_tarefa_rtsp(task: Dict[str, Any]) -> Dict[str, Any]:
     if modo == "noite":
         return _resultado(_noite_recente(task, sessao, prazo), "gravacao")
 
-    ret = (_gravacao_recente_motorola(task, sessao, prazo) if _eh_motorola(task)
-           else _gravacao_recente_hikvision(task, prazo))
+    if _eh_motorola(task):
+        ret = _gravacao_recente_motorola(task, sessao, prazo)
+    elif _eh_intelbras(task):
+        ret = _gravacao_recente_intelbras(task, prazo)
+    else:
+        ret = _gravacao_recente_hikvision(task, prazo)
     res = _resultado(ret, "gravacao")
     if not res["success"]:
         res["error_message"] = f"Ao vivo: câmera sem vídeo. Gravação: {ret.get('motivo') or 'falhou'}"
