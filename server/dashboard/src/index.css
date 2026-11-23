@@ -1000,7 +1000,7 @@ body.dash-arrastando * { cursor: grabbing !important; }
   .modal-header {
     position: sticky; top: 0; z-index: 2;
     background: var(--bg-elevated);
-    padding: 16px 0 12px; margin-bottom: 12px;
+    padding: 16px 16px 12px; margin: 0 -16px 12px; /* de ponta a ponta: conteúdo que sangra (galeria) não aparece nas laterais */
   }
   .confirm-dialog { max-width: 100%; padding: 20px 16px; }
 
