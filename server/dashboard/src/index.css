@@ -1034,6 +1034,7 @@ body.dash-arrastando * { cursor: grabbing !important; }
 @media (max-width: 768px) {
   .table-wrap:has(> table.tabela-cartoes) { overflow: visible; background: transparent; border: none; }
   .table-wrap > table.tabela-cartoes { min-width: 0; }
+  table.tabela-cartoes { min-width: 0 !important; }
   table.tabela-cartoes, table.tabela-cartoes tbody, table.tabela-cartoes tr, table.tabela-cartoes td {
     display: block; width: 100%;
   }
@@ -1106,4 +1107,14 @@ body.dash-arrastando * { cursor: grabbing !important; }
 .main-content .flex.items-center.justify-between > .flex { flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 768px) {
   .main-content .flex.items-center.justify-between > .flex { justify-content: flex-start; }
+}
+
+/* Rodadas de backup do cliente (celular): data + status / tipo + máquinas OK / e-mail + botões */
+@media (max-width: 768px) {
+  .rodada-linha { grid-template-columns: auto minmax(0, 1fr) auto !important; row-gap: 8px !important; }
+  .rodada-linha > .rodada-data   { grid-column: 2; grid-row: 1; }
+  .rodada-linha > .rodada-status { grid-column: 3; grid-row: 1; justify-self: end; }
+  .rodada-linha > .rodada-tipo   { grid-column: 2; grid-row: 2; }
+  .rodada-linha > .rodada-ok     { grid-column: 3; grid-row: 2; justify-self: end; flex-wrap: wrap; justify-content: flex-end; }
+  .rodada-linha > .rodada-email  { grid-column: 2 / 4; grid-row: 3; justify-content: space-between; }
 }

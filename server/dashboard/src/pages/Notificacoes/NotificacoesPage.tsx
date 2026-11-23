@@ -57,7 +57,7 @@ function agruparPorMaquina<T extends { machine_id: string; machine_nome: string 
   return grupos;
 }
 
-const ESTILO_SELO = { fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 999 } as const;
+const ESTILO_SELO = { fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap" } as const;
 const SELO_NEUTRO = { ...ESTILO_SELO, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" };
 const SELO_ERRO = { ...ESTILO_SELO, background: "var(--err-bg, rgba(239,68,68,0.12))", color: "var(--err)" };
 
@@ -335,13 +335,13 @@ export default function NotificacoesPage() {
                   (soma, eq) => soma + eq.cameras.filter((c) => c.status_comunicacao === "OFFLINE").length, 0);
                 return (
                 <div key={maquina.machine_id}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", minWidth: 0, flexWrap: "wrap", textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
                     }}
                   >
@@ -424,13 +424,13 @@ export default function NotificacoesPage() {
                 const totalSinal = maquina.equipamentos.reduce((s, eq) => s + eq.onus_sinal_critico, 0);
                 return (
                 <div key={maquina.machine_id}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", minWidth: 0, flexWrap: "wrap", textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
                     }}
                   >
@@ -540,13 +540,13 @@ export default function NotificacoesPage() {
                   + maquina.equipamentos.filter((eq) => eq.erro).length;
                 return (
                 <div key={maquina.machine_id}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", minWidth: 0, flexWrap: "wrap", textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
                     }}
                   >

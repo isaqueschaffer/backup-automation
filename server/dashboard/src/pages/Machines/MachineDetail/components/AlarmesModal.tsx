@@ -132,7 +132,7 @@ export default function AlarmesModal({ machineId, nvrId, nvrName, onClose }: {
                   </div>
                 )}
               </div>
-              <table>
+              <table className="tabela-cartoes">
                 <thead><tr><th>Partição</th><th>Armada</th><th>Disparo</th></tr></thead>
                 <tbody>
                   {central.particoes.map((p, j) => (
@@ -153,7 +153,7 @@ export default function AlarmesModal({ machineId, nvrId, nvrName, onClose }: {
           {incendio.length > 0 && (
             <div className="table-wrap">
               <div style={{ padding: "8px 10px", fontWeight: 600 }}>Centrais de incêndio</div>
-              <table>
+              <table className="tabela-cartoes">
                 <thead><tr><th>Central</th><th>Modelo</th><th>Status</th></tr></thead>
                 <tbody>
                   {incendio.map((c, i) => (
