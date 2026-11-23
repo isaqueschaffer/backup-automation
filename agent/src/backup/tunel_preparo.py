@@ -129,6 +129,21 @@ def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
 # ─── DEFENSE ─────────────────────────────────────────────────────────────────
 
 def preparar_defense(eq: dict) -> dict:
+    """Backup do Defense no túnel + status das câmeras (online e gravações pela API do Defense, como no Windows).
+    Sem as câmeras no relatório a Galeria e a Gravação do equipamento ficavam vazias no painel, embora o teste
+    de conexão listasse as câmeras. O status vai em qualquer desfecho do arquivo de backup."""
+    res = _preparar_arquivo_defense(eq)
+    try:
+        from src.vms.defense import _montar_status_cameras_defense
+        res["cameras"] = _montar_status_cameras_defense(eq)
+        if res["cameras"]:
+            logging.info(f"  [DEFENSE] {eq.get('name', 'Defense')}: {len(res['cameras'])} câmera(s) no relatório.")
+    except Exception:
+        logging.warning(f"  [DEFENSE] {eq.get('name', 'Defense')}: falha ao obter o status das câmeras.", exc_info=True)
+    return res
+
+
+def _preparar_arquivo_defense(eq: dict) -> dict:
     """Arquivo de backup mais recente (.enc/.zip/.dbk/.bak) da `pasta_origem`, por SFTP (`acesso_remoto=sftp`) ou
     por SMB provisionado por SSH (cadastros antigos). Sem `pasta_origem`: ERRO (não há dump do banco no Mikrotik)."""
     from src.backup.file_manager.models import BackupFile

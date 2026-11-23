@@ -1127,6 +1127,19 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-23] — Agente 1.1.62: câmeras do Defense no backup em túnel do MikroTik
+
+- **Problema**: na máquina do MikroTik, o teste de conexão do Defense listava as 20 câmeras, mas a Galeria e a Gravação do equipamento ficavam vazias. O `preparar_defense` do túnel (`agent/src/backup/tunel_preparo.py`) só achava o arquivo de backup e mandava `cameras: None` no relatório; no Windows, `realizar_backup_defense` também monta o status das câmeras pela API.
+- **Correção**: `preparar_defense` chama `_montar_status_cameras_defense` (mesma função do Windows: online e gravações pela API do Defense, nada gravado no roteador) e põe as câmeras no relatório em qualquer desfecho do arquivo (inclusive ERRO por falta de `pasta_origem`). Falha na API só deixa `cameras` vazio. A busca do arquivo virou `_preparar_arquivo_defense`, sem mudança. Teste: `agent/tests/test_tunel_defense_cameras.py`.
+- **Versão**: 1.1.62 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto. Vai junto a correção do ping da API (entrada abaixo).
+
+### [2026-11-23] — API: ping do agente sem consulta síncrona no laço de eventos (impasse que derrubou a produção)
+
+- **Incidente**: a VM 192.168.75.112 reiniciou às 02:35 UTC e o `dokploy-postgres` subiu sem IP na `dokploy-network` ("invalid IP"); o Dokploy reiniciava a cada 2 min ("Postgres not reachable") e `dokploy.suportetrilan.com.br` dava 502. Corrigido com `docker service update --force dokploy-postgres`. O push da 1.1.61 tinha se perdido nesse intervalo; o redeploy manual subiu um container novo do Backend que travou: as 15 conexões do pool (5 + 10) ficaram em "idle in transaction", toda requisição esperava 30 s e falhava (`QueuePool limit … reached`), e até um 404 demorava 25 s.
+- **Causa**: `POST /agent/ping` é `async def`, mas fazia `commit`, `_read_request_flags` (5x no long-poll), `db.get` e a poda de logs direto no laço de eventos. Com o pool cheio, o laço parava 30 s esperando conexão; as conexões presas eram de outros pings, que pegaram a conexão na resolução das dependências (thread) e só a devolveriam quando o laço voltasse a rodar. Na subida de um container novo os 18 agentes chegam juntos e o impasse se instala.
+- **Correção** (`server/api/routers/agent.py`): a parte síncrona do ping foi para `_iniciar_ping` e `_concluir_ping`, chamadas com `asyncio.to_thread`, assim como `db.close()` e `_read_request_flags`. O laço só faz a espera e aciona os `asyncio.Event` das tarefas RTSP/alarme. Teste: `server/api/tests/test_ping_sem_bloquear.py`.
+- **Pendente**: os erros "can't compare offset-naive and offset-aware datetimes" em `services/notificacoes.py:228` (`verificar_agentes_offline`) e `services/backup_runs.py:266` (`_is_due`) aparecem no log (capturados, não derrubam a API), contrariando a REGRA-001; tratar à parte.
+
 ### [2026-11-23] — Agente 1.1.61: imagem da noite e de referência pela gravação em NVR Intelbras
 
 - **Problema**: na Galeria do NVR Intelbras 192.168.75.6 (iNVD 3016), "Capturar imagem da noite" respondia "NVR não entregou o trecho gravado" em todas as câmeras. A captura pela gravação (modos `noite` e `referencia` da tarefa RTSP) só tinha playback Hikvision e Motorola; sem marca Motorola, caía no playback Hikvision (`/Streaming/tracks/<canal>01`) e o NVR Dahua respondia 404. Não era do túnel do MikroTik: o agente Windows faria o mesmo.
