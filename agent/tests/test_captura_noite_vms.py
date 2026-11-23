@@ -69,6 +69,35 @@ class TestCapturaNoiteVms(unittest.TestCase):
             self.assertEqual(cap.call_count, 2)
             self.assertEqual([c["nome"] for c in cap.call_args[0][1]], ["Cam 2"])
 
+    def test_defense_recebe_a_marca_do_defense_antes_da_captura(self):
+        equipamentos = [{
+            "tipo": "DEFENSE", "name": "Defense A", "active": True,
+            "cameras_config": [{"canal": 1, "nome": "DIH", "ip": "192.168.75.37", "modelo": "DIH33001-D/A(POE)"}],
+        }]
+        cameras_api = [{"nome": "DIH", "ip": "192.168.75.37", "marca": "ONVIF"}]
+        with patch("src.vms.defense._consultar_api_defense", return_value=({"x": True}, cameras_api, {})), \
+                patch("src.camera.rtsp_client.capturar_imagens_noite_vms", side_effect=_captura_falsa()) as cap:
+            self.assertEqual(cn.capturar_noite_vms(equipamentos, {}, datetime(2026, 10, 30, 20, 0)), 1)
+        self.assertEqual(cap.call_args[0][1][0]["marca"], "ONVIF")
+        # A Galeria original não é alterada (a captura trabalha numa cópia)
+        self.assertNotIn("marca", equipamentos[0]["cameras_config"][0])
+
+    def test_defense_com_api_quebrada_captura_assim_mesmo(self):
+        equipamentos = [{
+            "tipo": "DEFENSE", "name": "Defense A", "active": True,
+            "cameras_config": [{"canal": 1, "nome": "Cam", "ip": "10.0.0.1"}],
+        }]
+        with patch("src.vms.defense._consultar_api_defense", side_effect=RuntimeError("API fora")), \
+                patch("src.camera.rtsp_client.capturar_imagens_noite_vms", side_effect=_captura_falsa()) as cap:
+            self.assertEqual(cn.capturar_noite_vms(equipamentos, {}, datetime(2026, 10, 30, 20, 0)), 1)
+        self.assertNotIn("marca", cap.call_args[0][1][0])
+
+    def test_digifort_nao_consulta_o_defense(self):
+        with patch("src.vms.defense._consultar_api_defense") as api, \
+                patch("src.camera.rtsp_client.capturar_imagens_noite_vms", side_effect=_captura_falsa()):
+            cn.capturar_noite_vms(_equipamentos(), {}, datetime(2026, 10, 30, 20, 0))
+            api.assert_not_called()
+
     def test_nova_noite_captura_de_novo(self):
         with patch("src.camera.rtsp_client.capturar_imagens_noite_vms", side_effect=_captura_falsa()) as cap:
             cn.capturar_noite_vms(_equipamentos(), {}, datetime(2026, 10, 30, 20, 0))

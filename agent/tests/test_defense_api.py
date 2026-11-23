@@ -17,6 +17,8 @@ from src.vms.defense import (
     extrair_cameras_defense_tree,
     consultar_gravacoes_defense_api,
     consultar_status_cameras_defense_api,
+    completar_marca_cameras_defense,
+    marca_rtsp_do_dispositivo,
     _montar_status_cameras_defense,
 )
 
@@ -339,6 +341,65 @@ class TestDefenseAPI(unittest.TestCase):
         self.assertEqual(res[1]["total_dias"], 8)
         self.assertEqual(res[1]["mapa"], "░░░░░░░████████")
         self.assertEqual(res[1]["dias_com_gravacao"], ["2026-10-22", "2026-10-23"])
+
+
+class TestMarcaRtspDefense(unittest.TestCase):
+    """A marca do RTSP vem do protocolo do dispositivo no Defense, não do palpite pelo modelo."""
+
+    def test_marca_pelo_protocolo(self):
+        self.assertEqual(marca_rtsp_do_dispositivo({"protocol": "1", "manufacturer": "1"}), "Intelbras")
+        self.assertEqual(marca_rtsp_do_dispositivo({"protocol": "2", "manufacturer": "2"}), "Hikvision")
+        # Motorola chega como ONVIF (protocolo 99, fabricante 246), com modelos MTI... e DIH...
+        self.assertEqual(marca_rtsp_do_dispositivo({"protocol": "99", "manufacturer": "246"}), "ONVIF")
+
+    def test_marca_reserva_pelo_fabricante_e_desconhecida(self):
+        self.assertEqual(marca_rtsp_do_dispositivo({"manufacturer": "2"}), "Hikvision")
+        self.assertEqual(marca_rtsp_do_dispositivo({"protocol": "7", "manufacturer": "9"}), "")
+        self.assertEqual(marca_rtsp_do_dispositivo({}), "")
+        self.assertEqual(marca_rtsp_do_dispositivo(None), "")
+
+    def test_extrair_cameras_traz_a_marca_do_dispositivo(self):
+        canal = [{"channelCode": "1$1$0$0", "channelName": "Camera 01", "channelType": "1", "status": "1"}]
+        devices = [
+            {"name": "DIH", "type": "2", "deviceIp": "192.168.75.37", "deviceModelStr": "DIH33001-D/A(POE)",
+             "protocol": "99", "manufacturer": "246", "units": [{"encoder": True, "channels": canal}]},
+            {"name": "GARAGEM", "type": "2", "deviceIp": "192.168.75.59", "deviceModelStr": "VIPC-1230-D-G2",
+             "protocol": "1", "manufacturer": "1", "units": [{"encoder": True, "channels": canal}]},
+        ]
+        cameras = extrair_cameras_defense_tree(devices)
+        self.assertEqual([c["marca"] for c in cameras], ["ONVIF", "Intelbras"])
+
+    def test_completar_marca_casa_por_ip_e_por_nome(self):
+        cameras_api = [
+            {"nome": "DVR - Canal 1", "canal_nome_original": "Canal 1", "ip": "10.0.40.47", "marca": "Intelbras"},
+            {"nome": "DVR - Canal 2", "canal_nome_original": "Canal 2", "ip": "10.0.40.47", "marca": "Intelbras"},
+            {"nome": "LATERAL", "canal_nome_original": "Camera 01", "ip": "192.168.75.22", "marca": "ONVIF"},
+            {"nome": "SEM MARCA", "ip": "192.168.75.99", "marca": ""},
+        ]
+        galeria = [
+            {"nome": "qualquer", "ip": "10.0.40.47"},            # por IP (canal de gravador)
+            {"nome": "Lateral", "ip": ""},                         # por nome, sem IP
+            {"nome": "Sem marca", "ip": "192.168.75.99"},          # API não soube a marca
+            {"nome": "Fora do Defense", "ip": "172.16.0.5"},       # câmera que o Defense não lista
+            {"nome": "Já tem", "ip": "192.168.75.22", "marca": "Hikvision"},  # marca da Galeria não é trocada
+        ]
+        with patch("src.vms.defense._consultar_api_defense", return_value=({"x": True}, cameras_api, {})) as api:
+            preenchidas = completar_marca_cameras_defense({"ip": "192.168.75.41", "password": "x"}, galeria)
+        self.assertEqual(preenchidas, 2)
+        self.assertEqual([c.get("marca") for c in galeria], ["Intelbras", "ONVIF", None, None, "Hikvision"])
+        api.assert_called_once()
+        self.assertFalse(api.call_args.kwargs.get("incluir_gravacoes", True))  # sem consultar gravações
+
+    def test_completar_marca_sem_api_nao_altera_nada(self):
+        galeria = [{"nome": "A", "ip": "10.0.0.1"}]
+        with patch("src.vms.defense._consultar_api_defense", return_value=({}, [], {})):
+            self.assertEqual(completar_marca_cameras_defense({}, galeria), 0)
+        self.assertNotIn("marca", galeria[0])
+
+    def test_completar_marca_nao_consulta_se_todas_ja_tem(self):
+        with patch("src.vms.defense._consultar_api_defense") as api:
+            self.assertEqual(completar_marca_cameras_defense({}, [{"nome": "A", "marca": "Intelbras"}]), 0)
+            api.assert_not_called()
 
 
 if __name__ == "__main__":
