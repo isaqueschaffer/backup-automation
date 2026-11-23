@@ -25,7 +25,7 @@ export default function HistoricoValidade({ renovacoes = [] }: HistoricoValidade
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead>
               <tr>
                 <th>Data</th>
