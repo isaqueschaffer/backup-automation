@@ -5,6 +5,7 @@ import { Menu, Server } from "lucide-react";
 import Sidebar from "./Sidebar";
 import AvisoConta from "./AvisoConta";
 import NotificacoesPopup from "./NotificacoesPopup";
+import SemConexao from "./SemConexao";
 
 export default function Layout({ children }: { children: ReactNode }) {
   // No celular a barra lateral vira gaveta; no desktop o estado é ignorado (CSS).
@@ -54,6 +55,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <AvisoConta />
         <NotificacoesPopup />
         {children}
+        <SemConexao />
       </main>
     </div>
   );

@@ -1,3 +1,4 @@
+import { useAutoAtualizar } from "../../utils/useAutoAtualizar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -40,6 +41,10 @@ export default function MachinesPage() {
     fetchCustomers().then(setCustomers).catch(() => { /* filtro fica só com "Todos"/"Sem cliente" */ });
   }, [toast]);
   useEffect(() => { load(); }, [load]);
+  // Atualização silenciosa (status online/backup das máquinas); falha tenta de novo no próximo ciclo
+  useAutoAtualizar(() => {
+    fetchMachines().then((m) => { setMachines(m); setLoadFailed(false); }).catch(() => {});
+  }, 15000);
 
   const visible = useMemo(() => {
     if (!customerFilter) return machines;

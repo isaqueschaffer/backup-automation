@@ -105,6 +105,25 @@ def get_me(
     )
 
 
+@router.post("/renovar", response_model=TokenResponse)
+def renovar(
+    ctx: Contexto = Depends(get_contexto_sem_bloqueio),
+    db: Session = Depends(get_db),
+):
+    """Troca um token ainda válido por um novo (mais ACCESS_TOKEN_EXPIRE_HOURS). O painel chama periodicamente para a
+    tela de monitoramento não cair no login. Usuário desativado ou com senha trocada já falha em get_contexto (401).
+    O login legado do admin (só senha) não renova: não há como revogar essa sessão sem trocar a SECRET_KEY."""
+    if ctx.usuario_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O login só com senha não renova a sessão. Use um usuário com e-mail.",
+        )
+    usuario = db.query(Usuario).filter(Usuario.id == ctx.usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessão expirada. Entre novamente.")
+    return TokenResponse(access_token=create_access_token_usuario(usuario))
+
+
 @router.post("/trocar-senha", response_model=TokenResponse)
 def trocar_senha(
     body: TrocarSenhaRequest,

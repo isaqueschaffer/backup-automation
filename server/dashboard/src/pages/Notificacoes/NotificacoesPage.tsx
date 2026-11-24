@@ -1,3 +1,4 @@
+import { useAutoAtualizar } from "../../utils/useAutoAtualizar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Bell, ChevronDown, ChevronRight, Pencil, Plus, Power, PowerOff, Siren, Trash2, Unplug, VideoOff } from "lucide-react";
 import {
@@ -87,18 +88,21 @@ export default function NotificacoesPage() {
   const [salvando, setSalvando] = useState<TipoNotificacao | string | null>(null);
   const [formAberto, setFormAberto] = useState<"nova" | NotificacaoPersonalizada | null>(null);
 
-  const carregar = useCallback(() => {
-    setLoading(true);
+  // silencioso: atualização automática, sem spinner nem toast de erro
+  const carregar = useCallback((silencioso = false) => {
+    if (!silencioso) setLoading(true);
     Promise.all([
       fetchNotificacoes(true), fetchConfigNotificacoes(), fetchNotificacoesPersonalizadas(), fetchCamerasNotificacao(),
       fetchAlarmesNotificacao(), fetchOltsNotificacao(),
     ])
       .then(([n, c, p, cam, alm, olt]) => { setAbertas(n); setConfig(c); setPersonalizadas(p); setCameras(cam); setAlarmes(alm); setOlts(olt); })
-      .catch(() => toast("Erro ao carregar notificações.", "error"))
+      .catch(() => { if (!silencioso) toast("Erro ao carregar notificações.", "error"); })
       .finally(() => setLoading(false));
   }, [toast]);
 
   useEffect(() => { carregar(); }, [carregar]);
+  // Não atualiza enquanto salva uma alteração ou com o formulário aberto (não desfaz o que a pessoa está fazendo)
+  useAutoAtualizar(() => { carregar(true); }, 30000, salvando === null && formAberto === null);
 
   const cameraPorMaquina = useMemo(() => agruparPorMaquina(cameras), [cameras]);
   const alarmePorMaquina = useMemo(() => agruparPorMaquina(alarmes), [alarmes]);

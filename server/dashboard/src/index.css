@@ -1118,3 +1118,32 @@ body.dash-arrastando * { cursor: grabbing !important; }
   .rodada-linha > .rodada-ok     { grid-column: 3; grid-row: 2; justify-self: end; flex-wrap: wrap; justify-content: flex-end; }
   .rodada-linha > .rodada-email  { grid-column: 2 / 4; grid-row: 3; justify-content: space-between; }
 }
+
+/* Faixas flutuantes do painel 24 h (sem conexão, nova versão): no rodapé, centralizadas, acima de tudo */
+.faixa-flutuante {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-accent);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+  font-size: 14px;
+}
+.faixa-flutuante-erro {
+  border-color: var(--err);
+  color: var(--err);
+  bottom: 72px; /* não cobre a faixa de nova versão se as duas aparecerem */
+}
+@media (max-width: 600px) {
+  .faixa-flutuante { width: calc(100vw - 32px); font-size: 13px; }
+  .faixa-flutuante span { flex: 1; }
+}
