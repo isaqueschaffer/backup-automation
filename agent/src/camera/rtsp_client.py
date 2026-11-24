@@ -949,6 +949,7 @@ def capturar_imagens_noite_vms(equipamento_nome: str, cameras_lista: list, conf:
             "username": cam.get("username") or "admin",
             "password": cam.get("password") or "navarro@123",
             "modelo": cam.get("modelo") or "Hikvision",
+            "marca": cam.get("marca") or "",
             "canal": cam.get("canal_rtsp"),
             "stream_principal": True,
             "gravador": bool(cam.get("canal_rtsp")),

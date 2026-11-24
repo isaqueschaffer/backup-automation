@@ -20,6 +20,21 @@ DEVICE_TYPES_GRAVADOR = {"1", "6"}
 DEVICE_TYPE_ACESSO = "16"
 DEVICE_CATEGORY_ACESSO = "8"
 
+# Marca para montar a URL RTSP, a partir do campo `protocol` do dispositivo no Defense (é ele que define o estilo da
+# URL): 1 = protocolo Dahua/Intelbras, 2 = Hikvision, 99 = ONVIF (câmeras Motorola MTI.../DIH... chegam assim, com
+# `manufacturer` 246). `manufacturer` só serve de reserva (1 = Intelbras, 2 = Hikvision); fora disso, "" e o agente
+# deduz pelo modelo, como antes.
+MARCA_RTSP_POR_PROTOCOLO = {"1": "Intelbras", "2": "Hikvision", "99": "ONVIF"}
+MARCA_RTSP_POR_FABRICANTE = {"1": "Intelbras", "2": "Hikvision"}
+
+
+def marca_rtsp_do_dispositivo(dev: dict) -> str:
+    """Marca (para o RTSP) de um dispositivo da árvore do Defense; "" se não for reconhecida."""
+    if not isinstance(dev, dict):
+        return ""
+    marca = MARCA_RTSP_POR_PROTOCOLO.get(str(dev.get("protocol", "")).strip())
+    return marca or MARCA_RTSP_POR_FABRICANTE.get(str(dev.get("manufacturer", "")).strip(), "")
+
 
 def canal_rtsp_do_codigo(codigo, eh_gravador: bool):
     """Canal RTSP de uma câmera de DVR/NVR a partir do código do canal no Defense ("1000079$1$0$3" = 4º canal do
@@ -65,6 +80,7 @@ def extrair_cameras_defense_tree(devices: list) -> list:
         dev_name = (dev.get("name") or dev.get("deviceName") or "").strip()
         dev_ip = dev.get("deviceIp") or dev.get("ip") or "N/A"
         dev_model = dev.get("deviceModelStr") or dev.get("model") or ""
+        dev_marca = marca_rtsp_do_dispositivo(dev)
         units = dev.get("units")
 
         if not isinstance(units, list):
@@ -135,6 +151,7 @@ def extrair_cameras_defense_tree(devices: list) -> list:
                 "codigo": ch_code,
                 "ip": ch_ip,
                 "modelo": ch_model,
+                "marca": dev_marca,
                 "online": is_online,
                 "status_comunicacao": "ONLINE" if is_online else "OFFLINE",
                 "dev_name": dev_name,
@@ -545,6 +562,34 @@ def _consultar_api_defense(equipamento: dict, incluir_gravacoes: bool = True) ->
         elif len(ret) == 2:
             status_dict, cameras_api = ret
     return status_dict, cameras_api, gravacoes_map
+
+
+def completar_marca_cameras_defense(equipamento: dict, cameras: list) -> int:
+    """Preenche `marca` nas câmeras da Galeria que ainda não têm, com a marca que o Defense informa do dispositivo
+    (casa por IP; câmera sem IP na API, pelo nome). Sem senha da API, API fora do ar ou câmera não achada, a câmera
+    fica como está e o RTSP segue deduzindo pelo modelo. Retorna quantas câmeras ganharam marca."""
+    pendentes = [c for c in cameras if not c.get("marca")]
+    if not pendentes:
+        return 0
+    _, cameras_api, _ = _consultar_api_defense(equipamento, incluir_gravacoes=False)
+    por_ip, por_nome = {}, {}
+    for cam_api in cameras_api:
+        marca = cam_api.get("marca")
+        if not marca:
+            continue
+        ip_api = (cam_api.get("ip") or "").strip()
+        if ip_api and ip_api != "N/A":
+            por_ip.setdefault(ip_api, marca)
+        for nome in (cam_api.get("nome"), cam_api.get("canal_nome_original")):
+            if nome:
+                por_nome.setdefault(nome.strip().lower(), marca)
+    preenchidas = 0
+    for cam in pendentes:
+        marca = por_ip.get((cam.get("ip") or "").strip()) or por_nome.get((cam.get("nome") or "").strip().lower())
+        if marca:
+            cam["marca"] = marca
+            preenchidas += 1
+    return preenchidas
 
 
 def _casar_cameras_defense(cameras_config: list, status_dict: dict, cameras_api: list) -> list:

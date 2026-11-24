@@ -60,6 +60,14 @@ def capturar_noite_vms(equipamentos: list, conf: dict, agora: Optional[datetime]
         if not pendentes:
             continue
 
+        if (eq.get("tipo") or "").upper() == "DEFENSE":
+            # A marca vem do Defense (protocolo do dispositivo), não do palpite pelo modelo da Galeria
+            try:
+                from src.vms.defense import completar_marca_cameras_defense
+                completar_marca_cameras_defense(eq, [c for _, c in pendentes])
+            except Exception:
+                logging.warning(f"  [NOITE] {nome_eq}: não consegui ler a marca das câmeras no Defense.", exc_info=True)
+
         logging.info(f"  [NOITE] {nome_eq}: capturando {len(pendentes)} câmera(s) pela rede (ao vivo, RTSP).")
         capturar_imagens_noite_vms(nome_eq, [c for _, c in pendentes], conf)
         for chave, cam in pendentes:
