@@ -1127,6 +1127,12 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-24] — Merge `helena` + Agente 1.1.64: marca da câmera do Defense na captura noturna RTSP
+
+- **Entrou** (commit `3775bc6` da Helena, pelo merge `808e2b4`): `agent/src/vms/defense.py` lê a marca do dispositivo na árvore do Defense pelo campo `protocol` (1 = Intelbras/Dahua, 2 = Hikvision, 99 = ONVIF, caso das Motorola MTI/DIH), com `manufacturer` de reserva, e grava `marca` em cada câmera de `extrair_cameras_defense_tree`. Nova `completar_marca_cameras_defense` preenche a marca das câmeras da Galeria sem marca (casa por IP; sem IP, pelo nome) antes da captura noturna (`captura_noite_vms.py`, só tipo DEFENSE; falha na API só registra aviso e a captura segue deduzindo pelo modelo). `rtsp_client.capturar_imagens_noite_vms` passa `marca` à tarefa RTSP. Testes em `test_defense_api.py` e `test_captura_noite_vms.py`.
+- **Auditoria**: só `agent/` (5 arquivos, +144); sem data com fuso, sem segredos, sem rotas do servidor, compose, nginx, models ou requirements. Nada bloqueado. Suíte do agente: 307 testes OK.
+- **Versão**: 1.1.64 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto.
+
 ### [2026-11-23] — Agente 1.1.63: foto pela API HTTP da Hikvision quando o RTSP não entrega imagem
 
 - **Problema**: no Digifort do CFTV 01 - Navarro, 12 câmeras de elevador (Hikvision DS-2CD1101-I, 2º ao 13º andar) nunca tiveram imagem ideal nem da noite: todos os caminhos RTSP (Hikvision, Intelbras, ONVIF, Grandstream), em TCP e UDP, davam "Tempo esgotado". Não era modelo (o 1º andar, que funciona, é o mesmo DS-2CD1101-I), caminho (seria 404) nem senha (seria 401; as credenciais vieram todas da mesma importação de 11/11). Com o `-timeout` de 5 s do ffmpeg, câmera muda daria erro em 5 s: estourar os 18 s indica que o RTSP troca dados mas não sai quadro (provável taxa de quadros baixa ou intervalo de quadro-chave longo, com `-skip_frame nokey`). O tempo esgotado descartava a saída do ffmpeg, e o diagnóstico ficava cego.
