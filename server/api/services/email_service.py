@@ -13,6 +13,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from config import settings
+from database import encerrar_transacao
 from models import NVR, NVRCamera, Setting
 from services.camera_offline import formatar_offline_ha, segundos_offline
 
@@ -641,6 +642,9 @@ def send_backup_report(
 
     _set_body(msg, body)
 
+    # Daqui em diante só disco e SMTP (até ~100 s): devolve a conexão do banco ao pool antes
+    encerrar_transacao(db)
+
     if attach and zip_path:
         msg.add_attachment(
             zip_path.read_bytes(),
@@ -814,6 +818,9 @@ def send_customer_report(
     )
 
     _set_body(msg, body)
+
+    # Daqui em diante só SMTP (até ~100 s): devolve a conexão do banco ao pool antes
+    encerrar_transacao(db)
 
     all_attachments = offline_images.get("attachments") or []
     first_batch = all_attachments[:MAX_OFFLINE_IMAGES]

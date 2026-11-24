@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 
 from models import ConfiguracaoNotificacao, Conta, Machine, NotificacaoPersonalizada, NVR, Notificacao, Usuario
 from services.email_service import _clean_recipients
+from database import encerrar_transacao
 from services.camera_offline import formatar_offline_ha, segundos_offline
+from services.datas import para_utc_naive
 from services.email_service import _smtp_config, _smtp_send
 from services.galeria_vms import status_por_camera
 from services.licenca_unm import licenca_da_config
@@ -97,6 +99,9 @@ def _enviar_email(db: Session, conta: Conta, assunto: str, texto_puro: str, corp
     msg["Subject"], msg["From"], msg["To"] = assunto, cfg["email"], ", ".join(para)
     msg.set_content(texto_puro)
     msg.add_alternative(corpo_html, subtype="html")
+    # O SMTP pode levar até ~100 s (3 tentativas de 30 s): grava o que já foi aberto/atualizado e devolve a conexão
+    # ao pool antes, para a sessão não ficar "idle in transaction" durante o envio
+    encerrar_transacao(db)
     return _smtp_send(msg, cfg, para)
 
 
@@ -225,7 +230,7 @@ def verificar_agentes_offline(db: Session, agora: Optional[datetime] = None) -> 
             if not tipo_ativo(db, m.conta_id, "AGENTE_OFFLINE"):
                 resolver(db, m.conta_id, "AGENTE_OFFLINE", machine_id=m.id)
                 continue
-            if m.last_seen < limite:
+            if para_utc_naive(m.last_seen) < limite:  # REGRA-001: last_seen pode voltar do banco com fuso
                 abrir_ou_atualizar(
                     db, m.conta_id, "AGENTE_OFFLINE",
                     f"Agente offline em '{m.name}'",
@@ -721,37 +726,25 @@ def verificar_notificacoes(db: Session) -> dict:
     de fundo do main.py. Retorna um pequeno resumo para o log."""
     resumo = {"emails_licenca": 0, "emails_personalizadas": 0, "emails_camera_offline": 0, "emails_alarme": 0,
               "emails_antena": 0, "emails_olt": 0}
-    try:
-        resumo["emails_licenca"] = verificar_licencas_unm2000(db)
-    except Exception:
-        logger.exception("Falha geral ao verificar licenças da UNM2000")
-    try:
-        verificar_backups_falhos(db)
-    except Exception:
-        logger.exception("Falha geral ao verificar backups com falha")
-    try:
-        verificar_agentes_offline(db)
-    except Exception:
-        logger.exception("Falha geral ao verificar agentes offline")
-    try:
-        resumo["emails_camera_offline"] = verificar_cameras_offline(db)
-    except Exception:
-        logger.exception("Falha geral ao verificar câmeras offline")
-    try:
-        resumo["emails_alarme"] = verificar_alarmes(db)
-    except Exception:
-        logger.exception("Falha geral ao verificar alarmes")
-    try:
-        resumo["emails_olt"] = verificar_olts(db)
-    except Exception:
-        logger.exception("Falha geral ao verificar ONUs das OLTs")
-    try:
-        resumo["emails_antena"] = verificar_antenas(db)
-    except Exception:
-        logger.exception("Falha geral ao verificar antenas")
-    try:
-        resumo["emails_personalizadas"] = verificar_personalizadas(db)
-    except Exception:
-        logger.exception("Falha geral ao verificar notificações personalizadas")
-    db.commit()
+    etapas = [
+        ("emails_licenca", verificar_licencas_unm2000, "licenças da UNM2000"),
+        (None, verificar_backups_falhos, "backups com falha"),
+        (None, verificar_agentes_offline, "agentes offline"),
+        ("emails_camera_offline", verificar_cameras_offline, "câmeras offline"),
+        ("emails_alarme", verificar_alarmes, "alarmes"),
+        ("emails_olt", verificar_olts, "ONUs das OLTs"),
+        ("emails_antena", verificar_antenas, "antenas"),
+        ("emails_personalizadas", verificar_personalizadas, "notificações personalizadas"),
+    ]
+    for chave, verificar, descricao in etapas:
+        # Cada etapa grava o seu resultado. Se falhar, desfaz só a parte dela: sem o rollback a sessão ficava em
+        # estado de erro (PendingRollbackError) e derrubava as etapas seguintes (pool esgotado em 24/11/2026).
+        try:
+            resultado = verificar(db)
+            db.commit()
+            if chave:
+                resumo[chave] = resultado
+        except Exception:
+            logger.exception("Falha geral ao verificar %s", descricao)
+            db.rollback()
     return resumo

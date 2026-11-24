@@ -12,6 +12,7 @@ Datetimes gravados são naive UTC (REGRA-001).
 import logging
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import zipfile
 from datetime import datetime, timedelta
 from typing import Iterator, List, Optional
@@ -21,7 +22,9 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from config import settings
+from database import encerrar_transacao
 from models import AgentLog, Backup, Customer, CustomerBackupRun, Machine
+from services.datas import para_utc_naive
 from services.email_service import send_customer_report
 from services.storage_service import get_zip_path, _sanitize_name
 
@@ -114,7 +117,7 @@ def finish_queue_run(db: Session, customer: Customer) -> None:
     now = _utcnow()
     limite = now + timedelta(seconds=settings.RUN_UPLOAD_GRACE_SECONDS)
     for run in _open_runs(db, customer.id, TRIGGER_QUEUE, now):
-        if run.deadline_at > limite:
+        if para_utc_naive(run.deadline_at) > limite:
             run.deadline_at = limite
 
 
@@ -186,11 +189,15 @@ def _latest_backup_by_machine(run: CustomerBackupRun) -> dict:
     latest: dict = {}
     for b in run.backups:
         key = str(b.machine_id)
-        ref = b.finished_at or b.created_at or datetime.min
         cur = latest.get(key)
-        if cur is None or ref >= (cur.finished_at or cur.created_at or datetime.min):
+        if cur is None or _report_time(b) >= _report_time(cur):
             latest[key] = b
     return latest
+
+
+def _report_time(b: Backup) -> datetime:
+    """Hora do relatório (finished_at ou created_at) em UTC naive (REGRA-001), datetime.min se não houver."""
+    return para_utc_naive(b.finished_at or b.created_at) or datetime.min
 
 
 def run_machine_ids(run: CustomerBackupRun) -> List[str]:
@@ -241,7 +248,8 @@ def compute_run_status(entries: List[dict]) -> str:
 def _still_running(run: CustomerBackupRun, now: datetime) -> bool:
     """Alguma máquina esperada, ainda sem relatório, está fazendo o backup agora (agente >= 1.1.8)?"""
     customer = run.customer
-    if customer is None or now >= run.started_at + timedelta(hours=settings.RUN_MAX_HOURS):
+    now = para_utc_naive(now)
+    if customer is None or now >= para_utc_naive(run.started_at) + timedelta(hours=settings.RUN_MAX_HOURS):
         return False
     latest = _latest_backup_by_machine(run)
     pendentes = {mid for mid in (run.expected_machine_ids or []) if mid not in latest}
@@ -250,19 +258,23 @@ def _still_running(run: CustomerBackupRun, now: datetime) -> bool:
             continue
         ativo = bool((m.telemetry or {}).get("backup_em_andamento"))
         # O ping chega a cada ~15 s; sem ping recente o agente caiu e não vale esperar
-        if ativo and m.last_seen is not None and (now - m.last_seen).total_seconds() < 120:
+        last_seen = para_utc_naive(m.last_seen)
+        if ativo and last_seen is not None and (now - last_seen).total_seconds() < 120:
             return True
     return False
 
 
 def _is_due(run: CustomerBackupRun, now: datetime) -> bool:
-    if now >= run.deadline_at:
+    # Tudo em UTC naive antes de comparar (REGRA-001): uma data com fuso vinda do banco derrubava o
+    # fechamento com "can't subtract offset-naive and offset-aware datetimes"
+    now = para_utc_naive(now)
+    if now >= para_utc_naive(run.deadline_at):
         return not _still_running(run, now)
     latest = _latest_backup_by_machine(run)
     expected = list(run.expected_machine_ids or [])
     if not expected or any(mid not in latest for mid in expected):
         return False
-    last_report = max((b.finished_at or b.created_at) for b in run.backups)
+    last_report = max(_report_time(b) for b in run.backups)
     return (now - last_report).total_seconds() > settings.RUN_UPLOAD_GRACE_SECONDS
 
 
@@ -327,7 +339,7 @@ def close_run(db: Session, run: CustomerBackupRun, now: Optional[datetime] = Non
 
     Retorna True se esta chamada fechou a rodada.
     """
-    now = now or _utcnow()
+    now = para_utc_naive(now) or _utcnow()
     status = compute_run_status(run_entries(db, run))
     # UPDATE condicional: evita fechar (e mandar e-mail) duas vezes
     result = db.execute(
@@ -351,7 +363,7 @@ def close_due_runs(db: Session, now: Optional[datetime] = None) -> List[UUID]:
 
     Chamada pela tarefa de fundo (a cada 30s) e exposta para testes. Retorna os IDs fechados.
     """
-    now = now or _utcnow()
+    now = para_utc_naive(now) or _utcnow()
 
     # Une duplicadas que a re-consulta do relatório não tenha resolvido
     dup_customers = {
@@ -505,80 +517,36 @@ def write_extracted_backup(
     return extracted_any
 
 
-def build_single_backup_zip_with_customer_password(
-    db: Session,
-    backup: Backup,
-    client_password: Optional[str] = None,
-):
-    """Gera o arquivo de um backup individual de máquina utilizando a senha do Cliente.
-    Se o cliente possuir senha configurada, protege o ZIP com a senha do cliente (AES-WZ).
-    Se o cliente usar padrão (sem senha), gera o ZIP sem senha.
-    Os arquivos internos da máquina são desencriptados com a senha da máquina e gravados sem senha interna.
-    """
-    import pyzipper
-    from services.crypto_service import decrypt as crypto_decrypt
-
-    machine = backup.machine
-    if not machine or not backup.zip_filename:
-        return None
-
-    customer = machine.customer
-    date_str = (backup.started_at or backup.created_at).strftime("%d-%m-%Y")
-    path = get_zip_path(machine.id, machine.name, backup.zip_filename, date_str=date_str, customer=customer)
-    if not path or not path.exists():
-        return None
-
-    if client_password is None and customer and customer.zip_password:
-        try:
-            client_password = crypto_decrypt(customer.zip_password)
-        except Exception:
-            logger.warning("Falha ao decriptar senha do cliente %s", customer.name)
-
-    tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
-    found_any = False
-    used_folders: set = set()
-
-    try:
-        if client_password:
-            zf_context = pyzipper.AESZipFile(
-                tmp, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES
-            )
-        else:
-            zf_context = pyzipper.AESZipFile(
-                tmp, "w", compression=pyzipper.ZIP_DEFLATED
-            )
-
-        with zf_context as zf_out:
-            if client_password:
-                zf_out.setpassword(client_password.encode())
-
-            if write_extracted_backup(zf_out, path, machine.name, machine.id, machine.zip_password, backup.zip_filename, used_folders):
-                found_any = True
-    except Exception:
-        tmp.close()
-        raise
-
-    if not found_any:
-        tmp.close()
-        return None
-    tmp.seek(0)
-    return tmp
+def _item_zip(machine: Machine, backup: Backup, customer) -> dict:
+    """Cópia simples do que o ZIP precisa de uma máquina/backup (sem ORM: a montagem roda fora da transação)."""
+    return {
+        "machine_id": machine.id,
+        "machine_name": machine.name,
+        "zip_password": machine.zip_password,
+        "zip_filename": backup.zip_filename,
+        "date_str": (backup.started_at or backup.created_at).strftime("%d-%m-%Y"),
+        "customer": SimpleNamespace(id=customer.id, name=customer.name) if customer is not None else None,
+    }
 
 
-def build_run_zip(db: Session, run: CustomerBackupRun, client_password: Optional[str] = None):
-    """Gera o ZIP consolidado da rodada do cliente.
-
-    Se `client_password` for informado (ou configurado no cliente), protege o ZIP do cliente com essa senha (AES-WZ).
-    Os arquivos dentro das pastas das máquinas ficam descompactados/sem senha interna.
-    """
-    import pyzipper
-
-    if client_password is None and run.customer and run.customer.zip_password:
+def _senha_do_cliente(customer, client_password: Optional[str]) -> Optional[str]:
+    if client_password is None and customer is not None and customer.zip_password:
         from services.crypto_service import decrypt as crypto_decrypt
         try:
-            client_password = crypto_decrypt(run.customer.zip_password)
+            return crypto_decrypt(customer.zip_password)
         except Exception:
-            logger.warning("Falha ao decriptar senha do cliente %s", run.customer.name)
+            logger.warning("Falha ao decriptar senha do cliente %s", customer.name)
+    return client_password
+
+
+def _montar_zip(db: Session, itens: List[dict], client_password: Optional[str]):
+    """Monta o ZIP do Cliente a partir dos itens (`_item_zip`). Antes devolve a conexão do banco ao pool: procurar
+    e ler os ZIPs num disco lento pode levar minutos, e a sessão ficava "idle in transaction" segurando uma conexão
+    do pool durante toda a montagem (pool esgotado em 24/11/2026).
+    Com senha, protege o ZIP do Cliente (AES-WZ); os arquivos internos ficam sem senha. None se nada foi achado."""
+    import pyzipper
+
+    encerrar_transacao(db)
 
     tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
     found_any = False
@@ -598,16 +566,13 @@ def build_run_zip(db: Session, run: CustomerBackupRun, client_password: Optional
             if client_password:
                 zf_out.setpassword(client_password.encode())
 
-            for e in run_entries(db, run):
-                b, m = e["backup"], e["machine"]
-                if b is None or m is None or not b.zip_filename:
-                    continue
-                date_str = (b.started_at or b.created_at).strftime("%d-%m-%Y")
-                path = get_zip_path(m.id, m.name, b.zip_filename, date_str=date_str, customer=m.customer or run.customer)
+            for it in itens:
+                path = get_zip_path(it["machine_id"], it["machine_name"], it["zip_filename"],
+                                    date_str=it["date_str"], customer=it["customer"])
                 if not path or not path.exists():
                     continue
-
-                if write_extracted_backup(zf_out, path, m.name, m.id, m.zip_password, b.zip_filename, used_folders):
+                if write_extracted_backup(zf_out, path, it["machine_name"], it["machine_id"], it["zip_password"],
+                                          it["zip_filename"], used_folders):
                     found_any = True
     except Exception:
         tmp.close()
@@ -618,6 +583,39 @@ def build_run_zip(db: Session, run: CustomerBackupRun, client_password: Optional
         return None
     tmp.seek(0)
     return tmp
+
+
+def build_single_backup_zip_with_customer_password(
+    db: Session,
+    backup: Backup,
+    client_password: Optional[str] = None,
+):
+    """Gera o arquivo de um backup individual de máquina utilizando a senha do Cliente.
+    Se o cliente possuir senha configurada, protege o ZIP com a senha do cliente (AES-WZ).
+    Se o cliente usar padrão (sem senha), gera o ZIP sem senha.
+    Os arquivos internos da máquina são desencriptados com a senha da máquina e gravados sem senha interna.
+    """
+    machine = backup.machine
+    if not machine or not backup.zip_filename:
+        return None
+    customer = machine.customer
+    itens = [_item_zip(machine, backup, customer)]
+    return _montar_zip(db, itens, _senha_do_cliente(customer, client_password))
+
+
+def build_run_zip(db: Session, run: CustomerBackupRun, client_password: Optional[str] = None):
+    """Gera o ZIP consolidado da rodada do cliente.
+
+    Se `client_password` for informado (ou configurado no cliente), protege o ZIP do cliente com essa senha (AES-WZ).
+    Os arquivos dentro das pastas das máquinas ficam descompactados/sem senha interna.
+    """
+    itens = []
+    for e in run_entries(db, run):
+        b, m = e["backup"], e["machine"]
+        if b is None or m is None or not b.zip_filename:
+            continue
+        itens.append(_item_zip(m, b, m.customer or run.customer))
+    return _montar_zip(db, itens, _senha_do_cliente(run.customer, client_password))
 
 
 def build_client_zip_with_password(db: Session, run: CustomerBackupRun, client_password: str):
@@ -630,58 +628,18 @@ def build_customer_latest_zip(db: Session, customer: Customer, client_password: 
     Se o cliente possuir senha configurada, protege o ZIP com essa senha (AES-WZ).
     Os arquivos dentro das pastas das máquinas ficam sem senha interna.
     """
-    import pyzipper
-
-    if client_password is None and customer.zip_password:
-        from services.crypto_service import decrypt as crypto_decrypt
-        try:
-            client_password = crypto_decrypt(customer.zip_password)
-        except Exception:
-            logger.warning("Falha ao decriptar senha do cliente %s", customer.name)
-
-    tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
-    found_any = False
-    used_folders: set = set()
-
-    try:
-        if client_password:
-            zf_context = pyzipper.AESZipFile(
-                tmp, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES
-            )
-        else:
-            zf_context = pyzipper.AESZipFile(
-                tmp, "w", compression=pyzipper.ZIP_DEFLATED
-            )
-
-        with zf_context as zf_out:
-            if client_password:
-                zf_out.setpassword(client_password.encode())
-
-            for machine in sorted(customer.machines, key=lambda m: m.queue_order):
-                latest = (
-                    db.query(Backup)
-                    .filter(Backup.machine_id == machine.id, Backup.zip_filename.isnot(None))
-                    .order_by(Backup.started_at.desc())
-                    .first()
-                )
-                if not latest or not latest.zip_filename:
-                    continue
-                date_str = (latest.started_at or latest.created_at).strftime("%d-%m-%Y")
-                path = get_zip_path(machine.id, machine.name, latest.zip_filename, date_str=date_str, customer=customer)
-                if not path or not path.exists():
-                    continue
-
-                if write_extracted_backup(zf_out, path, machine.name, machine.id, machine.zip_password, latest.zip_filename, used_folders):
-                    found_any = True
-    except Exception:
-        tmp.close()
-        raise
-
-    if not found_any:
-        tmp.close()
-        return None
-    tmp.seek(0)
-    return tmp
+    itens = []
+    for machine in sorted(customer.machines, key=lambda m: m.queue_order):
+        latest = (
+            db.query(Backup)
+            .filter(Backup.machine_id == machine.id, Backup.zip_filename.isnot(None))
+            .order_by(Backup.started_at.desc())
+            .first()
+        )
+        if not latest or not latest.zip_filename:
+            continue
+        itens.append(_item_zip(machine, latest, customer))
+    return _montar_zip(db, itens, _senha_do_cliente(customer, client_password))
 
 
 def iter_file(f, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
