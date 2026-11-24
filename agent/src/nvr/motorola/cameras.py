@@ -14,6 +14,7 @@ def abrir_sessao_motorola(nvr_ip, usuario, senha):
     pwd_b64 = base64.b64encode(senha.encode('utf-8')).decode('utf-8')
     xml_header = '<?xml version="1.0" encoding="utf-8" ?>'
     token = ""
+    session.tvt_session_id = ""  # sessionId do reqLogin (o WebSocket dos firmwares novos autentica com ele)
 
     try:
         # Tenta o fluxo novo de login (reqLogin -> doLogin com hash SHA-512)
@@ -27,6 +28,7 @@ def abrir_sessao_motorola(nvr_ip, usuario, senha):
             root_req = parse_xml_seguro(r_req.content)
             nonce = texto(root_req, ".//nonce", None)
             token = texto(root_req, ".//token", None) or ""
+            session.tvt_session_id = (texto(root_req, ".//sessionId", None) or "").strip("{}")
 
             if nonce and token:
                 pwd_md5 = hashlib.md5(senha.encode('utf-8')).hexdigest().upper()
