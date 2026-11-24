@@ -1,4 +1,5 @@
 """Endpoint MCP (POST /mcp, Streamable HTTP sem estado, respostas JSON) e as rotas dos tokens em "Minha conta"."""
+import asyncio
 import base64
 import json
 import logging
@@ -28,6 +29,12 @@ logger = logging.getLogger("trilan.mcp")
 VERSOES = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 LIMITE_TEXTO = 80_000
 LIMITE_IMAGEM = 2 * 1024 * 1024
+# Resposta maior que isto não é aberta (protege a memória do servidor: a VM tem 5 GB e 1 CPU)
+LIMITE_RESPOSTA = 15 * 1024 * 1024
+# Ferramentas que listam câmeras: chamadas sempre sem as fotos (ver_imagem_camera mostra a de um canal)
+SEM_IMAGENS = {"get_nvr_cameras"}
+# Chamadas simultâneas das IAs (os apps disparam várias em paralelo; o pool do banco tem 15 conexões)
+_limite_chamadas = asyncio.Semaphore(3)
 
 INSTRUCOES = """Trilan Backups: sistema que faz backup automático da configuração de equipamentos (NVRs, câmeras, OLTs,
 Mikrotik, centrais de alarme, antenas, DIGIFORT...) e monitora o estado deles.
@@ -37,7 +44,7 @@ Você age em nome do usuário conectado, com as mesmas permissões dele no paine
 Auditoria como "<e-mail> (IA via MCP)". Antes de excluir algo ou de agir em todas as máquinas, confirme com o
 usuário. Para achar ids, liste primeiro (clientes, máquinas, equipamentos).
 Imagens de câmera chegam como imagem anexada (não como texto): foto ao vivo com test_equipamento_rtsp; foto salva
-(referência ou da noite) de um canal com ver_imagem_camera. Mostre a imagem ao usuário no chat."""
+(referência ou da noite) de um canal com ver_imagem_camera (get_nvr_cameras lista os canais sem as fotos). Mostre a imagem ao usuário no chat."""
 
 router = APIRouter(tags=["MCP"])
 tokens_router = APIRouter(prefix="/api/v1/mcp", tags=["MCP"])
@@ -87,6 +94,10 @@ def _texto_resultado(resp: executor.Resposta) -> dict:
         return {"content": [{"type": "text", "text": f"Erro {resp.status}: {detalhe}"}], "isError": True}
     if not resp.corpo:
         return {"content": [{"type": "text", "text": f"OK ({resp.status}, sem conteúdo)."}]}
+    if len(resp.corpo) > LIMITE_RESPOSTA:
+        return {"content": [{"type": "text", "text": (
+            f"Resposta grande demais ({len(resp.corpo) // (1024 * 1024)} MB). Use filtros, paginação ou uma "
+            "ferramenta mais específica (ex.: ver_imagem_camera para a foto de um canal).")}], "isError": True}
     if resp.tipo.startswith("image/") and len(resp.corpo) <= LIMITE_IMAGEM:
         return {"content": [{"type": "image", "mimeType": resp.tipo, "data": base64.b64encode(resp.corpo).decode()}]}
     if resp.tipo == "application/json" or resp.tipo.startswith("text/"):
@@ -137,14 +148,12 @@ async def _tratar(msg: Any, request: Request, usuario: Usuario) -> Optional[dict
         return _ok(id_, {})
     if metodo == "tools/list":
         ferramentas = [f.para_mcp(super_admin) for f in catalogo(request.app) if super_admin or not f.so_super]
-        return _ok(id_, {"tools": [*ferramentas, imagens.FERRAMENTA]})
+        return _ok(id_, {"tools": ferramentas})
     if metodo in ("resources/list", "resources/templates/list", "prompts/list"):
         chave = {"resources/list": "resources", "resources/templates/list": "resourceTemplates"}.get(metodo, "prompts")
         return _ok(id_, {chave: []})
     if metodo == "logging/setLevel":
         return _ok(id_, {})
-    if metodo == "tools/call" and params.get("name") == imagens.NOME_FERRAMENTA:
-        return _ok(id_, await _ver_imagem_camera(request, usuario, params.get("arguments") or {}))
     if metodo == "tools/call":
         nome = params.get("name")
         f = next((x for x in catalogo(request.app) if x.nome == nome), None)
@@ -156,33 +165,14 @@ async def _tratar(msg: Any, request: Request, usuario: Usuario) -> Optional[dict
             return _ok(id_, {"content": [{"type": "text", "text": str(e)}], "isError": True})
         if not super_admin:
             conta_id = None
+        if f.nome in SEM_IMAGENS:
+            query["incluir_imagens"] = False  # listas de câmeras: as fotos (dezenas de MB) não passam pela IA
         logger.info("MCP %s %s %s (%s)", usuario.email, f.metodo, caminho, f.nome)
-        resp = await executor.chamar(request.app, usuario, f.metodo, caminho, query, corpo, conta_id,
-                                     ip=ip_do_cliente(request))
+        async with _limite_chamadas:
+            resp = await executor.chamar(request.app, usuario, f.metodo, caminho, query, corpo, conta_id,
+                                         ip=ip_do_cliente(request))
         return _ok(id_, _texto_resultado(resp))
     return _erro(id_, -32601, f"Método não suportado: {metodo}")
-
-
-async def _ver_imagem_camera(request: Request, usuario, args: dict) -> dict:
-    """Foto salva de um canal: lê a galeria pela própria rota do painel (mesmas permissões) e devolve só a imagem."""
-    faltando = [c for c in ("machine_id", "equipamento_id", "canal") if args.get(c) in (None, "")]
-    if faltando:
-        return {"content": [{"type": "text", "text": f"Falta: {', '.join(faltando)}."}], "isError": True}
-    caminho = f"/api/v1/machines/{quote(str(args['machine_id']), safe='')}/equipamentos/" \
-              f"{quote(str(args['equipamento_id']), safe='')}/cameras"
-    conta_id = args.get("contexto_conta_id") if usuario.papel == "SUPER_ADMIN" else None
-    resp = await executor.chamar(request.app, usuario, "GET", caminho, conta_id=conta_id, ip=ip_do_cliente(request))
-    if resp.status >= 400:
-        return _texto_resultado(resp)
-    try:
-        cameras = json.loads(resp.corpo)
-    except Exception:
-        return {"content": [{"type": "text", "text": "Resposta inválida da galeria."}], "isError": True}
-    achadas, info = imagens.escolher_da_galeria(cameras, args["canal"], args.get("tipo") or "as_duas")
-    if not achadas:
-        return {"content": [{"type": "text", "text": info}], "isError": True}
-    blocos, aviso = imagens.anexar(achadas)
-    return {"content": [{"type": "text", "text": f"{info}\n{aviso}"}, *blocos]}
 
 
 @router.post("/mcp", include_in_schema=False)

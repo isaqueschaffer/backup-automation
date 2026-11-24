@@ -87,7 +87,3 @@ def test_galeria_grande_nao_anexa_tudo():
     _, achadas = imagens.separar(cams)
     blocos, aviso = imagens.anexar(achadas)
     assert len(blocos) == imagens.MAX_IMAGENS and "ver_imagem_camera" in aviso
-    escolhidas, info = imagens.escolher_da_galeria(cams, 7, "noite")
-    assert len(escolhidas) == 1 and "CAM 7" in escolhidas[0]["rotulo"]
-    vazio, info = imagens.escolher_da_galeria(cams, 99, "noite")
-    assert not vazio and "não encontrado" in info

@@ -12,37 +12,12 @@ import re
 from typing import Any, List, Optional, Tuple
 
 MAX_IMAGENS = 4
-MAX_BYTES_TOTAL = 8 * 1024 * 1024
+MAX_BYTES_TOTAL = 6 * 1024 * 1024
 MIN_CHARS = 500  # string menor que isso não é foto
 
 _DATA_URL = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.*)$", re.S)
 
 NOME_FERRAMENTA = "ver_imagem_camera"
-
-FERRAMENTA = {
-    "name": NOME_FERRAMENTA,
-    "title": "Ver a imagem salva de uma câmera",
-    "description": (
-        "Mostra no chat a imagem salva de uma câmera de um equipamento (NVR/DVR/VMS): a imagem de referência "
-        "(a 'perfeita', usada para comparar) ou a da noite (capturada da gravação da madrugada).\n"
-        "Para achar os ids: list_customers / list_machines, depois list_equipamentos e get_nvr_cameras (que "
-        "lista os canais sem as fotos). Para uma foto AO VIVO, use test_equipamento_rtsp."
-    ),
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "machine_id": {"type": "string", "description": "Id da máquina (computador com o agente)."},
-            "equipamento_id": {"type": "string", "description": "Id do equipamento (NVR/DVR/VMS)."},
-            "canal": {"type": "integer", "description": "Canal da câmera (como em get_nvr_cameras)."},
-            "tipo": {
-                "type": "string", "enum": ["noite", "referencia", "as_duas"], "default": "as_duas",
-                "description": "Qual imagem: a da noite, a de referência ou as duas.",
-            },
-        },
-        "required": ["machine_id", "equipamento_id", "canal"],
-    },
-    "annotations": {"title": "Ver a imagem salva de uma câmera", "readOnlyHint": True, "openWorldHint": False},
-}
 
 
 def _decodificar(valor: str) -> Optional[Tuple[str, str]]:
@@ -111,29 +86,3 @@ def anexar(achadas: List[dict]) -> Tuple[List[dict], str]:
         else:
             linhas.append(f"[IMAGEM {i}] {img['rotulo']}: não anexada (muitas imagens). Use {NOME_FERRAMENTA}.")
     return blocos, "\n".join(linhas)
-
-
-def escolher_da_galeria(cameras: Any, canal: int, tipo: str) -> Tuple[List[dict], str]:
-    """Para ver_imagem_camera: acha o canal na resposta de get_nvr_cameras e devolve (imagens, texto)."""
-    if not isinstance(cameras, list):
-        return [], "Resposta inesperada da galeria."
-    cam = next((c for c in cameras if isinstance(c, dict) and str(c.get("canal")) == str(canal)), None)
-    if not cam:
-        canais = ", ".join(str(c.get("canal")) for c in cameras if isinstance(c, dict))
-        return [], f"Canal {canal} não encontrado. Canais deste equipamento: {canais or 'nenhum'}."
-    chaves = {"noite": ["night_image_base64"], "referencia": ["perfect_image_base64"]}.get(
-        tipo, ["night_image_base64", "perfect_image_base64"])
-    achadas = []
-    for k in chaves:
-        v = cam.get(k)
-        dec = _decodificar(v) if isinstance(v, str) and v else None
-        if dec:
-            achadas.append({"mime": dec[0], "b64": dec[1], "rotulo": _rotulo(cam, k)})
-    if not achadas:
-        nome = cam.get("nome") or f"canal {canal}"
-        return [], (f"A câmera {nome} não tem imagem salva desse tipo. Para uma foto ao vivo, use "
-                    "test_equipamento_rtsp.")
-    info = f"Câmera: {cam.get('nome') or '-'} (canal {canal})"
-    if cam.get("night_image_date"):
-        info += f"; imagem da noite de {cam['night_image_date']}"
-    return achadas, info

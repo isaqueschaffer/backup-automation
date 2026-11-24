@@ -11,7 +11,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from auth import Contexto, get_contexto, get_contexto_teste
 from database import get_db
@@ -643,16 +643,40 @@ async def comandar_central_alarme(
 def get_nvr_cameras(
     machine_id: UUID,
     id: UUID,
+    incluir_imagens: bool = True,
     db: Session = Depends(get_db),
     ctx: Contexto = Depends(get_contexto),
 ):
-    """Retorna todas as câmeras de um NVR específico (com suas imagens)."""
+    """Retorna todas as câmeras de um NVR específico (com suas imagens).
+    incluir_imagens=false (usado pelo MCP): não carrega as fotos (dezenas de MB num NVR grande); no lugar vem um
+    aviso quando a câmera tem foto. A foto de um canal sai em GET .../cameras/{canal}/imagem."""
     _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr:
         raise HTTPException(status_code=404, detail="NVR não encontrado")
 
-    cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).order_by(NVRCamera.canal).all()
+    consulta = db.query(NVRCamera).filter(NVRCamera.nvr_id == id)
+    tem_foto: dict = {}
+    if not incluir_imagens:
+        consulta = consulta.options(defer(NVRCamera.perfect_image_base64), defer(NVRCamera.night_image_base64))
+        tem_foto = {
+            cid: (ref, noite) for cid, ref, noite in db.query(
+                NVRCamera.id,
+                NVRCamera.perfect_image_base64.isnot(None),
+                NVRCamera.night_image_base64.isnot(None),
+            ).filter(NVRCamera.nvr_id == id)
+        }
+
+    def foto(c_db, campo: str):
+        if c_db is None:
+            return None
+        if incluir_imagens:
+            return getattr(c_db, campo)
+        ref, noite = tem_foto.get(c_db.id, (False, False))
+        existe = ref if campo == "perfect_image_base64" else noite
+        return "[tem imagem: veja com ver_imagem_camera]" if existe else None
+
+    cameras_db = consulta.order_by(NVRCamera.canal).all()
     agora = datetime.utcnow()
     report_status = nvr.last_recording_status or []
     is_vms = (nvr.tipo or "NVR").upper() in TIPOS_VMS
@@ -676,8 +700,8 @@ def get_nvr_cameras(
                 "canal_rtsp": c_db.canal_rtsp if c_db else None,
                 "ip_compartilhado": (ip_item or "").strip() in compartilhados,
                 "has_password": bool(c_db and c_db.password),
-                "perfect_image_base64": c_db.perfect_image_base64 if c_db else None,
-                "night_image_base64": c_db.night_image_base64 if c_db else None,
+                "perfect_image_base64": foto(c_db, "perfect_image_base64"),
+                "night_image_base64": foto(c_db, "night_image_base64"),
                 "night_image_date": c_db.night_image_date if c_db else None,
                 "updated_at": c_db.updated_at if c_db else None,
                 "status_comunicacao": st.get("status_comunicacao"),
@@ -724,8 +748,8 @@ def get_nvr_cameras(
             "canal_rtsp": None,
             "ip_compartilhado": False,
             "has_password": bool(c_db and c_db.password),
-            "perfect_image_base64": c_db.perfect_image_base64 if c_db else None,
-            "night_image_base64": c_db.night_image_base64 if c_db else None,
+            "perfect_image_base64": foto(c_db, "perfect_image_base64"),
+            "night_image_base64": foto(c_db, "night_image_base64"),
             "night_image_date": c_db.night_image_date if c_db else None,
             "updated_at": c_db.updated_at if c_db else None,
             "status_comunicacao": c_report.get("status_comunicacao") if c_report else None,
@@ -748,6 +772,36 @@ def get_nvr_cameras(
         merged_cameras.append(obj)
 
     return merged_cameras
+
+
+@router.get("/{id}/cameras/{canal}/imagem")
+def ver_imagem_camera(
+    machine_id: UUID,
+    id: UUID,
+    canal: int,
+    tipo: str = Query("as_duas", pattern="^(noite|referencia|as_duas)$"),
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Mostra a imagem salva de UMA câmera: a da noite (capturada da gravação da madrugada), a de referência
+    (a "perfeita", usada para comparar) ou as duas. Carrega só esse canal. Para uma foto ao vivo use
+    test_equipamento_rtsp; para listar os canais, get_nvr_cameras."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="NVR não encontrado")
+    cam = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == canal).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail=f"Canal {canal} sem câmera cadastrada na galeria.")
+    resp = {"canal": cam.canal, "nome": cam.nome, "night_image_date": cam.night_image_date}
+    if tipo in ("noite", "as_duas"):
+        resp["night_image_base64"] = cam.night_image_base64
+    if tipo in ("referencia", "as_duas"):
+        resp["perfect_image_base64"] = cam.perfect_image_base64
+    if not resp.get("night_image_base64") and not resp.get("perfect_image_base64"):
+        raise HTTPException(status_code=404, detail="Essa câmera não tem imagem salva desse tipo. "
+                                                    "Para uma foto ao vivo, use test_equipamento_rtsp.")
+    return resp
 
 
 def _camera_response_dict(c: NVRCamera) -> dict:
