@@ -108,8 +108,9 @@ Desde a 1.1.34 todas as versões do `agent/requirements.txt` são fixas (`==`); 
 trilan-nvr-backup-automation/
 ├── PROJECT_SPEC.md              <- ESTE ARQUIVO (fonte de verdade)
 ├── README.md
-├── agent/                       <- Agente Windows (PyInstaller)
+├── agent/                       <- Agente Windows (PyInstaller) e Linux (MikroTik container)
 │   ├── service.py               <- Entry point do serviço Windows (ping em thread + loop principal)
+│   ├── service_linux.py         <- Entry point do container no MikroTik
 │   ├── tray.py                  <- Entry point do app de bandeja
 │   ├── agent.py                 <- Orquestrador de backup (reexporta run_backup)
 │   ├── agent.conf               <- Configuração local do agente (NAO versionar)
@@ -118,6 +119,9 @@ trilan-nvr-backup-automation/
 │   ├── publish_version.ps1
 │   ├── installer.iss            <- Instalador Inno Setup (versão do agente)
 │   ├── requirements.txt
+│   ├── requirements-linux.txt
+│   ├── Dockerfile.mikrotik      <- Imagem ARMv7 do agente no MikroTik
+│   ├── mikrotik/                <- Imagem do container (anexo de release) e scripts RouterOS (setup.rsc)
 │   ├── dist/                    <- EXEs compilados (NAO versionados; vão por upload no OTA Manager)
 │   └── src/
 │       ├── application/
@@ -1122,6 +1126,79 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-23] — Agente 1.1.63: foto pela API HTTP da Hikvision quando o RTSP não entrega imagem
+
+- **Problema**: no Digifort do CFTV 01 - Navarro, 12 câmeras de elevador (Hikvision DS-2CD1101-I, 2º ao 13º andar) nunca tiveram imagem ideal nem da noite: todos os caminhos RTSP (Hikvision, Intelbras, ONVIF, Grandstream), em TCP e UDP, davam "Tempo esgotado". Não era modelo (o 1º andar, que funciona, é o mesmo DS-2CD1101-I), caminho (seria 404) nem senha (seria 401; as credenciais vieram todas da mesma importação de 11/11). Com o `-timeout` de 5 s do ffmpeg, câmera muda daria erro em 5 s: estourar os 18 s indica que o RTSP troca dados mas não sai quadro (provável taxa de quadros baixa ou intervalo de quadro-chave longo, com `-skip_frame nokey`). O tempo esgotado descartava a saída do ffmpeg, e o diagnóstico ficava cego.
+- **Correção** (`agent/src/camera/rtsp_client.py`): (1) o tempo esgotado do ffmpeg leva a última linha da saída dele (`[ffmpeg: ...]`, sem credenciais); (2) em câmera Hikvision/genérica, se o RTSP falhar sem 401, `test_rtsp_camera` pede a foto pela API HTTP (`/ISAPI/Streaming/channels/<ch>01/picture`, depois `/Streaming/channels/<ch>01/picture`), com autenticação digest e a mesma senha. Vale para ao vivo, referência e imagem da noite de VMS. 401/403 no HTTP para na hora (bloqueio de usuário); 401 no RTSP nem tenta o HTTP. Testes: `agent/tests/test_foto_hikvision.py`.
+- **Versão**: 1.1.63 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto.
+
+### [2026-11-23] — Agente 1.1.62: câmeras do Defense no backup em túnel do MikroTik
+
+- **Problema**: na máquina do MikroTik, o teste de conexão do Defense listava as 20 câmeras, mas a Galeria e a Gravação do equipamento ficavam vazias. O `preparar_defense` do túnel (`agent/src/backup/tunel_preparo.py`) só achava o arquivo de backup e mandava `cameras: None` no relatório; no Windows, `realizar_backup_defense` também monta o status das câmeras pela API.
+- **Correção**: `preparar_defense` chama `_montar_status_cameras_defense` (mesma função do Windows: online e gravações pela API do Defense, nada gravado no roteador) e põe as câmeras no relatório em qualquer desfecho do arquivo (inclusive ERRO por falta de `pasta_origem`). Falha na API só deixa `cameras` vazio. A busca do arquivo virou `_preparar_arquivo_defense`, sem mudança. Teste: `agent/tests/test_tunel_defense_cameras.py`.
+- **Versão**: 1.1.62 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto. Vai junto a correção do ping da API (entrada abaixo).
+
+### [2026-11-23] — API: ping do agente sem consulta síncrona no laço de eventos (impasse que derrubou a produção)
+
+- **Incidente**: a VM 192.168.75.112 reiniciou às 02:35 UTC e o `dokploy-postgres` subiu sem IP na `dokploy-network` ("invalid IP"); o Dokploy reiniciava a cada 2 min ("Postgres not reachable") e `dokploy.suportetrilan.com.br` dava 502. Corrigido com `docker service update --force dokploy-postgres`. O push da 1.1.61 tinha se perdido nesse intervalo; o redeploy manual subiu um container novo do Backend que travou: as 15 conexões do pool (5 + 10) ficaram em "idle in transaction", toda requisição esperava 30 s e falhava (`QueuePool limit … reached`), e até um 404 demorava 25 s.
+- **Causa**: `POST /agent/ping` é `async def`, mas fazia `commit`, `_read_request_flags` (5x no long-poll), `db.get` e a poda de logs direto no laço de eventos. Com o pool cheio, o laço parava 30 s esperando conexão; as conexões presas eram de outros pings, que pegaram a conexão na resolução das dependências (thread) e só a devolveriam quando o laço voltasse a rodar. Na subida de um container novo os 18 agentes chegam juntos e o impasse se instala.
+- **Correção** (`server/api/routers/agent.py`): a parte síncrona do ping foi para `_iniciar_ping` e `_concluir_ping`, chamadas com `asyncio.to_thread`, assim como `db.close()` e `_read_request_flags`. O laço só faz a espera e aciona os `asyncio.Event` das tarefas RTSP/alarme. Teste: `server/api/tests/test_ping_sem_bloquear.py`.
+- **Pendente**: os erros "can't compare offset-naive and offset-aware datetimes" em `services/notificacoes.py:228` (`verificar_agentes_offline`) e `services/backup_runs.py:266` (`_is_due`) aparecem no log (capturados, não derrubam a API), contrariando a REGRA-001; tratar à parte.
+
+### [2026-11-23] — Agente 1.1.61: imagem da noite e de referência pela gravação em NVR Intelbras
+
+- **Problema**: na Galeria do NVR Intelbras 192.168.75.6 (iNVD 3016), "Capturar imagem da noite" respondia "NVR não entregou o trecho gravado" em todas as câmeras. A captura pela gravação (modos `noite` e `referencia` da tarefa RTSP) só tinha playback Hikvision e Motorola; sem marca Motorola, caía no playback Hikvision (`/Streaming/tracks/<canal>01`) e o NVR Dahua respondia 404. Não era do túnel do MikroTik: o agente Windows faria o mesmo.
+- **Correção** (`agent/src/camera/rtsp_client.py`, `agent/src/nvr/intelbras/recordings.py`): playback Dahua `rtsp://…:554/cam/playback?channel=N&subtype=0&starttime=AAAA_MM_DD_HH_MM_SS&endtime=…` (horário do relógio do NVR). Trechos pela busca `mediaFileFind.cgi` (`buscar_trechos_intelbras`: lista de (início, fim), `[]` sem gravação, `None` se a busca falhou). Noite: 02:00 limitado ao trecho, como no Hikvision; sem busca, horários fixos com tempo curto; desiste após `MAX_FALHAS_CAPTURA`. Referência: fim do trecho mais recente, em janelas de 6 h até `DIAS_BUSCA`.
+- **Escolha da marca** (`_eh_intelbras`): "Intelbras"/"Dahua" na marca ou no modelo do equipamento decide; "Motorola"/"Hikvision" exclui; marca vazia sonda `magicBox.cgi?action=getDeviceType` uma vez por tarefa. Câmera direta (VMS) segue só ao vivo. "INTELBRAS" saiu de `_sem_playback` (antes um NVR com "Intelbras" no modelo recebia "captura pela gravação não suportada").
+- **Testes**: `agent/tests/test_playback_intelbras.py` (8, com o CGI e o ffmpeg simulados). Não testado contra o NVR real antes da release.
+- **Versão**: 1.1.61 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto (a OTA do MikroTik aceita).
+
+### [2026-11-19] — Agente 1.1.60: backup de todos os tipos no túnel do MikroTik (SFTP, memória, nada em disco)
+
+- **Versão**: 1.1.60 em `updater.py`, `installer.iss` e `server/dashboard/package.json` (este estava em 1.1.59 e foi corrigido). Sem biblioteca nova (`requirements-linux.txt` intacto: paramiko 3.4 já traz SFTP).
+- **Alarmes do Defense — correção revertida**: a 1.1.60 inicial (`33735f0`) trocou o token CSRF de `gerar_token_csrf()` para HMAC-SHA1. Conferido no Defense IA real (192.168.75.41:3001) em 19/11: SHA1 simples é aceito (login com senha errada → 401 "credenciais inválidas") e HMAC é recusado (403 "Token CSRF inválido"). Voltou o SHA1 simples (o teste `test_formato_do_pacote_csrf` já esperava isso); sem a reversão, a 1.1.60 quebraria status e armar/desarmar das centrais em todos os agentes.
+- **Regra central**: o MikroTik é ponte; nenhum dado de backup é gravado no roteador, nem temporário (a 1.1.60 inicial gravava o NVR Intelbras em `data/tmp_nvr`; removido). Tudo passa por `backup/tunel.py` (ZIP AES em fluxo -> `PUT /agent/backup/upload-stream/{id}`). Origens do ZIP: SMB, **SFTP**, **memória** (configs pequenas, até `LIMITE_MEMORIA` = 64 MB; acima disso o equipamento vira ERRO com mensagem clara) e **fluxo HTTP** (PABX grande/sem Content-Length). Planilhas do NVR entram no ZIP global em `NVR/PLANILHA/` (mesmos nomes do Windows).
+- **Origem SFTP** (`agent/src/backup/sftp_origem.py`): para UNM2000, Digifort e Defense o agente entra por SSH na máquina do cliente (OpenSSH Server do Windows ou Linux) e lê por SFTP em blocos; nada é criado no cliente (sem usuário novo, share ou porta 445). Somente leitura (`PastaSftp` só tem listar/stat/tamanho/abrir) e todo caminho é conferido contra a `pasta_origem` (`..` e fora da pasta são recusados); `D:UNM2000/emsback` vira `/D:/UNM2000/emsback`. A seleção do backup é a do Windows (`UNM2000Parser._find_backups_sftp`, mesmas regras de data esperada, completude e estabilidade; Digifort `DIGIFORT_DIR` pasta inteira).
+- **Método**: `config_extra.acesso_remoto` = `sftp` | `smb`. Ausente = comportamento anterior (SMB provisionado por SSH), para não quebrar cadastros que já funcionam; o formulário novo grava `sftp` por padrão (cadastro antigo sem o campo aparece como `smb`). O agente Windows ignora o campo.
+- **Segurança SSH**: fim do `AutoAddPolicy` nos caminhos do túnel. TOFU como o OpenSSH: a 1ª conexão grava a impressão digital em `/app/data/known_hosts_trilan` (e registra no log do painel), chave diferente depois = recusa "a chave SSH de <host> mudou" (status ERRO). `ssh_fingerprint` (SHA256:...) no cadastro prevalece e é exigida. Autenticação por senha ou por chave privada (`ssh_chave`, só em memória). Senha e chave nunca vão ao log. O provisionamento SMB por SSH (`smb_ssh_provisioner`) também passa a verificar a chave quando roda no Linux; no Windows segue como antes.
+- **Servidor/painel**: `ssh_chave` entra em `SEGREDOS` (`services/segredos_config.py`): cifrada em `ssh_chave_enc`, o painel só recebe `ssh_chave_definida`, vazio mantém, só o agente recebe o texto (igual à `ssh_senha`). `validar_acesso_remoto` (criar e editar equipamento) valida `acesso_remoto`, chave privada, `ssh_fingerprint` e `ssh_porta`. `config_extra` é JSON: sem migração de banco. Formulário (`SmbConfigSection`, só com `agenteTipo === "MIKROTIK"`; UNM2000, Digifort e Defense): IP da máquina, método, usuário/senha/porta SSH, chave privada (textarea) e impressão digital. Corrigido: o payload do Defense não enviava os campos de acesso remoto.
+- **Equipamentos de rede, tudo em memória**: NVR Intelbras (CGI) e Hikvision (`.bin` com secretkey da senha do ZIP + `.xls`), Motorola = SEM_ARQUIVOS, com `cameras` (status de gravação), `telemetria` e planilha como no Windows (planilha que falha não muda o status); PABX Issabel (memória se Content-Length <= limite, senão HTTP em fluxo); OLT VSOL (HTTP em memória, mantendo `_parece_config/_parece_html`); MIKROTIK (SSH no roteador-alvo, `/system backup save` + `/export`, SFTP em blocos, depois remove os dois arquivos do alvo; eles ficam transitoriamente na flash do alvo, inevitável porque o RouterOS só gera backup em arquivo); OLT Huawei: sem FTP efêmero (exigiria porta 21 e NAT no roteador), o agente lê `display current-configuration` por SSH (paginação tratada) e envia `current-configuration_<nome>_<data>.txt`: é a config em texto (restaurável colando no terminal), diferente do binário `backup configuration`/`backup data` do Windows. CAMERA e ANTENA seguem sem backup. Defense sem `pasta_origem` = ERRO ("configure a pasta de backup do Defense"; sem dump de banco).
+- **Windows**: o agente Windows continua gravando em disco como antes (as funções ganharam variantes em memória: `baixar_configuracao_intelbras_memoria`, `baixar_bytes`, `realizar_backup_vsol(em_memoria=True)`, planilhas aceitam `BytesIO`).
+- **Testes**: `agent/tests/test_tunel_sftp.py` (servidor SSH/SFTP real em 127.0.0.1: conversão de caminho, `..`/fora da pasta, TOFU, fingerprint, chave privada, leitura em blocos, ZIP com origens SFTP + memória + HTTP, nenhum arquivo criado fora do known_hosts, seleção UNM2000/Digifort, NVR, PABX, Huawei) e `server/api/tests/test_segredos_config.py`.
+- **Arquivos**: agent/src/backup/{sftp_origem,tunel,tunel_preparo,downloader,smb_ssh_provisioner}.py, agent/src/backup/file_manager/{models,parsers,manager,validators}.py, agent/src/application/backup_job.py, agent/src/olt/{huawei_texto,vsol}.py, agent/src/pabx/issabel.py, agent/src/mikrotik/routeros.py, agent/src/nvr/*/planilha.py, agent/src/nvr/intelbras/backup.py, agent/README_MIKROTIK.md, server/api/services/segredos_config.py, server/api/routers/equipamentos.py, server/dashboard/src/{api/types.ts,pages/Machines/MachineDetail/utils.ts,.../components/EquipamentoFormModal.tsx}, server/dashboard/package.json.
+
+### [2026-11-19] — Agente 1.1.59: compatibilização de comandos e script de provisionamento RouterOS
+
+- **Versão**: bumped para 1.1.59 em `updater.py` (`CURRENT_VERSION`), `installer.iss` (`AppVersion`) e `server/dashboard/package.json`.
+- **Conteúdo da versão**: incorpora script `agent/mikrotik/setup.rsc` para provisionamento no RouterOS e alinhamento do schema `PingResponse` (`alarme_task`).
+- **Arquivos**: agent/src/application/updater.py, agent/installer.iss, server/dashboard/package.json, PROJECT_SPEC.md.
+
+### [2026-11-19] — Merge do ramo `helena` — alarme_task no schema PingResponse
+
+- **Schema da API (`server/api/schemas.py`)**: adicionado `alarme_task: Optional[dict] = None` ao schema `PingResponse`. O endpoint de ping (`routers/agent.py`) já retornava `alarme_task=comando["task"]` para despachar comandos de armar/desarmar central do DEFENSE (agente >= 1.1.50), e agora o campo está explicitamente declarado no modelo de resposta Pydantic.
+- **Auditoria**: sem datas com fuso, sem segredos ou credenciais, sem impacto em regras de isolamento.
+- **Sem alteração em código executável do agente ou painel**: nenhuma nova versão do agente foi gerada.
+- **Arquivos**: server/api/schemas.py, PROJECT_SPEC.md.
+
+### [2026-11-19] — Merge do ramo `helena` — script `setup.rsc` e provisionamento de rede/firewall no MikroTik
+
+- **Provisionamento MikroTik (`agent/mikrotik/setup.rsc`)**: script idempotente para RouterOS v7 que provisiona as regras de firewall e encaminhamento necessárias quando o container do agente roda no próprio MikroTik:
+  - Libera entrada SSH (TCP/22) vindo da bridge do container (`br-trilan`, sub-rede `172.30.250.0/30`) antes do primeiro drop da chain input (`TRILAN-SSH-ANTENAS`);
+  - Inclui a sub-rede no `available-from` do serviço `/ip service ssh` se houver restrição configurada;
+  - Libera encaminhamento (`forward`) da bridge para alcançar antenas e equipamentos em outras sub-redes (`TRILAN-FORWARD-CONTAINER`);
+  - Aplica regra de NAT `masquerade` para a sub-rede do container alcançar a rede das antenas (`TRILAN-NAT-CONTAINER`).
+- **Documentação (`agent/README_MIKROTIK.md`)**: adicionada seção detalhada "Regras de rede e firewall (SSH e Antenas)" instruindo a execução do script `/import setup.rsc`.
+- **Auditoria**: sem datas com fuso, sem segredos ou credenciais, sem conflitos com regras do projeto.
+- **Sem alteração em código executável do agente, servidor ou painel**: nenhuma nova versão do agente foi gerada.
+- **Arquivos**: agent/mikrotik/setup.rsc (novo), agent/README_MIKROTIK.md, PROJECT_SPEC.md.
+
+### [2026-11-18] — Painel: trocar "onde o agente roda" (Windows/MikroTik) de uma máquina já criada
+
+**Problema:** o tipo do agente (`clients.agente_tipo`, WINDOWS | MIKROTIK) só era escolhido na criação da máquina; se o cliente trocasse (ex.: tirou o Windows e passou a usar o MikroTik, ou o contrário), era preciso criar outra máquina e perder o histórico. O backend já aceitava o campo no `PUT /api/v1/machines/{id}` (`MachineUpdate.agente_tipo`) e já o registrava nos Eventos do Agente ("onde o agente roda"), mas o modal "Editar Máquina" não mostrava o campo.
+**Alteração (painel):** `EditMachineModal` ganha o seletor "Onde o agente roda" (mesmos textos da criação) e, quando o valor muda, um aviso do que fazer: instalar o agente no novo lugar com o mesmo Client ID/API Key da máquina (histórico preservado), revisar os equipamentos (IP de cada um; UNM2000/Digifort com o IP da máquina da pasta) e, no MikroTik, que só o backup em túnel de UNM2000/Digifort roda. `MachineDetail` envia `agente_tipo` no salvar.
+**Testes:** `server/api/tests/test_agente_tipo_edicao.py` (novo, 3: troca nos dois sentidos com registro do evento, editar outro campo não muda o tipo, valor inválido recusado); `tsc` e build do painel OK.
+**Arquivos:** server/dashboard/src/pages/Machines/MachineDetail/{index.tsx,components/EditMachineModal.tsx}, server/api/tests/test_agente_tipo_edicao.py (novo), PROJECT_SPEC.md.
 
 ### [2026-11-18] — Agente 1.1.58: Mikrotik como túnel (backup em fluxo, nada gravado no roteador), coletas e OTA que instala biblioteca nova
 

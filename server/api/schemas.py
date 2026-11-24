@@ -364,7 +364,6 @@ class ConexaoTesteResponse(BaseModel):
     ok: Optional[bool] = None
     mensagem: Optional[str] = None
     segundos: int = 0
-    alarme_task: Optional[dict] = None  # armar/desarmar central de alarme (agente >= 1.1.50, que declara "comando_alarme")
 
 
 class PingRequest(BaseModel):

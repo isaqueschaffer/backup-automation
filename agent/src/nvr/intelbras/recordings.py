@@ -163,3 +163,72 @@ def tem_gravacao_entre(nvr_ip, usuario, senha, canal_id, inicio, fim):
                 )
             except Exception:
                 pass
+
+
+def buscar_trechos_intelbras(nvr_ip, usuario, senha, canal_id, inicio, fim, max_results=100):
+    """Trechos gravados de um canal entre `inicio` e `fim` (datetimes no relógio do NVR).
+    Retorna lista de (início, fim) como datetime, [] se não há gravação, ou None se a busca falhou."""
+    auth = HTTPDigestAuth(usuario, senha)
+    try:
+        ch_num = int(str(canal_id).strip())
+    except (ValueError, TypeError):
+        ch_num = 1
+
+    token = None
+    try:
+        r_create = requests.get(f"http://{nvr_ip}/cgi-bin/mediaFileFind.cgi?action=factory.create",
+                                auth=auth, timeout=TIMEOUT_S, verify=False)
+        if r_create.status_code != 200 or "=" not in r_create.text:
+            return None
+        token = r_create.text.strip().split("=")[1].strip()
+
+        params = {
+            "action": "findFile",
+            "object": token,
+            "condition.Channel": ch_num,
+            "condition.StartTime": inicio.strftime("%Y-%m-%d %H:%M:%S"),
+            "condition.EndTime": fim.strftime("%Y-%m-%d %H:%M:%S"),
+            "condition.Types[0]": "dav",
+        }
+        r_find = requests.get(f"http://{nvr_ip}/cgi-bin/mediaFileFind.cgi", params=params,
+                              auth=auth, timeout=TIMEOUT_S, verify=False)
+        if r_find.status_code != 200 or "OK" not in r_find.text:
+            return None
+
+        r_next = requests.get(
+            f"http://{nvr_ip}/cgi-bin/mediaFileFind.cgi?action=findNextFile&object={token}&count={int(max_results)}",
+            auth=auth, timeout=TIMEOUT_S * 2, verify=False)
+        if r_next.status_code != 200:
+            return None
+        m = re.search(r"found=(\d+)", r_next.text)
+        if not m:
+            return None
+
+        inicios, fins = {}, {}
+        for idx, campo, valor in re.findall(r"items\[(\d+)\]\.(StartTime|EndTime)=([0-9: -]+)", r_next.text):
+            try:
+                dt = datetime.strptime(valor.strip()[:19], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            (inicios if campo == "StartTime" else fins)[idx] = dt
+        return [(inicios[i], fins[i]) for i in inicios if i in fins and fins[i] > inicios[i]]
+    except Exception as e:
+        logging.debug(f"Erro ao buscar trechos Intelbras canal {ch_num} entre {inicio} e {fim}: {e}")
+        return None
+    finally:
+        if token:
+            try:
+                requests.get(f"http://{nvr_ip}/cgi-bin/mediaFileFind.cgi?action=destroy&object={token}",
+                             auth=auth, timeout=3, verify=False)
+            except Exception:
+                pass
+
+
+def eh_nvr_intelbras(nvr_ip, usuario, senha) -> bool:
+    """O equipamento responde ao CGI Dahua/Intelbras (magicBox)?"""
+    try:
+        r = requests.get(f"http://{nvr_ip}/cgi-bin/magicBox.cgi?action=getDeviceType",
+                         auth=HTTPDigestAuth(usuario, senha), timeout=TIMEOUT_S, verify=False)
+        return r.status_code == 200 and "type=" in r.text
+    except Exception:
+        return False

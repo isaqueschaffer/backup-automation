@@ -25,7 +25,9 @@ def _texto(valor):
 
 
 def gerar_token_csrf(segredo: str = SEGREDO_CSRF_PADRAO) -> str:
-    """Mesmo formato do `Tokens.create()` do pacote npm `csrf`: "<sal>-<base64url(sha1('<sal>-<segredo>'))>"."""
+    """Mesmo formato do `Tokens.create()` do pacote npm `csrf`: "<sal>-<base64url(sha1('<sal>-<segredo>'))>".
+    SHA1 SIMPLES, sem HMAC: conferido no Defense IA real em 19/11/2026 (SHA1 -> 401 "credenciais inválidas", ou seja,
+    token aceito; HMAC-SHA1 -> 403 "Token CSRF inválido"). A 1.1.60 chegou a trocar para HMAC e quebrava o login."""
     sal = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
     digest = hashlib.sha1(f"{sal}-{segredo}".encode()).digest()
     assinatura = base64.b64encode(digest).decode().replace("+", "-").replace("/", "_").rstrip("=")

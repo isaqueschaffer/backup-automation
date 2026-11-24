@@ -443,9 +443,10 @@ def gerar_planilha_intelbras(nvr_ip, usuario, senha, destino: Path) -> bool:
             logging.warning(f"  Planilha Intelbras: sem resposta do CGI em {nvr_ip}.")
             return False
         wb, n_canais = _montar_planilha(dahua, nvr_ip)
-        destino.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(destino, Path):       # BytesIO (túnel do Mikrotik) não tem pasta
+            destino.parent.mkdir(parents=True, exist_ok=True)
         wb.save(destino)
-        logging.info(f"  Planilha Intelbras OK ({n_canais} canal(is) -> {destino.name}).")
+        logging.info(f"  Planilha Intelbras OK ({n_canais} canal(is) -> {getattr(destino, 'name', 'memoria')}).")
         return True
     except Exception:
         logging.warning(f"  Falha ao gerar a planilha do NVR Intelbras {nvr_ip}.", exc_info=True)

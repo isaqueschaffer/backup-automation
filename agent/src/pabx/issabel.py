@@ -126,3 +126,91 @@ def realizar_backup_issabel(equipamento: dict, pasta_data: Path) -> dict:
     except Exception as e:
         logging.error(f"  Erro durante o processo PABX: {str(e)}")
         return {"nome": nome, "status": "ERRO", "cameras": None}
+
+
+
+def _abrir_download(session: requests.Session, host: str, filename: str):
+    """GET do arquivo gerado, em fluxo, pedindo o corpo sem compressão (o tamanho do Content-Length tem de bater
+    com os bytes lidos). Devolve a resposta (aberta)."""
+    download_url = (
+        f"{host}/index.php?menu=backup_restore"
+        f"&action=download_file&file_name={filename}&rawmode=yes"
+    )
+    resp = session.get(download_url, stream=True, verify=False, timeout=60, headers={"Accept-Encoding": "identity"})
+    resp.raise_for_status()
+    return resp
+
+
+def _tamanho_resposta(resp) -> int | None:
+    try:
+        n = int(resp.headers.get("Content-Length", ""))
+        return n if n >= 0 and not resp.headers.get("Content-Encoding") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def preparar_backup_issabel_tunel(equipamento: dict, limite_memoria: int) -> dict:
+    """Túnel do Mikrotik: nada em disco. Gera o backup no Issabel e baixa o .tar:
+    - com Content-Length até `limite_memoria`: o arquivo fica em memória (e a nova tentativa do túnel não baixa de novo);
+    - maior, ou sem Content-Length: devolve a origem "http" (`abrir_fluxo`), lida em blocos direto para o ZIP; sem
+      Content-Length não há conferência de tamanho, mas o download precisa terminar sem erro.
+    Devolve {"nome", "status": "PRONTO"|"ERRO", "arquivos_origem": [(BackupFile, nome_no_zip)]}."""
+    from src.backup.file_manager.models import BackupFile
+
+    nome = equipamento.get("name", "PABX_Issabel")
+    ip = equipamento.get("ip")
+    user = equipamento.get("username")
+    pwd = equipamento.get("password")
+    erro = {"nome": nome, "status": "ERRO", "cameras": None}
+    if not ip or not user:
+        logging.error(f"  [PABX] {nome}: faltam IP ou usuário.")
+        return erro
+    host = f"https://{ip}" if not ip.startswith("http") else ip
+
+    logging.info(f"{'='*50} {nome} [PABX Issabel / túnel] (IP: {ip}) {'='*50}")
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": f"{host}/index.php?menu=backup_restore"
+    })
+    s.cookies.set("lang", "pt_BR")
+    try:
+        if not login(s, host, user, pwd):
+            logging.error("  Falha no login do Issabel (credenciais invalidas ou servico indisponivel).")
+            return erro
+        nome_arquivo = disparar_backup(s, host)
+        logging.info(f"  Backup gerado com sucesso: {nome_arquivo}")
+
+        resp = _abrir_download(s, host, nome_arquivo)
+        tamanho = _tamanho_resposta(resp)
+        if tamanho is not None and tamanho <= limite_memoria:
+            try:
+                dados = b"".join(c for c in resp.iter_content(chunk_size=1024 * 1024) if c)
+            finally:
+                resp.close()
+            if len(dados) != tamanho:
+                raise ValueError(f"download incompleto ({len(dados)} de {tamanho} bytes)")
+            bf = BackupFile(path=Path(nome_arquivo), file_type="PABX_TAR", dados=dados)
+            logging.info(f"  [PABX] {nome}: {nome_arquivo} em memória ({tamanho:,} bytes).")
+        else:
+            resp.close()        # grande ou sem tamanho: relido em blocos na hora de montar o ZIP
+
+            def abrir_fluxo():
+                r = _abrir_download(s, host, nome_arquivo)
+
+                def blocos():
+                    try:
+                        for c in r.iter_content(chunk_size=1024 * 1024):
+                            if c:
+                                yield c
+                    finally:
+                        r.close()
+                return blocos(), _tamanho_resposta(r)
+
+            bf = BackupFile(path=Path(nome_arquivo), file_type="PABX_TAR", abrir_fluxo=abrir_fluxo)
+            logging.info(f"  [PABX] {nome}: {nome_arquivo} será lido em blocos "
+                         f"({'tamanho informado ' + format(tamanho, ',') if tamanho is not None else 'sem Content-Length'}).")
+        return {"nome": nome, "status": "PRONTO", "arquivos_origem": [(bf, nome_arquivo)], "cameras": None}
+    except Exception as e:
+        logging.error(f"  Erro durante o processo PABX: {e}")
+        return erro

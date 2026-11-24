@@ -146,7 +146,25 @@ class FileManager:
         from src.backup.smb_storage import is_smb_path, parse_smb_target
         eq_ip = (equipamento.get("ip") or "").strip()
         smb_detectado = is_smb_path(pasta_origem_str, config_extra=config_extra, ip=eq_ip)
-        
+
+        # Túnel do Mikrotik com acesso_remoto="sftp": lê por SSH/SFTP (nada é criado na máquina do cliente).
+        # O agente Windows ignora o campo e segue pelo caminho local/SMB de sempre.
+        target_sftp = None
+        if somente_preparar:
+            from src.backup.sftp_origem import ErroSftp, PastaSftp, conexao_do_cadastro, usa_sftp
+            if usa_sftp(config_extra):
+                smb_detectado = False
+                con, msg_sftp = conexao_do_cadastro(equipamento, config_extra)
+                if con is None:
+                    logging.error(f"  [SFTP] {msg_sftp}")
+                    return {"nome": nome_original, "status": BackupStatus.ERRO.value, "cameras": None}
+                try:
+                    target_sftp = PastaSftp(con, pasta_origem_str)
+                except ErroSftp as e:
+                    logging.error(f"  [SFTP] {e}")
+                    return {"nome": nome_original, "status": BackupStatus.ERRO.value, "cameras": None}
+                logging.info(f"  [SFTP] Origem remota: {msg_sftp}, pasta {target_sftp.raiz}")
+
         target_smb = None
         if smb_detectado:
             smb_host = (
@@ -210,11 +228,12 @@ class FileManager:
             return {"nome": nome_original, "status": BackupStatus.ERRO.value, "cameras": None}
 
         # 1. Busca Backups (já ordenados do mais recente para o mais antigo)
-        origem_busca = target_smb if target_smb is not None else pasta_origem
+        origem_busca = target_sftp or target_smb or pasta_origem
         grupos = parser.find_backups(origem_busca)
         
         if not grupos:
-            logging.error(f"  [{tipo_parser}] Nenhum backup encontrado em: {origem_busca.unc_path if hasattr(origem_busca, 'unc_path') else origem_busca}")
+            logging.error(f"  [{tipo_parser}] Nenhum backup encontrado em: "
+                          f"{getattr(origem_busca, 'unc_path', None) or getattr(origem_busca, 'raiz', None) or origem_busca}")
             return {"nome": nome_original, "status": BackupStatus.NAO_ENCONTRADO.value, "cameras": None}
 
         # 2. Avalia o grupo mais recente
@@ -244,7 +263,7 @@ class FileManager:
             elif f.file_type == "DIGIFORT_DIR":
                 nome_destino = f.path.name
             else:
-                ext = f.path.suffix if (f.path.suffix or f.is_smb) else ""
+                ext = f.path.suffix if (f.path.suffix or f.is_smb or f.is_sftp) else ""
                 nome_destino = f"{prefixo}{nome_safe}_{grupo_recente.date.strftime('%Y%m%d_%H%M%S')}{ext}"
                 
             caminho_destino = pasta_eq / nome_destino

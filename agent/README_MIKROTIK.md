@@ -4,7 +4,7 @@ The Windows version in branch `isaque` is unchanged. This branch adds a separate
 
 ## Imagem completa (1.1.58) — o que o agente Linux faz
 
-**O Mikrotik é uma PONTE/TÚNEL até o servidor:** pouco processamento e nada gravado no roteador, nem arquivo temporário. Tudo o que ele faz é em memória e o resultado vai direto ao servidor. **Faz backup só em túnel** (ver abaixo): lê o backup do UNM2000/Digifort do cliente por SMB e o envia em fluxo ao servidor. NVR, PABX, VSOL, Huawei e demais tipos que gravam em disco ficam com os agentes Windows. Não roda os webhooks Defense/Digifort (gravam CSV). A imagem leva tudo o que as rotinas dele usam, para as versões seguintes chegarem pela OTA sem trocar a imagem:
+**O Mikrotik é uma PONTE/TÚNEL até o servidor:** pouco processamento e nada gravado no roteador, nem arquivo temporário. Tudo o que ele faz é em memória e o resultado vai direto ao servidor. **Faz backup de todos os tipos que têm backup** (desde a 1.1.60, ver a matriz abaixo): lê o que está num computador do cliente por SFTP (ou SMB), baixa em memória o que está em equipamento de rede e envia tudo em fluxo ao servidor. Não roda os webhooks Defense/Digifort (gravam CSV). A imagem leva tudo o que as rotinas dele usam, para as versões seguintes chegarem pela OTA sem trocar a imagem:
 
 | Rotina (1.1.58) | Usa |
 | :---- | :---- |
@@ -12,17 +12,47 @@ The Windows version in branch `isaque` is unchanged. This branch adds a separate
 | Captura da Galeria sob demanda (ao vivo, referência, noite; uma por vez) | `ffmpeg` mínimo (JPEG por pipe, sem arquivo) |
 | Presença das câmeras, status das OLTs (SNMP), antenas (SSH no MikroTik \+ ping), alarmes do Defense e armar/desarmar central | `ping`, `pysnmp`, `paramiko` |
 | Teste de conexão pedido pelo painel | — |
-| Backup em túnel (UNM2000 e Digifort por pasta de rede, no horário e sob demanda) | `smbprotocol`, `pyzipper` |
+| Backup em túnel (todos os tipos, no horário e sob demanda; ver matriz) | `paramiko` (SSH/SFTP), `smbprotocol`, `pyzipper`, `requests`, `openpyxl` |
 
 - Ciclo automático da imagem da noite (19h30–4h, um frame de cada câmera a cada 10 min): desligado no Mikrotik; `TRILAN_NOITE_AUTOMATICA=true` liga. O backup em túnel vem ligado; `TRILAN_ENABLE_BACKUPS=false` desliga.
 
 ### Backup em túnel (`src/backup/tunel.py`)
 
 ```
-pasta do UNM2000/Digifort --SMB--> montador do ZIP (memória) --fila ~2 MB--> PUT em pedaços --> servidor
+computador do cliente --SFTP/SMB--\
+equipamento de rede --HTTP/SSH---->  montador do ZIP (memória) --fila ~2 MB--> PUT em pedaços --> servidor
 ```
 
-- **Nada vai ao disco do roteador:** o ZIP com a senha da máquina e o `backup.zip` de cada equipamento são montados enquanto os bytes passam (mesma estrutura do agente Windows: `<TIPO>/backup_<tipo>_<nome>/backup.zip`). A fila é pequena e bloqueia a leitura quando o envio está lento: a memória fica em poucos MB, seja qual for o tamanho.
+- **Nada vai ao disco do roteador** (só o `known_hosts_trilan`, de configuração): o ZIP com a senha da máquina e o `backup.zip` de cada equipamento são montados enquanto os bytes passam (mesma estrutura do agente Windows: `<TIPO>/backup_<tipo>_<nome>/backup.zip`; planilhas dos NVR em `NVR/PLANILHA/`). A fila é pequena e bloqueia a leitura quando o envio está lento: a memória fica em poucos MB para arquivo grande, que sempre passa em blocos. Arquivo pequeno (config de equipamento) pode ficar inteiro em memória até `LIMITE_MEMORIA` (64 MB); acima disso o equipamento vira `ERRO` com mensagem clara.
+
+#### Matriz tipo x método
+
+| Tipo | Método no túnel | Observação |
+| :---- | :---- | :---- |
+| OLT UNM2000, DIGIFORT | **SFTP** (`acesso_remoto=sftp`) ou SMB (`smb`, ou campo ausente) | Seleção igual à do Windows: data esperada, completude, estabilidade; Digifort = pasta `YYYYMMDD` inteira |
+| DEFENSE | SFTP ou SMB provisionado | Arquivo mais recente `.enc/.zip/.dbk/.bak` da `pasta_origem`; sem a pasta = `ERRO` ("configure a pasta de backup do Defense"); não há dump do banco no Mikrotik |
+| NVR Intelbras | HTTP (CGI) em memória | Config `.backup` + `cameras` (gravação) + `telemetria` + planilha |
+| NVR Hikvision | HTTP (ISAPI) em memória | `.bin` (secretkey da senha do ZIP) + `.xls` + `cameras` + `telemetria` + planilha |
+| NVR Motorola | só leitura de gravação | `SEM_ARQUIVOS`, como no Windows (com `cameras`, `telemetria` e planilha) |
+| PABX Issabel | HTTP: memória (Content-Length <= limite) ou fluxo | Sem Content-Length: sem conferência de tamanho, mas o download tem de terminar sem erro |
+| OLT VSOL | HTTP em memória | Mesmas validações de config (não aceita HTML/login) |
+| OLT Huawei | SSH, config em **texto** | Ver abaixo |
+| MIKROTIK (equipamento) | SSH + SFTP no roteador-alvo | `/system backup save` + `/export` no alvo, lidos em blocos e apagados do alvo no fim (ficam transitoriamente na flash do alvo: o RouterOS só gera backup em arquivo) |
+| CAMERA, ANTENA | — | Sem backup (como no Windows) |
+
+#### OLT Huawei: configuração em texto (diferente do Windows)
+
+O agente Windows sobe um FTP efêmero (porta 21) para a OLT empurrar o binário (`backup configuration` e `backup data`). No Mikrotik isso exigiria a porta 21 aberta e NAT no roteador, então **não é feito**: o agente entra por SSH, desliga a paginação (`screen-length 0 temporary`, `undo smart` e, se ainda aparecer `---- More ----`, responde com espaço), roda `display current-configuration` e envia o texto como `current-configuration_<nome>_<data>.txt`. Vale como `OK` se o texto parecer config válida (mínimo de tamanho e terminar em `return`). Restaura-se colando no terminal da OLT; **não** substitui o binário do `backup data` do Windows. O log do painel registra isso a cada backup.
+
+#### Acesso por SFTP (computador do cliente)
+
+O agente entra por **SSH** (OpenSSH Server do Windows, ou Linux) e lê por **SFTP em blocos**, direto para o ZIP. Nada é criado na máquina do cliente: sem usuário novo, sem share, sem porta 445. No `config_extra` do equipamento: `acesso_remoto` = `sftp` (padrão do formulário novo) ou `smb` (provisiona o usuário `trilan_leitura` e um share oculto, como na 1.1.60; é o que vale para cadastro antigo sem o campo); `smb_host` (IP da máquina), `ssh_usuario`, `ssh_senha` e/ou `ssh_chave` (chave privada, cifrada no servidor como a senha), `ssh_porta` (22) e `ssh_fingerprint` (opcional). A `pasta_origem` aceita `D:UNM2000/emsback`, `D:\UNM2000\emsback` ou `/var/backups` (no Windows vira `/D:/UNM2000/emsback`). Recomendado: usuário próprio só com leitura na pasta (não o Administrador) e chave em vez de senha.
+
+#### Segurança do SSH
+
+- **Chave do host (TOFU, como o OpenSSH):** a 1ª conexão grava a impressão digital em `/app/data/known_hosts_trilan` e a registra no log do painel (o técnico confere); depois, chave diferente = recusa com "a chave SSH de <host> mudou" e status `ERRO`. Se o cadastro tiver `ssh_fingerprint` (`SHA256:...`), ela prevalece e é exigida desde a primeira vez. Para aceitar uma troca legítima, apague a linha do host no arquivo (ou atualize o `ssh_fingerprint`). O `AutoAddPolicy` não é mais usado nos caminhos do túnel. (O SMB provisionado só verifica pelo TOFU, sem `ssh_fingerprint`.) Montar `/app/data` num `mount` do RouterOS mantém o arquivo se o container for recriado; sem isso, a próxima conexão volta a ser "primeira".
+- **Somente leitura:** o código SFTP só lista, confere o tamanho e lê; nunca escreve, renomeia nem apaga na máquina do cliente. Todo caminho é normalizado e precisa ficar dentro da `pasta_origem` (`..` é recusado).
+- **Segredos:** senha e chave privada vêm do servidor só para o agente, ficam em memória (a chave nunca é gravada em disco) e nunca entram no log.
 
 - **Servidor:** `PUT /api/v1/agent/backup/upload-stream/{backup_id}` (corpo em pedaços; mesmas regras do envio comum: limite de tamanho, ZIP só substitui o anterior ao terminar, e-mail do relatório). Se a conexão cair no meio, o `.part` é descartado. `POST /api/v1/agent/backup/{backup_id}/resultado` corrige o status de um equipamento.
 
@@ -30,7 +60,7 @@ pasta do UNM2000/Digifort --SMB--> montador do ZIP (memória) --fila ~2 MB--> PU
 
 - **Conferência:** só pelo tamanho (não há cópia local para comparar o hash). Compressão desligada (os backups já vêm comprimidos e a CPU do roteador é pouca); `TRILAN_TUNEL_COMPRESSAO=deflate` liga.
 
-- **Não entra no túnel** (grava arquivo em disco): NVR, PABX, VSOL, Huawei, Mikrotik, Defense (status `TIPO_NAO_SUPORTADO` no relatório). O status das câmeras do Digifort que o agente Windows lê dos arquivos copiados (tempo de gravação) também não sai pelo túnel: precisa dos arquivos em disco.
+- **Fora do túnel:** CAMERA e ANTENA (sem backup). O status das câmeras do Digifort que o agente Windows lê dos arquivos copiados (tempo de gravação) também não sai pelo túnel: precisa dos arquivos em disco. Defense: o status de câmeras/alarme vem das outras rotinas, não do backup.
 
 - `verificar_imagem.py` monta um ZIP com senha em fluxo no build e reprova a imagem se falhar (pega problema de zipfile/cripto no ARMv7 antes de chegar ao roteador).
 
@@ -46,7 +76,7 @@ pasta do UNM2000/Digifort --SMB--> montador do ZIP (memória) --fila ~2 MB--> PU
 
 ## Disabled / unvalidated
 
-- The router never stores a backup (bridge design): the tunnel streams it through memory (see "Backup em túnel").  
+- The router never stores a backup (bridge design): the tunnel streams it through memory (see "Backup em túnel"). Only exception: when the target of a MIKROTIK-type equipment is a router, RouterOS itself writes the `/system backup save` and `/export` files on the target's flash until the stream finishes, then they are removed.  
 - Existing API client has `verify=False`. Correct certificate validation before production.  
 - Existing timeout implementation can leave Python threads alive; introduce process-based cancellation before production.  
 - Some Python dependencies or base image variants may not support ARMv7; build and runtime testing are still required.
@@ -70,7 +100,7 @@ Confirm the resulting image's architecture and test it on ARMv7 Linux before loa
 
 Quando o equipamento `ANTENA` (ou `MIKROTIK`) estiver no mesmo roteador onde o container roda, o agente precisa alcançar o SSH do RouterOS e pingar as antenas a partir da bridge do container (`br-trilan`, `172.30.250.2/30`):
 
-- Execute o script [agent/mikrotik/setup.rsc](https://www.google.com/search?q=mikrotik/setup.rsc) no terminal do RouterOS (`/import setup.rsc`) após criar `br-trilan` e `veth-trilan`. Ele libera de forma idempotente:  
+- Execute o script `agent/mikrotik/setup.rsc` no terminal do RouterOS (`/import setup.rsc`) após criar `br-trilan` e `veth-trilan`. Ele libera de forma idempotente:  
   - `chain=input` na porta `22` TCP vindo de `br-trilan` (antes do `drop` padrão);  
   - `172.30.250.0/30` no `AVAILABLE-FROM` do `/ip service ssh` (caso haja restrição de IP configurada, sem apagar os endereços existentes);  
   - `chain=forward` vindo de `br-trilan` e `srcnat masquerade` para `172.30.250.0/30` (para o ping ICMP às antenas funcionar).  

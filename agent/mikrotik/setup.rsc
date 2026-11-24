@@ -10,7 +10,7 @@
 # ==============================================================================
 
 :local bridgeTrilan "br-trilan"
-:local redeTrilan 172.30.250.0/30
+:local redeTrilan "172.30.250.0/30"
 
 # 1. Libera SSH (TCP/22) vindo da bridge do container antes do primeiro drop do input
 :if ([:len [/ip firewall filter find comment="TRILAN-SSH-ANTENAS"]] = 0) do={
@@ -23,10 +23,13 @@
 }
 
 # 2. Adiciona 172.30.250.0/30 ao AVAILABLE-FROM do SSH caso haja restrição configurada
-:local sshAddrs [/ip service get ssh address]
-:if ([:len $sshAddrs] > 0) do={
-    :if ([:typeof [:find $sshAddrs $redeTrilan]] = "nil") do={
-        /ip service set ssh address=($sshAddrs , $redeTrilan)
+:local sshItem [/ip service find name=ssh]
+:if ([:len $sshItem] > 0) do={
+    :local sshAddrs [/ip service get $sshItem address]
+    :if ([:len $sshAddrs] > 0) do={
+        :if ([:typeof [:find $sshAddrs $redeTrilan]] = "nil") do={
+            /ip service set $sshItem address=($sshAddrs . "," . $redeTrilan)
+        }
     }
 }
 

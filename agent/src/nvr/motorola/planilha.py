@@ -324,9 +324,10 @@ def gerar_planilha_motorola(nvr_ip, usuario, senha, destino: Path) -> bool:
             logging.warning(f"  Planilha Motorola: login falhou em {nvr_ip}.")
             return False
         wb, n_canais = _montar_planilha(_Nvr(sessao, nvr_ip), nvr_ip)
-        destino.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(destino, Path):       # BytesIO (túnel do Mikrotik) não tem pasta
+            destino.parent.mkdir(parents=True, exist_ok=True)
         wb.save(destino)
-        logging.info(f"  Planilha Motorola OK ({n_canais} canal(is) -> {destino.name}).")
+        logging.info(f"  Planilha Motorola OK ({n_canais} canal(is) -> {getattr(destino, 'name', 'memoria')}).")
         return True
     except Exception:
         logging.warning(f"  Falha ao gerar a planilha do NVR Motorola {nvr_ip}.", exc_info=True)

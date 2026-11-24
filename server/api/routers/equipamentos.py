@@ -28,7 +28,7 @@ from services.agent_logs import registrar_alteracao
 from services.antenas import normalizar_config as normalizar_config_antena
 from services.camera_offline import segundos_offline
 from services.crypto_service import encrypt, decrypt
-from services.segredos_config import proteger_segredos
+from services.segredos_config import proteger_segredos, validar_acesso_remoto
 from services.escopo import obter_maquina
 from services.licenca_unm import licenca_da_config
 from services.galeria_vms import (
@@ -121,6 +121,9 @@ def create_equipamento(
         )
 
     config_extra = body.config_extra
+    erro_acesso = validar_acesso_remoto(config_extra)
+    if erro_acesso:
+        raise HTTPException(status_code=400, detail=erro_acesso)
     if tipo == "ANTENA":
         config_extra = _config_antena(config_extra)
 
@@ -165,6 +168,9 @@ def update_equipamento(
         if field == "password" and value:
             eq.password = encrypt(value)
         elif field == "config_extra":
+            erro_acesso = validar_acesso_remoto(value)
+            if erro_acesso:
+                raise HTTPException(status_code=400, detail=erro_acesso)
             if (body.tipo or eq.tipo or "").upper() == "ANTENA":
                 value = _config_antena(value)
             eq.config_extra = proteger_segredos(value, eq.config_extra)

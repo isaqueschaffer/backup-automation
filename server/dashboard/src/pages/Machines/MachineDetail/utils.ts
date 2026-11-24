@@ -43,6 +43,10 @@ export function emptyEqForm(overrides: Partial<EqForm> = {}): EqForm {
     ssh_senha: "",
     ssh_senha_definida: false,
     ssh_porta: "",
+    acesso_remoto: "sftp",
+    ssh_chave: "",
+    ssh_chave_definida: false,
+    ssh_fingerprint: "",
     ...overrides,
   };
 }
@@ -86,6 +90,11 @@ export function eqToForm(eq: NVR): EqForm {
     ssh_senha: "",
     ssh_senha_definida: !!cfg?.ssh_senha_definida,
     ssh_porta: cfg?.ssh_porta ?? "",
+    // Cadastro antigo sem o campo: o agente segue no SMB provisionado, então o formulário mostra o que já vale
+    acesso_remoto: cfg?.acesso_remoto || (cfg?.ssh_usuario || cfg?.smb_host ? "smb" : "sftp"),
+    ssh_chave: "",
+    ssh_chave_definida: !!cfg?.ssh_chave_definida,
+    ssh_fingerprint: cfg?.ssh_fingerprint || "",
   };
 }
 
@@ -96,6 +105,34 @@ export interface EqPayload {
   username: string;
   password?: string;
   config_extra: EquipamentoConfig | null;
+}
+
+// Acesso remoto à máquina do cliente (UNM2000 / Digifort / Defense com agente no MikroTik). Devolve a mensagem de erro, se houver.
+function aplicarAcessoRemoto(cfg: EquipamentoConfig, eqForm: EqForm, agenteTipo?: "WINDOWS" | "MIKROTIK", editando?: boolean, ipPadrao?: string): string | null {
+  if (eqForm.smb_host?.trim()) cfg.smb_host = eqForm.smb_host.trim();
+  if (eqForm.smb_usuario?.trim()) cfg.smb_usuario = eqForm.smb_usuario.trim();
+  if (eqForm.smb_senha) cfg.smb_senha = eqForm.smb_senha;
+  if (eqForm.ssh_usuario?.trim()) cfg.ssh_usuario = eqForm.ssh_usuario.trim();
+  // Senha e chave só vão se digitadas; em branco o servidor mantém as atuais
+  if (eqForm.ssh_senha) cfg.ssh_senha = eqForm.ssh_senha;
+  if (eqForm.ssh_chave?.trim()) cfg.ssh_chave = eqForm.ssh_chave.trim();
+  if (eqForm.ssh_porta) cfg.ssh_porta = Number(eqForm.ssh_porta);
+  if (eqForm.ssh_fingerprint?.trim()) cfg.ssh_fingerprint = eqForm.ssh_fingerprint.trim();
+  if (agenteTipo === "MIKROTIK") {
+    cfg.acesso_remoto = eqForm.acesso_remoto === "smb" ? "smb" : "sftp";
+    if (!cfg.smb_host && !ipPadrao) return "Agente no MikroTik: informe o IP da máquina deste equipamento para acessar a pasta.";
+    if (cfg.acesso_remoto === "sftp") {
+      if (!cfg.ssh_usuario) return "Acesso por SFTP: informe o usuário SSH da máquina.";
+      const temSenha = !!eqForm.ssh_senha || (!!editando && !!eqForm.ssh_senha_definida);
+      const temChave = !!eqForm.ssh_chave?.trim() || (!!editando && !!eqForm.ssh_chave_definida);
+      if (!temSenha && !temChave) return "Acesso por SFTP: informe a senha ou a chave privada do usuário SSH.";
+      if (cfg.ssh_chave && !/PRIVATE KEY/.test(cfg.ssh_chave.slice(0, 80))) return "A chave SSH precisa ser a chave PRIVADA (-----BEGIN ... PRIVATE KEY-----).";
+      if (cfg.ssh_fingerprint && !/^(SHA256:)?[A-Za-z0-9+/]{43}=?$/.test(cfg.ssh_fingerprint)) return "Impressão digital inválida: use o formato SHA256:... (ssh-keygen -lf).";
+    }
+  } else if (cfg.ssh_usuario && !cfg.smb_host) {
+    return "Informe o IP da máquina deste equipamento para acessar a pasta.";
+  }
+  return null;
 }
 
 export function buildEqPayload(
@@ -131,13 +168,8 @@ export function buildEqPayload(
       caminho_log_csv: eqForm.caminho_log_csv?.trim() || "",
       pasta_gravacoes: eqForm.pasta_gravacoes?.trim() || "",
     };
-    if (eqForm.smb_host?.trim()) cfg.smb_host = eqForm.smb_host.trim();
-    if (eqForm.smb_usuario?.trim()) cfg.smb_usuario = eqForm.smb_usuario.trim();
-    if (eqForm.smb_senha) cfg.smb_senha = eqForm.smb_senha;
-    if (eqForm.ssh_usuario?.trim()) cfg.ssh_usuario = eqForm.ssh_usuario.trim();
-    if (eqForm.ssh_senha) cfg.ssh_senha = eqForm.ssh_senha;
-    if (eqForm.ssh_porta) cfg.ssh_porta = Number(eqForm.ssh_porta);
-    if ((agenteTipo === "MIKROTIK" || cfg.ssh_usuario) && !cfg.smb_host) return { error: "Agente no MikroTik: informe o IP da máquina deste equipamento para acessar a pasta." };
+    const erroAcesso = aplicarAcessoRemoto(cfg, eqForm, agenteTipo, !!editingEqId);
+    if (erroAcesso) return { error: erroAcesso };
     payload.config_extra = cfg;
   } else if (eqForm.tipo === "OLT") {
     if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
@@ -158,13 +190,8 @@ export function buildEqPayload(
       if (eqForm.nomes_db_senha) cfg.nomes_db_senha = eqForm.nomes_db_senha;
       cfg.licenca_inicio = eqForm.licenca_inicio || "";
       cfg.licenca_fim = eqForm.licenca_fim || "";
-      if (eqForm.smb_host?.trim()) cfg.smb_host = eqForm.smb_host.trim();
-      if (eqForm.smb_usuario?.trim()) cfg.smb_usuario = eqForm.smb_usuario.trim();
-      if (eqForm.smb_senha) cfg.smb_senha = eqForm.smb_senha;
-      if (eqForm.ssh_usuario?.trim()) cfg.ssh_usuario = eqForm.ssh_usuario.trim();
-      if (eqForm.ssh_senha) cfg.ssh_senha = eqForm.ssh_senha;
-      if (eqForm.ssh_porta) cfg.ssh_porta = Number(eqForm.ssh_porta);
-      if ((agenteTipo === "MIKROTIK" || cfg.ssh_usuario) && !cfg.smb_host) return { error: "Agente no MikroTik: informe o IP da máquina deste equipamento para acessar a pasta." };
+      const erroAcesso = aplicarAcessoRemoto(cfg, eqForm, agenteTipo, !!editingEqId);
+      if (erroAcesso) return { error: erroAcesso };
       if (cfg.olts) {
         if (!cfg.telnet_usuario) return { error: "Para monitorar as OLTs, informe o usuário do Telnet." };
         if (!eqForm.telnet_senha && !(editingEqId && eqForm.telnet_senha_definida)) return { error: "Para monitorar as OLTs, informe a senha do Telnet." };
@@ -182,11 +209,15 @@ export function buildEqPayload(
     payload.ip = eqForm.ip.trim();
     payload.username = eqForm.username.trim() || "system";
     payload.password = eqForm.password;
-    payload.config_extra = {
+    if (agenteTipo === "MIKROTIK" && !eqForm.pasta_origem.trim()) return { error: "Agente no MikroTik: configure a pasta de backup do Defense (o agente lê o arquivo gerado por ele)." };
+    const cfgDefense: EquipamentoConfig = {
       pasta_origem: eqForm.pasta_origem.trim(),
       porta_api: Number(eqForm.porta_api) || 4433,
       porta_alarme: Number(eqForm.porta_alarme) || 3001,
     };
+    const erroAcessoDefense = aplicarAcessoRemoto(cfgDefense, eqForm, agenteTipo, !!editingEqId, payload.ip);
+    if (erroAcessoDefense) return { error: erroAcessoDefense };
+    payload.config_extra = cfgDefense;
   }
   // Remove blank passwords in edit mode so backend ignores them
   if (editingEqId && !payload.password) delete payload.password;

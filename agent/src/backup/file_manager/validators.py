@@ -46,15 +46,20 @@ class Validator:
         """
         tamanhos_iniciais = {}
         for f in group.files:
-            chave = f.remote_path if (f.is_smb and f.remote_path) else f.path
+            chave = f.remote_path if ((f.is_smb or f.is_sftp) and f.remote_path) else f.path
             tamanhos_iniciais[chave] = f.size_bytes
         
         # Espera um pouco para ver se os arquivos estão sendo escritos
         time.sleep(wait_seconds)
         
         for f in group.files:
-            chave = f.remote_path if (f.is_smb and f.remote_path) else f.path
-            if f.is_smb and f.remote_path:
+            chave = f.remote_path if ((f.is_smb or f.is_sftp) and f.remote_path) else f.path
+            if f.is_sftp and f.remote_path:
+                try:
+                    tamanho_atual = f.sftp.tamanho(f.remote_path)
+                except Exception:
+                    tamanho_atual = f.size_bytes
+            elif f.is_smb and f.remote_path:
                 try:
                     from src.backup.smb_storage import SmbStorage
                     tamanho_atual = SmbStorage.get_file_size(f.remote_path)

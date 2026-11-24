@@ -17,6 +17,9 @@ class UNM2000Parser(BaseParser):
         Encontra backups do UNM2000 (YYYYMMDD_HHMMSS) e Digifort (diretórios YYYYMMDD).
         Aceita pasta_origem como Path local ou SmbTarget.
         """
+        from src.backup.sftp_origem import PastaSftp
+        if isinstance(pasta_origem, PastaSftp):
+            return self._find_backups_sftp(pasta_origem)
         try:
             from src.backup.smb_storage import SmbTarget
             if isinstance(pasta_origem, SmbTarget):
@@ -71,6 +74,41 @@ class UNM2000Parser(BaseParser):
             return grupos
 
         # Ordenar do mais recente para o mais antigo
+        grupos.sort(key=lambda x: x.date, reverse=True)
+        return grupos
+
+    def _find_backups_sftp(self, pasta) -> List[BackupGroup]:
+        """Varredura de backups via SFTP (agente do Mikrotik): mesmas regras do SMB (arquivo com data no nome nas
+        extensões aceitas; pasta YYYYMMDD do Digifort). Só lê; o tamanho da pasta é calculado só para a escolhida."""
+        extensoes_aceitas = {".zip", ".tar", ".gz", ".7z"}
+        grupos = []
+        try:
+            for entry in pasta.listar():
+                if entry.is_dir:
+                    match = re.match(r'^(\d{8})$', entry.name)
+                    if match:
+                        data_obj = parse_backup_date(match.group(1))
+                        if data_obj:
+                            bf = BackupFile(path=Path(entry.name), file_type="DIGIFORT_DIR", remote_path=entry.path,
+                                            is_sftp=True, sftp=pasta)
+                            grupos.append(BackupGroup(date=data_obj, files=[bf], group_id=match.group(1)))
+                    continue
+
+                if Path(entry.name).suffix.lower() not in extensoes_aceitas:
+                    continue
+                match = re.search(r'(\d{8}_\d{6})', entry.name)
+                if not match:
+                    continue
+                data_obj = parse_backup_date(match.group(1))
+                if not data_obj:
+                    continue
+                bf = BackupFile(path=Path(entry.name), file_type="ZIP", remote_path=entry.path,
+                                is_sftp=True, sftp=pasta, _size=entry.size)
+                grupos.append(BackupGroup(date=data_obj, files=[bf], group_id=match.group(1)))
+        except Exception as e:
+            logging.error(f"  [UNM2000/SFTP] Erro ao acessar a pasta de origem remota '{pasta.raiz}': {e}")
+            return grupos
+
         grupos.sort(key=lambda x: x.date, reverse=True)
         return grupos
 

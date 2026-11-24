@@ -278,14 +278,13 @@ async def ping_agent(
     machine: Machine = Depends(get_current_machine),
     db: Session = Depends(get_db)
 ):
-    """Heartbeat do agente. Usa long-polling (5 iterações de 1s) para entregar comandos de teste RTSP rapidamente."""
+    """Heartbeat do agente. Usa long-polling (5 iterações de 1s) para entregar comandos de teste RTSP rapidamente.
+
+    Todo acesso ao banco roda em thread (asyncio.to_thread): consulta síncrona aqui dentro bloqueava o laço de
+    eventos, e com o pool cheio o laço ficava 30 s parado esperando conexão enquanto as conexões presas só seriam
+    devolvidas por pings que precisavam do próprio laço (impasse que derrubou a API em 23/11/2026)."""
     # Commit imediato: persiste last_seen/telemetry antes de liberar a conexão para o long-polling
-    machine.last_seen = datetime.utcnow()
-    if body and body.telemetry:
-        machine.telemetry = body.telemetry
-    if body and body.versao and body.versao.strip():
-        machine.agent_version = body.versao.strip()[:20]
-    db.commit()
+    await asyncio.to_thread(_iniciar_ping, db, machine, body)
     machine_id = machine.id
     machine_id_str = str(machine_id)
     # Agente >= 1.1.8 informa que está fazendo backup: o reinício espera ele terminar (senão o backup se perde)
@@ -302,7 +301,7 @@ async def ping_agent(
     # Libera a conexão do pool durante a espera: o long-poll não pode segurar a sessão
     # do banco por vários segundos (esgotaria o pool com muitos agentes). A mesma
     # sessão é reutilizada (nova transação) logo após o polling.
-    db.close()
+    await asyncio.to_thread(db.close)
 
     # ── Espera por tarefas (long-polling: 5 iterações de 1s) ──
     for _ in range(5):
@@ -337,12 +336,26 @@ async def ping_agent(
             comando["event"].set()
 
         # Flags normais de restart/backup: só retorna imediatamente se estiverem marcadas
-        restart_flag, backup_flag = _read_request_flags(machine_id)
+        restart_flag, backup_flag = await asyncio.to_thread(_read_request_flags, machine_id)
         if (restart_flag and not em_backup) or backup_flag:
             break
 
         await asyncio.sleep(1)
 
+    return await asyncio.to_thread(_concluir_ping, db, machine_id, body, em_backup)
+
+
+def _iniciar_ping(db: Session, machine: Machine, body: PingRequest | None) -> None:
+    machine.last_seen = datetime.utcnow()
+    if body and body.telemetry:
+        machine.telemetry = body.telemetry
+    if body and body.versao and body.versao.strip():
+        machine.agent_version = body.versao.strip()[:20]
+    db.commit()
+
+
+def _concluir_ping(db: Session, machine_id, body: PingRequest | None, em_backup: bool) -> PingResponse:
+    """Parte final do ping (síncrona, roda em thread): restart/backup pendentes, recuperação de backup e log."""
     # Recarrega a máquina na sessão (ela foi liberada antes do polling)
     machine = db.get(Machine, machine_id)
     if machine is None:
