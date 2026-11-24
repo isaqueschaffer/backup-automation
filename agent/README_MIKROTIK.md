@@ -33,7 +33,7 @@ equipamento de rede --HTTP/SSH---->  montador do ZIP (memória) --fila ~2 MB--> 
 | DEFENSE | SFTP ou SMB provisionado | Arquivo mais recente `.enc/.zip/.dbk/.bak` da `pasta_origem`; sem a pasta = `ERRO` ("configure a pasta de backup do Defense"); não há dump do banco no Mikrotik |
 | NVR Intelbras | HTTP (CGI) em memória | Config `.backup` + `cameras` (gravação) + `telemetria` + planilha |
 | NVR Hikvision | HTTP (ISAPI) em memória | `.bin` (secretkey da senha do ZIP) + `.xls` + `cameras` + `telemetria` + planilha |
-| NVR Motorola | só leitura de gravação | `SEM_ARQUIVOS`, como no Windows (com `cameras`, `telemetria` e planilha) |
+| NVR Motorola | HTTP + porta de serviço (6036) ou WebSocket, em memória | Config `CONFIG_MOTOROLA_<data>.bin` + `cameras` + `telemetria` + planilha; o container precisa alcançar a porta de serviço do NVR, além da HTTP |
 | PABX Issabel | HTTP: memória (Content-Length <= limite) ou fluxo | Sem Content-Length: sem conferência de tamanho, mas o download tem de terminar sem erro |
 | OLT VSOL | HTTP em memória | Mesmas validações de config (não aceita HTML/login) |
 | OLT Huawei | SSH, config em **texto** | Ver abaixo |

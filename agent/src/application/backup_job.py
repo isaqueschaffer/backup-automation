@@ -16,6 +16,7 @@ from src.application.api_client import fetch_server_config, post_report, upload_
 from src.application import log_remoto
 from src.nvr.factory import verificar_gravacao_nvr, coletar_telemetria_nvr
 from src.nvr.intelbras.backup import baixar_configuracao_intelbras
+from src.nvr.motorola.backup import baixar_configuracao_motorola
 try:
     from src.nvr.hikvision.planilha import gerar_planilha_hikvision
     from src.nvr.intelbras.planilha import gerar_planilha_intelbras
@@ -104,8 +105,9 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
     status = "OK"
 
     if tipo_nvr == "MOTOROLA":
-        logging.info("  NVR Motorola detectado. Backup restauravel da configuracao nao suportado nativamente. Gravacoes verificadas.")
-        status = "SEM_ARQUIVOS"
+        logging.info("  NVR Motorola detectado. Exportando configuracao restauravel (sem plugin)...")
+        arq_cfg = pasta_nvr / f"CONFIG_MOTOROLA_{data_hoje()}.bin"
+        status = "OK" if baixar_configuracao_motorola(ip, user, pwd, arq_cfg) else "PARCIAL"
     elif tipo_nvr == "INTELBRAS" or (marca and marca.upper() == "INTELBRAS"):
         logging.info("  NVR Intelbras detectado. Baixando configuracao completa via CGI...")
         arq_cfg = pasta_nvr / f"CONFIG_INTELBRAS_{data_hoje()}.backup"

@@ -187,7 +187,10 @@ reinício direto e encerra o processo na hora.
 4. Configuração:
    - **Hikvision**: baixa `CONFIG_NVR_<data>.bin` (cifrado com a senha do ZIP) e `CONFIG_IPCAM_<data>.xls`.
    - **Intelbras**: baixa `CONFIG_INTELBRAS_<data>.backup` pelo CGI.
-   - **Motorola**: não há backup restaurável; só verifica a gravação e o status fica `SEM_ARQUIVOS`.
+   - **Motorola**: baixa `CONFIG_MOTOROLA_<data>.bin` (o mesmo arquivo da tela "Backup e restauração" do NVR, já
+     cifrado pelo próprio NVR) sem o plugin do navegador (`src/nvr/motorola/backup.py`): `exportConfig` por HTTP e
+     depois o protocolo binário da porta de serviço (6036; firmwares do plugin v2/v3) ou o WebSocket do modo H5
+     (firmware 1.4.x, plugin v5). Falha na exportação = `PARCIAL`.
 5. Gera uma **planilha** `.xlsx` com a configuração lida do equipamento, colocada em `NVR/PLANILHA/` do pacote final.
    Falha da planilha nunca altera o status do backup.
 

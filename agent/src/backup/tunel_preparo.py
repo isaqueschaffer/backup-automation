@@ -34,7 +34,7 @@ def _memoria(nome_arquivo: str, dados: bytes, tipo: str):
 
 def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
     """Mesmo fluxo do agente Windows (`processar_nvr`), em memória: status das câmeras, telemetria, config
-    (Intelbras CGI / Hikvision ISAPI .bin + .xls; Motorola = SEM_ARQUIVOS) e planilha .xlsx."""
+    (Intelbras CGI / Hikvision ISAPI .bin + .xls; Motorola exportConfig + porta de serviço ou WebSocket) e planilha."""
     import requests
     from requests.auth import HTTPDigestAuth
     from src.application.backup_job import PLANILHAS_NVR
@@ -69,9 +69,13 @@ def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
     status = "OK"
     try:
         if tipo_nvr == "MOTOROLA":
-            logging.info("  NVR Motorola detectado. Backup restauravel da configuracao nao suportado nativamente. "
-                         "Gravacoes verificadas.")
-            status = "SEM_ARQUIVOS"
+            logging.info("  NVR Motorola detectado. Exportando configuracao restauravel (em memória, sem plugin)...")
+            from src.nvr.motorola.backup import baixar_configuracao_motorola_memoria
+            dados = baixar_configuracao_motorola_memoria(ip, user, pwd, limite=LIMITE_MEMORIA)
+            if dados is not None:
+                arquivos.append(_memoria(f"CONFIG_MOTOROLA_{_data_arquivo()}.bin", dados, "NVR_CONFIG"))
+            else:
+                status = "PARCIAL"
         elif tipo_nvr == "INTELBRAS" or (marca and marca.upper() == "INTELBRAS"):
             logging.info("  NVR Intelbras detectado. Baixando configuracao completa via CGI (em memória)...")
             dados = baixar_configuracao_intelbras_memoria(ip, user, pwd, limite=LIMITE_MEMORIA)

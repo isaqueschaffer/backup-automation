@@ -528,14 +528,26 @@ class TestEmMemoria(unittest.TestCase):
         self.assertEqual(res["status"], "PRONTO")
         self.assertNotIn("_planilha", res)
 
-    def test_nvr_motorola_sem_arquivos_e_intelbras_sem_download_parcial(self):
+    def test_nvr_motorola_config_em_memoria_e_intelbras_sem_download_parcial(self):
         eq, cams, prep = self._nvr("MOTOROLA")
         from src.application import backup_job
         with mock.patch("src.nvr.factory.verificar_gravacao_nvr", return_value=(cams, "MOTOROLA")), \
                 mock.patch("src.nvr.factory.coletar_telemetria_nvr", return_value=None), \
+                mock.patch("src.nvr.motorola.backup.baixar_configuracao_motorola_memoria",
+                           return_value=b"m" * 3000) as baixar, \
                 mock.patch.dict(backup_job.PLANILHAS_NVR, {}, clear=True):
             res = prep.preparar_nvr(eq, "s")
-        self.assertEqual((res["status"], res["cameras"]), ("SEM_ARQUIVOS", cams))
+        self.assertEqual((res["status"], res["status_final"], res["cameras"]), ("PRONTO", "OK", cams))
+        bf, nome = res["arquivos_origem"][0]
+        self.assertEqual(bf.dados, b"m" * 3000)
+        self.assertTrue(nome.startswith("CONFIG_MOTOROLA_") and nome.endswith(".bin"))
+        self.assertIsNotNone(baixar.call_args.kwargs.get("limite"))
+        with mock.patch("src.nvr.factory.verificar_gravacao_nvr", return_value=(cams, "MOTOROLA")), \
+                mock.patch("src.nvr.factory.coletar_telemetria_nvr", return_value=None), \
+                mock.patch("src.nvr.motorola.backup.baixar_configuracao_motorola_memoria", return_value=None), \
+                mock.patch.dict(backup_job.PLANILHAS_NVR, {}, clear=True):
+            res = prep.preparar_nvr(eq, "s")
+        self.assertEqual((res["status"], res["cameras"]), ("PARCIAL", cams))
         eq2, _, _ = self._nvr("INTELBRAS")
         with mock.patch("src.nvr.factory.verificar_gravacao_nvr", return_value=(cams, "INTELBRAS")), \
                 mock.patch("src.nvr.factory.coletar_telemetria_nvr", return_value=None), \
