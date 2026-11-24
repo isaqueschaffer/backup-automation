@@ -59,3 +59,35 @@ def test_auditoria_marca_mcp():
                 somente_leitura=False)
     assert Contexto(**base).feito_por == "a@b.com"
     assert Contexto(**base, via="mcp").feito_por == "a@b.com (IA via MCP)"
+
+
+def _jpeg_b64(tamanho=400_000):
+    import base64 as b
+    return b.b64encode(b"\xff\xd8\xff\xe0" + b"x" * tamanho).decode()
+
+
+def test_imagem_sai_do_json_e_vai_como_imagem():
+    from mcp_server import imagens
+
+    foto = _jpeg_b64()
+    dados, achadas = imagens.separar({"success": True, "image_base64": foto, "error_message": None})
+    assert dados["image_base64"] == "[IMAGEM 1]" and len(achadas) == 1 and achadas[0]["mime"] == "image/jpeg"
+    blocos, aviso = imagens.anexar(achadas)
+    assert blocos == [{"type": "image", "mimeType": "image/jpeg", "data": foto}] and "anexada" in aviso
+    # data URL e texto comum não são confundidos
+    _, a2 = imagens.separar({"perfect_image_base64": "data:image/png;base64," + _jpeg_b64(1000), "nome": "x" * 600})
+    assert len(a2) == 1 and a2[0]["mime"] == "image/jpeg"
+
+
+def test_galeria_grande_nao_anexa_tudo():
+    from mcp_server import imagens
+
+    cams = [{"canal": i, "nome": f"CAM {i}", "night_image_base64": _jpeg_b64(1000), "perfect_image_base64": None}
+            for i in range(1, 11)]
+    _, achadas = imagens.separar(cams)
+    blocos, aviso = imagens.anexar(achadas)
+    assert len(blocos) == imagens.MAX_IMAGENS and "ver_imagem_camera" in aviso
+    escolhidas, info = imagens.escolher_da_galeria(cams, 7, "noite")
+    assert len(escolhidas) == 1 and "CAM 7" in escolhidas[0]["rotulo"]
+    vazio, info = imagens.escolher_da_galeria(cams, 99, "noite")
+    assert not vazio and "não encontrado" in info

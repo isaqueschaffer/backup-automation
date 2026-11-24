@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Optional
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -18,7 +19,7 @@ from database import SessionLocal, get_db
 from models import McpToken, Usuario
 from services.dashboards.compartilhamento import ip_do_cliente
 
-from . import executor
+from . import executor, imagens
 from .ferramentas import catalogo
 from .tokens import PAPEIS_MCP, PREFIXO_PESSOAL, base_url, gerar, validar_access
 
@@ -34,7 +35,9 @@ Hierarquia: Conta (integrador ou cliente final) > Cliente/Setor > Máquina (comp
 Equipamento. Os backups e os testes são feitos pelo agente da máquina.
 Você age em nome do usuário conectado, com as mesmas permissões dele no painel; tudo o que alterar fica na
 Auditoria como "<e-mail> (IA via MCP)". Antes de excluir algo ou de agir em todas as máquinas, confirme com o
-usuário. Para achar ids, liste primeiro (clientes, máquinas, equipamentos)."""
+usuário. Para achar ids, liste primeiro (clientes, máquinas, equipamentos).
+Imagens de câmera chegam como imagem anexada (não como texto): foto ao vivo com test_equipamento_rtsp; foto salva
+(referência ou da noite) de um canal com ver_imagem_camera. Mostre a imagem ao usuário no chat."""
 
 router = APIRouter(tags=["MCP"])
 tokens_router = APIRouter(prefix="/api/v1/mcp", tags=["MCP"])
@@ -88,14 +91,21 @@ def _texto_resultado(resp: executor.Resposta) -> dict:
         return {"content": [{"type": "image", "mimeType": resp.tipo, "data": base64.b64encode(resp.corpo).decode()}]}
     if resp.tipo == "application/json" or resp.tipo.startswith("text/"):
         texto = resp.corpo.decode(errors="replace")
+        blocos: list = []
+        aviso = ""
         if resp.tipo == "application/json":
             try:
-                texto = json.dumps(json.loads(texto), ensure_ascii=False, default=str)
+                # fotos em base64 saem do JSON e vão como imagem (como texto, os apps cortam a resposta)
+                dados, achadas = imagens.separar(json.loads(texto))
+                blocos, aviso = imagens.anexar(achadas)
+                texto = json.dumps(dados, ensure_ascii=False, default=str)
             except Exception:
                 pass
         if len(texto) > LIMITE_TEXTO:
             texto = texto[:LIMITE_TEXTO] + f"\n\n[Resposta cortada: {len(texto)} caracteres. Use filtros ou paginação.]"
-        return {"content": [{"type": "text", "text": texto}]}
+        if aviso:
+            texto += "\n\n" + aviso
+        return {"content": [{"type": "text", "text": texto}, *blocos]}
     nome = resp.headers.get("content-disposition", "")
     return {"content": [{"type": "text", "text": (
         f"A rota devolveu um arquivo ({resp.tipo or 'binário'}, {len(resp.corpo)} bytes) {nome}. "
@@ -127,12 +137,14 @@ async def _tratar(msg: Any, request: Request, usuario: Usuario) -> Optional[dict
         return _ok(id_, {})
     if metodo == "tools/list":
         ferramentas = [f.para_mcp(super_admin) for f in catalogo(request.app) if super_admin or not f.so_super]
-        return _ok(id_, {"tools": ferramentas})
+        return _ok(id_, {"tools": [*ferramentas, imagens.FERRAMENTA]})
     if metodo in ("resources/list", "resources/templates/list", "prompts/list"):
         chave = {"resources/list": "resources", "resources/templates/list": "resourceTemplates"}.get(metodo, "prompts")
         return _ok(id_, {chave: []})
     if metodo == "logging/setLevel":
         return _ok(id_, {})
+    if metodo == "tools/call" and params.get("name") == imagens.NOME_FERRAMENTA:
+        return _ok(id_, await _ver_imagem_camera(request, usuario, params.get("arguments") or {}))
     if metodo == "tools/call":
         nome = params.get("name")
         f = next((x for x in catalogo(request.app) if x.nome == nome), None)
@@ -149,6 +161,28 @@ async def _tratar(msg: Any, request: Request, usuario: Usuario) -> Optional[dict
                                      ip=ip_do_cliente(request))
         return _ok(id_, _texto_resultado(resp))
     return _erro(id_, -32601, f"Método não suportado: {metodo}")
+
+
+async def _ver_imagem_camera(request: Request, usuario, args: dict) -> dict:
+    """Foto salva de um canal: lê a galeria pela própria rota do painel (mesmas permissões) e devolve só a imagem."""
+    faltando = [c for c in ("machine_id", "equipamento_id", "canal") if args.get(c) in (None, "")]
+    if faltando:
+        return {"content": [{"type": "text", "text": f"Falta: {', '.join(faltando)}."}], "isError": True}
+    caminho = f"/api/v1/machines/{quote(str(args['machine_id']), safe='')}/equipamentos/" \
+              f"{quote(str(args['equipamento_id']), safe='')}/cameras"
+    conta_id = args.get("contexto_conta_id") if usuario.papel == "SUPER_ADMIN" else None
+    resp = await executor.chamar(request.app, usuario, "GET", caminho, conta_id=conta_id, ip=ip_do_cliente(request))
+    if resp.status >= 400:
+        return _texto_resultado(resp)
+    try:
+        cameras = json.loads(resp.corpo)
+    except Exception:
+        return {"content": [{"type": "text", "text": "Resposta inválida da galeria."}], "isError": True}
+    achadas, info = imagens.escolher_da_galeria(cameras, args["canal"], args.get("tipo") or "as_duas")
+    if not achadas:
+        return {"content": [{"type": "text", "text": info}], "isError": True}
+    blocos, aviso = imagens.anexar(achadas)
+    return {"content": [{"type": "text", "text": f"{info}\n{aviso}"}, *blocos]}
 
 
 @router.post("/mcp", include_in_schema=False)
