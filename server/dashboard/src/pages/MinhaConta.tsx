@@ -7,6 +7,7 @@ import { apiErrorMessage } from "../utils/errors";
 import { StatusContaBadge, TIPO_CONTA_LABEL, textoValidade } from "./Contas/contaUi";
 import UsuariosSection from "./Contas/UsuariosSection";
 import HistoricoValidade from "./Contas/HistoricoValidade";
+import ConexaoIA from "./ConexaoIA";
 
 export default function MinhaConta() {
   const { me, recarregarMe } = useAuth();
@@ -177,6 +178,7 @@ export default function MinhaConta() {
         </div>
 
         {renderCardSenha()}
+        <ConexaoIA />
       </>
     );
   }
@@ -212,6 +214,7 @@ export default function MinhaConta() {
         </div>
 
         {renderCardSenha()}
+        <ConexaoIA />
       </>
     );
   }
@@ -334,6 +337,7 @@ export default function MinhaConta() {
 
       {/* Card Minha Senha */}
       {renderCardSenha()}
+      <ConexaoIA />
     </>
   );
 }

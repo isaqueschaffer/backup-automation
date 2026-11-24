@@ -428,3 +428,53 @@ class NotificacaoPersonalizada(Base):
     criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
     atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+
+
+# ─── MCP (IA conectada ao sistema: Claude, ChatGPT, Gemini) ─────────────────
+class McpToken(Base):
+    """Acesso de uma IA pelo MCP em nome de um usuário ADMIN ou SUPER_ADMIN.
+    PESSOAL: token criado em "Minha conta" (Antigravity/Gemini CLI), sem validade, até ser revogado.
+    OAUTH: conexão feita pelo login do Claude, ChatGPT ou app do Gemini; access de 1 h renovado pelo refresh.
+    Guarda só o SHA-256 dos tokens. token_versao: trocar a senha/papel do usuário derruba as conexões."""
+    __tablename__ = "mcp_tokens"
+    __table_args__ = (CheckConstraint("tipo IN ('PESSOAL', 'OAUTH')", name="ck_mcp_tokens_tipo"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo = Column(String(10), nullable=False)
+    nome = Column(String(255), nullable=False)  # PESSOAL: nome dado pelo usuário; OAUTH: nome do aplicativo
+    token_hash = Column(String(64), nullable=False, unique=True)
+    expira_em = Column(DateTime, nullable=True)  # None = sem validade (PESSOAL)
+    refresh_hash = Column(String(64), nullable=True, unique=True)
+    refresh_expira_em = Column(DateTime, nullable=True)
+    client_id = Column(String(512), nullable=True)  # OAUTH: aplicativo que recebeu
+    token_versao = Column(Integer, nullable=False)
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ultimo_uso = Column(DateTime, nullable=True)
+    revogado = Column(Boolean, default=False, nullable=False)
+
+
+class McpOauthCliente(Base):
+    """Aplicativo OAuth (registro dinâmico RFC 7591 ou documento de metadados com URL como client_id)."""
+    __tablename__ = "mcp_oauth_clientes"
+
+    client_id = Column(String(512), primary_key=True)
+    nome = Column(String(255), nullable=True)
+    redirect_uris = Column(JSON, nullable=False)
+    secret_hash = Column(String(64), nullable=True)  # None = cliente público (PKCE)
+    metadados_url = Column(Boolean, default=False, nullable=False)  # client_id é URL (CIMD)
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+    atualizado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class McpOauthCodigo(Base):
+    """Código de autorização OAuth (uso único, 10 min)."""
+    __tablename__ = "mcp_oauth_codigos"
+
+    codigo_hash = Column(String(64), primary_key=True)
+    client_id = Column(String(512), nullable=False)
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    redirect_uri = Column(Text, nullable=False)
+    code_challenge = Column(String(128), nullable=False)
+    expira_em = Column(DateTime, nullable=False)
+    usado = Column(Boolean, default=False, nullable=False)

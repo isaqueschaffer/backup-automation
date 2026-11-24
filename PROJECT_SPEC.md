@@ -2774,6 +2774,19 @@ Integração (merge em isaque): a dependência foi fixada em `pysnmp>=7.1,<8.0.0
 
 ---
 
+### [2026-11-24] — Servidor MCP (Claude, ChatGPT, Gemini)
+
+IA conectada ao sistema pelo Model Context Protocol, em `server/api/mcp_server/` (dentro do Backend, sem serviço novo no Dokploy).
+- **Endereço:** `POST https://server.suportetrilan.com.br/mcp` (Streamable HTTP sem estado, respostas JSON; GET/DELETE = 405).
+- **Ferramentas:** geradas das rotas do painel (`/api/v1`) que usam `get_contexto` e afins, com o esquema do OpenAPI (~100). Ficam de fora `/api/v1/auth`, `/api/v1/mcp`, `/api/v1/public`, `/api/v1/agent`, o cadastro de versão OTA e uploads multipart. Rota só do super admin só aparece para ele; o super admin escolhe a conta pelo argumento `contexto_conta_id` (vira `X-Conta-ID`). GET = `readOnlyHint`; DELETE, `*-all`, `rotate-key` = `destructiveHint` (o app pede confirmação). Rota nova do painel entra sozinha.
+- **Execução:** a ferramenta chama a rota dentro do processo (ASGI) com um JWT de 5 min do usuário com `"via": "mcp"`: valem papel, somente leitura e REGRA-010; a Auditoria grava `<e-mail> (IA via MCP)` (`Contexto.feito_por`). Senhas aparecem como no painel (decisão do usuário).
+- **Quem conecta:** só `SUPER_ADMIN` e `ADMIN` com e-mail (o login legado só com senha não).
+- **Autenticação:** OAuth 2.1 para Claude, ChatGPT e app do Gemini (metadados RFC 9728/8414 em `/.well-known/...`, registro dinâmico `POST /oauth/register` e client_id por URL (CIMD, só HTTPS em IP público), login em `/oauth/authorize`, PKCE S256 obrigatório, `POST /oauth/token` com access de 1 h e refresh de 90 dias com rotação, `POST /oauth/revoke`). Token pessoal (`trilan_mcp_...`, sem validade) para Antigravity/Gemini CLI, criado em "Minha conta". Trocar a senha ou o papel derruba todos os acessos (`token_versao`).
+- **Tabelas novas:** `mcp_tokens` (só o SHA-256), `mcp_oauth_clientes`, `mcp_oauth_codigos` (criadas pelo `create_all`).
+- **Rotas do painel:** `GET /api/v1/mcp/info`, `GET|POST /api/v1/mcp/tokens`, `DELETE /api/v1/mcp/tokens/{id}`. Tela: card "Conectar IA (MCP)" em Minha conta.
+- **Config opcional:** `MCP_BASE_URL` (vazio = deduz de `X-Forwarded-Proto/Host`).
+- **Painel 24 h (mesmo dia):** `POST /api/v1/auth/renovar` (o painel renova o JWT a cada 30 min) e `/version.json` no build do painel (recarrega sozinho após deploy).
+
 ## 17. Fluxo de Atualização de Versão (Release)
 
 Quando uma nova versão do Agente Trilan for lançada, certifique-se de atualizar o número da versão nos seguintes arquivos:

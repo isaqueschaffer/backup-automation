@@ -412,6 +412,12 @@ app.include_router(storage_admin.router)  # Armazenamento admin: /api/v1/admin/s
 app.include_router(notificacoes.router)   # Notificações: /api/v1/notificacoes
 app.include_router(auditoria.router)      # Auditoria: /api/v1/auditoria
 
+# MCP: IA (Claude, ChatGPT, Gemini) usando o sistema em nome de um administrador. /mcp, OAuth e /api/v1/mcp/tokens
+from mcp_server import oauth as mcp_oauth, servidor as mcp_servidor  # noqa: E402
+app.include_router(mcp_servidor.router)
+app.include_router(mcp_servidor.tokens_router)
+app.include_router(mcp_oauth.router)
+
 
 # ─── Tarefa de fundo: fechamento das rodadas de backup do Cliente ──────────
 # A cada 30s fecha as rodadas vencidas/completas e envia o e-mail do Cliente.

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # Token só para publicar versões do agente (POST /api/v1/admin/agent-version), enviado em
     # X-Publish-Token. Não dá acesso ao painel. Vazio = desativado (só o admin publica).
     PUBLISH_TOKEN: str = ""
+    # Endereço público desta API para o MCP e o OAuth (ex.: https://server.suportetrilan.com.br).
+    # Vazio = deduz do pedido (X-Forwarded-Proto/Host do proxy).
+    MCP_BASE_URL: str = ""
 
     # CORS — lista de origens permitidas separadas por vírgula.
     # Ex: CORS_ORIGINS=https://painel.suaempresa.com,https://outro.dominio.com
