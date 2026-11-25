@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { EqForm, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
-import { TIPOS, TIPO_ICONE_EMOJI } from "../utils";
+import { TIPOS, TIPO_ICONE_EMOJI, USUARIO_SSH_PADRAO } from "../utils";
 import PlanilhaCamerasCampo from "./PlanilhaCamerasCampo";
 
 export default function EquipamentoFormModal({ machineId, agenteTipo, eqForm, setEqForm, editingEqId, saving, onSave, onClose, onErro }: {
@@ -377,6 +377,14 @@ function SmbConfigSection({
 }) {
   const sftp = eqForm.acesso_remoto !== "smb";
   const rotulo = { fontSize: 11, marginBottom: 4 } as const;
+  // Usuário padrão: a conta que o script preparar_acesso_ssh.ps1 cria em qualquer Windows (o técnico pode trocar)
+  useEffect(() => {
+    if (!eqForm.ssh_usuario) setEqForm(f => (f.ssh_usuario ? f : { ...f, ssh_usuario: USUARIO_SSH_PADRAO }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const linkScript = (
+    <a href="/preparar_acesso_ssh.ps1" download style={{ color: "var(--accent)" }}>preparar_acesso_ssh.ps1</a>
+  );
   return (
     <div
       style={{
@@ -407,8 +415,8 @@ function SmbConfigSection({
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px", gap: 12, marginTop: 12 }}>
         <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label" style={rotulo}>{sftp ? "Usuário SSH (só leitura) *" : "Administrador (SSH)"}</label>
-          <input className="form-input" type="text" autoComplete="off" placeholder={sftp ? "trilan_leitura" : "Administrador"}
+          <label className="form-label" style={rotulo}>{sftp ? "Usuário SSH *" : "Administrador (SSH)"}</label>
+          <input className="form-input" type="text" autoComplete="off" placeholder={USUARIO_SSH_PADRAO}
             value={eqForm.ssh_usuario || ""} onChange={e => setEqForm({ ...eqForm, ssh_usuario: e.target.value })} />
         </div>
         <div className="form-group" style={{ margin: 0 }}>
@@ -423,6 +431,12 @@ function SmbConfigSection({
             value={eqForm.ssh_porta ?? ""} onChange={e => setEqForm({ ...eqForm, ssh_porta: e.target.value })} />
         </div>
       </div>
+      <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
+        Usuário padrão "{USUARIO_SSH_PADRAO}": rode uma vez o script {linkScript} como administrador na máquina do cliente. Ele liga o
+        OpenSSH, libera a porta 22 e cria essa conta no grupo Administradores (em Windows de qualquer idioma); a senha que você
+        digitar no script é a que vai aqui. Para usar outra conta já existente, troque o usuário. Evite "Administrator": em Windows
+        em português a conta interna se chama "Administrador", vem desativada e o SSH derruba a conexão.
+      </span>
       {sftp ? (
         <>
           <div className="form-group" style={{ margin: "12px 0 0" }}>

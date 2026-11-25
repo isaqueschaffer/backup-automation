@@ -133,6 +133,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       ip: string;
       modelo: string;
       senha: string;
+      usuario?: string;
       situacao: "nova" | "atualiza";
       pastaGravacao?: string;
     }>;
@@ -198,6 +199,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
         ip: c.ip,
         modelo: c.modelo,
         senha: c.password,
+        usuario: c.usuario,
         situacao: (jaExiste ? "atualiza" : "nova") as "nova" | "atualiza",
         pastaGravacao: c.pastaGravacao,
       };
@@ -266,7 +268,7 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       const payloadCams = previa.cams.map(c => ({
         nome: c.nome,
         ip: c.ip,
-        username: "admin",
+        username: c.usuario || "admin",
         password: c.senha,
         modelo: c.modelo,
         pasta_gravacao: c.pastaGravacao || undefined,

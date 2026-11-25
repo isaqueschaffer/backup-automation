@@ -27,6 +27,10 @@ export const TIPO_ICONE_EMOJI: Record<string, string> = {
 // Nome seguro para arquivo (espaços -> "_")
 export const safeFileName = (s: string) => s.replace(/\s+/g, "_");
 
+// Conta que o script public/preparar_acesso_ssh.ps1 cria na máquina do cliente (no grupo Administradores, em
+// Windows de qualquer idioma). É o padrão do campo "Usuário SSH" do acesso remoto (agente no MikroTik); dá para trocar.
+export const USUARIO_SSH_PADRAO = "trilan_backup";
+
 export function emptyEqForm(overrides: Partial<EqForm> = {}): EqForm {
   return {
     tipo: "NVR", name: "", ip: "", username: "", password: "",

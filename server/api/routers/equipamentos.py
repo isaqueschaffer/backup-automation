@@ -33,6 +33,7 @@ from services.escopo import obter_maquina
 from services.licenca_unm import licenca_da_config
 from services.galeria_vms import (
     cameras_do_relatorio_sem_par,
+    credenciais_dos_gravadores,
     canal_int as _canal_int,
     ip_valido,
     parear_cameras,
@@ -1125,9 +1126,23 @@ def salvar_planilha(
         planilha.dados = dados_enc
         planilha.importado_em = agora
 
+    # Defense: a planilha manda no acesso aos canais de DVR/NVR que a Galeria criou sozinha (a partir do relatório do
+    # agente, com a senha padrão): passam a usar o usuário e a senha da linha do gravador na planilha.
+    atualizados = 0
+    if (nvr.tipo or "").upper() == "DEFENSE":
+        gravadores = gravadores_da_planilha(payload.linhas, payload.linha_cabecalho)
+        if gravadores:
+            cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).all()
+            for camera, usuario, senha in credenciais_dos_gravadores(cameras_db, nvr.last_recording_status or [], gravadores):
+                camera.username = usuario
+                camera.password = encrypt(senha)
+                atualizados += 1
+
     registrar_alteracao(
         db, machine_id, ctx.feito_por,
-        f"importou a planilha '{payload.nome_arquivo}' ({total} linha(s)) no equipamento '{nvr.name}'.", nvr.name,
+        f"importou a planilha '{payload.nome_arquivo}' ({total} linha(s)) no equipamento '{nvr.name}'"
+        + (f"; usuário e senha de {atualizados} canal(is) de gravador atualizados pela planilha." if atualizados else "."),
+        nvr.name,
     )
     db.commit()
     db.refresh(planilha)

@@ -22,7 +22,7 @@ function marcarSituacao(rows: unknown[][], opcao: DigifortNameOption, existentes
     const jaExiste = existentes.some(e =>
       (nome !== "" && (e.nome || "").trim().toLowerCase() === nome) || (ip !== "" && (e.ip || "").trim() === ip));
     return {
-      nome: c.name, ip: c.ip, modelo: c.modelo, senha: c.password,
+      nome: c.name, ip: c.ip, modelo: c.modelo, senha: c.password, usuario: c.usuario,
       situacao: jaExiste ? "atualiza" : "nova", pastaGravacao: c.pastaGravacao,
     };
   });
@@ -61,7 +61,7 @@ export function aplicarOpcaoNome(p: PlanilhaPendente, opcao: DigifortNameOption,
 export async function enviarPlanilhaVms(machineId: string, nvrId: string, p: PlanilhaPendente): Promise<void> {
   await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/import`, {
     cameras: p.cams.map(c => ({
-      nome: c.nome, ip: c.ip, username: "admin", password: c.senha, modelo: c.modelo,
+      nome: c.nome, ip: c.ip, username: c.usuario || "admin", password: c.senha, modelo: c.modelo,
       pasta_gravacao: c.pastaGravacao || undefined,
     })),
   });

@@ -2,6 +2,7 @@
 Serviço para manipulação e persistência segura de planilhas VMS (DIGIFORT / DEFENSE).
 """
 import json
+import re
 from typing import List
 
 
@@ -10,9 +11,10 @@ _TIPOS_GRAVADOR = ("dvr", "nvr", "imhdx", "invd", "gravador")
 
 
 def gravadores_da_planilha(linhas: List[List[str]], linha_cabecalho: int) -> List[dict]:
-    """Gravadores (DVR/NVR) de uma planilha de dispositivos do Defense: [{'nome', 'ip'}]. A linha do gravador não vira
-    câmera da Galeria (os canais dele vêm do Defense pelo "Sincronizar da Máquina"); o nome e o IP dela dizem a que
-    gravador cada canal pertence."""
+    """Gravadores (DVR/NVR) de uma planilha de dispositivos do Defense: [{'nome', 'ip'}] e, quando a planilha tem as
+    colunas, 'usuario' e 'senha' do gravador. A linha do gravador não vira câmera da Galeria (os canais dele vêm do
+    Defense pelo "Sincronizar da Máquina"); o nome e o IP dela dizem a que gravador cada canal pertence e o usuário e a
+    senha dela são os de acesso aos canais."""
     if linha_cabecalho < 0 or linha_cabecalho >= len(linhas):
         return []
     cab = [str(c or "").strip().lower() for c in linhas[linha_cabecalho]]
@@ -23,6 +25,8 @@ def gravadores_da_planilha(linhas: List[List[str]], linha_cabecalho: int) -> Lis
     i_tipo = achar(lambda h: h == "tipo" or ("tipo" in h and ("dispositivo" in h or "equipamento" in h)))
     i_nome = achar(lambda h: "nome" in h and not any(x in h for x in ("usu", "identificador", "dom")))
     i_ip = achar(lambda h: "identificador" in h or h == "ip" or "endere" in h)
+    i_usuario = achar(lambda h: "usu" in h or h in ("user", "username"))
+    i_senha = achar(lambda h: "senha" in h or "pass" in h)
     if min(i_tipo, i_nome, i_ip) < 0:
         return []
 
@@ -32,7 +36,12 @@ def gravadores_da_planilha(linhas: List[List[str]], linha_cabecalho: int) -> Lis
             continue
         tipo, nome, ip = (str(linha[i] or "").strip() for i in (i_tipo, i_nome, i_ip))
         if nome and ip and "." in ip and any(t in tipo.lower() for t in _TIPOS_GRAVADOR):
-            saida.append({"nome": nome, "ip": ip})
+            item = {"nome": nome, "ip": ip}
+            for chave, i in (("usuario", i_usuario), ("senha", i_senha)):
+                valor = str(linha[i] or "").strip() if 0 <= i < len(linha) else ""
+                if valor:
+                    item[chave] = valor
+            saida.append(item)
     return saida
 
 
@@ -47,7 +56,8 @@ def casar_cameras_por_ip(itens: List, cameras_db: List) -> List:
         return (getattr(obj, "ip", None) or "").strip()
 
     def nome_de(obj) -> str:
-        return (getattr(obj, "nome", None) or "").strip().lower()
+        # Sem pontuação, espaços e maiúsculas: "1 ANDAR- ACESSO" (relatório do Defense) = "1 andar - acesso" (planilha)
+        return re.sub(r"[^a-z0-9]", "", (getattr(obj, "nome", None) or "").lower())
 
     from collections import Counter
     na_planilha = Counter(ip_de(i) for i in itens if ip_de(i))
