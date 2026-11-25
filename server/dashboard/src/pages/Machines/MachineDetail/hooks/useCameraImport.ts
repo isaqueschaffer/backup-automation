@@ -42,7 +42,7 @@ export function parseCsv(text: string): string[][] {
 
 export type DigifortNameOption = "descricao" | "nome" | "auto";
 
-export interface CameraRow { name: string; ip: string; password: string; modelo: string; pastaGravacao?: string }
+export interface CameraRow { name: string; ip: string; password: string; modelo: string; pastaGravacao?: string; usuario?: string }
 
 function cleanCell(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -284,7 +284,9 @@ export function rowsToCameras(
 
   // Demais formatos: Digifort, Intelbras Defense e Genéricos
   let idxDesc = headers.findIndex(h => h.includes("desc"));
-  let idxNome = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+  let idxNome = headers.findIndex(h => (h.includes("nome") && !h.includes("usu")) || h.includes("câmera") || h.includes("camera"));
+  // "Nome de usuário" (export do Defense) / "Usuário" / "User": acesso da câmera, que a planilha manda
+  const idxUsuario = headers.findIndex(h => h.includes("usu") || h === "user" || h === "username");
   if (idxDesc === -1) idxDesc = idxNome;
 
   // \bip\b (não h.includes("ip")): "ip" sozinho, não a substring dentro de "tipo do dispositivo"
@@ -371,7 +373,11 @@ export function rowsToCameras(
 
     if (desc && ender) {
       const pastaGravacao = idxDiretorio >= 0 ? pastaGravacaoDoCaminho(cleanCell(cols[idxDiretorio])) : "";
-      out.push({ name: desc, ip: ender, password: pass || "navarro@123", modelo, ...(pastaGravacao ? { pastaGravacao } : {}) });
+      const usuario = idxUsuario >= 0 ? cleanCell(cols[idxUsuario]) : "";
+      out.push({
+        name: desc, ip: ender, password: pass || "navarro@123", modelo,
+        ...(usuario ? { usuario } : {}), ...(pastaGravacao ? { pastaGravacao } : {}),
+      });
     }
   }
   return out;

@@ -107,11 +107,31 @@ def cameras_do_relatorio_sem_par(cameras_db: list, relatorio: list, gravadores: 
         canal_rtsp = canal_int(st.get("canal_rtsp"))
         canal_rtsp = canal_rtsp if canal_rtsp and 1 <= canal_rtsp <= 512 else None
         eh_canal_de_gravador = canal_rtsp is not None or gravador is not None
-        saida.append({
+        item = {
             "nome": nome, "ip": ip,
             "modelo": MODELO_CANAL_DE_GRAVADOR if eh_canal_de_gravador else marca_pelo_modelo(st.get("modelo")),
             "canal_rtsp": canal_rtsp,
-        })
+        }
+        # Usuário e senha do gravador vêm da planilha (a linha dele); sem eles a Galeria usa os padrões
+        if gravador and gravador.get("usuario"):
+            item["username"] = gravador["usuario"]
+        if gravador and gravador.get("senha"):
+            item["password"] = gravador["senha"]
+        saida.append(item)
+    return saida
+
+
+def credenciais_dos_gravadores(cameras_db: list, relatorio: list, gravadores: Optional[list]) -> List[Tuple[object, str, str]]:
+    """Canais de DVR/NVR que já estão na Galeria e a que gravador da planilha pertencem: [(câmera, usuario, senha)].
+    A planilha manda: o acesso ao canal é o do gravador (linha dele), não o padrão que a Galeria pôs sozinha quando a
+    câmera nasceu do relatório do agente. Só entram gravadores com usuário e senha na planilha."""
+    saida = []
+    for _, st, c, _ in parear_cameras(cameras_db, relatorio):
+        if st is None or c is None:
+            continue
+        gravador = gravador_do_canal(st, gravadores)
+        if gravador and gravador.get("usuario") and gravador.get("senha"):
+            saida.append((c, gravador["usuario"], gravador["senha"]))
     return saida
 
 

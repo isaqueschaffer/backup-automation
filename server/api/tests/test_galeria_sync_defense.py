@@ -7,7 +7,8 @@ from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from services.galeria_vms import cameras_do_relatorio_sem_par, gravador_do_canal, marca_pelo_modelo
+from services.galeria_vms import (cameras_do_relatorio_sem_par, credenciais_dos_gravadores, gravador_do_canal,
+                                  marca_pelo_modelo)
 
 
 def _cam(nome, ip, canal):
@@ -75,6 +76,34 @@ def test_ip_do_gravador_da_planilha_vale_quando_o_defense_nao_informa():
     assert cameras_do_relatorio_sem_par([], rel) == []  # sem a planilha não há IP: descartada
     (cam,) = cameras_do_relatorio_sem_par([], rel, GRAVADORES)
     assert (cam["ip"], cam["modelo"], cam["canal_rtsp"]) == ("192.168.75.6", "ONVIF", 2)
+
+
+GRAVADORES_COM_ACESSO = [
+    {"nome": "DVR-CATANDUVA", "ip": "10.0.40.47", "usuario": "sup", "senha": "S3nha!"},
+    {"nome": "NVR INTELBRAS", "ip": "192.168.75.6"},  # sem usuário/senha na planilha
+]
+
+
+def test_canal_novo_de_gravador_nasce_com_o_usuario_e_a_senha_da_planilha():
+    rel = [{"nome": "DVR-CATANDUVA - FRENTE", "ip": "10.0.40.47", "dispositivo": "DVR-CATANDUVA", "canal_rtsp": 1},
+           {"nome": "NVR INTELBRAS - CAM 2", "ip": "N/A", "dispositivo": "NVR INTELBRAS", "canal_rtsp": 2},
+           {"nome": "TERRENO 01", "ip": "192.168.75.10"}]
+    novas = {c["nome"]: c for c in cameras_do_relatorio_sem_par([], rel, GRAVADORES_COM_ACESSO)}
+    assert (novas["DVR-CATANDUVA - FRENTE"]["username"], novas["DVR-CATANDUVA - FRENTE"]["password"]) == ("sup", "S3nha!")
+    assert "username" not in novas["NVR INTELBRAS - CAM 2"] and "password" not in novas["NVR INTELBRAS - CAM 2"]
+    assert "username" not in novas["TERRENO 01"]  # câmera de IP próprio não herda acesso de gravador
+
+
+def test_credenciais_dos_gravadores_atingem_so_canais_de_gravador_ja_na_galeria():
+    galeria = [_cam("DVR-CATANDUVA - FRENTE", "10.0.40.47", 1), _cam("TERRENO 01", "192.168.75.10", 2),
+               _cam("NVR INTELBRAS - CAM 2", "192.168.75.6", 3)]
+    rel = [{"nome": "DVR-CATANDUVA - FRENTE", "ip": "10.0.40.47", "dispositivo": "DVR-CATANDUVA"},
+           {"nome": "TERRENO 01", "ip": "192.168.75.10"},
+           {"nome": "NVR INTELBRAS - CAM 2", "ip": "192.168.75.6", "dispositivo": "NVR INTELBRAS"}]
+    achadas = credenciais_dos_gravadores(galeria, rel, GRAVADORES_COM_ACESSO)
+    assert [(c.nome, u, s) for c, u, s in achadas] == [("DVR-CATANDUVA - FRENTE", "sup", "S3nha!")]
+    assert credenciais_dos_gravadores(galeria, rel, None) == []
+    assert credenciais_dos_gravadores(galeria, None, GRAVADORES_COM_ACESSO) == []
 
 
 def test_gravador_do_canal_casa_pelo_dispositivo_ou_pelo_prefixo_do_nome():

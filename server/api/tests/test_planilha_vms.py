@@ -170,8 +170,21 @@ def test_gravadores_da_planilha_do_defense():
               _linha("NVR/iNVD", "NVR INTELBRAS", "192.168.75.6"),
               _linha("Câmera IP", "TERRENO 01", "192.168.75.10"),
               _linha("DVR/iMHDX", "SEM IP", "")]
-    assert gravadores_da_planilha(linhas, 1) == [{"nome": "ESTOQUE CATANDUVA", "ip": "10.0.40.41"},
-                                                  {"nome": "NVR INTELBRAS", "ip": "192.168.75.6"}]
+    assert gravadores_da_planilha(linhas, 1) == [
+        {"nome": "ESTOQUE CATANDUVA", "ip": "10.0.40.41", "usuario": "admin", "senha": "x"},
+        {"nome": "NVR INTELBRAS", "ip": "192.168.75.6", "usuario": "admin", "senha": "x"}]
+
+
+def test_gravador_sem_usuario_e_senha_na_planilha_vem_so_com_nome_e_ip():
+    linhas = [CABECALHO_DEFENSE, ["Encoder", "DVR/iMHDX", "Intelbras", "IP", "DVR A", "10.0.40.41", "37777", "", "", "", ""]]
+    assert gravadores_da_planilha(linhas, 0) == [{"nome": "DVR A", "ip": "10.0.40.41"}]
+
+
+def test_nome_sem_pontuacao_casa_a_camera_que_o_defense_criou_sozinho():
+    # O relatório do Defense escreve "1 ANDAR- ACESSO"; a planilha, "1 andar - acesso": é a mesma câmera
+    antigas = [_cam("1 ANDAR- ACESSO", "10.0.0.5", 1), _cam("1 ANDAR- FUNDOS", "10.0.0.5", 2)]
+    itens = [_cam("1 andar - acesso", "10.0.0.5", None)]
+    assert casar_cameras_por_ip(itens, antigas) == [antigas[0]]
 
 
 def test_planilha_sem_coluna_de_tipo_ou_cabecalho_ruim_nao_tem_gravadores():

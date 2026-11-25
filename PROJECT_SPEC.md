@@ -1127,6 +1127,14 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-25] — Defense: a planilha manda no que a Galeria pegou sozinha
+
+- **Problema**: a Galeria do Defense recebe câmeras sozinha (IP e marca do relatório do agente, senha padrão `navarro@123`) e a planilha exportada do Defense (com usuário e senha de cada dispositivo) só atualizava o que casava por IP ou nome exato, ignorava a coluna de usuário (o painel mandava sempre `admin`) e deixava os canais de DVR/NVR criados pelo relatório com a senha padrão, embora a linha do gravador na planilha traga a senha real.
+- **Regra** (escolhida pelo usuário): a planilha manda nos casos casados; nada é apagado (câmeras que a planilha não traz, como canais de DVR do relatório, ficam com as imagens).
+- **Servidor**: `casar_cameras_por_ip` compara nomes sem pontuação, espaços e maiúsculas ("1 ANDAR- ACESSO" = "1 andar - acesso"), para a câmera criada sozinha ser atualizada em vez de duplicada. `gravadores_da_planilha` passa a trazer `usuario` e `senha` da linha do gravador (quando as colunas existem). `cameras_do_relatorio_sem_par` (Sincronizar da Máquina) cria o canal de gravador já com esse usuário e senha. Novo `credenciais_dos_gravadores`: ao guardar a planilha (`PUT /{id}/planilha`) de um DEFENSE, os canais de gravador que já estão na Galeria passam a usar o usuário e a senha da linha do gravador (o log de alterações informa quantos).
+- **Painel**: `rowsToCameras` lê a coluna "Nome de usuário"/"Usuário"/"User" e o usuário vai em `username` na importação (Galeria e formulário do Digifort); sem a coluna segue `admin`. A coluna de usuário não é mais confundida com a de nome da câmera.
+- **Testes**: `test_planilha_vms.py` e `test_galeria_sync_defense.py` (casos novos); `tsc --noEmit` do painel limpo. Não testado contra o servidor real nem com a planilha de verdade do Defense; versão do agente não alterada (mudança só em servidor e painel).
+
 ### [2026-11-24] — Backup restaurável da configuração dos NVR Motorola, sem plugin
 
 - **Problema**: a exportação da configuração dos NVR Motorola (OEM TVT, NVMS-9000) só existia pela tela web com o plugin ActiveX no Internet Explorer; o agente só verificava gravações e o backup ficava `SEM_ARQUIVOS`.

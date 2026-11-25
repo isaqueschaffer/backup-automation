@@ -148,6 +148,8 @@ export interface CameraLidaPlanilha {
   ip: string;
   modelo: string;
   senha: string;
+  // Usuário da coluna "Nome de usuário" da planilha (sem ela, "admin")
+  usuario?: string;
   situacao: "nova" | "atualiza";
   // Subpasta de gravação desta câmera (coluna "Diretório de gravação" do export do Digifort)
   pastaGravacao?: string;
