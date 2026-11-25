@@ -3,6 +3,7 @@ import { fetchSettings, updateSettings, fetchAgentVersions, createAgentVersion, 
 import { useToast } from "../components/Toast";
 import { useConfirm } from "../components/ConfirmDialog";
 import { AgentVersion } from "../api/types";
+import { apiErrorMessage } from "../utils/errors";
 import { Save, Mail, Lock, Database, UploadCloud, Trash2, Power, PowerOff } from "lucide-react";
 
 function OtaManager() {
@@ -204,7 +205,10 @@ export default function Settings() {
       }
       await updateSettings(payload);
       toast("Configurações salvas!", "success");
-    } catch { toast("Erro ao salvar.", "error"); }
+    } catch (err) {
+      // Mostra o motivo (ex.: "A senha deve ter pelo menos 10 caracteres."), não só a falha genérica
+      toast(apiErrorMessage(err, "Erro ao salvar."), "error");
+    }
     finally { setSaving(false); }
   };
 

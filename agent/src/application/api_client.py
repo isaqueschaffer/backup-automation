@@ -1,20 +1,147 @@
 import logging
 import math
+import ssl
+import threading
 import requests
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlsplit
 
 TIMEOUT_SERVER = 120
 
-def fetch_server_config(conf: dict) -> dict:
+# ── Conexão com o servidor da Trilan (AGT-02, auditoria de 25/11/2026) ─────────────────────────────────────
+# Todas as chamadas à API do servidor (conf["server_url"]) passam por _requisitar: uma Session única, os cabeçalhos
+# de autenticação montados num lugar só e o certificado VALIDADO. Os equipamentos da LAN (NVR, câmeras, OLT...) têm
+# certificado autoassinado e continuam com verify=False nos módulos deles: isto aqui vale só para o servidor.
+#
+# Fallback: um agente em campo pode estar com https:// para um endereço cujo certificado não valida (IP, domínio
+# interno). Exigir a validação de uma vez cortaria o contato dele com o servidor e com a OTA, sem conserto remoto.
+# Por isso, na primeira falha de VERIFICAÇÃO do certificado, o processo avisa no log (uma vez) e segue sem validar
+# até reiniciar, como nas versões anteriores. Os avisos chegam ao painel (log remoto) e mostram quais máquinas
+# precisam de ajuste antes de a validação passar a ser obrigatória. Outros erros de TLS (conexão caída no meio do
+# handshake etc.) não ligam o modo inseguro: são passageiros e desligar a validação não os resolve.
+log = logging.getLogger("trilan.api")
+
+_sessao: requests.Session | None = None
+_trava = threading.Lock()
+_tls_inseguro = False          # True depois da 1ª falha de certificado: o processo segue sem validar
+_avisos_dados: set[str] = set()
+
+
+def _obter_sessao() -> requests.Session:
+    global _sessao
+    with _trava:
+        if _sessao is None:
+            _sessao = requests.Session()
+        return _sessao
+
+
+def _cabecalhos(conf: dict, extra: dict | None = None) -> dict:
     headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
-    url = f"{conf['server_url']}/api/v1/agent/config"
-    r = requests.get(
-        url,
-        headers=headers,
-        timeout=30,
-        verify=False,
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def _url(conf: dict, caminho: str) -> str:
+    return f"{str(conf['server_url']).rstrip('/')}{caminho}"
+
+
+def _avisar_uma_vez(chave: str, mensagem: str) -> None:
+    with _trava:
+        if chave in _avisos_dados:
+            return
+        _avisos_dados.add(chave)
+    # O aviso pode nascer dentro do envio de logs (send_logs), onde o log remoto descarta tudo para não entrar em
+    # laço. Enfileirar não faz HTTP, então liberamos só esta linha para ela chegar ao painel.
+    try:
+        from src.application import log_remoto
+        ctx = log_remoto._contexto_thread
+    except Exception:
+        ctx = None
+    anterior = getattr(ctx, "enviando_logs", False) if ctx is not None else False
+    try:
+        if ctx is not None:
+            ctx.enviando_logs = False
+        log.warning(mensagem, extra={"enviar_servidor": True})
+    finally:
+        if ctx is not None:
+            ctx.enviando_logs = anterior
+
+
+def _falha_de_certificado(exc: BaseException) -> bool:
+    """True quando o SSLError é a verificação do certificado (autoassinado, CA desconhecida, vencido, nome/IP que
+    não bate). Percorre a cadeia de exceções (requests -> urllib3 -> ssl)."""
+    vistos = set()
+    pendentes = [exc]
+    while pendentes:
+        e = pendentes.pop()
+        if e is None or id(e) in vistos:
+            continue
+        vistos.add(id(e))
+        if isinstance(e, ssl.SSLCertVerificationError) or type(e).__name__ == "CertificateError":
+            return True
+        texto = str(e).lower()
+        if "certificate verify failed" in texto or "hostname mismatch" in texto or "doesn't match" in texto:
+            return True
+        pendentes.extend([getattr(e, "__cause__", None), getattr(e, "__context__", None),
+                          getattr(e, "reason", None)])
+        pendentes.extend(a for a in getattr(e, "args", ()) if isinstance(a, BaseException))
+    return False
+
+
+def _ativar_tls_inseguro(url: str, exc: BaseException) -> None:
+    global _tls_inseguro
+    with _trava:
+        _tls_inseguro = True
+    host = urlsplit(url).netloc or url
+    _avisar_uma_vez(
+        "tls-inseguro",
+        f"[TLS] O certificado do servidor {host} não pôde ser validado ({type(exc).__name__}). O agente vai "
+        f"continuar SEM validar o certificado até reiniciar (modo inseguro, como nas versões anteriores). "
+        f"Ajuste a URL do servidor no agent.conf para https://server.suportetrilan.com.br (ou instale um "
+        f"certificado válido): uma versão futura vai exigir a validação e esta máquina perderá o contato.",
     )
+
+
+def _requisitar(conf: dict, metodo: str, caminho: str, *, headers_extra: dict | None = None,
+                ao_repetir=None, **kwargs) -> requests.Response:
+    """Chamada à API do servidor. `ao_repetir` (opcional) prepara o corpo para a 2ª tentativa (ex.: f.seek(0))."""
+    url = _url(conf, caminho)
+    headers = _cabecalhos(conf, headers_extra)
+    sessao = _obter_sessao()
+    if url.lower().startswith("http://"):
+        _avisar_uma_vez(
+            "http",
+            f"[TLS] A URL do servidor ({urlsplit(url).netloc}) usa http://, sem criptografia: a API Key e os "
+            f"backups trafegam abertos na rede. Troque para https://server.suportetrilan.com.br no agent.conf.",
+        )
+        return sessao.request(metodo, url, headers=headers, **kwargs)
+    if _tls_inseguro:
+        return sessao.request(metodo, url, headers=headers, verify=False, **kwargs)
+    try:
+        return sessao.request(metodo, url, headers=headers, verify=True, **kwargs)
+    except requests.exceptions.SSLError as e:
+        if not _falha_de_certificado(e):
+            raise
+        # A verificação falha no handshake, antes de o corpo sair: um iterador (upload em fluxo) ainda está intacto.
+        _ativar_tls_inseguro(url, e)
+        if ao_repetir is not None:
+            ao_repetir()
+        return sessao.request(metodo, url, headers=headers, verify=False, **kwargs)
+
+
+def _post(conf: dict, caminho: str, **kwargs) -> requests.Response:
+    return _requisitar(conf, "POST", caminho, **kwargs)
+
+
+def _get(conf: dict, caminho: str, **kwargs) -> requests.Response:
+    return _requisitar(conf, "GET", caminho, **kwargs)
+
+
+def fetch_server_config(conf: dict) -> dict:
+    url = _url(conf, "/api/v1/agent/config")
+    r = _get(conf, "/api/v1/agent/config", timeout=30)
     r.raise_for_status()
     try:
         return r.json()
@@ -159,7 +286,6 @@ def _json_safe(obj):
 
 def ping_server(conf: dict, recursos_extra: tuple = ()) -> dict:
     """Envia um ping para o servidor para manter o status online. Usa long-polling."""
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
         telemetry = _json_safe(_get_telemetry())
     except Exception as e:
@@ -170,20 +296,13 @@ def ping_server(conf: dict, recursos_extra: tuple = ()) -> dict:
     from src.application.updater import CURRENT_VERSION
     # `recursos_extra`: o que só o serviço do Windows executa (ex.: "comando_alarme", >= 1.1.50); o do Linux não manda
     payload = {"telemetry": telemetry, "recursos": ["teste_conexao", *recursos_extra], "versao": CURRENT_VERSION}
-    r = requests.post(
-        f"{conf['server_url']}/api/v1/agent/ping",
-        headers=headers, timeout=40, verify=False, json=payload
-    )
+    r = _post(conf, "/api/v1/agent/ping", timeout=40, json=payload)
     r.raise_for_status()
     return r.json()
 
 def send_rtsp_result(conf: dict, result: dict) -> bool:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/rtsp-result",
-            json=result, headers=headers, timeout=60, verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/rtsp-result", json=result, timeout=60)
         r.raise_for_status()
         return True
     except Exception as e:
@@ -192,12 +311,8 @@ def send_rtsp_result(conf: dict, result: dict) -> bool:
 
 def send_conexao_progresso(conf: dict, estado: dict) -> bool:
     """Andamento do "Testar conexão" (estado inteiro a cada etapa)."""
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/conexao-progresso",
-            json=estado, headers=headers, timeout=20, verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/conexao-progresso", json=estado, timeout=20)
         r.raise_for_status()
         return True
     except Exception as e:
@@ -205,12 +320,8 @@ def send_conexao_progresso(conf: dict, estado: dict) -> bool:
         return False
 
 def upload_night_image(conf: dict, payload: dict) -> bool:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/nvr-cameras/night-image",
-            json=payload, headers=headers, timeout=60, verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/nvr-cameras/night-image", json=payload, timeout=60)
         r.raise_for_status()
         data = r.json()
         if data.get("status") == "error":
@@ -222,15 +333,8 @@ def upload_night_image(conf: dict, payload: dict) -> bool:
         return False
 
 def send_presenca_cameras(conf: dict, equipamentos: list) -> bool:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/cameras/status",
-            json={"equipamentos": equipamentos},
-            headers=headers,
-            timeout=60,
-            verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/cameras/status", json={"equipamentos": equipamentos}, timeout=60)
         r.raise_for_status()
         return True
     except Exception as e:
@@ -239,15 +343,8 @@ def send_presenca_cameras(conf: dict, equipamentos: list) -> bool:
 
 
 def send_status_olts(conf: dict, equipamentos: list) -> bool:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/olt/status",
-            json={"equipamentos": equipamentos},
-            headers=headers,
-            timeout=60,
-            verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/olt/status", json={"equipamentos": equipamentos}, timeout=60)
         r.raise_for_status()
         return True
     except Exception as e:
@@ -256,15 +353,8 @@ def send_status_olts(conf: dict, equipamentos: list) -> bool:
 
 
 def send_status_antenas(conf: dict, equipamentos: list) -> bool:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/antenas/status",
-            json={"equipamentos": equipamentos},
-            headers=headers,
-            timeout=60,
-            verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/antenas/status", json={"equipamentos": equipamentos}, timeout=60)
         r.raise_for_status()
         return True
     except Exception as e:
@@ -273,15 +363,8 @@ def send_status_antenas(conf: dict, equipamentos: list) -> bool:
 
 
 def send_status_alarmes(conf: dict, equipamentos: list) -> bool:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/defense/alarmes/status",
-            json={"equipamentos": equipamentos},
-            headers=headers,
-            timeout=60,
-            verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/defense/alarmes/status", json={"equipamentos": equipamentos}, timeout=60)
         r.raise_for_status()
         return True
     except Exception as e:
@@ -290,15 +373,8 @@ def send_status_alarmes(conf: dict, equipamentos: list) -> bool:
 
 
 def send_resultado_comando_alarme(conf: dict, sucesso: bool, mensagem: str) -> bool:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/defense/alarmes/comando-resultado",
-            json={"sucesso": bool(sucesso), "mensagem": str(mensagem or "")[:500]},
-            headers=headers,
-            timeout=30,
-            verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/defense/alarmes/comando-resultado", json={"sucesso": bool(sucesso), "mensagem": str(mensagem or "")[:500]}, timeout=30)
         r.raise_for_status()
         return True
     except Exception as e:
@@ -308,7 +384,6 @@ def send_resultado_comando_alarme(conf: dict, sucesso: bool, mensagem: str) -> b
 
 def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 resultados: list, trigger: str) -> str | None:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     payload = {
         "started_at": started_at.isoformat(),
         "finished_at": finished_at.isoformat(),
@@ -330,10 +405,7 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
         "trigger": trigger,
     }
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/backup/report",
-            json=payload, headers=headers, timeout=30, verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/backup/report", json=payload, timeout=30)
         r.raise_for_status()
         try:
             resp_data = r.json()
@@ -349,16 +421,15 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
         return None
 
 def upload_zip(conf: dict, backup_id: str, zip_path: Path, device_type: str = "NVR") -> bool:
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
         with open(zip_path, "rb") as f:
-            r = requests.post(
-                f"{conf['server_url']}/api/v1/agent/backup/upload/{backup_id}",
+            # O requests lê o arquivo ao montar o corpo: se a 1ª tentativa cair no fallback de TLS, volta ao início
+            r = _post(
+                conf, f"/api/v1/agent/backup/upload/{backup_id}",
                 params={"device_type": device_type},
-                headers=headers,
                 files={"file": (zip_path.name, f, "application/zip")},
                 timeout=TIMEOUT_SERVER,
-                verify=False,
+                ao_repetir=lambda: f.seek(0),
             )
         r.raise_for_status()
         try:
@@ -376,15 +447,13 @@ def upload_zip_stream(conf: dict, backup_id: str, nome_zip: str, pedacos, device
     """Envio em túnel (agente do Mikrotik): `pedacos` é um iterador de bytes (o ZIP sendo montado) e o corpo vai em
     pedaços (Transfer-Encoding: chunked), sem arquivo no disco. Se o iterador falhar no meio, a conexão cai e o
     servidor descarta o que recebeu."""
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"], "Content-Type": "application/zip"}
     try:
-        r = requests.put(
-            f"{conf['server_url']}/api/v1/agent/backup/upload-stream/{backup_id}",
+        r = _requisitar(
+            conf, "PUT", f"/api/v1/agent/backup/upload-stream/{backup_id}",
+            headers_extra={"Content-Type": "application/zip"},
             params={"device_type": device_type, "nome": nome_zip},
-            headers=headers,
             data=pedacos,
             timeout=TIMEOUT_SERVER,
-            verify=False,
         )
         r.raise_for_status()
         try:
@@ -400,13 +469,9 @@ def upload_zip_stream(conf: dict, backup_id: str, nome_zip: str, pedacos, device
 
 def corrigir_resultado(conf: dict, backup_id: str, nome: str, status: str) -> bool:
     """Corrige no servidor o status de um equipamento do relatório (o do túnel sai antes do envio, provisório)."""
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/backup/{backup_id}/resultado",
-            json={"nome": nome, "status": status},
-            headers=headers, timeout=30, verify=False,
-        )
+        r = _post(conf, f"/api/v1/agent/backup/{backup_id}/resultado", json={"nome": nome, "status": status},
+                  timeout=30)
         r.raise_for_status()
         return True
     except Exception as e:
@@ -416,17 +481,11 @@ def corrigir_resultado(conf: dict, backup_id: str, nome: str, status: str) -> bo
 
 def send_logs(conf: dict, logs: list) -> bool:
     """Envia lote de logs do agente para a API do servidor."""
-    headers = {"X-Client-ID": conf["client_id"], "X-API-Key": conf["api_key"]}
     try:
-        r = requests.post(
-            f"{conf['server_url']}/api/v1/agent/logs",
-            json={"logs": logs},
-            headers=headers,
-            timeout=30,
-            verify=False,
-        )
+        r = _post(conf, "/api/v1/agent/logs", json={"logs": logs}, timeout=30)
         r.raise_for_status()
         return True
     except Exception:
-        # Crucial: NUNCA chamar logging.error aqui para evitar laço de log infinito
+        # Crucial: NUNCA chamar logging.error aqui para evitar laço de log infinito (o aviso único de TLS de
+        # _requisitar só enfileira a linha, sem HTTP)
         return False

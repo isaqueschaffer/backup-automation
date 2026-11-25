@@ -22,7 +22,7 @@ import requests
 
 logger = logging.getLogger("trilan.updater")
 
-CURRENT_VERSION = "1.1.66"   # <-- Atualizar manualmente a cada build
+CURRENT_VERSION = "1.1.67"   # <-- Atualizar manualmente a cada build
 _UPDATE_CHECK_INTERVAL = 3600  # segundos entre verificações de update (1h)
 _last_update_check: float = 0.0
 
@@ -80,11 +80,15 @@ def check_and_apply_update(conf: dict) -> bool:
     }
 
     try:
+        # Certificado sempre validado, SEM o fallback do api_client (AGT-02): a resposta escolhe a URL e o SHA-256
+        # do executável que será instalado; aceitar certificado inválido aqui deixaria quem intercepta a conexão
+        # trocar os dois. Uma máquina com URL de certificado inválido não recebe OTA até ajustar o agent.conf.
         resp = requests.get(
             f"{server_url}/api/v1/agent/update-check",
             headers=headers,
             params={"current_version": CURRENT_VERSION},
             timeout=20,
+            verify=True,
         )
         resp.raise_for_status()
         data = resp.json()

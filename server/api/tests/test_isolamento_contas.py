@@ -38,6 +38,7 @@ def test_isolamento_contas():
     from config import settings
 
     sufixo = uuid4().hex[:8]
+    senha_admin_original = None
 
     contaA_id = uuid4()
     contaB_id = uuid4()
@@ -202,7 +203,13 @@ def test_isolamento_contas():
 
         # Senha super admin legado
         setting_pwd = db.query(Setting).filter(Setting.key == "admin_password_hash").first()
-        super_pw = setting_pwd.value if (setting_pwd and setting_pwd.value) else settings.ADMIN_PASSWORD
+        if setting_pwd and senhas.eh_hash_bcrypt(setting_pwd.value):
+            # Já é hash (API-05): não dá para saber a senha; usa uma temporária e devolve o hash original no fim
+            senha_admin_original = setting_pwd.value
+            super_pw = f"SenhaSuperTeste-{sufixo}"
+            setting_pwd.value = senhas.gerar_hash(super_pw)
+        else:
+            super_pw = setting_pwd.value if (setting_pwd and setting_pwd.value) else settings.ADMIN_PASSWORD
 
         db.commit()
 
@@ -383,6 +390,9 @@ def test_isolamento_contas():
     finally:
         with SessionLocal() as db_clean:
             try:
+                if senha_admin_original is not None:
+                    db_clean.query(Setting).filter(Setting.key == "admin_password_hash").update(
+                        {"value": senha_admin_original}, synchronize_session=False)
                 from models import ConfiguracaoNotificacao
                 db_clean.query(Notificacao).filter(Notificacao.conta_id.in_([contaA_id, contaB_id, contaV_id])).delete(synchronize_session=False)
                 db_clean.query(ConfiguracaoNotificacao).filter(ConfiguracaoNotificacao.conta_id.in_([contaA_id, contaB_id, contaV_id])).delete(synchronize_session=False)

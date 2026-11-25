@@ -247,7 +247,66 @@ async def test_equipamento_rtsp(
     modo "referencia": ao vivo; se a câmera estiver offline, o frame mais recente da gravação (agente >= 1.1.6).
     modo "noite": madrugada mais recente com gravação; o servidor já salva como imagem da noite do canal.
     O VISUALIZADOR só pode o "ao_vivo", e nada da captura é gravado (nem a câmera recuperada do relatório).
+
+    Todo acesso ao banco roda em thread (asyncio.to_thread), como no ping: consulta síncrona aqui dentro bloqueava o
+    laço de eventos e, com o pool cheio, travava todos os pings (API fora do ar em 23/11/2026).
     """
+    machine_id_str = str(machine_id)
+    preparo = await asyncio.to_thread(
+        _preparar_teste_rtsp, db, ctx, machine_id, equipamento_id, canal, modo, nome, machine_id_str
+    )
+    if isinstance(preparo, RTSPTestResponse):
+        return preparo
+    task_data, is_vms, nome_camera = preparo
+
+    # Conferido de novo aqui, sem `await` até a inclusão: dois pedidos simultâneos podem ter passado juntos
+    # pela conferência feita na thread.
+    if machine_id_str in pending_rtsp_tasks:
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe um teste RTSP em andamento para esta máquina. Aguarde a conclusão e tente novamente.",
+        )
+    event = asyncio.Event()
+
+    entry = {
+        "task": task_data,
+        "event": event,
+        "result": None,
+        "sent": False
+    }
+    pending_rtsp_tasks[machine_id_str] = entry
+    try:
+        # Libera a conexão do banco durante a espera (a captura pela gravação pode levar ~2 min)
+        await asyncio.to_thread(db.close)
+
+        # Ao vivo: até 55s. Pela gravação: busca dia a dia no NVR (o agente desiste em ~100s + envio).
+        espera = 55.0 if modo == "ao_vivo" else 130.0
+        try:
+            await asyncio.wait_for(event.wait(), timeout=espera)
+        except asyncio.TimeoutError:
+            return RTSPTestResponse(success=False, error_message="FALHA: O Agente local não respondeu ao comando a tempo. Verifique se o agente está online.")
+    finally:
+        # Sempre remove a tarefa (timeout, cancelamento ou sucesso); pop evita KeyError
+        if pending_rtsp_tasks.get(machine_id_str) is entry:
+            pending_rtsp_tasks.pop(machine_id_str, None)
+
+    result = entry.get("result")
+    if not result:
+        return RTSPTestResponse(success=False, error_message="FALHA: Agente respondeu, mas sem dados válidos.")
+
+    if modo == "noite":
+        if result.success and not result.horario and not is_vms:
+            # Agente antigo capturou ao vivo: não é imagem da noite
+            return RTSPTestResponse(success=False, error_message="Atualize o agente desta máquina para a versão 1.1.6 ou superior para capturar a imagem da noite pelo painel.")
+        await asyncio.to_thread(_gravar_resultado_noite, db, equipamento_id, canal, nome_camera or nome, result, is_vms)
+
+    return result
+
+
+def _preparar_teste_rtsp(db: Session, ctx: Contexto, machine_id: UUID, equipamento_id: UUID, canal: Optional[int],
+                         modo: str, nome: Optional[str], machine_id_str: str):
+    """Parte síncrona do teste RTSP (roda em thread): validações, câmera recuperada do relatório e auditoria.
+    Devolve um RTSPTestResponse (resposta antecipada) ou (task_data, is_vms, nome_da_camera)."""
     so_testa = ctx.somente_leitura  # passou por get_contexto_teste sendo somente leitura = VISUALIZADOR
     if so_testa and modo != "ao_vivo":
         raise HTTPException(status_code=403, detail="Seu usuário só pode capturar a imagem ao vivo, sem salvar.")
@@ -260,8 +319,6 @@ async def test_equipamento_rtsp(
         raise HTTPException(status_code=422, detail="Informe o canal da câmera.")
     if modo != "ao_vivo" and not canal:
         raise HTTPException(status_code=422, detail="Informe o canal para capturar da gravação.")
-
-    machine_id_str = str(machine_id)
 
     # Só 1 teste RTSP por máquina por vez (o dicionário é indexado pela máquina).
     # LIMITAÇÃO: o estado fica na memória do processo; requer 1 worker uvicorn.
@@ -354,57 +411,32 @@ async def test_equipamento_rtsp(
             "modo": modo,  # agentes < 1.1.6 ignoram e capturam ao vivo
         }
 
+    # Lido antes do commit da auditoria: depois dele os objetos expiram e lê-los no laço faria SELECT lá
+    nome_camera = cam_db.nome if cam_db is not None else None
     if modo == "ao_vivo":
-        alvo = f"da câmera '{cam_db.nome}'" if cam_db is not None else ""
+        alvo = f"da câmera '{nome_camera}'" if cam_db is not None else ""
         registrar_alteracao(db, machine_id, ctx.feito_por,
                             f"testou a captura ao vivo {alvo} do equipamento '{eq.name}' (sem salvar).".replace("  ", " "), eq.name)
         db.commit()
+    return task_data, is_vms, nome_camera
 
-    event = asyncio.Event()
 
-    entry = {
-        "task": task_data,
-        "event": event,
-        "result": None,
-        "sent": False
-    }
-    pending_rtsp_tasks[machine_id_str] = entry
-    # Libera a conexão do banco durante a espera (a captura pela gravação pode levar ~2 min)
-    db.close()
-
-    # Ao vivo: até 55s. Pela gravação: busca dia a dia no NVR (o agente desiste em ~100s + envio).
-    espera = 55.0 if modo == "ao_vivo" else 130.0
-    try:
-        await asyncio.wait_for(event.wait(), timeout=espera)
-    except asyncio.TimeoutError:
-        return RTSPTestResponse(success=False, error_message="FALHA: O Agente local não respondeu ao comando a tempo. Verifique se o agente está online.")
-    finally:
-        # Sempre remove a tarefa (timeout, cancelamento ou sucesso); pop evita KeyError
-        if pending_rtsp_tasks.get(machine_id_str) is entry:
-            pending_rtsp_tasks.pop(machine_id_str, None)
-
-    result = entry.get("result")
-    if not result:
-        return RTSPTestResponse(success=False, error_message="FALHA: Agente respondeu, mas sem dados válidos.")
-
-    if modo == "noite" and result.success:
+def _gravar_resultado_noite(db: Session, equipamento_id: UUID, canal: Optional[int], nome: Optional[str],
+                            result: RTSPTestResponse, is_vms: bool) -> None:
+    """Resultado da captura da noite (roda em thread): salva a imagem ou marca o motivo da falha na galeria."""
+    if result.success:
         if not result.horario:
-            if is_vms:
-                # Câmera direta (DIGIFORT/DEFENSE): capturada ao vivo pelo agente, sem horário de gravação
-                result.horario = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-            else:
-                # Agente antigo capturou ao vivo: não é imagem da noite
-                return RTSPTestResponse(success=False, error_message="Atualize o agente desta máquina para a versão 1.1.6 ou superior para capturar a imagem da noite pelo painel.")
-        _salvar_imagem_noite(db, equipamento_id, canal, (cam_db.nome if cam_db else None) or nome, result)
-    elif modo == "noite":
-        # Mostra o motivo na galeria (a imagem anterior, se houver, é mantida)
-        nvr = db.query(NVR).filter(NVR.id == equipamento_id).first()
-        if nvr is not None:
-            _marcar_imagem_noite(db, nvr, canal, {"status": "FALHA", "motivo": mascarar_credenciais(result.error_message), "horario": None},
-                                 (cam_db.nome if cam_db else None) or nome)
-            db.commit()
-
-    return result
+            # Câmera direta (DIGIFORT/DEFENSE): capturada ao vivo pelo agente, sem horário de gravação
+            # (NVR sem horário já foi recusado antes, na rota)
+            result.horario = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        _salvar_imagem_noite(db, equipamento_id, canal, nome, result)
+        return
+    # Mostra o motivo na galeria (a imagem anterior, se houver, é mantida)
+    nvr = db.query(NVR).filter(NVR.id == equipamento_id).first()
+    if nvr is not None:
+        _marcar_imagem_noite(db, nvr, canal, {"status": "FALHA", "motivo": mascarar_credenciais(result.error_message), "horario": None},
+                             nome)
+        db.commit()
 
 
 def _gravadores_da_planilha_guardada(db: Session, nvr_id: UUID) -> list:
@@ -580,7 +612,53 @@ async def comandar_central_alarme(
 ):
     """Arma ou desarma uma central de alarme do DEFENSE pelo agente da máquina (o painel de alarmes só existe na rede
     do cliente). Só ADMIN da conta e super admin (o get_contexto barra LEITURA e conta vencida em POST). Espera o
-    resultado do agente e registra o pedido e o resultado nos logs da máquina."""
+    resultado do agente e registra o pedido e o resultado nos logs da máquina.
+
+    Todo acesso ao banco roda em thread (asyncio.to_thread), como no ping: consulta síncrona no laço de eventos
+    travava todos os pings com o pool cheio (23/11/2026)."""
+    machine_id_str = str(machine_id)
+    task, nvr_nome, nome_central, acao_texto = await asyncio.to_thread(
+        _preparar_comando_alarme, db, ctx, machine_id, id, body, machine_id_str
+    )
+
+    # Conferido de novo aqui, sem `await` até a inclusão: dois pedidos simultâneos podem ter passado juntos pela thread
+    if machine_id_str in pending_alarme_tasks:
+        raise HTTPException(status_code=409, detail="Já existe um comando de alarme em andamento nesta máquina. Aguarde.")
+    entry = {"task": task, "event": asyncio.Event(), "result": None, "sent": False}
+    pending_alarme_tasks[machine_id_str] = entry
+    try:
+        await asyncio.to_thread(db.close)  # não segura a conexão do banco durante a espera
+
+        await asyncio.to_thread(
+            _registrar_comando_alarme, machine_id, nvr_nome,
+            f"{ctx.feito_por} pediu para {acao_texto} a central '{nome_central}'.", "INFO", ctx.feito_por,
+        )
+        try:
+            await asyncio.wait_for(entry["event"].wait(), timeout=ESPERA_COMANDO_ALARME_S)
+            resultado = entry["result"] or ComandoAlarmeResultado(sucesso=False, mensagem="O agente respondeu sem resultado.")
+        except asyncio.TimeoutError:
+            resultado = ComandoAlarmeResultado(
+                sucesso=False,
+                mensagem="O agente não respondeu a tempo (agente offline ou ocupado).",
+            )
+    finally:
+        if pending_alarme_tasks.get(machine_id_str) is entry:
+            pending_alarme_tasks.pop(machine_id_str, None)
+
+    situacao = "concluído" if resultado.sucesso else "falhou"
+    await asyncio.to_thread(
+        _registrar_comando_alarme,
+        machine_id, nvr_nome,
+        f"Comando para {acao_texto} a central '{nome_central}' {situacao}" + (f": {resultado.mensagem}" if resultado.mensagem else "."),
+        "INFO" if resultado.sucesso else "ERROR",
+    )
+    return resultado
+
+
+def _preparar_comando_alarme(db: Session, ctx: Contexto, machine_id: UUID, id: UUID, body: ComandoAlarmeRequest,
+                             machine_id_str: str):
+    """Parte síncrona do comando de alarme (roda em thread): validações e montagem da tarefa do agente.
+    Devolve (task, nome_do_equipamento, nome_da_central, acao_texto)."""
     machine = _get_machine_or_404(machine_id, db, ctx)
     nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
     if not nvr or (nvr.tipo or "").upper() != "DEFENSE":
@@ -592,7 +670,6 @@ async def comandar_central_alarme(
     if not check_machine_online(machine):
         raise HTTPException(status_code=409, detail="O agente desta máquina está offline: o comando não pode ser entregue.")
 
-    machine_id_str = str(machine_id)
     if machine_id_str in pending_alarme_tasks:
         raise HTTPException(status_code=409, detail="Já existe um comando de alarme em andamento nesta máquina. Aguarde.")
 
@@ -611,31 +688,7 @@ async def comandar_central_alarme(
         "username": nvr.username or "system", "password": senha,
         "central_id": body.central_id, "acao": body.acao,
     }
-    nvr_nome = nvr.name
-    entry = {"task": task, "event": asyncio.Event(), "result": None, "sent": False}
-    pending_alarme_tasks[machine_id_str] = entry
-    db.close()  # não segura a conexão do banco durante a espera
-
-    _registrar_comando_alarme(machine_id, nvr_nome, f"{ctx.feito_por} pediu para {acao_texto} a central '{nome_central}'.", "INFO", ctx.feito_por)
-    try:
-        await asyncio.wait_for(entry["event"].wait(), timeout=ESPERA_COMANDO_ALARME_S)
-        resultado = entry["result"] or ComandoAlarmeResultado(sucesso=False, mensagem="O agente respondeu sem resultado.")
-    except asyncio.TimeoutError:
-        resultado = ComandoAlarmeResultado(
-            sucesso=False,
-            mensagem="O agente não respondeu a tempo (agente offline ou ocupado).",
-        )
-    finally:
-        if pending_alarme_tasks.get(machine_id_str) is entry:
-            pending_alarme_tasks.pop(machine_id_str, None)
-
-    situacao = "concluído" if resultado.sucesso else "falhou"
-    _registrar_comando_alarme(
-        machine_id, nvr_nome,
-        f"Comando para {acao_texto} a central '{nome_central}' {situacao}" + (f": {resultado.mensagem}" if resultado.mensagem else "."),
-        "INFO" if resultado.sucesso else "ERROR",
-    )
-    return resultado
+    return task, nvr.name, nome_central, acao_texto
 
 
 # ─── NVR Cameras Gallery ───────────────────────────────────────────────────

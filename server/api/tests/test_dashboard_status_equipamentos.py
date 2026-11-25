@@ -108,8 +108,11 @@ OLT_STATUS = {
 
 
 def test_olt_niveis_pons_licenca_e_sem_dado_de_assinante():
+    # Vencimento relativo ao dia REAL: licenca_da_config conta os dias a partir de date.today(), não de AGORA
+    # (com AGORA + 5 dias o teste passou a falhar sozinho em 18/11/2026, quando a "licença" venceu)
     eq = _eq("OLT", "UNM Matriz", olt_status=OLT_STATUS,
-             config_extra={"licenca_fim": (AGORA + timedelta(days=5)).strftime("%Y-%m-%d"), "senha": "segredo"})
+             config_extra={"licenca_fim": (datetime.utcnow() + timedelta(days=5)).strftime("%Y-%m-%d"),
+                           "senha": "segredo"})
     dados = construir_status_olt(_ctx([eq]), ConfigStatusOlt())
     item = dados["equipamentos"][0]
     olts = {o["nome"]: o for o in item["olts"]}

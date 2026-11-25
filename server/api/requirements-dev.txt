@@ -1,0 +1,4 @@
+# Só para testes (CI e máquina de desenvolvimento); não entra na imagem de produção.
+-r requirements.txt
+pytest==8.3.3
+httpx==0.27.2

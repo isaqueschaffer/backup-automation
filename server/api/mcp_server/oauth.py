@@ -4,7 +4,12 @@
 - Aplicativo: registro dinâmico (POST /oauth/register, RFC 7591) ou client_id em URL com documento de metadados (CIMD).
 - Login: GET/POST /oauth/authorize mostra a tela de login do Trilan; só ADMIN e SUPER_ADMIN conectam. PKCE S256 obrigatório.
 - Tokens: POST /oauth/token (authorization_code e refresh_token, com rotação) e POST /oauth/revoke (RFC 7009).
+
+As rotas que leem o corpo (`await request.form()`/`json()`) são async; todo o resto (banco, bcrypt, busca do CIMD)
+roda numa função síncrona em thread (asyncio.to_thread). Consulta síncrona no laço de eventos travava todos os pings
+com o pool cheio (23/11/2026).
 """
+import asyncio
 import base64
 import hashlib
 import html
@@ -177,6 +182,10 @@ async def registrar_cliente(request: Request, db: Session = Depends(get_db)):
         meta = await request.json()
     except Exception:
         return _erro_oauth("invalid_client_metadata", "Corpo JSON inválido.")
+    return await asyncio.to_thread(_registrar_cliente, db, meta)
+
+
+def _registrar_cliente(db: Session, meta) -> JSONResponse:
     uris = meta.get("redirect_uris") if isinstance(meta, dict) else None
     if not isinstance(uris, list) or not uris or len(uris) > 10 or \
             not all(isinstance(u, str) and len(u) <= 2000 and _redirect_aceito(u) for u in uris):
@@ -293,6 +302,11 @@ def autorizar_tela(request: Request, db: Session = Depends(get_db)):
 @router.post("/oauth/authorize")
 async def autorizar_login(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
+    return await asyncio.to_thread(_autorizar_login, request, db, form)
+
+
+def _autorizar_login(request: Request, db: Session, form) -> HTMLResponse | RedirectResponse:
+    """Confere o login (bcrypt) e grava o código de autorização. Síncrona: roda em thread."""
     campos = {k: (form.get(k) or None) for k in _CAMPOS}
     cliente, erro = _validar_pedido(db, campos)
     if not cliente:
@@ -375,6 +389,10 @@ def _pkce_ok(verificador: str, desafio: str) -> bool:
 @router.post("/oauth/token")
 async def token(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
+    return await asyncio.to_thread(_token, request, db, form)
+
+
+def _token(request: Request, db: Session, form) -> JSONResponse:
     cliente = _autenticar_cliente(db, request, form)
     if not cliente:
         return _erro_oauth("invalid_client", "Aplicativo não reconhecido.", 401)
@@ -419,6 +437,10 @@ async def token(request: Request, db: Session = Depends(get_db)):
 @router.post("/oauth/revoke")
 async def revogar(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
+    return await asyncio.to_thread(_revogar, db, form)
+
+
+def _revogar(db: Session, form) -> JSONResponse:
     h = hash_token(form.get("token") or "")
     registro = db.query(McpToken).filter((McpToken.token_hash == h) | (McpToken.refresh_hash == h)).first()
     if registro and registro.tipo == "OAUTH":

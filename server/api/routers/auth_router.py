@@ -1,5 +1,6 @@
 from datetime import datetime
-import secrets
+import hmac
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -26,18 +27,49 @@ from services import senhas
 from services.contas import obter_conta_plataforma_id, resumo_da_conta, rotulos_da_conta
 from services.dashboards.compartilhamento import LimitadorJanela, ip_do_cliente
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+# Senha do login legado (só senha, super admin da plataforma): bcrypt nesta chave da tabela settings; sem ela vale a
+# variável de ambiente ADMIN_PASSWORD. Instalações antigas guardaram a senha em texto puro aqui (PUT /settings).
+CHAVE_SENHA_ADMIN = "admin_password_hash"
 
 limite_login = LimitadorJanela(maximo=10, janela_s=300)
 
 
-def get_admin_password(db: Session) -> str:
-    """Fetch admin password from DB settings or fall back to env var."""
-    row = db.query(Setting).filter(Setting.key == "admin_password_hash").first()
-    # If stored in settings table (plain for now — bcrypt optional upgrade)
-    if row and row.value:
-        return row.value
-    return settings.ADMIN_PASSWORD
+def conferir_senha_admin(db: Session, senha: str) -> bool:
+    """Confere a senha do login legado. Com hash bcrypt gravado, compara pelo bcrypt; com valor antigo em texto puro,
+    compara em tempo constante e, se bater, regrava já como hash (migração no primeiro login). Sem nada gravado,
+    compara com ADMIN_PASSWORD (variável de ambiente), que continua em texto puro no ambiente."""
+    row = db.query(Setting).filter(Setting.key == CHAVE_SENHA_ADMIN).first()
+    guardado = row.value if row else None
+    if not guardado:
+        return hmac.compare_digest((senha or "").encode(), (settings.ADMIN_PASSWORD or "").encode())
+    if senhas.eh_hash_bcrypt(guardado):
+        return senhas.conferir(senha, guardado)
+    if not hmac.compare_digest((senha or "").encode(), guardado.encode()):
+        return False
+    if len(senha.encode()) <= senhas.SENHA_MAX_BYTES:  # acima disso o bcrypt cortaria a senha
+        try:
+            row.value = senhas.gerar_hash(senha)
+            db.commit()
+            logger.info("Senha do administrador da plataforma migrada de texto puro para bcrypt.")
+        except Exception:
+            db.rollback()
+            logger.exception("Não foi possível regravar a senha do administrador como hash; o login segue valendo.")
+    return True
+
+
+def gravar_senha_admin(db: Session, senha: str) -> None:
+    """Grava a nova senha do login legado como hash bcrypt (sem commit). ValueError se a senha não serve."""
+    senhas.validar_senha_nova(senha)
+    valor = senhas.gerar_hash(senha)
+    row = db.query(Setting).filter(Setting.key == CHAVE_SENHA_ADMIN).first()
+    if row:
+        row.value = valor
+    else:
+        db.add(Setting(key=CHAVE_SENHA_ADMIN, value=valor))
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -51,8 +83,7 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
 
     # Login legado: sem email (apenas senha)
     if not body.email or not body.email.strip():
-        admin_pw = get_admin_password(db)
-        if not secrets.compare_digest(body.password.encode(), admin_pw.encode()):
+        if not conferir_senha_admin(db, body.password):
             limite_login.registrar(ip)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong password")
         token = create_access_token({"sub": "admin"})

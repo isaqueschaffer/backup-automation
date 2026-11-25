@@ -9,7 +9,7 @@ sys.path.insert(0, str(API_DIR))
 
 # Mock settings antes de importar o projeto
 os.environ["SECRET_KEY"] = "test_secret_key_1234567890123456789012"
-os.environ["FERNET_KEY"] = "dGVzdF9mZXJuZXRfa2V5XzMyX2J5dGVzX2xvbmdfIQ=="
+os.environ["FERNET_KEY"] = "dHJpbGFuLWNoYXZlLWRlLXRlc3RlLTMyLWJ5dGVzISE="
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ.setdefault("ADMIN_PASSWORD", "senha_de_teste")
 

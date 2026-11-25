@@ -1,0 +1,90 @@
+# CI (DOC-02, auditoria de 25/11/2026): testes do agente e da API, checagem de tipos + build do painel e as
+# verificações da auditoria de merge do CLAUDE.md. Roda em push e PR; não faz deploy (o deploy continua pelo
+# server/deploy_producao.ps1). Um job vermelho num ramo de colaborador = não fazer o merge na isaque.
+name: CI
+
+on:
+  push:
+    branches: [isaque, producao, integracao-equipamentos, helena]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  regras:
+    name: Regras da auditoria de merge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verificar linhas adicionadas
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          # Ramo novo (before = 000...) ou execução manual: compara só com o commit anterior
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            BASE="HEAD~1"
+          fi
+          python tools/verificar_regras.py "$BASE" HEAD
+
+  api:
+    name: API (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # a mesma da produção (Railpack)
+          cache: pip
+          cache-dependency-path: server/api/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests -q -p no:cacheprovider -rs
+
+  agente:
+    name: Agente (unittest, Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"   # a mesma do build.ps1
+          cache: pip
+          cache-dependency-path: agent/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests
+
+  painel:
+    name: Painel (tipos + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: server/dashboard/package-lock.json
+      - run: npm ci
+      - run: npm run build   # tsc --noEmit && vite build
