@@ -26,6 +26,20 @@ config_email.json
 server/.env
 agent/agent.conf
 agent/agent.conf.bak
+# Segredos em qualquer pasta (DOC-04, auditoria de 25/11/2026): antes só o .git/info/exclude local protegia as
+# credenciais da raiz, e um clone novo + "git add -A" as levaria para o repositório público
+*.local.md
+.env.*
+!.env.example
+!.env.local.example
+*.pem
+*.key
+*.pfx
+id_rsa*
+id_ed25519*
+acesso*.md
+chave api*.md
+.pytest_cache/
 
 # Logs and databases
 *.log

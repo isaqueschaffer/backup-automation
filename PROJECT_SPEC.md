@@ -1130,6 +1130,18 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-25] — Agente 1.1.66: Fase 0 da auditoria (OTA Linux com certificado, segredo fora do log, README, .gitignore)
+
+- **Origem**: auditoria de organização, padronização e documentação de 25/11/2026 (relatório no claude.ai, IDs AGT/API/WEB/DOC). Esta rodada aplica a Fase 0, exceto a senha padrão de câmera no código (AGT-03/API-06), que o dono decidiu manter por ora.
+- **AGT-01**: `updater_linux.verificar_e_instalar` deixou de usar `verify=False` no `update-check`. A resposta escolhe a URL e o SHA-256 do pacote executado no container; sem validar o certificado, quem interceptasse a conexão trocaria os dois. O agente Linux já exige `https://server.suportetrilan.com.br` (certificado público). Teste: `test_update_check_valida_o_certificado`.
+- **AGT-12**: `backup/downloader.py` ganhou `sem_query()`: os logs de HTTP de erro e de exceção não levam mais a query da URL. A URL do backup Hikvision traz `secretkey=...&iv=...` (dá para recuperar a senha do ZIP) e as mensagens do `requests` repetem a URL, o que o `split('?')` antigo não cobria. Teste: `agent/tests/test_downloader_log.py`.
+- **API-03**: `test_isolamento_contas.py` usa `pytest.skip` sem `TRILAN_TESTE_ISOLAMENTO=1` (antes fazia `return` e aparecia como aprovado sem verificar nada).
+- **WEB-02**: `npm run build` do painel passa a ser `tsc --noEmit && vite build` (erro de tipo derruba o build em vez de ir para a produção); novo script `typecheck`.
+- **DOC-04**: `.gitignore` versionado com padrões de segredo (`*.local.md`, `.env.*` exceto os exemplos, `*.pem`, `*.key`, `id_rsa*`, `acesso*.md`, `chave api*.md`, `.pytest_cache/`); antes só o `.git/info/exclude` local protegia as credenciais da raiz.
+- **DOC-01**: `README.md` da raiz reescrito (estava corrompido e falava só do agente de setembro): arquitetura, pastas, ambiente local, testes, instalação do agente, ramos e deploy pelo `server/deploy_producao.ps1`.
+- **DOC-09/10**: skill `especialista-dashboard` com a regra de deploy nova; cópia do Gemini de `criar-novo-agente` com a linha da planilha `.xlsx` (nunca grava usuário/senha).
+- **Versão**: 1.1.66 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto. Suíte do agente: 328 testes OK.
+
 ### [2026-11-25] — Merge helena: Defense (planilha manda no acesso dos canais de gravador) e usuário SSH padrão `trilan_backup`
 
 - **Entrou** (commits `17ddfd8` e `d87cfb6` da Helena, 13 arquivos, +231/−21, só servidor e painel): `services/planilha_vms.py` (`gravadores_da_planilha` traz `usuario`/`senha` da linha do gravador; `casar_cameras_por_ip` compara nomes sem pontuação), `services/galeria_vms.py` (`cameras_do_relatorio_sem_par` cria o canal com o acesso do gravador; novo `credenciais_dos_gravadores`), `PUT /machines/{id}/equipamentos/{id}/planilha` (Defense: atualiza usuário e senha cifrada dos canais de gravador já na Galeria), painel (coluna de usuário na importação da planilha, campo Usuário SSH com padrão `trilan_backup` e aviso) e o script `server/dashboard/public/preparar_acesso_ssh.ps1`, mais testes novos em `test_planilha_vms.py` e `test_galeria_sync_defense.py`.

@@ -200,7 +200,9 @@ def verificar_e_instalar(conf: dict) -> bool:
     server_url = conf.get("server_url", "").rstrip("/")
     headers = {"X-Client-ID": conf.get("client_id", ""), "X-API-Key": conf.get("api_key", "")}
     try:
-        r = requests.get(f"{server_url}/api/v1/agent/update-check", headers=headers, timeout=20, verify=False,
+        # Certificado validado (AGT-01, auditoria de 25/11/2026): a resposta escolhe a URL e o SHA-256 do pacote que
+        # será executado; com verify=False quem interceptasse a conexão trocaria os dois e rodaria código no container.
+        r = requests.get(f"{server_url}/api/v1/agent/update-check", headers=headers, timeout=20,
                          params={"current_version": CURRENT_VERSION, "plataforma": "linux"})
         r.raise_for_status()
         data = r.json()

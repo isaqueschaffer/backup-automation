@@ -80,6 +80,21 @@ class TesteUpdaterLinux(unittest.TestCase):
         self.assertEqual((self.codigo / "pendente").read_text(), "0")
         self.assertFalse((self.codigo / "novo").exists())
 
+    def test_update_check_valida_o_certificado(self):
+        """AGT-01: a resposta do update-check escolhe a URL e o hash do pacote; sem validar o certificado, quem
+        interceptasse a conexão rodaria código no container."""
+        chamadas = []
+
+        def falso(url, **k):
+            chamadas.append((url, k))
+            return _Resp({"has_update": False})
+
+        with mock.patch.object(updater_linux.requests, "get", side_effect=falso):
+            updater_linux.verificar_e_instalar({"server_url": "https://s", "client_id": "c", "api_key": "k"})
+        url, kwargs = chamadas[0]
+        self.assertIn("update-check", url)
+        self.assertNotEqual(kwargs.get("verify", True), False)
+
     def test_hash_errado_recusa(self):
         self.assertFalse(self._rodar(_pacote("9.9.9"), sha="0" * 64))
         self.assertFalse((self.codigo / "atual").exists())
