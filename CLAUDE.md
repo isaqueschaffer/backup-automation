@@ -19,10 +19,12 @@ Skills externas e como aplicá-las aqui (as regras do projeto sempre prevalecem)
 ## Produção no Dokploy (verificado em 09/11/2026; corrige o que se dizia antes)
 
 **A produção NÃO usa `server/docker-compose.yml`.** No Dokploy, o projeto "Sistema de Backup" (ambiente `production`) tem:
-- **Backend** (Application): repositório `projetoswmfa/trilan-backup-automation`, branch `isaque`, caminho `/server/api`, build **Railpack**, auto-deploy. Variáveis de ambiente (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`...) ficam na aba Environment do Application, não em `.env` do repositório. Bind mount `/opt/trilan/backups` -> `/data/backups`.
-- **Frontend** (Application): mesmo repositório e branch, caminho `/server/dashboard`, Railpack, auto-deploy, variável `VITE_API_URL`.
+- **Origem do código (desde 25/11/2026):** Backend e Frontend usam a fonte **Git** (`customGitUrl`) `https://github.com/isaqueschaffer/backup-automation.git`, ramo **`producao`**, sem credencial (repositório público). O GitHub App antigo (`dokploy-2026-08-12-thuirh`, ligado a `projetoswmfa/trilan-backup-automation`, ramo `isaque`) parou de funcionar ("Bad credentials") e só o dono da conta `projetoswmfa` poderia recriá-lo. O ramo `producao` tem um ruleset (`producao-somente-admin`) que só deixa o administrador do repositório (o dono) criar, atualizar ou apagar o ramo; colaboradores com escrita não conseguem empurrar nele. **Não há webhook**: depois de empurrar em `producao`, disparar o deploy pela API do Dokploy (`POST /api/application.deploy` com `applicationId`, login por cookie; ver `CLAUDE.local.md`) do Backend e do Frontend. Para voltar ao auto-deploy, criar o webhook do repositório para a URL de deploy do Dokploy (exige o escopo `admin:repo_hook` no `gh`).
+- **Push de produção:** `git push isaque_repo isaque:producao` (além do push duplo de sempre). O ramo `isaque` em `projetoswmfa` continua sendo o ramo de trabalho e o portão de merge, mas não dispara mais o deploy sozinho.
+- **Backend** (Application): caminho `/server/api`, build **Railpack**. Variáveis de ambiente (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`...) ficam na aba Environment do Application, não em `.env` do repositório. Bind mount `/opt/trilan/backups` -> `/data/backups`.
+- **Frontend** (Application): mesma origem e ramo, caminho `/server/dashboard`, Railpack, variável `VITE_API_URL`.
 - Um **Postgres do próprio Dokploy** (serviço `sistema-de-backup-database-…`); o `DATABASE_URL` do Backend aponta para ele pelo nome interno. O nome interno de qualquer serviço do Dokploy é o `appName` dele.
-- Cada push na `isaque` redeploya Backend e Frontend. **Alterar `docker-compose.yml` não muda a produção**; um serviço novo precisa ser criado no Dokploy como Application novo, com as variáveis, o volume e o endereço interno ajustados lá. Os compose servem ao ambiente local (`docker-compose.local.yml`) e como referência dos serviços.
+- O deploy de Backend e Frontend vem do ramo `producao` (ver acima). **Alterar `docker-compose.yml` não muda a produção**; um serviço novo precisa ser criado no Dokploy como Application novo, com as variáveis, o volume e o endereço interno ajustados lá. Os compose servem ao ambiente local (`docker-compose.local.yml`) e como referência dos serviços.
 - **Acesso (só para o Claude; nunca passar ao Gemini):** o endereço do painel, o modo de login e onde estão as credenciais ficam em `CLAUDE.local.md` (só nesta máquina, fora do git). Consultar (GET) é livre; criar/editar Application, variáveis ou disparar deploy só a pedido do usuário. Nunca imprimir valores de variáveis nem senhas, e nunca copiar credenciais para arquivos versionados (este repositório é espelhado em um público).
 
 ## Publicação de versões do agente (regra fixa)
@@ -53,7 +55,7 @@ Depois da release, informar os links e os hashes e esperar o usuário dizer "pub
 ## Checklist de uma nova versão do agente (fazer sempre, nesta ordem)
 
 1. Subir a versão nos três lugares (updater.py, installer.iss, package.json) e registrar no changelog do `PROJECT_SPEC.md`.
-2. Commit e push para `origin isaque` e `isaque_repo isaque:integracao-equipamentos`.
+2. Commit e push para `origin isaque`, `isaque_repo isaque:integracao-equipamentos` e `isaque_repo isaque:producao` (este último é o que vai para a produção; depois disparar o deploy do Backend e do Frontend pela API do Dokploy).
 3. Gerar os executáveis: `agent/build.ps1` e depois `ISCC.exe installer.iss` (Inno Setup 7). Encerrar antes processos `TrilanAgent*` abertos.
 4. Calcular os SHA-256 de `TrilanAgentService.exe`, `TrilanAgentTray.exe`, `TrilanAgentSetup.exe` e `TrilanAgentLinux.tar.gz`.
 5. Criar a release em `isaqueschaffer/backup-automation` (tag = versão, título `v<versão>`) com os quatro arquivos (Service, Tray, Setup e Linux) e conferir que os `digest` dos assets batem com os hashes. Se o `requirements-linux.txt` mudou, gerar também a imagem nova do Mikrotik (`agent/README_MIKROTIK.md`), porque a OTA do Linux recusa essa versão.
@@ -64,7 +66,7 @@ Depois da release, informar os links e os hashes e esperar o usuário dizer "pub
 
 ## Merge de ramos de colaboradores (`helena`, `integracao-equipamentos`) em `isaque`
 
-O merge em `isaque` é o único portão da produção (cada push dispara o deploy). Antes de concluir o merge, fazer sempre:
+O merge em `isaque` é o único portão da produção (o que está em `isaque` é empurrado para `producao` no repositório público e vai ao ar no deploy). Antes de concluir o merge, fazer sempre:
 
 1. `git fetch` e ver o que entra: `git log isaque..<ramo> --oneline` e `git diff --stat isaque...<ramo>`.
 2. Olhar com atenção os arquivos sensíveis: `server/docker-compose*.yml` (não regem a produção, mas manter coerentes: local em `7001:7001`), `server/nginx/nginx.conf`, `server/api/models.py`, a parte de migrações do `server/api/main.py`, `requirements*.txt`, `agent/build.ps1`, `agent/installer.iss`, `.env*`, além de arquivos novos na raiz e binários.
