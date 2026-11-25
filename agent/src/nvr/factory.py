@@ -19,6 +19,10 @@ except Exception:
 
 DIAS_VERIFICAR = 15
 DIAS_MAX_RETENCAO = 730  # limite da busca da gravacao mais antiga (Hikvision/Intelbras)
+# Buscas de gravacao simultaneas no mesmo NVR. Eram 10 no Hikvision: o DS-7616NI-K2 da Horizontes travava o
+# servico web no meio da verificacao (canais NAO_VERIFICADO e configuracao sem baixar, 23 e 25/11/2026).
+WORKERS_GRAVACAO_HIKVISION = 4
+WORKERS_GRAVACAO_INTELBRAS = 5
 
 def _probe_hikvision(nvr_ip, usuario, senha):
     """Sonda NVR (IP) e DVR (analogico). Retorna (cameras, tipo) ou ({}, None) se nenhum respondeu."""
@@ -201,7 +205,7 @@ def verificar_gravacao_nvr(nvr_ip, usuario, senha, marca=None):
         # Demais Marcas (Hikvision e Intelbras)
         fn_tem_gravacao = tem_gravacao_no_dia_intelbras if tipo == "INTELBRAS" else tem_gravacao_no_dia
         fn_tem_entre = tem_gravacao_entre_intelbras if tipo == "INTELBRAS" else tem_gravacao_entre
-        workers = 5 if tipo == "INTELBRAS" else 10
+        workers = WORKERS_GRAVACAO_INTELBRAS if tipo == "INTELBRAS" else WORKERS_GRAVACAO_HIKVISION
         with ThreadPoolExecutor(max_workers=workers) as executor:
             for canal_id, camera in cameras.items():
                 nome = camera["nome"]

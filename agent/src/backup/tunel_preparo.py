@@ -39,7 +39,7 @@ def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
     from requests.auth import HTTPDigestAuth
     from src.application.backup_job import PLANILHAS_NVR
     from src.backup.crypto import gerar_secretkey
-    from src.backup.downloader import baixar_bytes
+    from src.backup.downloader import baixar_bytes, com_novas_tentativas, isapi_responde
     from src.nvr.factory import coletar_telemetria_nvr, verificar_gravacao_nvr
     from src.nvr.intelbras.backup import baixar_configuracao_intelbras_memoria
 
@@ -88,16 +88,18 @@ def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
                 sessao = requests.Session()
                 sessao.auth = HTTPDigestAuth(user, pwd)
                 sessao.verify = False
-                sessao.get(f"http://{ip}/ISAPI/System/status", timeout=5).raise_for_status()
+                if not com_novas_tentativas(lambda: isapi_responde(sessao, ip), "ISAPI do NVR"):
+                    raise RuntimeError(f"ISAPI de {ip} não respondeu")
                 sk, iv = gerar_secretkey(senha_zip)
                 url_bin = f"http://{ip}/ISAPI/System/configurationData?secretkey={sk}&security=1&iv={iv}"
-                dados = baixar_bytes(sessao, url_bin, min_bytes=100_000, valida_xml=True)
-                if dados is not None:
+                dados = com_novas_tentativas(lambda: baixar_bytes(sessao, url_bin, min_bytes=100_000, valida_xml=True),
+                                             "Download da configuracao do NVR")
+                if dados:
                     logging.info("  Backup NVR OK.")
                     arquivos.append(_memoria(f"CONFIG_NVR_{_data_arquivo()}.bin", dados, "NVR_CONFIG"))
                 url_xls = f"http://{ip}/ISAPI/ContentMgmt/InputProxy/ipcConfig"
-                dados = baixar_bytes(sessao, url_xls)
-                if dados is not None:
+                dados = com_novas_tentativas(lambda: baixar_bytes(sessao, url_xls), "Download da configuracao das IPCAM")
+                if dados:
                     logging.info("  Backup IPCAM OK.")
                     arquivos.append(_memoria(f"CONFIG_IPCAM_{_data_arquivo()}.xls", dados, "NVR_CONFIG"))
                 status = "OK" if len(arquivos) == 2 else "PARCIAL"
