@@ -36,7 +36,7 @@ AVISOS = [
      lambda f: f.startswith("agent/") and "/tests/" not in f,
      "verify=False novo: só é aceitável para equipamentos da rede local, nunca para o servidor da Trilan"),
     (re.compile(r"navarro@123"),
-     lambda f: "/tests/" not in f and f.endswith(CODIGO),
+     lambda f: "/tests/" not in f and f.endswith(CODIGO) and not f.endswith("verificar_regras.py"),
      "senha padrão de câmera em lugar novo (o repositório é público)"),
 ]
 CODIGO = (".py", ".ts", ".tsx", ".js", ".jsx", ".ps1", ".iss")
