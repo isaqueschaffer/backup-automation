@@ -1127,6 +1127,12 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-25] — Usuário SSH padrão "trilan_backup" e script de preparo da máquina do cliente
+
+- **Problema**: no Defense da `teste-mk-maquina` (agente no MikroTik), o backup falhava com `Connection reset by peer` no SSH de 192.168.75.41. Teste direto mostrou que o OpenSSH for Windows 9.5 derruba a conexão já no pedido de login do usuário `Administrator` (antes da senha); `Administrador`, `SERVIDOR-DEFENSE` e até um usuário inexistente recebiam a lista de métodos normalmente. Em Windows em português a conta interna é `Administrador` (e vem desativada); com `SERVIDOR-DEFENSE` o backup passou. Não existe nome de administrador comum a todos os Windows.
+- **Solução** (escolhida pelo usuário): conta padrão `trilan_backup`, criada por um script. `server/dashboard/public/preparar_acesso_ssh.ps1` (baixável no painel em `/preparar_acesso_ssh.ps1`, idempotente): instala e liga o OpenSSH Server, libera a porta 22, cria ou redefine a conta `trilan_backup` (senha digitada na hora, nunca gravada) e a põe no grupo Administradores achado pelo SID `S-1-5-32-544` (vale em qualquer idioma); mostra o IP e a impressão digital da chave SSH. No formulário do equipamento (seção de acesso remoto, só agente MikroTik) o campo de usuário SSH vem preenchido com `trilan_backup` (`USUARIO_SSH_PADRAO` em `MachineDetail/utils.ts`), editável, com o link do script e o aviso sobre `Administrator`. Cadastros existentes com usuário preenchido não mudam.
+- **Testes**: `tsc --noEmit` limpo; sintaxe do script conferida pelo parser do PowerShell e a busca do grupo pelo SID ("Administradores" neste Windows). O script não foi executado numa máquina de cliente.
+
 ### [2026-11-25] — Defense: a planilha manda no que a Galeria pegou sozinha
 
 - **Problema**: a Galeria do Defense recebe câmeras sozinha (IP e marca do relatório do agente, senha padrão `navarro@123`) e a planilha exportada do Defense (com usuário e senha de cada dispositivo) só atualizava o que casava por IP ou nome exato, ignorava a coluna de usuário (o painel mandava sempre `admin`) e deixava os canais de DVR/NVR criados pelo relatório com a senha padrão, embora a linha do gravador na planilha traga a senha real.
