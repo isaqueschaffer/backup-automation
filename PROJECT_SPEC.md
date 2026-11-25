@@ -883,11 +883,11 @@ A produção **não** usa `server/docker-compose.yml`. No Dokploy, o projeto "Si
 
 | Serviço | Tipo no Dokploy | Origem | Build | Observações |
 |---|---|---|---|---|
-| Backend | Application | `projetoswmfa/trilan-backup-automation`, branch `isaque`, caminho `/server/api` | Railpack | Auto-deploy. Variáveis na aba Environment do Application (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`, `RAILPACK_PYTHON_VERSION`...). Bind mount `/opt/trilan/backups` -> `/data/backups` |
-| Frontend | Application | mesmo repositório e branch, caminho `/server/dashboard` | Railpack | Auto-deploy. Variável `VITE_API_URL` |
+| Backend | Application | Git `https://github.com/isaqueschaffer/backup-automation.git`, ramo `producao`, caminho `/server/api` (desde 25/11/2026; antes GitHub App em `projetoswmfa/trilan-backup-automation`, ramo `isaque`) | Railpack | Sem auto-deploy (deploy pelo `server/deploy_producao.ps1`). Variáveis na aba Environment do Application (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`, `RAILPACK_PYTHON_VERSION`...). Bind mount `/opt/trilan/backups` -> `/data/backups` |
+| Frontend | Application | mesma origem e ramo, caminho `/server/dashboard` | Railpack | Sem auto-deploy. Variável `VITE_API_URL` |
 | Banco | Postgres do Dokploy | — | — | O `DATABASE_URL` do Backend aponta para ele pelo nome interno (`appName` do serviço) |
 
-- **Deploy:** cada push na `isaque` refaz Backend e Frontend.
+- **Deploy:** `./server/deploy_producao.ps1` (na raiz, ramo `isaque` já enviado): empurra `isaque` -> `producao` e dispara pela API do Dokploy o deploy do Backend e depois o do Frontend, esperando cada um. Não há webhook. O ramo `producao` tem o ruleset `producao-somente-admin` (só o administrador do repositório cria/atualiza/apaga).
 - **Serviço novo:** precisa ser criado no Dokploy como Application (variáveis, volume e endereço interno configurados lá); alterar o compose não tem efeito em produção. O nome interno de um serviço, usado por outro, é o `appName` dele.
 - **WhatsApp:** retirado em 10/11/2026 (solução arquivada em `archive/whatsapp/README.md`). O Application "WhatsApp" do Dokploy e as variáveis `WHATSAPP_*` do Backend foram removidos (ver o changelog de 10/11/2026).
 
@@ -895,7 +895,8 @@ A produção **não** usa `server/docker-compose.yml`. No Dokploy, o projeto "Si
 
 | Branch | Repositorio | Proposito |
 |---|---|---|
-| `isaque` | `projetoswmfa/trilan-backup-automation` (privado) | **Producao**: cada push dispara o deploy automatico no Dokploy; so o dono faz merge aqui |
+| `isaque` | `projetoswmfa/trilan-backup-automation` (privado) | Ramo de trabalho do dono e portao de merge; so o dono faz merge aqui (nao dispara deploy desde 25/11/2026) |
+| `producao` | `isaqueschaffer/backup-automation` (publico) | **Producao**: copia de `isaque` que o Dokploy poe no ar; protegido (so o dono atualiza, pelo `server/deploy_producao.ps1`) |
 | `integracao-equipamentos` | `isaqueschaffer/backup-automation` (publico) | Colaboradores e testadores; sem acesso direto a `isaque`; recebe o espelho do push duplo |
 | `helena` | `isaqueschaffer/backup-automation` (publico) | Colaboradora; sem acesso direto a `isaque`; o codigo so chega a producao por merge auditado feito pelo dono |
 
@@ -908,6 +909,8 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 ```
 
 **Excecao:** Branches de features externas (ex: `helena`) NAO devem ir para `integracao-equipamentos` sem auditoria de merge.
+
+Para ir ao ar (servidor/painel), depois do push duplo: `./server/deploy_producao.ps1` (faz o terceiro push, `isaque:producao`, e o deploy). Mudanca so no agente: `git push isaque_repo isaque:producao` basta, para manter `producao` igual a `isaque`.
 
 ### Auditoria de merge de ramos de colaboradores
 
@@ -1126,6 +1129,12 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 ---
 
 ## 16. Architecture Changelog
+
+### [2026-11-25] — Produção passa a vir do ramo `producao` do repositório público (deploy pelo script)
+
+- **Problema**: desde 24/11 à tarde nenhum deploy entrava: o GitHub App do Dokploy (`dokploy-2026-08-12-thuirh`, ligado a `projetoswmfa/trilan-backup-automation`) passou a responder "Bad credentials" e não existe mais no GitHub; o deploy do Frontend da 1.1.65 ficou "running" por 14 h e travou a fila. O backend seguiu com o código das 13:42 de 24/11 e o pool do banco esgotou de novo na madrugada (API fora do ar até o reinício do serviço às 09:21). Recriar o App exigiria o login da conta `projetoswmfa` (dono do repositório; o nosso acesso é de colaborador, sem admin).
+- **Mudança**: Backend e Frontend no Dokploy passaram para a fonte Git `https://github.com/isaqueschaffer/backup-automation.git`, ramo `producao` (público, sem credencial; caminhos `/server/api` e `/server/dashboard` mantidos; o GitHub App continua configurado mas fora de uso). O ramo `producao` tem o ruleset `producao-somente-admin` (update/creation/deletion/non-fast-forward bloqueados, com passe livre só para o administrador do repositório): Helena e `projetoswmfa` têm escrita no repositório público mas não atualizam `producao`. Sem webhook (o `gh` não tem `admin:repo_hook`), então o deploy é disparado pelo novo `server/deploy_producao.ps1` (push `isaque` -> `producao`, `application.deploy` do Backend e depois do Frontend pela API do Dokploy, espera cada um; credenciais lidas do arquivo local fora do git). Regras atualizadas em `CLAUDE.md` (produção, checklist da versão, merge), `.agents/rules/git-deploy.md` (o Gemini não empurra em `producao` nem faz deploy), skills `gerenciar-containers` (Claude e Gemini) e seção 11 deste arquivo.
+- **Também**: o primeiro build pelo novo caminho falhou no `apt` (`OpenPGP signature verification failed`) porque o relógio da VM estava 48 min atrasado (chrony sem `makestep` depois de a VM ficar pausada); corrigido com `chronyc makestep` (autorizado pelo usuário). A fila travada foi limpa com `application.cleanQueues` (`cancelDeployment` não existe no Dokploy self-hosted) e o serviço `dokploy` foi reiniciado a pedido do usuário.
 
 ### [2026-11-24] — Servidor: pool do banco esgotado (API fora do ar de 16:35 a ~17:30)
 
