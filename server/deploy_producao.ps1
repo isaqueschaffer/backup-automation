@@ -48,8 +48,16 @@ foreach ($p in (Invoke-RestMethod -Uri "$painel/project.all" -WebSession $sessao
 $alvos = if ($Apenas -eq "Ambos") { @("Backend", "Frontend") } else { @($Apenas) }
 
 function Get-UltimoDeploy($id) {
-    $app = Invoke-RestMethod -Uri "$painel/application.one?applicationId=$id" -WebSession $sessao -TimeoutSec 60
-    $app.deployments | Sort-Object createdAt | Select-Object -Last 1
+    # O painel do Dokploy às vezes responde 502/timeout com a VM ocupada pelo build: tenta de novo antes de desistir
+    for ($t = 1; $t -le 6; $t++) {
+        try {
+            $app = Invoke-RestMethod -Uri "$painel/application.one?applicationId=$id" -WebSession $sessao -TimeoutSec 60
+            return ($app.deployments | Sort-Object createdAt | Select-Object -Last 1)
+        } catch {
+            if ($t -eq 6) { throw }
+            Start-Sleep -Seconds 20
+        }
+    }
 }
 
 foreach ($nome in $alvos) {
