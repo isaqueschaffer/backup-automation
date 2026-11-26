@@ -6,9 +6,8 @@ import {
   EyeOff,
   GripVertical,
   Network,
-  Server,
 } from "lucide-react";
-import { Machine } from "../../api/types";
+import { Machine, MaquinaSemBackup } from "../../api/types";
 import StatusBadge from "../../components/StatusBadge";
 import { fmtDate, fmtSchedule } from "../../utils/date";
 import {
@@ -21,6 +20,7 @@ import {
 } from "../Machines/MachineDetail/telemetry";
 import { serverUtcMs } from "../Machines/MachineDetail/utils";
 import { Span, SPANS } from "./layout";
+import { fmtAtraso } from "./gravidade";
 import RingGauge from "./RingGauge";
 import { useRotulos } from "../../contexts/AuthContext";
 
@@ -31,6 +31,7 @@ interface Props {
   editing: boolean;
   onSpanChange: (s: Span) => void;
   onHide: () => void;
+  semBackup?: MaquinaSemBackup;
 }
 
 // Card compacto da máquina na Visão Geral com medidores em anel
@@ -41,12 +42,14 @@ export default function MachineHealthCard({
   editing,
   onSpanChange,
   onHide,
+  semBackup,
 }: Props) {
   const { singularMin } = useRotulos();
   const t = useMemo(() => parseTelemetry(machine.telemetry), [machine.telemetry]);
   const level = t ? overallLevel(t) : null;
   const isOnline = machine.active && machine.is_online;
-  const customerInitial = (machine.customer_name || "S").charAt(0).toUpperCase();
+  const initial = (machine.name || "M").charAt(0).toUpperCase();
+  const cliente = machine.customer_name || `Sem ${singularMin}`;
 
   return (
     <div
@@ -133,34 +136,28 @@ export default function MachineHealthCard({
             className="client-avatar"
             style={{ width: 28, height: 28, fontSize: 12, borderRadius: 8 }}
           >
-            {customerInitial}
+            {initial}
           </div>
           <div style={{ minWidth: 0 }}>
+            {/* Título = máquina (vários cards do mesmo Cliente ficavam todos com o mesmo nome) */}
             <div
               className="client-name"
-              style={{ fontSize: 13, marginBottom: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-              title={machine.customer_name || `Sem ${singularMin}`}
+              style={{ fontSize: 14, marginBottom: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              title={machine.name}
             >
-              {machine.customer_name || `Sem ${singularMin}`}
+              {machine.name}
             </div>
             <div
               style={{
-                fontSize: 10,
+                fontSize: 11,
                 color: "var(--text-muted)",
-                display: "flex",
-                alignItems: "center",
-                gap: 3,
-                minWidth: 0,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
               }}
-              title={machine.name}
+              title={cliente}
             >
-              <Server size={10} style={{ flexShrink: 0 }} />
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {machine.name}
-              </span>
+              {cliente}
             </div>
           </div>
         </div>
@@ -168,6 +165,16 @@ export default function MachineHealthCard({
           <StatusBadge status={machine.last_backup_status} />
         </div>
       </div>
+
+      {semBackup && (
+        <div
+          className="badge err"
+          style={{ display: "flex", width: "100%", fontSize: 11, padding: "4px 8px", marginBottom: 8, whiteSpace: "normal" }}
+          title={`Horário do backup: ${fmtDate(semBackup.agendado_em, { short: true })}`}
+        >
+          {`Sem backup desde ${fmtDate(semBackup.agendado_em, { short: true })} (há ${fmtAtraso(semBackup.minutos_de_atraso)})`}
+        </div>
+      )}
 
       {/* Linha de comunicação */}
       <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
@@ -357,7 +364,7 @@ export default function MachineHealthCard({
           marginTop: "auto",
           paddingTop: 8,
           borderTop: "1px solid var(--border)",
-          fontSize: 10,
+          fontSize: 11,
           color: "var(--text-muted)",
           overflow: "hidden",
           textOverflow: "ellipsis",

@@ -1,16 +1,17 @@
 import asyncio
 import logging
-from datetime import date
+from datetime import datetime
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import func, cast, Date, text, inspect
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func, text, inspect
 
 from database import Base, engine, get_db, SessionLocal
 from models import Machine, Customer, Backup, Plano
 from schemas import StatsResponse
 from auth import Contexto, get_contexto
-from services.escopo import filtrar_por_conta
+from services.escopo import filtrar_maquinas, filtrar_por_conta
+from services.agenda import inicio_do_dia_brasilia_utc, maquina_online, sem_backup_desde_o_agendado
 from config import settings
 from routers import auth_router, machines, customers, nvrs, backups, agent, settings_router, equipamentos, dashboards, public_dashboard, storage_admin, contas_admin, conta, notificacoes, auditoria
 from routers.agent_update import agent_router as update_agent_router, admin_router as update_admin_router
@@ -566,14 +567,11 @@ async def _sincronizar_imagens_cameras() -> None:
 # ─── Stats endpoint ────────────────────────────────────────────────────────
 @app.get("/api/v1/stats", response_model=StatsResponse)
 def get_stats(db: Session = Depends(get_db), ctx: Contexto = Depends(get_contexto)):
-    today = date.today()
-    # Contagens agregadas em 3 queries
-    q_machines = db.query(
-        func.count(Machine.id),
-        func.count(Machine.id).filter(Machine.active == True),
-    )
-    q_machines = filtrar_por_conta(q_machines, Machine.conta_id, ctx)
-    machines_total, machines_active = q_machines.one()
+    """Números da Visão Geral. "Hoje" = dia de Brasília; respeita a conta e as máquinas liberadas ao usuário."""
+    agora = datetime.utcnow()
+    dia_inicio = inicio_do_dia_brasilia_utc(agora)
+
+    maquinas = filtrar_maquinas(filtrar_por_conta(db.query(Machine), Machine.conta_id, ctx), Machine.id, ctx)         .options(selectinload(Machine.customer), selectinload(Machine.equipamentos)).all()
 
     q_customers = db.query(func.count(Customer.id))
     q_customers = filtrar_por_conta(q_customers, Customer.conta_id, ctx)
@@ -582,23 +580,30 @@ def get_stats(db: Session = Depends(get_db), ctx: Contexto = Depends(get_context
     q_backup = db.query(
         func.count(Backup.id),
         func.count(Backup.id).filter(Backup.status == "OK"),
+        func.count(Backup.id).filter(Backup.status == "PARTIAL"),
         func.count(Backup.id).filter(Backup.status == "ERROR"),
-    ).filter(cast(Backup.started_at, Date) == today)
-
+    ).filter(Backup.started_at >= dia_inicio)
     if ctx.conta_id is not None:
         q_backup = q_backup.filter(
             Backup.machine_id.in_(filtrar_por_conta(db.query(Machine.id), Machine.conta_id, ctx))
         )
+    q_backup = filtrar_maquinas(q_backup, Backup.machine_id, ctx)
+    b_today, b_ok, b_parcial, b_err = q_backup.one()
 
-    b_today, b_ok, b_err = q_backup.one()
+    sem_backup = [s for s in (sem_backup_desde_o_agendado(m, agora) for m in maquinas) if s is not None]
+    sem_backup.sort(key=lambda s: -s["minutos_de_atraso"])
 
     return StatsResponse(
-        machines_total=machines_total or 0,
-        machines_active=machines_active or 0,
+        machines_total=len(maquinas),
+        machines_active=sum(1 for m in maquinas if m.active),
+        machines_online=sum(1 for m in maquinas if maquina_online(m, agora)),
         customers_total=customers_total or 0,
         backups_today=b_today or 0,
         backups_ok=b_ok or 0,
+        backups_partial=b_parcial or 0,
         backups_error=b_err or 0,
+        dia_inicio=dia_inicio,
+        sem_backup=sem_backup,
     )
 
 

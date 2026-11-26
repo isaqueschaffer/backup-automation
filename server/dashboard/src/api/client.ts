@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import axios from "axios";
-import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, EquipamentoOltNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedAuditoria, PaginatedBackups, TipoNotificacao, UsuarioAuditoriaOpcao } from "./types";
+import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, EquipamentoOltNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedAuditoria, PaginatedBackups, Stats, TipoNotificacao, UsuarioAuditoriaOpcao } from "./types";
 import { saveBlob } from "../utils/download";
 import { marcarConexao } from "../utils/conexao";
 
@@ -61,7 +61,7 @@ export const renovarSessao = (): Promise<{ access_token: string }> =>
   api.post("/auth/renovar").then((r) => r.data);
 
 // ── Stats ─────────────────────────────────────────────────────
-export const fetchStats = () => api.get("/stats").then((r) => r.data);
+export const fetchStats = (): Promise<Stats> => api.get("/stats").then((r) => r.data);
 
 // ── Máquinas (computadores com o agente) ──────────────────────
 export const fetchMachines = (params?: { customer_id?: string; unassigned?: boolean }): Promise<Machine[]> =>

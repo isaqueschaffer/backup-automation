@@ -238,39 +238,13 @@ def _manter_imagem_noite(anterior, novo, por_nome=False):
 
 
 BACKUP_TRAVADO_MIN = 120  # backup em andamento há mais que isso: o painel pode reiniciar o agente mesmo assim
-OFFSET_UTC_PADRAO_MIN = -180  # Brasília (UTC-3): agentes < 1.1.34 não informam o fuso
-
-
-def _offset_utc_min(telemetria_ping, telemetria_maquina) -> int:
-    """Fuso local da máquina em minutos em relação ao UTC (`utc_offset_min` da telemetria, agente >= 1.1.34):
-    o do corpo do ping ou, se ausente, o último gravado na máquina. Fora de -720..840 ou inválido: -180."""
-    valor = None
-    for tel in (telemetria_ping, telemetria_maquina):
-        if isinstance(tel, dict) and tel.get("utc_offset_min") is not None:
-            valor = tel.get("utc_offset_min")
-            break
-    if isinstance(valor, bool):
-        return OFFSET_UTC_PADRAO_MIN
-    try:
-        offset = int(valor)
-    except (TypeError, ValueError):
-        return OFFSET_UTC_PADRAO_MIN
-    return offset if -720 <= offset <= 840 else OFFSET_UTC_PADRAO_MIN
-
-
-RECUPERACAO_TOLERANCIA_MIN = 30  # só considera o horário "perdido" 30 min depois dele
-
-
-def _ultimo_horario_agendado(agora_local: datetime, hora: int, minuto: int) -> Optional[datetime]:
-    """Último horário agendado (hora local da máquina, naive) que já passou há mais de
-    RECUPERACAO_TOLERANCIA_MIN: o de hoje, se já passou, senão o de ontem."""
-    try:
-        hoje = agora_local.replace(hour=hora, minute=minuto, second=0, microsecond=0)
-    except ValueError:
-        return None
-    if agora_local > hoje + timedelta(minutes=RECUPERACAO_TOLERANCIA_MIN):
-        return hoje
-    return hoje - timedelta(days=1)
+# Horário agendado e fuso da máquina: services/agenda.py (também usado pela Visão Geral)
+from services.agenda import (  # noqa: E402
+    OFFSET_UTC_PADRAO_MIN,
+    RECUPERACAO_TOLERANCIA_MIN,
+    offset_utc_min as _offset_utc_min,
+    ultimo_horario_agendado as _ultimo_horario_agendado,
+)
 
 
 @router.post("/ping", response_model=PingResponse)

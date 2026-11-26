@@ -606,13 +606,33 @@ class SettingsResponse(BaseModel):
 # ─────────────────────────────────────────────
 # Stats (overview dashboard)
 # ─────────────────────────────────────────────
+class MaquinaSemBackup(BaseModel):
+    """Máquina que não fez backup desde o último horário agendado (Visão Geral, "esperado × realizado")."""
+    machine_id: UUID
+    machine_name: str
+    customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
+    agendado_em: datetime  # UTC naive
+    minutos_de_atraso: int
+    last_backup_at: Optional[datetime] = None
+    last_backup_status: Optional[str] = None
+    online: bool = False
+    last_seen: Optional[datetime] = None
+
+
 class StatsResponse(BaseModel):
+    """Contagens da Visão Geral. "Hoje" é o dia de Brasília (antes era o dia UTC: depois das 21:00 contava o dia
+    seguinte)."""
     machines_total: int
     machines_active: int
+    machines_online: int = 0
     customers_total: int
     backups_today: int
     backups_ok: int
+    backups_partial: int = 0
     backups_error: int
+    dia_inicio: Optional[datetime] = None  # meia-noite de Brasília em UTC (para o link à lista filtrada)
+    sem_backup: List[MaquinaSemBackup] = []
 
 
 # ─────────────────────────────────────────────

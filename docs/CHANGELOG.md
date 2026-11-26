@@ -9,6 +9,13 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Visão Geral: números do dia de Brasília com parciais, "sem backup desde o horário" e problemas primeiro
+
+- **Problema** (revisão de experiência do painel, 26/11): o topo da Visão Geral contava "hoje" pelo dia UTC (às 21:00 de Brasília já virava o dia seguinte), não mostrava os PARCIAIS nem respeitava as máquinas liberadas ao usuário (`filtrar_maquinas`): mostrava "Backups OK hoje 16" enquanto a página Backups tinha 10 OK, 4 parciais e 1 erro. Máquina que não fez o backup (ex.: Georgina offline) não aparecia em lugar nenhum. Os cards seguiam a ordem de cadastro e tinham o Cliente como título (5 cards "Navarro").
+- **API** (`GET /api/v1/stats`, `main.py`): "hoje" = meia-noite de Brasília em diante; novos campos `backups_partial`, `machines_online`, `dia_inicio` e `sem_backup` (máquinas ativas, com equipamento ativo, sem backup desde o último horário agendado, com 2 h de folga para a fila; horário do Cliente quando a máquina tem um, fuso da telemetria). Novo `services/agenda.py` com o cálculo do horário agendado e do fuso, que saiu de `routers/agent.py` (a recuperação de backup perdido importa de lá). `ultimo_horario_agendado` volta mais um dia quando o de ontem ainda está na folga (00:30 com agendamento às 23:00).
+- **Painel**: os números viram botões (OK, Parciais e Erros abrem `/backups?status=...`; a página Backups lê e grava os filtros na URL: `cliente`, `maquina`, `status`, `de`, `ate`); número e lista "Sem backup desde o horário agendado" com atraso, último backup e comunicação; cards por gravidade (offline > sem backup > erro > parcial > saúde crítica > ok > desativada) com a opção "Minha ordem" (a do Personalizar), título = máquina e Cliente embaixo, aviso "Sem backup desde ..." no card, rodapé maior; modo **Lista** compacto. Preferência de ordem e modo no navegador (`trilan.overview.vista.v1`).
+- **Arquivos**: `server/api/main.py`, `schemas.py` (`StatsResponse`, `MaquinaSemBackup`), `services/agenda.py`, `routers/agent.py`, `tests/test_agenda_sem_backup.py`; `server/dashboard/src/pages/Overview/{index.tsx,MachineHealthCard.tsx,gravidade.ts}`, `pages/Backups.tsx`, `api/{types.ts,client.ts}`, `index.css`. Testes da API: 195 OK (2 skipped). Sem mudança no agente (versão continua 1.1.70).
+
 ### [2026-11-26] — Agente 1.1.70: merge da Helena (OLT Huawei com sessão exclusiva e novas tentativas; backup de pasta aceita 24 h)
 
 - **Versão**: 1.1.70 em `updater.py`, `installer.iss`, `server/dashboard/package.json` e `package-lock.json`, levando o merge do ramo `helena`. `requirements-linux.txt` intacto. Testes: suíte do agente 374 OK (1 skipped).

@@ -753,7 +753,7 @@ Todas as rotas de dados abaixo (máquinas, equipamentos, Clientes/Setores, dashb
 | PUT | `/api/v1/admin/agent-version/{id}/toggle` | Ativar/desativar versao |
 | PUT | `/api/v1/admin/agent-version/{id}` | Editar versao |
 | DELETE | `/api/v1/admin/agent-version/{id}` | Deletar versao |
-| GET | `/api/v1/stats` | Estatisticas do dashboard |
+| GET | `/api/v1/stats` | Estatisticas da Visão Geral: dia de Brasília (OK, parciais, erros), máquinas online e `sem_backup` (sem backup desde o último horário agendado, 2 h de folga; `services/agenda.py`) |
 | GET | `/api/v1/notificacoes` | Notificações da conta (licença UNM2000 vencendo, backup com falha, agente offline); `apenas_abertas=false` traz também as resolvidas; isolada por conta (REGRA-010) |
 | GET | `/api/v1/notificacoes/config` | Preferência (ativo/inativo) da conta para cada tipo (ausente = ativo) |
 | PUT | `/api/v1/notificacoes/config/{tipo}` | Liga/desliga um tipo para a conta (ADMIN da conta ou super admin) |

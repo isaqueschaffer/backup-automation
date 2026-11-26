@@ -375,13 +375,31 @@ export interface PaginatedAuditoria {
   dias_retencao: number;
 }
 
+export interface MaquinaSemBackup {
+  machine_id: string;
+  machine_name: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  agendado_em: string; // UTC sem fuso
+  minutos_de_atraso: number;
+  last_backup_at: string | null;
+  last_backup_status: string | null;
+  online: boolean;
+  last_seen: string | null;
+}
+
+// "Hoje" = dia de Brasília (servidor)
 export interface Stats {
   machines_total: number;
   machines_active: number;
+  machines_online: number;
   customers_total: number;
   backups_today: number;
   backups_ok: number;
+  backups_partial: number;
   backups_error: number;
+  dia_inicio: string | null;
+  sem_backup: MaquinaSemBackup[];
 }
 
 export interface Settings {

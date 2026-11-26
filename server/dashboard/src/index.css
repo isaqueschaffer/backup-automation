@@ -291,6 +291,13 @@ img { max-width: 100%; }
 .stat-card.cyan::after   { background: var(--cyan); }
 .stat-card.green::after  { background: var(--ok); }
 .stat-card.red::after    { background: var(--err); }
+.stat-card.amber::after  { background: var(--warn); }
+
+/* Números da Visão Geral são botões (abrem a lista filtrada) */
+button.stat-card { font: inherit; color: inherit; text-align: left; width: 100%; cursor: pointer; }
+button.stat-card:disabled { cursor: default; }
+button.stat-card:disabled:hover { transform: none; box-shadow: none; }
+button.stat-card:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 
 .stat-label {
   font-size: 11px; font-weight: 600;
@@ -309,6 +316,7 @@ img { max-width: 100%; }
 .stat-value.cyan   { color: var(--cyan); }
 .stat-value.green  { color: var(--ok); }
 .stat-value.red    { color: var(--err); }
+.stat-value.amber  { color: var(--warn); }
 
 .stat-icon {
   position: absolute;
@@ -1146,4 +1154,30 @@ body.dash-arrastando * { cursor: grabbing !important; }
 @media (max-width: 600px) {
   .faixa-flutuante { width: calc(100vw - 32px); font-size: 13px; }
   .faixa-flutuante span { flex: 1; }
+}
+
+/* ── Visão Geral: sem backup, ordem e modo lista (26/11/2026) ─────────── */
+.sem-backup-card { padding: 14px 16px; margin-bottom: 24px; border-color: rgba(239,68,68,0.35); }
+.overview-barra { flex-wrap: wrap; }
+.overview-vista { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.overview-vista .form-input { width: auto; padding: 4px 8px; font-size: 12px; }
+.segmentado { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmentado button {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; font: inherit; font-size: 12px;
+  background: var(--bg-surface); color: var(--text-secondary); border: none; cursor: pointer;
+}
+.segmentado button + button { border-left: 1px solid var(--border); }
+.segmentado button.ativo { background: var(--accent); color: #fff; }
+.segmentado button:focus-visible { outline: 2px solid var(--accent-light); outline-offset: -2px; }
+.linha-clicavel { cursor: pointer; }
+.celula-linha { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.link-botao {
+  background: none; border: none; padding: 0; font: inherit; font-weight: 600;
+  color: var(--text-primary); cursor: pointer; text-align: left;
+}
+.link-botao:hover { color: var(--accent-light); text-decoration: underline; }
+.link-botao:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; border-radius: 4px; }
+@media (max-width: 768px) {
+  .overview-vista { margin-left: 0; width: 100%; }
 }

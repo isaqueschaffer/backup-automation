@@ -1,6 +1,6 @@
 import { useAutoAtualizar } from "../utils/useAutoAtualizar";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { fetchBackups, fetchMachines, fetchCustomers, resendBackupEmail, downloadBackupZip, BackupQuery } from "../api/client";
 import { Backup, Customer, Machine, NVRResult, PaginatedBackups } from "../api/types";
 import Modal from "../components/Modal";
@@ -123,14 +123,27 @@ export default function Backups() {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const loadSeq = useRef(0);
+  // Filtros na URL (?status=PARTIAL&de=2026-11-26...): os números da Visão Geral abrem a lista já filtrada e o
+  // link pode ser copiado ou recarregado sem perder o filtro
+  const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
-  const [customerFilter, setCustomerFilter] = useState("");
-  const [machineFilter, setMachineFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [customerFilter, setCustomerFilter] = useState(() => searchParams.get("cliente") ?? "");
+  const [machineFilter, setMachineFilter] = useState(() => searchParams.get("maquina") ?? "");
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") ?? "");
 
   const today = localDateStr();
-  const [dateFrom, setDateFrom] = useState(today);
-  const [dateTo, setDateTo] = useState(today);
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get("de") ?? today);
+  const [dateTo, setDateTo] = useState(() => searchParams.get("ate") ?? today);
+
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (customerFilter) p.set("cliente", customerFilter);
+    if (machineFilter) p.set("maquina", machineFilter);
+    if (statusFilter) p.set("status", statusFilter);
+    if (dateFrom && dateFrom !== today) p.set("de", dateFrom);
+    if (dateTo && dateTo !== today) p.set("ate", dateTo);
+    setSearchParams(p, { replace: true });
+  }, [customerFilter, machineFilter, statusFilter, dateFrom, dateTo, today, setSearchParams]);
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [resendingEmailId, setResendingEmailId] = useState<string | null>(null);

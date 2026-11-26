@@ -2,9 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
+  AlertTriangle,
   Archive,
   Check,
   CheckCircle,
+  Clock,
+  LayoutGrid,
+  List,
   RotateCcw,
   Search,
   Server,
@@ -12,15 +16,18 @@ import {
   Users,
 } from "lucide-react";
 import { fetchMachines, fetchStats } from "../../api/client";
-import { Machine, Stats } from "../../api/types";
+import { Machine, MaquinaSemBackup, Stats } from "../../api/types";
 import { useToast } from "../../components/Toast";
 import { useConfirm } from "../../components/ConfirmDialog";
 import { Span, useOverviewLayout } from "./layout";
 import MachineHealthCard from "./MachineHealthCard";
 import { useRotulos } from "../../contexts/AuthContext";
+import StatusBadge from "../../components/StatusBadge";
+import { fmtDate } from "../../utils/date";
+import { fmtAtraso, gravidadeDa, useVista } from "./gravidade";
 
 export default function Overview() {
-  const { plural, singularMin } = useRotulos();
+  const { plural, singular, singularMin } = useRotulos();
   const [stats, setStats] = useState<Stats | null>(null);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -40,6 +47,28 @@ export default function Overview() {
   const confirmar = useConfirm();
 
   const layout = useOverviewLayout(machines);
+  const vista = useVista();
+
+  const semBackup = useMemo(
+    () => new Map<string, MaquinaSemBackup>((stats?.sem_backup ?? []).map(s => [s.machine_id, s])),
+    [stats],
+  );
+
+  // Problemas primeiro (padrão) ou a ordem montada no "Personalizar"; editando, vale sempre a personalizada
+  const ordenadas = useMemo(() => {
+    if (editing || vista.ordem === "personalizada") return layout.visible;
+    return [...layout.visible].sort((a, b) => {
+      const d = gravidadeDa(a, semBackup).nivel - gravidadeDa(b, semBackup).nivel;
+      if (d !== 0) return d;
+      return (a.customer_name || "").localeCompare(b.customer_name || "") || a.name.localeCompare(b.name);
+    });
+  }, [editing, vista.ordem, layout.visible, semBackup]);
+  const modoLista = vista.modo === "lista" && !editing;
+
+  // Números de hoje abrem a lista de backups já filtrada (o dia padrão da lista é hoje)
+  const abrirBackups = (status: string) => navigate(`/backups?status=${status}`);
+  const abrirMaquina = (id: string) => navigate(`/maquinas/${id}`);
+  const temSemBackup = !!stats && stats.sem_backup.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -177,31 +206,109 @@ export default function Overview() {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Números de hoje (dia de Brasília) */}
       <div className="stats-grid">
-        <div className="stat-card purple" style={{ cursor: "pointer" }} onClick={() => navigate("/clientes")}>
+        <button type="button" className="stat-card purple" onClick={() => navigate("/clientes")}>
           <div className="stat-label">{plural}</div>
           <div className="stat-value purple">{stats?.customers_total ?? "—"}</div>
           <Users size={28} className="stat-icon" color="var(--accent)" />
-        </div>
-        <div className="stat-card cyan" style={{ cursor: "pointer" }} onClick={() => navigate("/maquinas")}>
-          <div className="stat-label">Máquinas ativas / total</div>
+        </button>
+        <button
+          type="button"
+          className="stat-card cyan"
+          onClick={() => navigate("/maquinas")}
+          title={stats ? `${stats.machines_online} online de ${stats.machines_active} ativas (${stats.machines_total} no total)` : undefined}
+        >
+          <div className="stat-label">Máquinas online</div>
           <div className="stat-value cyan">
-            {stats ? `${stats.machines_active}/${stats.machines_total}` : "—"}
+            {stats ? `${stats.machines_online}/${stats.machines_active}` : "—"}
           </div>
           <CheckCircle size={28} className="stat-icon" color="var(--cyan)" />
-        </div>
-        <div className="stat-card green">
-          <div className="stat-label">Backups OK Hoje</div>
+        </button>
+        <button type="button" className="stat-card green" onClick={() => abrirBackups("OK")}>
+          <div className="stat-label">Backups OK hoje</div>
           <div className="stat-value green">{stats?.backups_ok ?? "—"}</div>
           <Archive size={28} className="stat-icon" color="var(--ok)" />
-        </div>
-        <div className="stat-card red">
-          <div className="stat-label">Erros Hoje</div>
+        </button>
+        <button type="button" className="stat-card amber" onClick={() => abrirBackups("PARTIAL")}>
+          <div className="stat-label">Parciais hoje</div>
+          <div className="stat-value amber">{stats?.backups_partial ?? "—"}</div>
+          <AlertTriangle size={28} className="stat-icon" color="var(--warn)" />
+        </button>
+        <button type="button" className="stat-card red" onClick={() => abrirBackups("ERROR")}>
+          <div className="stat-label">Erros hoje</div>
           <div className="stat-value red">{stats?.backups_error ?? "—"}</div>
           <AlertCircle size={28} className="stat-icon" color="var(--err)" />
-        </div>
+        </button>
+        <button
+          type="button"
+          className={`stat-card ${temSemBackup ? "red" : "green"}`}
+          onClick={() => document.getElementById("sem-backup")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          disabled={!temSemBackup}
+          title="Máquinas que não fizeram o backup do último horário agendado"
+        >
+          <div className="stat-label">Sem backup</div>
+          <div className={`stat-value ${temSemBackup ? "red" : "green"}`}>
+            {stats ? stats.sem_backup.length : "—"}
+          </div>
+          <Clock size={28} className="stat-icon" color={temSemBackup ? "var(--err)" : "var(--ok)"} />
+        </button>
       </div>
+
+      {/* Esperado × realizado: máquinas que não fizeram o backup do último horário agendado */}
+      {stats && temSemBackup && (
+        <div id="sem-backup" className="card sem-backup-card">
+          <div className="section-title" style={{ marginBottom: 10 }}>
+            <Clock size={15} /> Sem backup desde o horário agendado ({stats.sem_backup.length})
+          </div>
+          <div className="table-wrap">
+            <table className="tabela-cartoes">
+              <thead>
+                <tr>
+                  <th>Máquina</th>
+                  <th>{singular}</th>
+                  <th>Horário perdido</th>
+                  <th>Atraso</th>
+                  <th>Último backup</th>
+                  <th>Comunicação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.sem_backup.map(item => (
+                  <tr key={item.machine_id} className="linha-clicavel" onClick={() => abrirMaquina(item.machine_id)}>
+                    <td data-label="">
+                      <button
+                        type="button"
+                        className="link-botao"
+                        onClick={(e) => { e.stopPropagation(); abrirMaquina(item.machine_id); }}
+                      >
+                        {item.machine_name}
+                      </button>
+                    </td>
+                    <td data-label={singular}>{item.customer_name || `Sem ${singularMin}`}</td>
+                    <td data-label="Horário perdido">{fmtDate(item.agendado_em, { short: true })}</td>
+                    <td data-label="Atraso">
+                      <strong style={{ color: "var(--err)" }}>{fmtAtraso(item.minutos_de_atraso)}</strong>
+                    </td>
+                    <td data-label="Último backup">
+                      <span className="celula-linha">
+                        {fmtDate(item.last_backup_at, { short: true, empty: "nunca" })}
+                        {item.last_backup_status && <StatusBadge status={item.last_backup_status} />}
+                      </span>
+                    </td>
+                    <td data-label="Comunicação">
+                      <span className="celula-linha">
+                        <span className={`dot ${item.online ? "ok" : "err"}`} />
+                        {item.online ? "Online" : `Offline desde ${fmtDate(item.last_seen, { short: true, empty: "sempre" })}`}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Barra do modo edição */}
       {editing && (
@@ -319,8 +426,39 @@ export default function Overview() {
       )}
 
       {/* Cards das máquinas */}
-      <div className="section-title">
+      <div className="section-title overview-barra">
         <Server size={15} /> Máquinas
+        {!editing && (
+          <div className="overview-vista">
+            <select
+              className="form-input"
+              value={vista.ordem}
+              onChange={(e) => vista.mudar({ ordem: e.target.value === "personalizada" ? "personalizada" : "gravidade" })}
+              aria-label="Ordem das máquinas"
+            >
+              <option value="gravidade">Problemas primeiro</option>
+              <option value="personalizada">Minha ordem</option>
+            </select>
+            <div className="segmentado" role="group" aria-label="Visualização">
+              <button
+                type="button"
+                className={vista.modo === "cards" ? "ativo" : ""}
+                aria-pressed={vista.modo === "cards"}
+                onClick={() => vista.mudar({ modo: "cards" })}
+              >
+                <LayoutGrid size={14} /> Cards
+              </button>
+              <button
+                type="button"
+                className={vista.modo === "lista" ? "ativo" : ""}
+                aria-pressed={vista.modo === "lista"}
+                onClick={() => vista.mudar({ modo: "lista" })}
+              >
+                <List size={14} /> Lista
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {machines.length === 0 && loadError ? (
@@ -349,9 +487,65 @@ export default function Overview() {
             <SlidersHorizontal size={14} /> Personalizar
           </button>
         </div>
+      ) : modoLista ? (
+        <div className="table-wrap">
+          <table className="tabela-cartoes">
+            <thead>
+              <tr>
+                <th>Máquina</th>
+                <th>Situação</th>
+                <th>{singular}</th>
+                <th>Comunicação</th>
+                <th>Último backup</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ordenadas.map(m => {
+                const g = gravidadeDa(m, semBackup);
+                const sb = semBackup.get(m.id);
+                return (
+                  <tr key={m.id} className="linha-clicavel" onClick={() => abrirMaquina(m.id)}>
+                    <td data-label="">
+                      <button
+                        type="button"
+                        className="link-botao"
+                        onClick={(e) => { e.stopPropagation(); abrirMaquina(m.id); }}
+                      >
+                        {m.name}
+                      </button>
+                    </td>
+                    <td data-label="Situação">
+                      <span
+                        className={`badge ${g.tom}`}
+                        title={sb ? `Sem o backup de ${fmtDate(sb.agendado_em, { short: true })}` : undefined}
+                      >
+                        <span className={`dot ${g.tom}`} />
+                        {sb && g.nivel === 1 ? `Sem backup há ${fmtAtraso(sb.minutos_de_atraso)}` : g.rotulo}
+                      </span>
+                    </td>
+                    <td data-label={singular}>{m.customer_name || `Sem ${singularMin}`}</td>
+                    <td data-label="Comunicação">
+                      {m.active && m.is_online
+                        ? "Online"
+                        : m.active
+                          ? `Offline desde ${fmtDate(m.last_seen, { short: true, empty: "sempre" })}`
+                          : "Desativada"}
+                    </td>
+                    <td data-label="Último backup">
+                      <span className="celula-linha">
+                        {fmtDate(m.last_backup_at, { short: true, empty: "nunca" })}
+                        {m.last_backup_status && <StatusBadge status={m.last_backup_status} />}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="overview-grid">
-          {layout.visible.map((m) => {
+          {ordenadas.map((m) => {
             const span = layout.spanOf(m.id);
             const isDragging = dragId === m.id;
             const isTarget = dropAt?.targetId === m.id && dragId !== m.id;
@@ -420,6 +614,7 @@ export default function Overview() {
                   editing={editing}
                   onSpanChange={(s) => layout.setSpan(m.id, s)}
                   onHide={() => layout.hide(m.id)}
+                  semBackup={semBackup.get(m.id)}
                 />
               </div>
             );
