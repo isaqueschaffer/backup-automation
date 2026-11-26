@@ -16,8 +16,8 @@ except ImportError:
 # Configurações dos Bancos UNM2000
 IPS_PADRAO = ["192.168.31.5", "192.168.91.6"]
 DB_PORT    = 3306
-DB_USER    = "zabbix_reader"
-DB_PASS    = "Zabbix@2024"
+DB_USER    = os.environ.get("UNM_DB_USER", "zabbix_reader")
+DB_PASS    = os.environ.get("UNM_DB_PASS", "")  # senha fora do código (o repositório é espelhado em um público)
 DB_NAME    = "integratecfgdb"
 
 # Prefixos SNMP para FiberHome

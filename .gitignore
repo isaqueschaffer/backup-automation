@@ -39,6 +39,7 @@ id_rsa*
 id_ed25519*
 acesso*.md
 chave api*.md
+.credenciais/
 .pytest_cache/
 
 # Logs and databases
@@ -76,7 +77,9 @@ teste backup motorola/respostas_telemetria_*/
 
 # Cache de leitura das gravacoes do Digifort (gerado pelo agente)
 agent/cache_gravacoes_digifort_*.json
+agent/ferramentas/dist_ferramentas/
 agent/dist_ferramentas/
+agent/ferramentas/build_ferramentas/
 agent/build_ferramentas/
 
 # Imagem do container do Mikrotik: vai como anexo da release (57 MB; o push ao origin cai)

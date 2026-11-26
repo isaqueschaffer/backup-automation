@@ -26,9 +26,13 @@ com o agente) › **Equipamento**. Cada rota da API só enxerga a conta do usuá
 | `server/docker-compose.local.yml` | Ambiente local completo (nginx, API, painel, Postgres) |
 | `server/deploy_producao.ps1` | Leva o código para a produção (ver "Deploy") |
 | `agent/` | Agente Python: serviço Windows (`service.py`), ícone da bandeja (`tray.py`), versão Linux para o container do Mikrotik (`service_linux.py`). Testes em `agent/tests/` |
-| `tools/` | Scripts de apoio e testes manuais (ver `tools/README.md`) |
-| `archive/`, `legacy/` | Código antigo guardado só como referência |
-| `PROJECT_SPEC.md` | Especificação: regras (REGRA-xxx), decisões (ADR-xxx), rotas, variáveis e o histórico de mudanças |
+| `agent/ferramentas/` | Ferramentas avulsas do agente, fora do produto |
+| `tools/` | Diagnóstico, testes ponta a ponta e o verificador de regras do CI (ver `tools/README.md`) |
+| `archive/` | Material antigo, guardado só como referência (ver `archive/README.md`) |
+| `PROJECT_SPEC.md` | Especificação: regras (REGRA-xxx), decisões (ADR-xxx), banco, rotas e variáveis |
+| `docs/CHANGELOG.md` | Histórico de mudanças, mais recente primeiro |
+| `docs/CONVENCOES.md` | Glossário (conceito × código × tabela) e convenções de nomes e pastas: leia antes de mexer em modelos e rotas |
+| `.github/workflows/ci.yml` | CI: testes do agente e da API, tipos e build do painel, regras da auditoria de merge |
 | `CLAUDE.md`, `.agents/` | Instruções e skills das IAs que trabalham no projeto (Claude Code e Gemini) |
 
 ## Rodar localmente

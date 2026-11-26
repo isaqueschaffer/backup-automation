@@ -2,13 +2,17 @@
 igual fara o servico do Windows, so que mais rapido e enquanto este terminal ficar aberto. So para testar sem instalar
 o agente novo. Pare com Ctrl+C.
 
-Uso: python testar_olt_loop.py            (le a config do agent.conf desta pasta)
+Uso (na pasta agent/): python ferramentas/testar_olt_loop.py   (le a config do agent/agent.conf)
 """
+import os
 import sys
 import time
 from datetime import datetime
 
-sys.path.insert(0, ".")
+# Ferramenta fica em agent/ferramentas/ (desde 26/11/2026): importa o codigo e le o agent.conf de agent/
+PASTA_AGENTE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PASTA_AGENTE)
+os.chdir(PASTA_AGENTE)
 from src.application.api_client import fetch_server_config, send_status_olts
 from src.application.status_olt import coletar_status_olts
 from src.core.config import load_conf

@@ -1,5 +1,10 @@
 # Instruções do projeto
 
+Documentos de referência: `README.md` (visão geral), `PROJECT_SPEC.md` (estado atual: regras, ADRs, banco, rotas,
+variáveis), `docs/CHANGELOG.md` (histórico, entrada nova no topo) e `docs/CONVENCOES.md` (glossário conceito ×
+código × tabela, nomes e onde cada arquivo fica; ler antes de criar módulo, rota ou pasta). Credenciais locais das
+IAs ficam em `.credenciais/` (fora do git; ver `CLAUDE.local.md`).
+
 ## Skills e subagentes (Claude e Antigravity)
 
 Cada ferramenta tem a sua pasta, com cópias separadas (não há link entre elas; ao mudar uma skill de conteúdo comum, atualizar as duas):
@@ -56,7 +61,7 @@ Depois da release, informar os links e os hashes e esperar o usuário dizer "pub
 
 ## Checklist de uma nova versão do agente (fazer sempre, nesta ordem)
 
-1. Subir a versão nos três lugares (updater.py, installer.iss, package.json) e registrar no changelog do `PROJECT_SPEC.md`.
+1. Subir a versão nos três lugares (updater.py, installer.iss, package.json) e registrar no changelog (`docs/CHANGELOG.md`).
 2. Commit e push duplo (`origin isaque` e `isaque_repo isaque:integracao-equipamentos`). Se a rodada também mexeu em servidor ou painel (a versão do `package.json` conta: ela aparece no painel), rodar `./server/deploy_producao.ps1`; se só mexeu no agente, basta `git push isaque_repo isaque:producao` para manter `producao` igual a `isaque`.
 3. Gerar os executáveis: `agent/build.ps1` e depois `ISCC.exe installer.iss` (Inno Setup 7). Encerrar antes processos `TrilanAgent*` abertos.
 4. Calcular os SHA-256 de `TrilanAgentService.exe`, `TrilanAgentTray.exe`, `TrilanAgentSetup.exe` e `TrilanAgentLinux.tar.gz`.
@@ -75,13 +80,13 @@ O merge em `isaque` é o único portão da produção: o que está em `isaque` �
 3. Procurar data com fuso nas linhas adicionadas (REGRA-001): `git diff isaque...<ramo> | grep -nE '^\+.*(datetime\.now|timezone)'`.
 4. Procurar segredos nas linhas adicionadas (chaves `sk_trilan_`, senhas, tokens, credenciais de equipamentos).
 5. Isolamento por conta (REGRA-010): toda rota nova ou alterada em `server/api/routers` recebe `ctx` (`get_contexto`) e busca Cliente/Máquina por `obter_cliente`/`obter_maquina`/`filtrar_por_conta`; procurar `verify_admin_token` e `db.query(Customer|Machine|NVR|Backup)` sem filtro de conta nas linhas adicionadas: `git diff isaque...<ramo> -- server/api/routers | grep -nE '^\+.*(verify_admin_token|db\.query\((Customer|Machine|NVR|Backup)\))'`.
-6. Se algo violar uma REGRA ou o compose, resolver no merge (manter a versão de `isaque`) e registrar no changelog do `PROJECT_SPEC.md` o que foi incorporado e o que foi bloqueado.
+6. Se algo violar uma REGRA ou o compose, resolver no merge (manter a versão de `isaque`) e registrar no changelog (`docs/CHANGELOG.md`) o que foi incorporado e o que foi bloqueado.
 
 ### Pedido "faça um merge com a Helena" = merge + versão + build + release + cadastro (regra permanente, desde 29/10/2026)
 
 O usuário não quer pedir cada etapa de novo. Quando ele pedir o merge com a Helena (ou com outro colaborador) e o ramo trouxer mudança no agente, fazer a sequência inteira, sem perguntar entre as etapas:
 
-1. Auditar e fazer o merge (`git merge --no-ff isaque_repo/helena`, depois da auditoria acima), resolver conflitos mantendo os dois lados quando forem só texto/campos, e registrar o merge no changelog do `PROJECT_SPEC.md`.
+1. Auditar e fazer o merge (`git merge --no-ff isaque_repo/helena`, depois da auditoria acima), resolver conflitos mantendo os dois lados quando forem só texto/campos, e registrar o merge no changelog (`docs/CHANGELOG.md`).
 2. Se o ramo mexeu em `agent/`, subir a versão (três lugares) e seguir o "Checklist de uma nova versão do agente": commit e push duplo, `agent/build.ps1` + `ISCC.exe installer.iss`, SHA-256, release em `isaqueschaffer/backup-automation` com Service, Tray, Setup e Linux, conferência dos `digest`.
    - **Deploy:** se o merge trouxe mudança em `server/` (ou subiu a versão do `package.json`), rodar `./server/deploy_producao.ps1` depois do push duplo e confirmar que Backend e Frontend terminaram como `done`; se só trouxe `agent/`, só `git push isaque_repo isaque:producao`. Neste fluxo o pedido de merge já autoriza o deploy.
 3. **Cadastrar a versão no painel na mesma rodada** (`agent/publish_version.ps1`), sem esperar o "publique": neste fluxo o pedido de merge com a Helena já é a autorização. Depois conferir via `GET /api/v1/admin/agent-version` (login em `/api/v1/auth/login` com `{"password": ...}`) que links e hashes batem, e rodar o passo 8 do checklist (`agent/reiniciar_agentes.ps1`, reinício de todos os agentes).

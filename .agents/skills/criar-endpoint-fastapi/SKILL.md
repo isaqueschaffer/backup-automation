@@ -38,4 +38,4 @@ Não migrar para SQLModel, HTTPX, sessão async nem Alembic. A skill `fastapi` v
    - Horários de backup são calculados no servidor, não pelo relógio do agente (REGRA-005).
 5. **Dashboard** (quando a tela usa o endpoint): função em `server/dashboard/src/api/client.ts` (`api.get("/caminho").then(r => r.data)`; a base já inclui `/api/v1` e o interceptor manda o `X-Conta-ID` do super admin) e tipo em `src/api/types.ts`. As datas chegam naive em UTC: formatar com `fmtDate` (`src/utils/date.ts`). Texto "Cliente" na tela vem de `useRotulos()`; botão que altera dados fica oculto com `useSomenteLeitura()` (`contexts/AuthContext.tsx`).
 6. **Agente** (quando ele consome o endpoint): versões antigas continuam rodando até a OTA chegar. Campo novo deve ser opcional e o servidor deve tolerar a ausência dele.
-7. **PROJECT_SPEC.md**: tabela de endpoints (seção 8, "Contratos de API") e changelog (seção 16: data, alteração, arquivos, breaking change, branch).
+7. **PROJECT_SPEC.md**: tabela de endpoints (seção 8, "Contratos de API") e o changelog em `docs/CHANGELOG.md` (entrada nova no topo: data, alteração, arquivos, breaking change, branch).

@@ -2,7 +2,7 @@
 #
 # O Dokploy le o codigo do ramo `producao` do repositorio publico isaqueschaffer/backup-automation (fonte Git, sem
 # credencial) e NAO tem webhook: depois do push, este script dispara o deploy do Backend e/ou do Frontend pela API.
-# As credenciais do Dokploy vem do arquivo local `chave api dokploy.md` (raiz do repositorio, fora do git) e nunca sao
+# As credenciais do Dokploy vem do arquivo local `.credenciais/dokploy-painel.md` (fora do git) e nunca sao
 # exibidas. So o administrador do repositorio publico consegue atualizar `producao` (ruleset producao-somente-admin).
 #
 # Uso (na raiz do repositorio):
@@ -29,7 +29,7 @@ if (-not $SemPush) {
 }
 $commit = (git rev-parse --short isaque).Trim()
 
-$arq = Join-Path $raiz "chave api dokploy.md"
+$arq = Join-Path $raiz ".credenciais/dokploy-painel.md"
 if (-not (Test-Path $arq)) { throw "Arquivo local '$arq' nao encontrado (credenciais do Dokploy)." }
 $txt = Get-Content $arq -Raw -Encoding UTF8
 $email = [regex]::Match($txt, '\*\*E-mail / Usu[^|]*\|\s*`([^`]+)`').Groups[1].Value

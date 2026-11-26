@@ -49,4 +49,4 @@ O backup (`run_backup` em `src/application/backup_job.py`) busca os equipamentos
 - Dependência nova: `agent/requirements.txt`; se ela tiver arquivos de dados, `--collect-all <pacote>` no `build.ps1`.
 - Módulo importado só dentro de função (como `src.olt.huawei_active`): `--hidden-import src.<tipo>.<modulo>` no comando do `TrilanAgentService` em `build.ps1`, senão o PyInstaller não o inclui.
 - Versão nova do agente: checklist do `CLAUDE.md` (versão em 3 lugares, build, release no repositório público, cadastro no painel só com "publique").
-- Changelog no `PROJECT_SPEC.md`.
+- Changelog em `docs/CHANGELOG.md` (entrada nova no topo).

@@ -7,30 +7,33 @@ description: Concilia os backups dos clientes nas três pontas — API (registro
 
 Só do Claude (usa acesso SSH às máquinas; **não existe cópia para o Gemini** e nada daqui vai para plano do Gemini).
 
-## Arquitetura (verificada em 13/11/2026)
+## Arquitetura (atualizada em 26/11/2026; antes de 25/11 VM e OneDrive ficavam no C:)
 
 ```
 Agente (cliente) --HTTP--> API FastAPI (Dokploy, VM Linux 192.168.75.112)
    grava em /data/backups  ==  /opt/trilan/backups (bind mount)
    compartilhado por Samba: \\192.168.75.112\backups (usuário trilan)
-Servidor Windows 192.168.75.27 (host Hyper-V da VM "Ubuntu")
+Servidor Windows 192.168.75.27 (Windows Server 2016 build 14393, host Hyper-V da VM "Ubuntu")
    tarefa Trilan_Sync_Backups_OneDrive (de hora em hora, :30, usuário Administrator, logon interativo)
    C:\TrilanSync\sync_backups_onedrive.ps1 -> robocopy /E /XO (cópia, NÃO espelho)
-   destino: C:\Users\Administrator\OneDrive - Trilan\Arquivos de Admin - Backups Clientes
+   pasta do OneDrive: lida do registro (HKCU\Software\Microsoft\OneDrive\Accounts\Business1 UserFolder)
+   destino: D:\OneDrive - Trilan\Arquivos de Admin - Backups Clientes\Sistema - backups automaticos
+            (pastas manuais antigas ficam ao lado, em ...\Pastas antigas; o script não mexe nelas)
    log: C:\Users\Administrator\AppData\Local\Trilan\sync_backups.log
-   cliente OneDrive envia para a nuvem (só com a sessão do Administrator aberta)
+   cliente OneDrive 26.139 envia para a nuvem (só com a sessão do Administrator aberta)
 ```
 
 - A VM é **Hyper-V no próprio servidor Windows**: se o host cai, falta energia ou o disco do host enche, a API cai junto.
-- O VHDX da VM é dinâmico (`C:\Users\Public\Documents\Hyper-V\Virtual Hard Disks\Ubuntu.vhdx`, até 127 GB) e o arquivo de memória (`.VMRS`, ~6 GB) fica em `C:\ProgramData\Microsoft\Windows\Hyper-V`. Disco C: cheio no host = VM pausada ("Disk Full") e depois desligada.
+- Desde 25/11/2026 o VHDX (dinâmico, até 127 GB), a configuração e o arquivo de memória da VM ficam em `D:\Hyper-V\Ubuntu`. Disco cheio no host = VM pausada ("Disk Full"/"PausedCritical") e depois desligada. Não rodar cópias grandes no D: com a produção no ar: o disco da VM está nele e a VM para de responder.
+- **OneDrive no Server 2016:** não existe "Arquivos sob demanda" (falta o driver `cldflt`), então o OneDrive guarda cópia local de tudo e **apagar da pasta apaga da nuvem**. Só a versão **26.139.0720.0007** instala nesse Windows (as atuais exigem Windows 10 22H2); o instalador fica em `D:\Instaladores\OneDriveSetup_26.139_x64.exe`. Nunca usar instalador mais novo.
 - `robocopy /XO` não apaga nada na nuvem: renomeações/exclusões no Linux deixam sobras no OneDrive (esperado).
 - O Windows mostra os horários dos arquivos com +1 h em relação à VM (fuso/horário de verão do host); compare por nome e quantidade, não pelo minuto exato.
 
 ## Credenciais (nunca imprimir, nunca versionar)
 
-Ficam em arquivos da raiz **fora do git** (listados em `.git/info/exclude`):
-- Windows host: `acesso -ao-servidor-windows--vm.md` (usuário `administrator`).
-- VM Linux: `acesso-ao-servidor-da-aplicacao-vm-no-servidor-windows.md` (usuário `trilan`; o mesmo valor serve para `sudo -S`).
+Ficam na pasta `.credenciais/` da raiz, **fora do git** (ignorada pelo `.gitignore`):
+- Windows host: `.credenciais/servidor-windows-hyperv.md` (usuário `administrator`).
+- VM Linux: `.credenciais/vm-linux-dokploy.md` (usuário `trilan`; o mesmo valor serve para `sudo -S`).
 - API: senha em `CLAUDE.local.md` (login `POST https://server.suportetrilan.com.br/api/v1/auth/login` com `{"password": ...}` → `access_token`).
 
 Ler a senha **dentro do comando** (regex no .md), nunca exibir. Só leitura (GET/consultas) sem pedido do usuário; qualquer ação (disparar backup, mexer na VM, no disco, no script ou na tarefa) só com autorização.
@@ -60,7 +63,10 @@ ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o PreferredAuthent
    - Dias sem registro → ver logs da máquina: `GET /api/v1/machines/{id}/logs?limit=500&incluir_pings=false&q=BACKUP` (máx. 500, mais recentes primeiro; filtrar por `q` e `nivel=ERROR,WARNING`).
    - Sinal de servidor fora do ar: `INICIANDO BACKUP — SCHEDULED` seguido de `BACKUP FINALIZADO.` em ~20–30 s, sem "Backup concluido", e `Falha ao buscar config: ... ConnectTimeout/Read timed out`. O agente aborta sem ZIP e sem registro.
 2. **VM Linux (o que chegou):** por pasta de cliente em `/opt/trilan/backups`: nº de arquivos, `du -sm`, arquivo mais novo (`find -printf '%TY-%Tm-%Td_%TH:%TM'`). Mais `uptime -s`, `journalctl --list-boots`, fim do boot anterior (`sudo journalctl -b -1 -n 40`), `free -m`, `df -h`.
-3. **Windows / OneDrive (o que subiu):** a mesma contagem por pasta no destino; `Get-ScheduledTaskInfo Trilan_Sync_Backups_OneDrive`; últimas linhas e linhas `ERRO` do log; `Get-Process OneDrive`; `quser` (sessão do Administrator aberta?).
+3. **Windows / OneDrive (o que chegou na pasta):** a mesma contagem por pasta no destino; `Get-ScheduledTaskInfo Trilan_Sync_Backups_OneDrive`; últimas linhas e linhas `ERRO` do log; `Get-Process OneDrive`; `quser` (sessão do Administrator aberta?).
+   - **Estar na pasta não é estar na nuvem.** Para saber se subiu, ler `C:\Users\Administrator\AppData\Local\Microsoft\OneDrive\logs\Business1\SyncDiagnostics.log` (texto, regravado a cada poucos minutos): `numFileUploads`, `successfulBytesUploadedTotal`, `dailyCogsImpact ...|u:<bytes>|...|dur:604800` (envio dos últimos 7 dias), `FilesToUpload`, `FilesToDownload`/`BytesToDownload`, `bytesAvailableOnDiskDrive`, `scanState`, `drivesChangeEnumPending`, `placeholdersEnabled`, `uptimeSecs`. Chegaram arquivos novos e `u:0` = o OneDrive não está enviando.
+   - `placeholdersEnabled = 0` = "Arquivos sob demanda" desligado: o OneDrive quer baixar tudo da nuvem para o C:. Se `BytesToDownload` for maior que o espaço livre, ele trava, e se conseguir baixar enche o C: e a VM pausa (Disk Full).
+   - O `System.FilePlaceholderStatus` lido pelo Shell numa sessão SSH vem sempre 7 e não diz nada.
 4. **Host Hyper-V (quando a API ficou fora):**
    - Log `Microsoft-Windows-Hyper-V-Worker-Admin`: 12635/12636 = Disk Full; 18524 = VM pausada; 18528 = VM desligada; 3326/12030 = falha ao ligar por falta de espaço; 18500 = ligou.
    - Log System: 41/6008 = desligamento inesperado (energia/travamento); 6005 = boot.

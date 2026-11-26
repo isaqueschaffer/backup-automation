@@ -1,6 +1,7 @@
 ---
 name: find-skills
 description: Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill.
+origem: vercel-labs/skills (skills/find-skills/SKILL.md); instalada em 20/10/2026 pelo npx skills (sha256 b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf). O skills-lock.json que registrava isso foi removido em 26/11/2026; neste projeto skills novas entram sem npx skills (ver CLAUDE.md).
 ---
 
 # Find Skills

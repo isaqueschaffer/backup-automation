@@ -31,4 +31,4 @@ então só devolva o que o cliente pode ver (nada de IP, usuário, senha, `confi
 
 - Teste de isolamento: com dois clientes, o dashboard de A nunca traz máquina/equipamento de B (use `tools/teste_dashboards_e2e.py` e acrescente verificações do novo tipo).
 - A resposta pública não contém IP, credencial ou configuração interna.
-- `PROJECT_SPEC.md`: entrada no changelog (e rota/tabela, se mudou o contrato).
+- `docs/CHANGELOG.md`: entrada nova no topo; `PROJECT_SPEC.md` só se mudou rota/tabela (contrato).
