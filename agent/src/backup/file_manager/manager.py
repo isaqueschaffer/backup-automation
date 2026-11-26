@@ -252,7 +252,7 @@ class FileManager:
         data_agente = get_agent_date()
         is_huawei = isinstance(parser, HuaweiParser)
         
-        logging.info(f"  Data esperada: {data_agente.strftime('%d/%m/%Y')}")
+        logging.info(f"  Data esperada: {data_agente.strftime('%d/%m/%Y')} (ou backup das ultimas 24 h)")
         logging.info(f"  Data do backup mais recente: {grupo_recente.date.strftime('%d/%m/%Y')}")
 
         sucesso_validacao, status_validacao = Validator.validate_group_for_copy(grupo_recente, data_agente, is_huawei)

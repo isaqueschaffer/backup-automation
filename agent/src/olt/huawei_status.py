@@ -16,9 +16,12 @@ from datetime import datetime
 
 import paramiko
 
+from .huawei_sessao import OltOcupada, conectar_com_novas_tentativas, sessao_exclusiva
 from .unm_telnet import qualidade_sinal, resumir_onus
 
 PORTA_PADRAO = 22
+# A coleta roda a cada 5 min: uma nova tentativa basta (o "Testar conexao" usa a mesma funcao e nao deve demorar)
+TENTATIVAS_LOGIN_STATUS = 2
 TIMEOUT_CONEXAO_S = 20
 TIMEOUT_COMANDO_S = 20
 MAX_PORTA = 16
@@ -85,14 +88,25 @@ def parse_ont_summary(texto: str) -> dict:
     return {"frame": frame, "slot": slot, "porta": porta, "total": total, "online": online, "onts": onts}
 
 
-def _coletar(ip: str, usuario: str, senha: str, porta: int) -> dict:
+def abrir_ssh_huawei(ip: str, usuario: str, senha: str, porta: int, timeout: float = TIMEOUT_CONEXAO_S):
+    """Cliente SSH conectado na OLT (um cliente novo por tentativa; fecha o que falhou)."""
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    # OLTs Huawei antigas usam apenas o algoritmo ssh-rsa (SHA-1).
-    ssh.connect(
-        ip, port=porta, username=usuario, password=senha, timeout=TIMEOUT_CONEXAO_S,
-        look_for_keys=False, allow_agent=False, disabled_algorithms={"keys": [], "pubkeys": []},
-    )
+    try:
+        # OLTs Huawei antigas usam apenas o algoritmo ssh-rsa (SHA-1).
+        ssh.connect(
+            ip, port=porta, username=usuario, password=senha, timeout=timeout,
+            look_for_keys=False, allow_agent=False, disabled_algorithms={"keys": [], "pubkeys": []},
+        )
+    except Exception:
+        ssh.close()
+        raise
+    return ssh
+
+
+def _coletar(ip: str, usuario: str, senha: str, porta: int) -> dict:
+    ssh = conectar_com_novas_tentativas(
+        lambda: abrir_ssh_huawei(ip, usuario, senha, porta), f"Status de {ip}", tentativas=TENTATIVAS_LOGIN_STATUS)
     shell = ssh.invoke_shell()
     shell.settimeout(2.0)
 
@@ -175,6 +189,9 @@ def explicar_erro_ssh(e: Exception, ip: str = "", porta: int = PORTA_PADRAO) -> 
     bruto = (str(e) or e.__class__.__name__).strip()
     baixo = bruto.lower()
     alvo = f"{ip}:{porta}" if ip else "a OLT"
+    if isinstance(e, OltOcupada):
+        return (f"O agente já está com uma sessão aberta na OLT {alvo} (backup ou coleta de status) e ela não "
+                f"terminou a tempo. Tente de novo em alguns minutos. ({bruto})")
     if isinstance(e, (socket.timeout, TimeoutError)) or "timed out" in baixo:
         return f"A OLT {alvo} não respondeu a tempo. Confira o IP, a porta SSH e se ela está ligada e alcançável. ({bruto})"
     if isinstance(e, ConnectionRefusedError) or "refused" in baixo:
@@ -198,7 +215,8 @@ def explicar_erro_ssh(e: Exception, ip: str = "", porta: int = PORTA_PADRAO) -> 
 def coletar_huawei(ip: str, usuario: str, senha: str, porta: int = PORTA_PADRAO) -> dict:
     """Status das ONTs de uma OLT Huawei. Nunca levanta erro: em falha devolve {'ip', 'erro'}."""
     try:
-        return _coletar(ip, usuario, senha, porta)
+        with sessao_exclusiva(ip):
+            return _coletar(ip, usuario, senha, porta)
     except Exception as e:
         logging.warning(f"[HUAWEI] Falha ao consultar status de {ip}: {e}")
         return {"ip": ip, "erro": explicar_erro_ssh(e, ip, porta)}

@@ -3,12 +3,16 @@ import time
 import socket
 import logging
 import threading
+from contextlib import ExitStack
 from pathlib import Path
 from datetime import datetime
 import paramiko
 from pyftpdlib.authorizers import DummyAuthorizer
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
+
+from src.olt.huawei_sessao import conectar_com_novas_tentativas, sessao_exclusiva
+from src.olt.huawei_status import abrir_ssh_huawei, explicar_erro_ssh
 
 # Usaremos a porta 21 padrao, agora que o WFTPD sera desinstalado
 FTP_PORT = 21
@@ -92,9 +96,11 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
     ftp_thread.start()
     
     # ── CONECTAR VIA SSH NA OLT ───────────────────────────────────────
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    
+    # Uma sessao por vez do agente na OLT (coleta de status, teste e backup esperam um ao outro)
+    ssh = None
+    pilha = ExitStack()
+    porta = 22
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     cfg_filename = f"hw_config_{nome.lower()}_{timestamp}.txt"
     data_filename = f"hw_data_{nome.lower()}_{timestamp}.dat"
@@ -102,19 +108,12 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
     try:
         porta = equipamento.get("porta") or equipamento.get("port") or 22
         porta = int(porta)
+        pilha.enter_context(sessao_exclusiva(ip))
         logging.info(f"[HUAWEI] Conectando via SSH em {ip}:{porta} (usuario: {username})...")
-        
-        # OLTs Huawei antigas usam apenas o algoritmo ssh-rsa (SHA-1).
-        ssh.connect(
-            ip,
-            port=porta,
-            username=username,
-            password=password,
-            timeout=20,
-            look_for_keys=False,
-            allow_agent=False,
-            disabled_algorithms={"keys": [], "pubkeys": []},
-        )
+
+        # Repete o login so quando a OLT fecha a conexao sem avaliar a senha (sessoes ocupadas)
+        ssh = conectar_com_novas_tentativas(
+            lambda: abrir_ssh_huawei(ip, username, password, porta, timeout=20), f"Backup de {nome}")
         logging.info(f"[HUAWEI] Conexao SSH estabelecida com sucesso em {ip}:{porta}")
         
         shell = ssh.invoke_shell()
@@ -198,20 +197,23 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
             logging.error(f"[HUAWEI] Verifique se a OLT consegue alcançar {local_ip}:21")
             
     except paramiko.ssh_exception.AuthenticationException as e:
-        logging.error(f"[HUAWEI] FALHA DE AUTENTICACAO em {ip}:{porta} — Usuario ou senha incorretos.")
+        # Senha recusada ou OLT que fechou o login: a explicacao distingue os dois (antes tudo virava "senha incorreta")
+        logging.error(f"[HUAWEI] FALHA NO LOGIN em {ip}:{porta} — {explicar_erro_ssh(e, ip, porta)}")
     except paramiko.ssh_exception.SSHException as e:
-        logging.error(f"[HUAWEI] FALHA SSH em {ip}:{porta} — {e}")
+        logging.error(f"[HUAWEI] FALHA SSH em {ip}:{porta} — {explicar_erro_ssh(e, ip, porta)}")
     except TimeoutError as e:
-        logging.error(f"[HUAWEI] TIMEOUT — A OLT nao respondeu a tempo: {e}")
+        logging.error(f"[HUAWEI] TIMEOUT — {explicar_erro_ssh(e, ip, porta)}")
     except ConnectionRefusedError:
         logging.error(f"[HUAWEI] CONEXAO RECUSADA — A OLT {ip}:{porta} recusou a conexao SSH.")
     except Exception as e:
         logging.error(f"[HUAWEI] ERRO INESPERADO em {ip}:{porta}: {type(e).__name__}: {e}")
     finally:
         try:
-            ssh.close()
+            if ssh is not None:
+                ssh.close()
         except Exception:
             pass
+        pilha.close()  # libera a OLT para a coleta de status / outro backup
         logging.info("[HUAWEI] Desligando servidor FTP temporario...")
         server.close_all()
             

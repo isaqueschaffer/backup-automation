@@ -100,11 +100,19 @@ def preparar_backup_huawei_texto(equipamento: dict, limite_memoria: int) -> dict
     except (TypeError, ValueError):
         porta = 22
 
+    from contextlib import ExitStack
+    from src.olt.huawei_sessao import conectar_com_novas_tentativas, sessao_exclusiva
+    from src.olt.huawei_status import explicar_erro_ssh
+
     ssh = None
+    pilha = ExitStack()
     try:
+        pilha.enter_context(sessao_exclusiva(ip))  # uma sessao por vez do agente na OLT (status, teste, backup)
         logging.info(f"[HUAWEI] Conectando via SSH em {ip}:{porta} (usuario: {usuario})...")
-        ssh = abrir_ssh(ip, porta, usuario, senha, None, cfg.get("ssh_fingerprint") or None,
-                        disabled_algorithms={"keys": [], "pubkeys": []})
+        ssh = conectar_com_novas_tentativas(
+            lambda: abrir_ssh(ip, porta, usuario, senha, None, cfg.get("ssh_fingerprint") or None,
+                              disabled_algorithms={"keys": [], "pubkeys": []}),
+            f"Backup de {nome}")
         shell = ssh.invoke_shell(width=200, height=500)
         shell.settimeout(15)
 
@@ -143,13 +151,14 @@ def preparar_backup_huawei_texto(equipamento: dict, limite_memoria: int) -> dict
     except ErroSftp as e:
         logging.error(f"[HUAWEI] {nome}: {e}")
     except TimeoutError as e:
-        logging.error(f"[HUAWEI] TIMEOUT — A OLT nao respondeu a tempo: {e}")
+        logging.error(f"[HUAWEI] TIMEOUT — {explicar_erro_ssh(e, ip, porta)}")
     except Exception as e:
-        logging.error(f"[HUAWEI] ERRO INESPERADO em {ip}:{porta}: {type(e).__name__}: {e}")
+        logging.error(f"[HUAWEI] FALHA em {ip}:{porta}: {explicar_erro_ssh(e, ip, porta)}")
     finally:
         try:
             if ssh is not None:
                 ssh.close()
         except Exception:
             pass
+        pilha.close()
     return erro
