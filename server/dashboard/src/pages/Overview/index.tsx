@@ -185,7 +185,7 @@ export default function Overview() {
         </div>
         <div className="flex gap-2">
           <button
-            className={editing ? "btn btn-primary" : "btn btn-secondary"}
+            className={`${editing ? "btn btn-primary" : "btn btn-secondary"} so-computador`}
             onClick={() => setEditing(!editing)}
           >
             {editing ? (
@@ -198,10 +198,10 @@ export default function Overview() {
               </>
             )}
           </button>
-          <button className="btn btn-secondary" onClick={() => navigate("/clientes")}>
+          <button className="btn btn-secondary so-computador" onClick={() => navigate("/clientes")}>
             <Users size={15} /> {plural}
           </button>
-          <button className="btn btn-primary" onClick={() => navigate("/maquinas")}>
+          <button className="btn btn-primary so-computador" onClick={() => navigate("/maquinas")}>
             <Server size={15} /> Máquinas
           </button>
         </div>

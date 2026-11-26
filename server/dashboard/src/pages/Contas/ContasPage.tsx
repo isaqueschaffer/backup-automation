@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Building2,
   Calendar,
@@ -28,6 +28,7 @@ import { useConfirm } from "../../components/ConfirmDialog";
 import { useAuth } from "../../contexts/AuthContext";
 import { fmtDate } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
+import { lerFiltro, useFiltrosNaUrl } from "../../utils/filtrosNaUrl";
 import { StatusContaBadge, TIPO_CONTA_LABEL, textoValidade } from "./contaUi";
 import ContaFormModal from "./ContaFormModal";
 import PlanosModal from "./PlanosModal";
@@ -338,13 +339,22 @@ export default function ContasPage() {
   const [savingNovo, setSavingNovo] = useState(false);
 
   // Filtros
-  const [busca, setBusca] = useState("");
+  // Também no endereço da página (link compartilhável; voltar não perde o filtro)
+  const [searchParams] = useSearchParams();
+  const [busca, setBusca] = useState(() => lerFiltro(searchParams, "q"));
   const [situacaoFilter, setSituacaoFilter] = useState<
     "TODAS" | "EM_DIA" | "VENCENDO" | "BLOQUEADAS"
-  >("TODAS");
+  >(() => {
+    const v = lerFiltro(searchParams, "situacao", "TODAS");
+    return v === "EM_DIA" || v === "VENCENDO" || v === "BLOQUEADAS" ? v : "TODAS";
+  });
   const [tipoFilter, setTipoFilter] = useState<
     "TODOS" | "INTEGRADOR" | "CLIENTE_FINAL"
-  >("TODOS");
+  >(() => {
+    const v = lerFiltro(searchParams, "tipo", "TODOS");
+    return v === "INTEGRADOR" || v === "CLIENTE_FINAL" ? v : "TODOS";
+  });
+  useFiltrosNaUrl({ q: busca.trim(), situacao: situacaoFilter, tipo: tipoFilter }, { situacao: "TODAS", tipo: "TODOS" });
 
   const loadDados = useCallback(async () => {
     try {

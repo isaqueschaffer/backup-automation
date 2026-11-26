@@ -9,6 +9,13 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Painel: celular com o essencial na primeira tela e filtros das listas no endereço da página
+
+- **Problema** (revisão de experiência do painel, itens 8 e 9): no celular, a primeira tela da Visão Geral só tinha o aviso da conta, os botões e os números um embaixo do outro; em Backups e Auditoria os filtros ocupavam a tela inteira. Só a página Backups guardava os filtros na URL: não dava para mandar o link de uma lista filtrada nem voltar de um detalhe sem perder o filtro.
+- **Celular**: os números da Visão Geral ficam em duas colunas, mais baixos e sem os enfeites; os botões Personalizar, Clientes e Máquinas somem (os dois últimos já estão no menu), então a lista de problemas aparece logo. Em Backups e Auditoria os filtros ficam atrás do botão "Filtros (n)", que mostra quantos estão ativos (componente novo `components/FiltrosRecolhiveis.tsx`).
+- **Filtros na URL**: novo `utils/filtrosNaUrl.ts` (`lerFiltro` + `useFiltrosNaUrl`, grava com `replace` para não encher o histórico). Máquinas (`?cliente=`), Auditoria (`cliente`, `maquina`, `usuario`, `q`, `de`, `ate`) e Contas (`q`, `situacao`, `tipo`) leem e gravam os filtros; Backups já fazia desde a rodada da Visão Geral.
+- **Conferido** com o painel local apontando para a API de produção: em 390 px, Visão Geral, Backups (`?status=PARTIAL` mostra "Filtros 1") e Auditoria; no computador, Auditoria e Contas abrem com os filtros da URL e Máquinas mantém o cliente escolhido depois de recarregar. Só painel (sem API nem agente; versão continua 1.1.70).
+
 ### [2026-11-26] — Painel: termos do dia a dia no lugar do jargão e Configurações enxuta
 
 - **Problema** (revisão de experiência do painel, itens 6 e 7): textos com jargão ("API Key", "Client ID", "Mover de conta", "ping", "Teste RTSP", "Status RTSP", "Telemetria") e Configurações misturando tudo, com campos sem rótulo ligado, carregamento que travava no indicador se a API falhasse e o botão Salvar sempre ativo.

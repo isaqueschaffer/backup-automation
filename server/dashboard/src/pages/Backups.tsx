@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchBackups, fetchMachines, fetchCustomers, resendBackupEmail, downloadBackupZip, BackupQuery } from "../api/client";
 import { Backup, Customer, Machine, NVRResult, PaginatedBackups } from "../api/types";
 import Modal from "../components/Modal";
+import FiltrosRecolhiveis from "../components/FiltrosRecolhiveis";
 import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
 import { fmtDate, localDateStr } from "../utils/date";
@@ -231,8 +232,8 @@ export default function Backups() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="filters-bar" style={{ flexWrap: "wrap" }}>
+      {/* Filtros (no celular, atrás do botão "Filtros") */}
+      <FiltrosRecolhiveis ativos={[customerFilter, machineFilter, statusFilter].filter(Boolean).length + (dateFrom !== today ? 1 : 0) + (dateTo !== today ? 1 : 0)}>
         <select
           className="form-input"
           value={customerFilter}
@@ -287,7 +288,7 @@ export default function Backups() {
         <button className="btn btn-primary" onClick={() => load()}>
           <Search size={14} style={{ flexShrink: 0 }} /> Buscar
         </button>
-      </div>
+      </FiltrosRecolhiveis>
 
       {loading ? (
         <div className="loading-state"><div className="spinner" /></div>

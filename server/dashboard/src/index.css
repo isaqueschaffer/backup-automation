@@ -1210,3 +1210,24 @@ body.dash-arrastando * { cursor: grabbing !important; }
 }
 .detalhes-tecnicos > summary:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; border-radius: 4px; }
 .detalhes-tecnicos[open] > summary { margin-bottom: 10px; }
+
+/* ── Celular (revisão de 26/11/2026, item 8) ─────────────── */
+.filtros-botao { display: none; }
+.filtros-contagem {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+}
+@media (max-width: 768px) {
+  .filtros-botao { display: inline-flex; width: 100%; justify-content: center; margin-bottom: 12px; }
+  .filtros-recolhiveis:not(.aberto) > .filters-bar { display: none; }
+  /* Visão Geral: Clientes e Máquinas já estão no menu; os números ficam em duas colunas, mais baixos */
+  .so-computador { display: none !important; }
+}
+@media (max-width: 480px) {
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .stats-grid .stat-card { padding: 12px 14px; }
+  .stats-grid .stat-label { font-size: 10px; letter-spacing: 0.04em; margin-bottom: 6px; }
+  .stats-grid .stat-value { font-size: 24px; }
+  .stats-grid .stat-icon, .stats-grid .stat-card::after { display: none; }
+}

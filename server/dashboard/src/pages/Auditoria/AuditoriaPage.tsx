@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Search } from "lucide-react";
 import { AuditoriaQuery, fetchAuditoria, fetchCustomers, fetchMachines, fetchUsuariosAuditoria } from "../../api/client";
 import { Customer, Machine, PaginatedAuditoria, UsuarioAuditoriaOpcao } from "../../api/types";
 import { useToast } from "../../components/Toast";
 import { useRotulos } from "../../contexts/AuthContext";
 import { fmtDate } from "../../utils/date";
+import { lerFiltro, useFiltrosNaUrl } from "../../utils/filtrosNaUrl";
+import FiltrosRecolhiveis from "../../components/FiltrosRecolhiveis";
 
 // Auditoria: quem alterou o quê no painel (equipamentos, câmeras, máquinas, comandos de alarme...).
 // Os mesmos eventos aparecem em "Eventos do Agente" de cada máquina; aqui ficam juntos, com filtros.
@@ -20,13 +22,21 @@ export default function AuditoriaPage() {
   const loadSeq = useRef(0);
 
   const [page, setPage] = useState(1);
-  const [customerFilter, setCustomerFilter] = useState("");
-  const [machineFilter, setMachineFilter] = useState("");
-  const [usuarioFilter, setUsuarioFilter] = useState("");
-  const [busca, setBusca] = useState("");
-  const [buscaAplicada, setBuscaAplicada] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // Filtros também no endereço da página (link compartilhável; voltar não perde o filtro)
+  const [searchParams] = useSearchParams();
+  const [customerFilter, setCustomerFilter] = useState(() => lerFiltro(searchParams, "cliente"));
+  const [machineFilter, setMachineFilter] = useState(() => lerFiltro(searchParams, "maquina"));
+  const [usuarioFilter, setUsuarioFilter] = useState(() => lerFiltro(searchParams, "usuario"));
+  const [busca, setBusca] = useState(() => lerFiltro(searchParams, "q"));
+  const [buscaAplicada, setBuscaAplicada] = useState(() => lerFiltro(searchParams, "q"));
+  const [dateFrom, setDateFrom] = useState(() => lerFiltro(searchParams, "de"));
+  const [dateTo, setDateTo] = useState(() => lerFiltro(searchParams, "ate"));
+  useFiltrosNaUrl({
+    cliente: customerFilter, maquina: machineFilter, usuario: usuarioFilter, q: buscaAplicada.trim(),
+    de: dateFrom, ate: dateTo,
+  });
+  const filtrosAtivos = [customerFilter, machineFilter, usuarioFilter, buscaAplicada.trim(), dateFrom, dateTo]
+    .filter(Boolean).length;
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -81,7 +91,7 @@ export default function AuditoriaPage() {
         </div>
       </div>
 
-      <div className="filters-bar" style={{ flexWrap: "wrap" }}>
+      <FiltrosRecolhiveis ativos={filtrosAtivos}>
         <select
           className="form-input"
           value={customerFilter}
@@ -144,7 +154,7 @@ export default function AuditoriaPage() {
         <button className="btn btn-primary" onClick={aplicarBusca}>
           <Search size={14} style={{ flexShrink: 0 }} /> Buscar
         </button>
-      </div>
+      </FiltrosRecolhiveis>
 
       {loading ? (
         <div className="loading-state"><div className="spinner" /></div>

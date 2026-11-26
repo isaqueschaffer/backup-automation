@@ -1,6 +1,6 @@
 import { useAutoAtualizar } from "../../utils/useAutoAtualizar";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   fetchMachines, fetchCustomers, createMachine, deleteMachine, restartAgentAll, triggerBackupAll,
 } from "../../api/client";
@@ -10,6 +10,7 @@ import { useToast } from "../../components/Toast";
 import { useConfirm } from "../../components/ConfirmDialog";
 import { fmtDate, fmtSchedule } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
+import { lerFiltro, useFiltrosNaUrl } from "../../utils/filtrosNaUrl";
 import { Plus, Trash2, Eye, RotateCcw, Play } from "lucide-react";
 import MenuAcoes from "../../components/MenuAcoes";
 import NewMachineModal, { NewMachineForm } from "./components/NewMachineModal";
@@ -25,7 +26,9 @@ export default function MachinesPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [customerFilter, setCustomerFilter] = useState(""); // "" = todos
+  const [searchParams] = useSearchParams();
+  const [customerFilter, setCustomerFilter] = useState(() => lerFiltro(searchParams, "cliente")); // "" = todos
+  useFiltrosNaUrl({ cliente: customerFilter });
   const [showCreate, setShowCreate] = useState(false);
   const [newKey, setNewKey] = useState<{ id: string; name: string; api_key: string } | null>(null);
   const [saving, setSaving] = useState(false);
