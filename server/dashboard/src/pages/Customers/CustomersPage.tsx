@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { fetchCustomers, createCustomer, deleteCustomer } from "../../api/client";
 import { Customer } from "../../api/types";
 import { useToast } from "../../components/Toast";
@@ -124,7 +124,8 @@ export default function CustomersPage() {
                 <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/clientes/${c.id}`)}>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{c.name}</span>
+                      <Link to={`/clientes/${c.id}`} onClick={e => e.stopPropagation()}
+                        style={{ fontWeight: 600, color: "var(--text-primary)" }}>{c.name}</Link>
                       {c.queue_active && <QueueBadge />}
                     </div>
                     {c.description && <div className="text-xs text-muted" style={{ marginTop: 2 }}>{c.description}</div>}

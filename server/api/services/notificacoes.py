@@ -7,12 +7,12 @@ from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from models import ConfiguracaoNotificacao, Conta, Machine, NotificacaoPersonalizada, NVR, Notificacao, Usuario
 from services.email_service import _clean_recipients
 from database import encerrar_transacao
-from services.camera_offline import formatar_offline_ha, segundos_offline
+from services.camera_offline import formatar_offline_ha, opcoes_cameras_sem_fotos, segundos_offline
 from services.datas import para_utc_naive
 from services.email_service import _smtp_config, _smtp_send
 from services.galeria_vms import status_por_camera
@@ -252,9 +252,10 @@ def verificar_cameras_offline(db: Session, agora: Optional[datetime] = None) -> 
     agora = agora or datetime.utcnow()
     limite_s = LIMIAR_CAMERA_OFFLINE_MIN * 60
     enviados = 0
+    # Sem as fotos das câmeras (base64 grande): aqui só importam nome, canal, pasta e a marcação de notificar
     nvrs = db.query(NVR).join(Machine, NVR.machine_id == Machine.id).filter(
         NVR.tipo.in_(("NVR", "DIGIFORT", "DEFENSE")), NVR.active == True, Machine.active == True
-    ).all()
+    ).options(*opcoes_cameras_sem_fotos(), selectinload(NVR.machine)).all()
     for nvr in nvrs:
         try:
             cameras = list(nvr.cameras_status)

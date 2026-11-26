@@ -209,3 +209,16 @@ def segundos_offline(st: dict, agora: datetime) -> Tuple[Optional[int], bool]:
         return seg, aprox
 
     return None, False
+
+
+def opcoes_cameras_sem_fotos() -> tuple:
+    """Opções de consulta de NVR que trazem as câmeras (`cameras_status`) numa consulta só e SEM as fotos de
+    referência e da noite (base64 de centenas de kB cada). Para listas e verificações que não mostram a foto;
+    se alguém ler a foto depois, ela vem sob demanda daquela câmera."""
+    from sqlalchemy.orm import selectinload
+
+    from models import NVR, NVRCamera
+
+    return (
+        selectinload(NVR.cameras_status).defer(NVRCamera.perfect_image_base64).defer(NVRCamera.night_image_base64),
+    )

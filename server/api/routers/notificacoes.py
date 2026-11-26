@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from auth import Contexto, exigir_admin_conta, get_contexto
 from database import get_db
@@ -27,7 +27,7 @@ from schemas import (
     NotificacaoPersonalizadaUpdate,
     NotificacaoResponse,
 )
-from services.camera_offline import segundos_offline
+from services.camera_offline import opcoes_cameras_sem_fotos, segundos_offline
 from services.escopo import filtrar_maquinas, filtrar_por_conta
 from services.galeria_vms import status_por_camera
 from services.notificacoes import TIPOS, id_central, verificar_alarmes_equipamento, verificar_olt_equipamento
@@ -126,6 +126,9 @@ def listar_cameras_notificacao(
     consulta = filtrar_maquinas(filtrar_por_conta(consulta, Machine.conta_id, ctx), Machine.id, ctx)
     agora = datetime.utcnow()
     saida = []
+    # Câmeras e máquinas numa consulta só e SEM as fotos (base64 de centenas de kB por câmera): antes cada
+    # equipamento buscava as câmeras com as fotos e a tela Notificações levava mais de 30 s (26/11/2026)
+    consulta = consulta.options(*opcoes_cameras_sem_fotos(), selectinload(NVR.machine))
     for nvr in consulta.order_by(Machine.name, NVR.name).all():
         cameras = list(nvr.cameras_status)
         if not cameras:

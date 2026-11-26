@@ -22,6 +22,7 @@ import {
 import CameraImagePanel from "./CameraImagePanel";
 import PlanilhaVmsModal from "./PlanilhaVmsModal";
 import { useCelular } from "../../../../utils/useCelular";
+import { propsClicavel } from "../../../../utils/clicavel";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // arquivo original
 const MAX_LADO = 3840; // reduz imagens maiores que 4K
@@ -694,7 +695,8 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                     const isSelected = selectedCanal === cam.canal;
                     const capturando = ocupado?.canal === cam.canal;
                     return (
-                      <div key={cam.canal} onClick={() => { setSelectedCanal(cam.canal); setDetalheCelular(true); }}
+                      <div key={cam.canal} {...propsClicavel(() => { setSelectedCanal(cam.canal); setDetalheCelular(true); })}
+                        aria-current={isSelected ? "true" : undefined}
                         style={{
                           padding: "10px 14px", cursor: "pointer", display: "flex", gap: 10,
                           background: isSelected ? "var(--primary-light)" : "transparent",

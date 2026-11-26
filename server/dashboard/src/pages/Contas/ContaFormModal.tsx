@@ -159,7 +159,7 @@ export default function ContaFormModal({
                 display: "flex",
                 flexDirection: "column",
                 gap: 4,
-                transition: "all 0.15s ease",
+                transition: "background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease",
               }}
             >
               <div
@@ -204,7 +204,7 @@ export default function ContaFormModal({
                 display: "flex",
                 flexDirection: "column",
                 gap: 4,
-                transition: "all 0.15s ease",
+                transition: "background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease",
               }}
             >
               <div

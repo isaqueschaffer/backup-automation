@@ -43,6 +43,9 @@
   --sidebar-w: 240px;
   --header-h: 64px;
   --transition: 0.2s ease;
+  /* Só o que muda no hover/foco (em vez de "all", que anima até largura e altura e pesa na rolagem) */
+  --transicao-padrao: background-color var(--transition), color var(--transition), border-color var(--transition),
+    box-shadow var(--transition), transform var(--transition), opacity var(--transition);
 
   /* Aliases (nomes usados em estilos inline) */
   --primary:       var(--accent);
@@ -176,7 +179,7 @@ img { max-width: 100%; }
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 13.5px; font-weight: 500;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
   margin-bottom: 2px;
   position: relative;
 }
@@ -212,7 +215,7 @@ img { max-width: 100%; }
   border-radius: var(--radius-sm);
   color: var(--err);
   font-size: 13.5px; font-weight: 500;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
   width: 100%;
   background: none; border: none;
 }
@@ -258,7 +261,7 @@ img { max-width: 100%; }
 /* ── Stat cards ───────────────────────────────────────── */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); /* os 6 números da Visão Geral numa linha */
   gap: 16px;
   margin-bottom: 28px;
 }
@@ -337,7 +340,7 @@ button.stat-card:focus-visible { outline: 2px solid var(--accent-light); outline
   border-radius: var(--radius-lg);
   padding: 20px;
   cursor: pointer;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
   position: relative;
   overflow: hidden;
 }
@@ -428,7 +431,7 @@ button.stat-card:focus-visible { outline: 2px solid var(--accent-light); outline
   border-radius: var(--radius-sm);
   font-size: 13.5px; font-weight: 600;
   border: none;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
   white-space: nowrap;
 }
 
@@ -486,7 +489,7 @@ button.stat-card:focus-visible { outline: 2px solid var(--accent-light); outline
   background: var(--bg-elevated);
   color: var(--text-secondary);
   border: 1px solid var(--border);
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
 }
 
 .btn-icon:hover {
@@ -807,7 +810,7 @@ tbody td {
   border: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 13px; font-weight: 500;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
 }
 
 .page-btn:hover:not(:disabled) {
@@ -1230,4 +1233,20 @@ body.dash-arrastando * { cursor: grabbing !important; }
   .stats-grid .stat-label { font-size: 10px; letter-spacing: 0.04em; margin-bottom: 6px; }
   .stats-grid .stat-value { font-size: 24px; }
   .stats-grid .stat-icon, .stats-grid .stat-card::after { display: none; }
+}
+
+/* ── Acessibilidade (revisão de 26/11/2026, item 10) ─────── */
+/* Foco visível em tudo que se alcança pelo Tab (antes só alguns botões tinham). Campos de formulário já
+   mostram o foco pela borda (.form-input:focus). */
+:where(a, button, summary, [role="button"], [role="link"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+:where(input[type="checkbox"], input[type="radio"]):focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+/* Quem pede menos movimento no sistema não vê animações nem transições */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+  }
 }

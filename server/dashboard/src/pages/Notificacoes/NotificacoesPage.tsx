@@ -85,6 +85,8 @@ export default function NotificacoesPage() {
   // chaves "camera:<máquina>" e "alarme:<máquina>": cada card abre e fecha as suas máquinas
   const [maquinasAbertas, setMaquinasAbertas] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  // A lista de câmeras é a parte mais pesada: chega à parte e não segura o resto da tela
+  const [carregandoCameras, setCarregandoCameras] = useState(true);
   const [salvando, setSalvando] = useState<TipoNotificacao | string | null>(null);
   const [formAberto, setFormAberto] = useState<"nova" | NotificacaoPersonalizada | null>(null);
 
@@ -92,12 +94,16 @@ export default function NotificacoesPage() {
   const carregar = useCallback((silencioso = false) => {
     if (!silencioso) setLoading(true);
     Promise.all([
-      fetchNotificacoes(true), fetchConfigNotificacoes(), fetchNotificacoesPersonalizadas(), fetchCamerasNotificacao(),
+      fetchNotificacoes(true), fetchConfigNotificacoes(), fetchNotificacoesPersonalizadas(),
       fetchAlarmesNotificacao(), fetchOltsNotificacao(),
     ])
-      .then(([n, c, p, cam, alm, olt]) => { setAbertas(n); setConfig(c); setPersonalizadas(p); setCameras(cam); setAlarmes(alm); setOlts(olt); })
+      .then(([n, c, p, alm, olt]) => { setAbertas(n); setConfig(c); setPersonalizadas(p); setAlarmes(alm); setOlts(olt); })
       .catch(() => { if (!silencioso) toast("Erro ao carregar notificações.", "error"); })
       .finally(() => setLoading(false));
+    fetchCamerasNotificacao()
+      .then(setCameras)
+      .catch(() => { if (!silencioso) toast("Erro ao carregar as câmeras.", "error"); })
+      .finally(() => setCarregandoCameras(false));
   }, [toast]);
 
   useEffect(() => { carregar(); }, [carregar]);
@@ -327,7 +333,11 @@ export default function NotificacoesPage() {
           <p className="text-sm text-muted" style={{ marginBottom: 10 }}>
             Escolha quais câmeras devem avisar quando ficarem offline por mais de 15 minutos. Câmeras novas começam desativadas.
           </p>
-          {cameraPorMaquina.length === 0 ? (
+          {carregandoCameras && cameraPorMaquina.length === 0 ? (
+            <div className="text-sm text-muted" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="spinner spinner-sm" /> Carregando as câmeras...
+            </div>
+          ) : cameraPorMaquina.length === 0 ? (
             <p className="text-sm text-muted">Nenhum equipamento com câmeras cadastradas.</p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

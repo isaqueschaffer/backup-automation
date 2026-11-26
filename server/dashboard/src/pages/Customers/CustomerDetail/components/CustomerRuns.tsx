@@ -11,6 +11,7 @@ import { extractBlobError } from "../../../../utils/download";
 import { apiErrorMessage } from "../../../../utils/errors";
 import { isRunOpen, runTriggerLabel, runZipFilename } from "../runUtils";
 import { useRotulos } from "../../../../contexts/AuthContext";
+import { propsClicavel } from "../../../../utils/clicavel";
 
 // Rodadas de backup do cliente: cada rodada agrupa os backups das máquinas e gera 1 e-mail.
 // A lista vem do polling da tela (index.tsx); onChanged pede um recarregamento após uma ação.
@@ -131,7 +132,7 @@ export default function CustomerRuns({
                 >
                   {/* Linha de cabeçalho da rodada */}
                   <div
-                    onClick={open ? undefined : () => toggleExpand(run.id)}
+                    {...(open ? {} : { ...propsClicavel(() => toggleExpand(run.id)), "aria-expanded": isExpanded })}
                     className="rodada-linha"
                     style={{
                       display: "grid",

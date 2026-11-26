@@ -25,6 +25,7 @@ import { useRotulos } from "../../contexts/AuthContext";
 import StatusBadge from "../../components/StatusBadge";
 import { fmtDate } from "../../utils/date";
 import { fmtAtraso, gravidadeDa, useVista } from "./gravidade";
+import { propsClicavel } from "../../utils/clicavel";
 
 export default function Overview() {
   const { plural, singular, singularMin } = useRotulos();
@@ -569,9 +570,7 @@ export default function Overview() {
                 onDragOver={(e) => onDragOver(e, m.id, span)}
                 onDrop={onDrop}
                 onDragEnd={onDragEnd}
-                onClick={() => {
-                  if (!editing) navigate(`/maquinas/${m.id}`);
-                }}
+                {...(editing ? {} : propsClicavel(() => navigate(`/maquinas/${m.id}`), "link"))}
               >
                 {/* Indicador de destino */}
                 {isTarget && (

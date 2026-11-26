@@ -1,5 +1,4 @@
 import { useRef, useState } from "react";
-import * as XLSX from "xlsx";
 import { createEquipamento, deleteEquipamento } from "../../../../api/client";
 import { NVR } from "../../../../api/types";
 import { ToastFn } from "../utils";
@@ -419,7 +418,7 @@ export function readRowsFromFile(file: File): Promise<unknown[][]> {
   return new Promise((resolve, reject) => {
     const isCsv = file.name.toLowerCase().endsWith(".csv");
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         if (isCsv) {
           const buf = new Uint8Array(evt.target?.result as ArrayBuffer);
@@ -432,6 +431,8 @@ export function readRowsFromFile(file: File): Promise<unknown[][]> {
           resolve(parseCsv(text));
         } else {
           const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+          // xlsx (~400 kB) só é baixado quando alguém importa uma planilha Excel
+          const XLSX = await import("xlsx");
           const workbook = XLSX.read(data, { type: "array" });
           const planilhas = workbook.SheetNames.map(
             nome => XLSX.utils.sheet_to_json(workbook.Sheets[nome], { header: 1 }) as unknown[][]

@@ -9,6 +9,14 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Painel: acessibilidade (rótulos, foco, teclado, movimento) e carregamento mais rápido (Notificações e pacote dividido)
+
+- **Problema** (revisão de experiência do painel, item 10): 112 rótulos sem ligação com o campo; áreas clicáveis que não eram botão nem link (fora do alcance do teclado); foco visível em uma regra só; 6 `transition: all`; telas levando 3 a 5 s; Notificações com mais de 4 s só no indicador. Medido em produção: `GET /notificacoes/cameras` levava ~32 s porque buscava as câmeras de cada equipamento uma a uma **com as fotos** (base64 de centenas de kB cada); o painel era um arquivo JavaScript único de 1,1 MB.
+- **API**: `services/camera_offline.opcoes_cameras_sem_fotos()` (câmeras numa consulta só, sem as colunas de foto) usado em `GET /notificacoes/cameras` (com a máquina junto) e na verificação periódica de câmera offline (`services/notificacoes.py`), que fazia o mesmo a cada ciclo.
+- **Painel**: telas carregadas sob demanda com `React.lazy` (o arquivo inicial caiu de 1,1 MB para ~310 kB; 98 kB comprimido) e a biblioteca de Excel (`xlsx`, ~430 kB) só baixa ao importar uma planilha; Notificações mostra a tela assim que o resto chega e as câmeras chegam à parte ("Carregando as câmeras...").
+- **Acessibilidade**: `utils/rotulosCampos.ts` liga sozinho rótulo e campo quando o grupo tem um de cada (mesmo esquema do `tabelaCartoes.ts`; ligado em `main.tsx`, vale para login e modais); foco visível em tudo que se alcança pelo Tab; `utils/clicavel.ts` (`propsClicavel`) dá foco e Enter/Espaço às áreas clicáveis (cards da Visão Geral, rodadas do cliente, câmeras da Galeria) e os nomes nas listas de Clientes e Contas viraram links; `transition: all` trocado pelas propriedades que mudam (`--transicao-padrao`); `prefers-reduced-motion` desliga animações e transições. Os 6 números da Visão Geral cabem numa linha.
+- **Conferido** com o painel local apontando para a API de produção: nenhum rótulo sem ligação em login, Visão Geral, Configurações, detalhe da máquina, Notificações, Contas e Clientes; Tab mostra o contorno em todos os elementos. Testes da API: 195 OK (2 skipped). Sem mudança no agente (versão continua 1.1.70).
+
 ### [2026-11-26] — Painel: celular com o essencial na primeira tela e filtros das listas no endereço da página
 
 - **Problema** (revisão de experiência do painel, itens 8 e 9): no celular, a primeira tela da Visão Geral só tinha o aviso da conta, os botões e os números um embaixo do outro; em Backups e Auditoria os filtros ocupavam a tela inteira. Só a página Backups guardava os filtros na URL: não dava para mandar o link de uma lista filtrada nem voltar de um detalhe sem perder o filtro.

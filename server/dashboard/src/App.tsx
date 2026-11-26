@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ToastProvider } from "./components/Toast";
@@ -7,20 +7,22 @@ import Layout from "./components/Layout";
 import NovaVersao from "./components/NovaVersao";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
-import CustomersPage from "./pages/Customers/CustomersPage";
-import CustomerDetail from "./pages/Customers/CustomerDetail";
-import MachinesPage from "./pages/Machines/MachinesPage";
-import MachineDetail from "./pages/Machines/MachineDetail";
-import Backups from "./pages/Backups";
-import Settings from "./pages/Settings";
-import VersoesAgente from "./pages/VersoesAgente";
-import PublicDashboardPage from "./pages/Dashboards/PublicDashboardPage";
-import DashboardAdminPage from "./pages/Dashboards/DashboardAdminPage";
-import ContasPage from "./pages/Contas/ContasPage";
-import ContaDetalhePage from "./pages/Contas/ContaDetalhePage";
-import MinhaConta from "./pages/MinhaConta";
-import NotificacoesPage from "./pages/Notificacoes/NotificacoesPage";
-import AuditoriaPage from "./pages/Auditoria/AuditoriaPage";
+// Telas carregadas sob demanda (React.lazy): o painel abre baixando só o login e a Visão Geral; antes era um
+// arquivo único de 1,1 MB.
+const CustomersPage = lazy(() => import("./pages/Customers/CustomersPage"));
+const CustomerDetail = lazy(() => import("./pages/Customers/CustomerDetail"));
+const MachinesPage = lazy(() => import("./pages/Machines/MachinesPage"));
+const MachineDetail = lazy(() => import("./pages/Machines/MachineDetail"));
+const Backups = lazy(() => import("./pages/Backups"));
+const Settings = lazy(() => import("./pages/Settings"));
+const VersoesAgente = lazy(() => import("./pages/VersoesAgente"));
+const PublicDashboardPage = lazy(() => import("./pages/Dashboards/PublicDashboardPage"));
+const DashboardAdminPage = lazy(() => import("./pages/Dashboards/DashboardAdminPage"));
+const ContasPage = lazy(() => import("./pages/Contas/ContasPage"));
+const ContaDetalhePage = lazy(() => import("./pages/Contas/ContaDetalhePage"));
+const MinhaConta = lazy(() => import("./pages/MinhaConta"));
+const NotificacoesPage = lazy(() => import("./pages/Notificacoes/NotificacoesPage"));
+const AuditoriaPage = lazy(() => import("./pages/Auditoria/AuditoriaPage"));
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, me } = useAuth();
@@ -77,6 +79,7 @@ function LegacyMachineRedirect() {
 function AppRoutes() {
   const { isAuthenticated } = useAuth();
   return (
+    <Suspense fallback={<div className="loading-state"><div className="spinner" /></div>}>
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<ProtectedRoute><Layout><Overview /></Layout></ProtectedRoute>} />
@@ -145,6 +148,7 @@ function AppRoutes() {
       <Route path="/d" element={<PublicDashboardPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
 

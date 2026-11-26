@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Building2,
   Calendar,
@@ -652,14 +652,16 @@ export default function ContasPage() {
                 >
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span
+                      <Link
+                        to={`/contas/${c.id}`}
+                        onClick={(e) => e.stopPropagation()}
                         style={{
                           fontWeight: 600,
                           color: "var(--text-primary)",
                         }}
                       >
                         {c.nome}
-                      </span>
+                      </Link>
                       {c.plataforma && (
                         <span className="badge muted">Plataforma</span>
                       )}
