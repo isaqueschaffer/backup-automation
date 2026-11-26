@@ -11,6 +11,7 @@ import { useConfirm } from "../../components/ConfirmDialog";
 import { fmtDate, fmtSchedule } from "../../utils/date";
 import { apiErrorMessage } from "../../utils/errors";
 import { Plus, Trash2, Eye, RotateCcw, Play } from "lucide-react";
+import MenuAcoes from "../../components/MenuAcoes";
 import NewMachineModal, { NewMachineForm } from "./components/NewMachineModal";
 import NewMachineKeyModal from "./components/NewMachineKeyModal";
 import { useRotulos, useSomenteLeitura } from "../../contexts/AuthContext";
@@ -175,7 +176,6 @@ export default function MachinesPage() {
                 <th>Equipamentos</th>
                 <th>Horário</th>
                 <th>Último backup</th>
-                <th>API Key</th>
                 <th>Ações</th>
               </tr>
             </thead>
@@ -184,7 +184,6 @@ export default function MachinesPage() {
                 <tr key={m.id}>
                   <td>
                     <Link to={`/maquinas/${m.id}`} style={{ fontWeight: 600, color: "var(--text-primary)" }}>{m.name}</Link>
-                    <div className="text-xs text-muted font-mono" style={{ marginTop: 2 }}>{m.id.slice(0, 8)}...</div>
                   </td>
                   <td>
                     {m.customer_id
@@ -198,18 +197,22 @@ export default function MachinesPage() {
                   <td className="text-secondary" title={m.schedule_from_customer ? `Definido pelo ${singularMin}` : "Horário próprio"}>
                     {fmtSchedule(m.backup_hour, m.backup_minute)}
                   </td>
-                  <td className="text-secondary text-sm">{fmtDate(m.last_backup_at)}</td>
-                  <td><span className="font-mono text-xs text-muted">{m.api_key_prefix}…</span></td>
+                  <td className="text-secondary text-sm">
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {fmtDate(m.last_backup_at, { empty: "nunca" })}
+                      {m.last_backup_status && <StatusBadge status={m.last_backup_status} />}
+                    </span>
+                  </td>
                   <td>
                     <div className="flex gap-2">
                       <button className="btn-icon" title="Abrir máquina" onClick={() => navigate(`/maquinas/${m.id}`)}>
                         <Eye size={14} />
                       </button>
+                      {/* Excluir fica no menu, não ao lado de "Abrir" em toda linha */}
                       {!somenteLeitura && (
-                        <button className="btn-icon" title="Excluir máquina" style={{ color: "var(--err)" }}
-                          onClick={() => handleDelete(m)}>
-                          <Trash2 size={14} />
-                        </button>
+                        <MenuAcoes compacto rotulo={`Mais ações de ${m.name}`} acoes={[
+                          { rotulo: "Excluir máquina", icone: <Trash2 size={14} />, onClick: () => handleDelete(m), perigo: true },
+                        ]} />
                       )}
                     </div>
                   </td>

@@ -7,7 +7,7 @@ export default function RotatedKeyModal({ apiKey, onCopy, onClose }: {
   onClose: () => void;
 }) {
   return (
-    <Modal title="Nova API Key gerada" onClose={onClose}>
+    <Modal title="Nova chave do agente gerada" onClose={onClose}>
       <div style={{
         background: "var(--warn-bg)", border: "1px solid rgba(245,158,11,0.3)",
         borderRadius: "var(--radius-sm)", padding: "12px 16px", marginBottom: 20,

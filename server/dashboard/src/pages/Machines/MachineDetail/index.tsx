@@ -52,9 +52,10 @@ export default function MachineDetail() {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [gruposAbertos, setGruposAbertos] = useState<Set<string>>(new Set());
-  // Seção Equipamentos recolhida por padrão (como Histórico, Câmeras e Eventos do Agente)
-  const [equipamentosAberto, setEquipamentosAberto] = useState(false);
+  // Equipamentos e seus grupos abertos por padrão e logo abaixo do cabeçalho: é o que se vem ver na máquina
+  // (antes ficavam recolhidos abaixo dos IDs técnicos). Guarda os grupos que o usuário fechou.
+  const [gruposFechados, setGruposFechados] = useState<Set<string>>(new Set());
+  const [equipamentosAberto, setEquipamentosAberto] = useState(true);
 
   // Filtros de logs com refs espelho para o polling contínuo
   const [filtrosLogs, setFiltrosLogs] = useState<FiltrosLogsState>({
@@ -226,7 +227,7 @@ export default function MachineDetail() {
       .map(([tipo, itens]) => ({ tipo, itens: [...itens].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })) }));
   })();
 
-  const alternarGrupo = (tipo: string) => setGruposAbertos(prev => {
+  const alternarGrupo = (tipo: string) => setGruposFechados(prev => {
     const prox = new Set(prev);
     if (prox.has(tipo)) prox.delete(tipo); else prox.add(tipo);
     return prox;
@@ -348,8 +349,8 @@ export default function MachineDetail() {
 
   const handleRotateKey = async () => {
     if (!(await confirmar({
-      title: "Gerar nova API Key",
-      message: "Gerar nova API Key? A chave atual será invalidada e o agente desta máquina precisará da nova.",
+      title: "Gerar nova chave do agente",
+      message: "A chave atual deixa de valer na hora: o agente desta máquina para de se comunicar até a nova chave ser colocada no agent.conf. Continuar?",
       confirmLabel: "Gerar nova chave",
       variant: "danger",
     }))) return;
@@ -357,7 +358,7 @@ export default function MachineDetail() {
       const data = await rotateMachineKey(id!);
       setRotatedKey(data.api_key || null);
       load(true);
-    } catch { toast("Erro ao gerar nova API Key.", "error"); }
+    } catch { toast("Erro ao gerar a nova chave do agente.", "error"); }
   };
 
   const handleRestartAgent = async () => {
@@ -417,9 +418,6 @@ export default function MachineDetail() {
         onTriggerBackup={handleTriggerBackup} onRestartAgent={handleRestartAgent}
       />
 
-      {/* ── Layout de três colunas ── */}
-      <MachineInfoCards machine={machine} customerEmails={customerEmails} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} nowMs={now + serverSkewMs} />
-
       {/* ── Equipamentos ── */}
       <div style={{ marginBottom: 24 }}>
         <div className={`flex items-center justify-between ${equipamentosAberto ? "mb-3" : ""}`}>
@@ -455,7 +453,7 @@ export default function MachineDetail() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             {gruposEquipamentos.map(g => {
-              const aberto = gruposAbertos.has(g.tipo);
+              const aberto = !gruposFechados.has(g.tipo);
               return (
                 <div key={g.tipo}>
                   <button
@@ -510,6 +508,9 @@ export default function MachineDetail() {
           </div>
         )}
       </div>
+
+      {/* ── Configuração, status do agente e saúde do servidor ── */}
+      <MachineInfoCards machine={machine} customerEmails={customerEmails} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} nowMs={now + serverSkewMs} />
 
       {/* ── Histórico de Backups ── */}
       <BackupHistory backups={backups} />

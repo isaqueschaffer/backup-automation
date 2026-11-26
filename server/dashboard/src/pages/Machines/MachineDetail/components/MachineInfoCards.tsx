@@ -8,7 +8,7 @@ import InfoPill from "./InfoPill";
 import ServerHealthCard from "./ServerHealthCard";
 import { useRotulos } from "../../../../contexts/AuthContext";
 
-// As três colunas do topo: Configuração, Status do Agente e Saúde do Servidor (telemetria)
+// As três colunas: Configuração (dados técnicos recolhidos), Status do Agente e Saúde do Servidor (telemetria)
 export default function MachineInfoCards({ machine, customerEmails, isAgentOnline, nextPingStr, onCopy, nowMs }: {
   machine: Machine;
   // E-mails do cliente quando a máquina os herda (null = não carregados: usa os da máquina)
@@ -34,12 +34,6 @@ export default function MachineInfoCards({ machine, customerEmails, isAgentOnlin
               ? <><Link to={`/clientes/${machine.customer_id}`}>{machine.customer_name || singular}</Link>
                   <span className="text-muted" style={{ fontSize: 12 }}> (posição {(machine.queue_order ?? 0) + 1} na fila)</span></>
               : <span className="text-muted">Sem {singularMin}</span>} />
-          <InfoPill icon={<KeyRound size={11} />} label="ID da máquina (Client ID no agent.conf)" value={machine.id} mono copyValue={machine.id} onCopy={onCopy} />
-          <InfoPill icon={<KeyRound size={11} />} label="API Key (prefixo)" value={`${machine.api_key_prefix}…`} mono />
-          <InfoPill icon={<Tag size={11} />} label="Versão"
-            value={machine.agent_version
-              ? `v${machine.agent_version}`
-              : <span className="text-muted">— (agente anterior à 1.1.49)</span>} mono={!!machine.agent_version} />
           <InfoPill icon={<Clock size={11} />} label="Horário do Backup"
             value={`${fmtSchedule(machine.backup_hour, machine.backup_minute)} (diário)${machine.schedule_from_customer ? ` — definido pelo ${singularMin}` : ""}`} />
           <InfoPill icon={<Mail size={11} />} label={machine.email_from_customer ? `E-mails do relatório (do ${singularMin})` : "E-mails de Notificação"}
@@ -47,6 +41,18 @@ export default function MachineInfoCards({ machine, customerEmails, isAgentOnlin
               ? <>{emails.join(", ") || "—"}
                   <span className="text-muted" style={{ fontSize: 12 }}> — definidos pelo {singularMin}, 1 e-mail por rodada</span></>
               : (emails.join(", ") || "—")} />
+          {/* Dados de instalação: recolhidos (só servem para configurar o agente ou dar suporte) */}
+          <details className="detalhes-tecnicos">
+            <summary>Dados técnicos do agente</summary>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <InfoPill icon={<Tag size={11} />} label="Versão do agente"
+                value={machine.agent_version
+                  ? `v${machine.agent_version}`
+                  : <span className="text-muted">— (agente anterior à 1.1.49)</span>} mono={!!machine.agent_version} />
+              <InfoPill icon={<KeyRound size={11} />} label="ID da máquina (vai no agent.conf)" value={machine.id} mono copyValue={machine.id} onCopy={onCopy} />
+              <InfoPill icon={<KeyRound size={11} />} label="Chave do agente (início)" value={`${machine.api_key_prefix}…`} mono />
+            </div>
+          </details>
         </div>
       </div>
 

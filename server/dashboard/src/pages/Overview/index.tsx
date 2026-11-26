@@ -68,7 +68,8 @@ export default function Overview() {
   // Números de hoje abrem a lista de backups já filtrada (o dia padrão da lista é hoje)
   const abrirBackups = (status: string) => navigate(`/backups?status=${status}`);
   const abrirMaquina = (id: string) => navigate(`/maquinas/${id}`);
-  const temSemBackup = !!stats && stats.sem_backup.length > 0;
+  const semBackupLista = stats?.sem_backup ?? []; // API anterior a 26/11/2026 não manda o campo
+  const temSemBackup = semBackupLista.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -221,7 +222,7 @@ export default function Overview() {
         >
           <div className="stat-label">Máquinas online</div>
           <div className="stat-value cyan">
-            {stats ? `${stats.machines_online}/${stats.machines_active}` : "—"}
+            {stats ? `${stats.machines_online ?? "—"}/${stats.machines_active}` : "—"}
           </div>
           <CheckCircle size={28} className="stat-icon" color="var(--cyan)" />
         </button>
@@ -232,7 +233,7 @@ export default function Overview() {
         </button>
         <button type="button" className="stat-card amber" onClick={() => abrirBackups("PARTIAL")}>
           <div className="stat-label">Parciais hoje</div>
-          <div className="stat-value amber">{stats?.backups_partial ?? "—"}</div>
+          <div className="stat-value amber">{stats ? (stats.backups_partial ?? "—") : "—"}</div>
           <AlertTriangle size={28} className="stat-icon" color="var(--warn)" />
         </button>
         <button type="button" className="stat-card red" onClick={() => abrirBackups("ERROR")}>
@@ -249,7 +250,7 @@ export default function Overview() {
         >
           <div className="stat-label">Sem backup</div>
           <div className={`stat-value ${temSemBackup ? "red" : "green"}`}>
-            {stats ? stats.sem_backup.length : "—"}
+            {stats ? semBackupLista.length : "—"}
           </div>
           <Clock size={28} className="stat-icon" color={temSemBackup ? "var(--err)" : "var(--ok)"} />
         </button>
@@ -259,7 +260,7 @@ export default function Overview() {
       {stats && temSemBackup && (
         <div id="sem-backup" className="card sem-backup-card">
           <div className="section-title" style={{ marginBottom: 10 }}>
-            <Clock size={15} /> Sem backup desde o horário agendado ({stats.sem_backup.length})
+            <Clock size={15} /> Sem backup desde o horário agendado ({semBackupLista.length})
           </div>
           <div className="table-wrap">
             <table className="tabela-cartoes">
@@ -274,7 +275,7 @@ export default function Overview() {
                 </tr>
               </thead>
               <tbody>
-                {stats.sem_backup.map(item => (
+                {semBackupLista.map(item => (
                   <tr key={item.machine_id} className="linha-clicavel" onClick={() => abrirMaquina(item.machine_id)}>
                     <td data-label="">
                       <button

@@ -1,11 +1,14 @@
 import { ArrowLeft, Clock, CloudLightning, Edit2, RefreshCw, RotateCcw } from "lucide-react";
 import { Link } from "react-router-dom";
+import MenuAcoes from "../../../../components/MenuAcoes";
 import { Machine } from "../../../../api/types";
 import StatusBadge from "../../../../components/StatusBadge";
 import { fmtDate } from "../../../../utils/date";
 import { useRotulos, useSomenteLeitura } from "../../../../contexts/AuthContext";
 
-// Cabeçalho da máquina: nome, último backup, ações e aviso de comando pendente
+// Cabeçalho da máquina: nome, conexão, último backup, ações e aviso de comando pendente.
+// Na fileira ficam só as ações do dia a dia; reiniciar o agente e trocar a chave vão para "Mais ações"
+// (trocar a chave desconecta o agente até ele receber a nova).
 export default function MachineHeader({ machine, isAgentOnline, nextPingStr, onBack, onEdit, onRotateKey, onTriggerBackup, onRestartAgent }: {
   machine: Machine;
   isAgentOnline: boolean;
@@ -37,28 +40,41 @@ export default function MachineHeader({ machine, isAgentOnline, nextPingStr, onB
               </div>
             )}
             <h1 className="page-title">{machine.name}</h1>
-            <p className="page-subtitle flex items-center gap-2">
+            <p className="page-subtitle flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+              <StatusBadge status={isAgentOnline ? "ONLINE" : (machine.active ? "OFFLINE" : "DESATIVADO")} />
+              {!isAgentOnline && machine.active && (
+                <span>{`última comunicação ${fmtDate(machine.last_seen, { short: true, empty: "nunca" })}`}</span>
+              )}
+              <span aria-hidden="true">·</span>
               <StatusBadge status={machine.last_backup_status} />
-              {machine.last_backup_at && `Último backup: ${fmtDate(machine.last_backup_at)}`}
+              {machine.last_backup_at ? `Último backup: ${fmtDate(machine.last_backup_at)}` : "Nenhum backup ainda"}
             </p>
           </div>
         </div>
         {!somenteLeitura && (
           <div className="flex gap-2">
+            <button className="btn btn-primary" onClick={onTriggerBackup}
+              title={!isAgentOnline ? "Agente offline — o backup começará no próximo contato" : "Fazer o backup desta máquina agora"}>
+              <CloudLightning size={15} /> Fazer backup agora
+            </button>
             <button className="btn btn-secondary" onClick={onEdit}>
-              <Edit2 size={15} /> Editar Máquina
+              <Edit2 size={15} /> Editar máquina
             </button>
-            <button className="btn btn-secondary" onClick={onRotateKey}>
-              <RefreshCw size={15} /> Rodar API Key
-            </button>
-            <button className="btn btn-secondary" onClick={onTriggerBackup}
-              title={!isAgentOnline ? "Agente offline — o backup começará no próximo ping" : "Solicitar backup manual agora"}>
-              <CloudLightning size={15} /> Gerar Backup
-            </button>
-            <button className="btn btn-secondary" onClick={onRestartAgent}
-              title={!isAgentOnline ? "Agente offline — o reinício será executado no próximo ping" : "Reiniciar o agente Windows"}>
-              <RotateCcw size={15} /> Reiniciar agente
-            </button>
+            <MenuAcoes acoes={[
+              {
+                rotulo: "Reiniciar agente",
+                icone: <RotateCcw size={14} />,
+                onClick: onRestartAgent,
+                dica: !isAgentOnline ? "Agente offline — o reinício será feito no próximo contato" : "Reiniciar o programa do agente nesta máquina",
+              },
+              {
+                rotulo: "Gerar nova chave do agente",
+                icone: <RefreshCw size={14} />,
+                onClick: onRotateKey,
+                perigo: true,
+                dica: "Invalida a chave atual: o agente para de se comunicar até receber a nova",
+              },
+            ]} />
           </div>
         )}
       </div>

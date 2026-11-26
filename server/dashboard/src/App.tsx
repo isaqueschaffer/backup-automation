@@ -13,6 +13,7 @@ import MachinesPage from "./pages/Machines/MachinesPage";
 import MachineDetail from "./pages/Machines/MachineDetail";
 import Backups from "./pages/Backups";
 import Settings from "./pages/Settings";
+import VersoesAgente from "./pages/VersoesAgente";
 import PublicDashboardPage from "./pages/Dashboards/PublicDashboardPage";
 import DashboardAdminPage from "./pages/Dashboards/DashboardAdminPage";
 import ContasPage from "./pages/Contas/ContasPage";
@@ -119,6 +120,18 @@ function AppRoutes() {
             <SuperAdminRoute>
               <Layout>
                 <Settings />
+              </Layout>
+            </SuperAdminRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/versoes-agente"
+        element={
+          <ProtectedRoute>
+            <SuperAdminRoute>
+              <Layout>
+                <VersoesAgente />
               </Layout>
             </SuperAdminRoute>
           </ProtectedRoute>

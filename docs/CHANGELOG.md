@@ -9,6 +9,15 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Painel: detalhe da máquina com os equipamentos primeiro, ações perigosas em "Mais ações" e página própria para as versões do agente
+
+- **Problema** (revisão de experiência do painel, itens 4 e 5): o detalhe da máquina abria com ID da máquina, prefixo da API Key e versão; os equipamentos ficavam recolhidos lá embaixo; "Rodar API Key" ficava ao lado de "Gerar Backup" e "Apagar Câmeras" (vermelho) ao lado de "Adicionar Câmera"; a lista de Máquinas tinha a lixeira colada ao "ver" em toda linha. Configurações tinha ~45 versões do agente na mesma página (6.340 px no computador).
+- **Detalhe da máquina**: cabeçalho com conexão (online/offline) e último backup; "Fazer backup agora" (principal) e "Editar máquina" na fileira; "Reiniciar agente" e "Gerar nova chave do agente" (antes "Rodar API Key", com aviso do que acontece) em **Mais ações**. Equipamentos logo abaixo do cabeçalho, abertos com os grupos abertos; os cards de Configuração/Status/Saúde vêm depois; ID da máquina, chave e versão ficam em "Dados técnicos do agente" (recolhido). Card do equipamento: "Editar" visível; pausar e remover no menu "⋯". Câmeras: "Adicionar câmera" e "Testar todas" visíveis; importar planilha, baixar imagens e **apagar todas** no menu.
+- **Lista de Máquinas**: sem a coluna "API Key" e o ID cortado; o último backup ganha o selo de status; "Excluir máquina" vai para o menu "⋯" da linha.
+- **Versões do agente**: nova página `/versoes-agente` (menu Plataforma, só administrador da plataforma) com a versão oferecida (Windows e Mikrotik: a MAIOR versão ativa, como o servidor escolhe), as últimas 5 (botão "Mostrar todas"), editar/pausar/apagar no menu (pausar a versão em uso pede confirmação) e o cadastro manual recolhido. Configurações só aponta para ela.
+- **Componente novo** `components/MenuAcoes.tsx`: menu acessível (Esc, setas, clique fora), ações perigosas em vermelho e separadas; lista em posição fixa para não ser cortada dentro de `.table-wrap`.
+- **Conferido** nas telas (computador e celular) com o painel local apontando para a API de produção: menus abrem dentro da tela, inclusive na última linha da tabela. Só painel (sem API nem agente; versão continua 1.1.70).
+
 ### [2026-11-26] — Visão Geral: números do dia de Brasília com parciais, "sem backup desde o horário" e problemas primeiro
 
 - **Problema** (revisão de experiência do painel, 26/11): o topo da Visão Geral contava "hoje" pelo dia UTC (às 21:00 de Brasília já virava o dia seguinte), não mostrava os PARCIAIS nem respeitava as máquinas liberadas ao usuário (`filtrar_maquinas`): mostrava "Backups OK hoje 16" enquanto a página Backups tinha 10 OK, 4 parciais e 1 erro. Máquina que não fez o backup (ex.: Georgina offline) não aparecia em lugar nenhum. Os cards seguiam a ordem de cadastro e tinham o Cliente como título (5 cards "Navarro").

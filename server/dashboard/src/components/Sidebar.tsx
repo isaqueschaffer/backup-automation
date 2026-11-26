@@ -8,6 +8,7 @@ import {
   Users,
   Archive,
   Settings,
+  UploadCloud,
   LogOut,
   Server,
   UserCircle,
@@ -71,6 +72,7 @@ export default function Sidebar({ aberta = false, onFechar }: SidebarProps) {
   const plataformaItems = [
     { to: "/contas", icon: Building2, label: "Contas" },
     { to: "/settings", icon: Settings, label: "Configurações" },
+    { to: "/versoes-agente", icon: UploadCloud, label: "Versões do agente" },
   ];
 
   return (

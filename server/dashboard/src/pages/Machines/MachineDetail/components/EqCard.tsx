@@ -1,4 +1,5 @@
-import { Activity, Cable, Edit2, FolderOpen, Image, PlugZap, RadioTower, RefreshCw, Siren, Trash2, Video } from "lucide-react";
+import { Activity, Cable, Edit2, FolderOpen, Image, Pause, PlugZap, RadioTower, RefreshCw, Siren, Trash2, Video } from "lucide-react";
+import MenuAcoes from "../../../../components/MenuAcoes";
 import { NVR } from "../../../../api/types";
 import { fmtDate } from "../../../../utils/date";
 import { eqCor, eqIcone } from "./eqTipos";
@@ -139,15 +140,19 @@ export default function EqCard({ eq, somenteLeitura, podeTestar = !somenteLeitur
         )}
         {!somenteLeitura && (
           <>
-            <button className="btn-icon" title={eq.active === false ? "Retomar Backup" : "Pausar Backup"} onClick={onToggleActive}>
-              {eq.active === false ? <RefreshCw size={14} /> : <div style={{width:14, height:14, borderLeft:'3px solid currentColor', borderRight:'3px solid currentColor'}}/>}
+            <button className="btn btn-secondary btn-sm" title="Editar equipamento" onClick={onEdit}
+              style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Edit2 size={13} /> Editar
             </button>
-            <button className="btn-icon" title="Editar" onClick={onEdit}>
-              <Edit2 size={14} />
-            </button>
-            <button className="btn-icon" style={{ color: "var(--err)" }} title="Remover" onClick={onDelete}>
-              <Trash2 size={14} />
-            </button>
+            {/* Pausar e remover no menu: a lixeira não fica colada aos botões do dia a dia */}
+            <MenuAcoes compacto rotulo={`Mais ações de ${eq.name}`} acoes={[
+              {
+                rotulo: eq.active === false ? "Retomar backup" : "Pausar backup",
+                icone: eq.active === false ? <RefreshCw size={14} /> : <Pause size={14} />,
+                onClick: onToggleActive,
+              },
+              { rotulo: "Remover equipamento", icone: <Trash2 size={14} />, onClick: onDelete, perigo: true },
+            ]} />
           </>
         )}
       </div>

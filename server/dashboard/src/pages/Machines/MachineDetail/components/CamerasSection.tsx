@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Trash2, Video } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Plus, Trash2, Upload, Video } from "lucide-react";
+import MenuAcoes from "../../../../components/MenuAcoes";
 import { NVR } from "../../../../api/types";
 import { RtspResult } from "../hooks/useRtspTest";
 import { safeFileName } from "../utils";
@@ -51,21 +52,21 @@ export default function CamerasSection({
         </button>
         <div className="flex gap-2">
           <input type="file" accept=".csv,.xls,.xlsx" ref={fileInputRef} style={{ display: 'none' }} onChange={onImportFile} />
-          <button className="btn btn-secondary" style={{ color: "var(--danger)" }} onClick={onDeleteAll} disabled={loading || isTesting}>
-            <Trash2 size={14} /> Apagar Câmeras
-          </button>
-          <button className="btn btn-secondary" onClick={onImportClick} disabled={loading || isTesting}>
-            <Plus size={14} /> Importar CSV
-          </button>
           <button className="btn btn-secondary" onClick={onAdd}>
-            <Plus size={14} /> Adicionar Câmera
-          </button>
-          <button className="btn btn-secondary" disabled={!hasImages} onClick={onDownloadImages}>
-            Baixar Imagens
+            <Plus size={14} /> Adicionar câmera
           </button>
           <button className="btn btn-success" disabled={loading || isTesting || cameras.length === 0} onClick={onTestAll}>
-            {isTesting ? "Testando..." : "Testar Todas"}
+            {isTesting ? "Testando..." : "Testar todas"}
           </button>
+          {/* Importar, baixar e apagar ficam no menu: apagar todas não fica ao lado de "Adicionar" */}
+          <MenuAcoes acoes={[
+            { rotulo: "Importar planilha (CSV/Excel)", icone: <Upload size={14} />, onClick: onImportClick, desabilitada: loading || isTesting },
+            { rotulo: "Baixar imagens do teste", icone: <Download size={14} />, onClick: onDownloadImages, desabilitada: !hasImages },
+            {
+              rotulo: "Apagar todas as câmeras", icone: <Trash2 size={14} />, onClick: onDeleteAll, perigo: true,
+              desabilitada: loading || isTesting || cameras.length === 0,
+            },
+          ]} />
         </div>
       </div>
 
