@@ -9,6 +9,22 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Merge `helena`: Digifort pela pasta de cada câmera e NVR Hikvision com novas tentativas
+
+- **Entrou** (helenaoc-dotcom, 25-26/11: `e2a22ce` conserto NVR Horizontes, `9e417e7` e `f629db5` Digifort): ver a entrada abaixo, escrita pela Helena.
+- **Auditoria**: 20 arquivos (agente, servidor, painel); sem data com fuso no servidor, sem segredos, sem rota nova (só o campo `pasta_gravacao` na resposta de câmeras, já dentro da rota com `ctx`), sem compose/nginx/models/migrações/requirements. `tools/verificar_regras.py`: 0 erro, 0 aviso. Atenção operacional: com o NVR Hikvision sem responder, as novas tentativas (3 × 60 s no status, no `.bin` e no `.xls`) somam até ~6 min ao backup daquele equipamento (dentro do limite de 2 h).
+- **Conflito**: só no `PROJECT_SPEC.md` (a Helena registrou no changelog antigo, que foi movido para este arquivo em 26/11): a entrada dela veio para cá sem mudança de texto.
+
+### [2026-11-26] — Digifort: pasta de gravação de cada câmera lida direto da planilha; NVR Hikvision com nova tentativa da configuração
+
+- **Origem (Digifort)**: na CFTV 03 do Navarro, a câmera "4° ANDAR A FUNDO CORREDOR" aparecia sem gravação nenhuma, mas os arquivos existiam. O equipamento não tinha "Local de gravação", então o agente deduzia a gravação do ping (câmera offline = 15 dias sem gravar). O export do Digifort já traz a coluna "Diretório de gravação" com o caminho de cada câmera (`D:\17\`, `D:\18\`...).
+- **Painel**: `pastaGravacaoDoCaminho` guarda o caminho completo quando a célula tem unidade ou é UNC (`D:\17`, sem a barra final); sem unidade, continua o último trecho. Saíram `raizComumCaminhos`/`raizGravacaoDaPlanilha` e o preenchimento automático do "Local de gravação" (Galeria e formulário): com câmeras em discos diferentes não há raiz comum, e no caso da CFTV 03 a raiz saía `D:`, que no Windows é a pasta atual do disco, não `D:\`. O formulário do Digifort mostra "Pastas de gravação: lidas da planilha (N de M)" no lugar do campo; o campo continua para planilha sem a coluna ou para completar as câmeras sem caminho.
+- **Servidor**: `NVRCameraResponse` e `GET .../cameras` (VMS) devolvem `pasta_gravacao`; `NVRCameraConfigItem.pasta_gravacao` com `max_length=255` (tamanho da coluna); `com_nomes_da_galeria` mostra o caminho completo como está (só o nome da subpasta continua virando o nome da Galeria). Sem migração.
+- **Agente**: `digifort_gravacoes.pastas_das_cameras` / `calcular_gravacoes_pastas` leem direto a pasta de cada câmera da Galeria com caminho completo; `_resumos_gravacao_digifort` junta essas pastas com as subpastas do "Local de gravação" (a mesma pasta entra uma vez só) e o vínculo volta à câmera pela chave igual ao texto da Galeria. `normalizar_raiz` corrige "D:" digitado no campo. Câmeras só com o nome da subpasta (importações antigas) seguem como antes.
+- **Origem (NVR)**: o NVR 03 da Horizontes (Hikvision DS-7616NI-K2) ficou PARCIAL em 23 e 25/11: o serviço web travou no meio da verificação de gravação (canais 9 a 14 `NAO_VERIFICADO`) e a configuração não baixou. `factory.WORKERS_GRAVACAO_HIKVISION` passa de 10 para 4 buscas simultâneas; `downloader.com_novas_tentativas` (3 tentativas, 60 s de pausa) e `isapi_responde` envolvem o status ISAPI e os downloads do `.bin`/`.xls`, no Windows (`backup_job`) e no Mikrotik (`tunel_preparo`).
+- **Testes**: agente 338 OK (novos: `test_novas_tentativas_nvr.py`, `TestPastaCompletaDaPlanilha` e `normalizar_raiz` em `test_digifort_gravacoes.py`); servidor `test_galeria_pasta_gravacao.py` + `test_planilha_vms.py` + `test_galeria_sync_defense.py` 28 OK; painel `tsc --noEmit` limpo. Não testado no navegador nem numa máquina Digifort real.
+- **Versão**: muda `agent/`; precisa de versão nova do agente no merge do dono.
+
 ### [2026-11-26] — Organização de pastas, documentos e nomes (sem mudança de comportamento)
 
 - **Changelog**: saiu da seção 16 do `PROJECT_SPEC.md` para `docs/CHANGELOG.md` (178 entradas, texto intacto); o spec caiu de 2.879 para 1.137 linhas e a seção 17 passou a apontar para o checklist do `CLAUDE.md`. Referências atualizadas no `CLAUDE.md` e nas skills (Claude e Gemini) que mandavam registrar "no changelog do PROJECT_SPEC". Título do spec: "Trilan Backups".

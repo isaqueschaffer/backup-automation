@@ -80,6 +80,8 @@ class NVRCameraResponse(BaseModel):
     username: Optional[str] = None
     modelo: Optional[str] = None
     canal_rtsp: Optional[int] = None
+    # Digifort: pasta de gravação da câmera (caminho completo vindo da planilha, ou só o nome da subpasta)
+    pasta_gravacao: Optional[str] = None
     ip_compartilhado: bool = False
     has_password: bool = False
     perfect_image_base64: Optional[str] = None
@@ -106,9 +108,9 @@ class NVRCameraConfigItem(BaseModel):
     password: Optional[str] = None
     modelo: str = "Hikvision"
     canal_rtsp: Optional[int] = Field(None, ge=1, le=512)
-    # Vínculo explícito com a subpasta de gravação (coluna "Diretório de gravação" do export do Digifort);
-    # usado quando o nome da pasta não bate com o nome da câmera (ver vincular_cameras_as_pastas no agente).
-    pasta_gravacao: Optional[str] = None
+    # Pasta de gravação da câmera (coluna "Diretório de gravação" do export do Digifort). Caminho completo
+    # ("D:\17"): o agente lê essa pasta direto. Só o nome ("17", planilhas antigas): subpasta do "Local de gravação".
+    pasta_gravacao: Optional[str] = Field(None, max_length=255)
 
 
 class NVRCameraBulkImport(BaseModel):

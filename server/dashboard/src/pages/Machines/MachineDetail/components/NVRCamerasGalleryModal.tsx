@@ -13,7 +13,6 @@ import {
   linhaDoCabecalho,
   linhasParaTexto,
   planilhaTemNomeEDescricao,
-  raizGravacaoDaPlanilha,
   gravadoresDaPlanilha,
   readRowsFromFile,
   rowsToCameras,
@@ -79,10 +78,8 @@ function Chip({ ok, label, title }: { ok: boolean; label: string; title: string 
   );
 }
 
-export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTipo = "NVR", onPastaGravacoesDetectada, onClose }: {
+export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTipo = "NVR", onClose }: {
   machineId: string, nvrId: string, nvrName: string, eqTipo?: TipoEquipamento,
-  // Planilha do Digifort com a coluna "Diretório de gravação": grava a raiz detectada no equipamento
-  onPastaGravacoesDetectada?: (raiz: string) => void | Promise<void>,
   onClose: () => void,
 }) {
   const { toast } = useToast();
@@ -137,7 +134,6 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       situacao: "nova" | "atualiza";
       pastaGravacao?: string;
     }>;
-    raizGravacoes?: string;
   }
   const [previa, setPrevia] = useState<PreviaVms | null>(null);
   const [previaMostrarSenhas, setPreviaMostrarSenhas] = useState(false);
@@ -251,7 +247,6 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
         exemploNome: exNome,
         exemploDescricao: exDesc,
         cams: camsComSituacao,
-        raizGravacoes: raizGravacaoDaPlanilha(rows),
       });
       setPreviaMostrarSenhas(false);
     } catch (err) {
@@ -276,14 +271,6 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
       await api.post(`/machines/${machineId}/equipamentos/${nvrId}/cameras/import`, {
         cameras: payloadCams,
       });
-
-      if (previa.raizGravacoes && onPastaGravacoesDetectada) {
-        try {
-          await onPastaGravacoesDetectada(previa.raizGravacoes);
-        } catch (raizErr) {
-          console.error("Falha ao gravar a pasta de gravação detectada na planilha:", raizErr);
-        }
-      }
 
       try {
         await api.put(`/machines/${machineId}/equipamentos/${nvrId}/planilha`, {

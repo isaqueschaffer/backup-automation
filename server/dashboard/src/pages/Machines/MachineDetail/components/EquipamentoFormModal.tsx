@@ -4,6 +4,7 @@ import { EqForm, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
 import { TIPOS, TIPO_ICONE_EMOJI, USUARIO_SSH_PADRAO } from "../utils";
 import PlanilhaCamerasCampo from "./PlanilhaCamerasCampo";
+import { caminhoAbsoluto } from "../hooks/useCameraImport";
 
 export default function EquipamentoFormModal({ machineId, agenteTipo, eqForm, setEqForm, editingEqId, saving, onSave, onClose, onErro }: {
   machineId: string;
@@ -261,20 +262,11 @@ export default function EquipamentoFormModal({ machineId, agenteTipo, eqForm, se
               Pasta onde o Digifort salva os backups da configuração.
             </span>
           </div>
-          <div className="form-group">
-            <label className="form-label">Local de gravação das câmeras</label>
-            <input className="form-input" type="text"
-              placeholder="C:\Digifort\Gravacoes"
-              value={eqForm.pasta_gravacoes || ""} onChange={e => setEqForm({ ...eqForm, pasta_gravacoes: e.target.value })} />
-            <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-              Pasta com uma subpasta por câmera (nome igual ao da planilha), cada uma com Dados e Indices.
-              O tempo gravado e os dias sem gravação saem desses arquivos. Sem esta pasta, o agente só testa se a câmera responde ao ping.
-            </span>
-          </div>
           {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
           <PlanilhaCamerasCampo
             machineId={machineId} nvrId={editingEqId} eqForm={eqForm} setEqForm={setEqForm}
             onPreviaAberta={setPreviaAberta} onErro={onErro} />
+          <PastaGravacoesCampo eqForm={eqForm} setEqForm={setEqForm} />
         </>
       )}
       {eqForm.tipo === "DEFENSE" && (
@@ -365,6 +357,58 @@ export default function EquipamentoFormModal({ machineId, agenteTipo, eqForm, se
         </button>
       </div>
     </Modal>
+  );
+}
+
+// "Local de gravação das câmeras" do Digifort. Com a coluna "Diretório de gravação" na planilha, cada câmera já traz o
+// caminho completo da pasta dela e o campo some; ele fica para planilhas sem essa coluna (uma pasta raiz com uma
+// subpasta por câmera) ou para completar as câmeras que vieram sem caminho.
+function PastaGravacoesCampo({ eqForm, setEqForm }: {
+  eqForm: EqForm;
+  setEqForm: React.Dispatch<React.SetStateAction<EqForm>>;
+}) {
+  const [mostrarCampo, setMostrarCampo] = useState(false);
+  const nova = eqForm.planilhaNova;
+  const total = nova ? nova.cams.length : eqForm.planilhaSalva?.total_cameras ?? 0;
+  const comPasta = nova
+    ? nova.cams.filter(c => caminhoAbsoluto(c.pastaGravacao)).length
+    : eqForm.planilhaSalva?.com_pasta_completa ?? 0;
+  const valor = eqForm.pasta_gravacoes || "";
+  const semPasta = Math.max(total - comPasta, 0);
+  const ajuda = { fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" } as const;
+
+  if (comPasta > 0 && !valor.trim() && !mostrarCampo) {
+    return (
+      <div className="form-group">
+        <label className="form-label">Pastas de gravação</label>
+        <span style={ajuda}>
+          Lidas da planilha: {comPasta} de {total} câmera(s), pela coluna "Diretório de gravação". O tempo gravado e os
+          dias sem gravação saem dos arquivos de cada pasta.
+          {semPasta > 0 && ` ${semPasta} câmera(s) sem caminho na planilha ficam como "não verificado".`}
+        </span>
+        {semPasta > 0 && (
+          <button type="button" className="btn btn-secondary" style={{ marginTop: 6 }} onClick={() => setMostrarCampo(true)}>
+            Informar uma pasta raiz para as demais
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="form-group">
+      <label className="form-label">Local de gravação das câmeras</label>
+      <input className="form-input" type="text"
+        placeholder="C:\Digifort\Gravacoes"
+        value={valor} onChange={e => setEqForm({ ...eqForm, pasta_gravacoes: e.target.value })} />
+      <span style={ajuda}>
+        {comPasta > 0
+          ? `Só para as câmeras sem caminho na planilha (${comPasta} de ${total} já têm a pasta lida da coluna "Diretório de gravação"). `
+          : "Para planilha sem a coluna \"Diretório de gravação\". "}
+        Pasta com uma subpasta por câmera (nome igual ao da planilha), cada uma com Dados e Indices.
+        Sem pasta nenhuma, o agente só testa se a câmera responde ao ping.
+      </span>
+    </div>
   );
 }
 

@@ -151,7 +151,8 @@ export interface CameraLidaPlanilha {
   // Usuário da coluna "Nome de usuário" da planilha (sem ela, "admin")
   usuario?: string;
   situacao: "nova" | "atualiza";
-  // Subpasta de gravação desta câmera (coluna "Diretório de gravação" do export do Digifort)
+  // Pasta de gravação desta câmera (coluna "Diretório de gravação" do export do Digifort): caminho completo
+  // ("D:\17") ou, sem unidade, só o nome da subpasta
   pastaGravacao?: string;
 }
 
@@ -167,8 +168,6 @@ export interface PlanilhaPendente {
   exemploNome?: string;
   exemploDescricao?: string;
   cams: CameraLidaPlanilha[];
-  // Raiz comum dos caminhos da coluna "Diretório de gravação" (vazio se a planilha não tiver essa coluna)
-  raizGravacoes?: string;
   // DVR/NVR da planilha do Defense (não viram câmera; orientam os canais do "Sincronizar da Máquina")
   gravadores?: { nome: string; ip: string }[];
 }
@@ -178,6 +177,8 @@ export interface PlanilhaSalvaInfo {
   total_linhas?: number;
   importado_em?: string;
   total_cameras: number;
+  // Câmeras da Galeria com o caminho completo da pasta de gravação (vindo da planilha)
+  com_pasta_completa?: number;
 }
 
 // Câmera sincronizada de um NVR (galeria)
@@ -189,6 +190,8 @@ export interface NvrCamera {
   username?: string | null;
   modelo?: string | null;
   canal_rtsp?: number | null;
+  // Digifort: pasta de gravação (caminho completo da planilha ou só o nome da subpasta)
+  pasta_gravacao?: string | null;
   ip_compartilhado?: boolean;
   has_password?: boolean;
   status_comunicacao?: string;

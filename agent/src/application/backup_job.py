@@ -36,7 +36,7 @@ from src.pabx.issabel import realizar_backup_issabel
 from src.mikrotik.routeros import realizar_backup_mikrotik
 from src.vms.defense import realizar_backup_defense
 from src.backup.crypto import gerar_secretkey
-from src.backup.downloader import baixar_arquivo
+from src.backup.downloader import baixar_arquivo, com_novas_tentativas, isapi_responde
 from src.backup.archiver import criar_zip, data_hoje
 
 TEMP_DIR = DIR_AGENT / "tmp_backup"
@@ -117,20 +117,22 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
             status = "PARCIAL"
     else:
         try:
-            sessao.get(f"http://{ip}/ISAPI/System/status", timeout=5).raise_for_status()
+            if not com_novas_tentativas(lambda: isapi_responde(sessao, ip), "ISAPI do NVR"):
+                raise RuntimeError(f"ISAPI de {ip} não respondeu")
 
             # Config NVR (.bin)
             sk, iv = gerar_secretkey(zip_password)
             url_bin = f"http://{ip}/ISAPI/System/configurationData?secretkey={sk}&security=1&iv={iv}"
             arq_bin = pasta_nvr / f"CONFIG_NVR_{data_hoje()}.bin"
-            if baixar_arquivo(sessao, url_bin, arq_bin, min_bytes=100_000, valida_xml=True):
+            if com_novas_tentativas(lambda: baixar_arquivo(sessao, url_bin, arq_bin, min_bytes=100_000, valida_xml=True),
+                                    "Download da configuracao do NVR"):
                 logging.info("  Backup NVR OK.")
                 sucessos += 1
 
             # Config IPCAM (.xls)
             url_xls = f"http://{ip}/ISAPI/ContentMgmt/InputProxy/ipcConfig"
             arq_xls = pasta_nvr / f"CONFIG_IPCAM_{data_hoje()}.xls"
-            if baixar_arquivo(sessao, url_xls, arq_xls):
+            if com_novas_tentativas(lambda: baixar_arquivo(sessao, url_xls, arq_xls), "Download da configuracao das IPCAM"):
                 logging.info("  Backup IPCAM OK.")
                 sucessos += 1
 

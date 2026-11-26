@@ -127,10 +127,17 @@ def segundos_por_dia(intervalos, destino=None):
     return destino
 
 
+def normalizar_raiz(raiz) -> str:
+    """'D:' vira 'D:\\': no Windows a unidade sozinha e a pasta atual daquele disco, nao a raiz dele
+    (o Digifort que grava direto em D:\\17\\, D:\\18\\... tem como raiz comum so 'D:')."""
+    texto = str(raiz).strip()
+    return texto + "\\" if re.fullmatch(r"[A-Za-z]:", texto) else texto
+
+
 def listar_pastas_cameras(raiz):
     """{nome da pasta: Path} das cameras em `raiz`. Aceita <raiz>/<camera>/{Dados,Indices} ou a pasta
     de uma camera so (com Dados e Indices direto, o nome e o da propria pasta)."""
-    raiz = Path(raiz)
+    raiz = Path(normalizar_raiz(raiz))
     if not raiz.is_dir():
         return {}
     if (raiz / "Indices").is_dir():
@@ -175,17 +182,42 @@ def caminho_cache(raiz, pasta_agente):
     return Path(pasta_agente) / f"cache_gravacoes_digifort_{chave}.json"
 
 
+_RE_CAMINHO_ABSOLUTO = re.compile(r"^([A-Za-z]:[\\/]|\\\\)")
+
+
+def caminho_absoluto(texto) -> bool:
+    r"""True para caminho completo do Windows ('D:\17', '\\servidor\share\17'); False para so o nome ('17')."""
+    return bool(_RE_CAMINHO_ABSOLUTO.match(str(texto or "").strip()))
+
+
+def pastas_das_cameras(cameras_servidor):
+    """{pasta_gravacao como esta na Galeria: Path} das cameras cuja pasta e um caminho completo (lido da coluna
+    "Diretorio de gravacao" da planilha). A chave e o texto da Galeria, para o vinculo achar a camera de volta."""
+    pastas = {}
+    for cam in cameras_servidor or []:
+        texto = (cam.get("pasta_gravacao") or "").strip()
+        if caminho_absoluto(texto):
+            pastas[texto] = Path(normalizar_raiz(texto))
+    return pastas
+
+
 def calcular_gravacoes(raiz, hoje=None, dias=DIAS_PADRAO, cache=None, limite_s=LIMITE_TOTAL_S):
     """Segundos gravados por dia de cada camera de `raiz`, nos ultimos `dias` dias (ate `hoje`).
     Retorna {nome da pasta: {dia: segundos}}; None no lugar do dict se a camera ficou incompleta
     (tempo esgotado: o que ja foi lido fica no cache e a proxima execucao continua)."""
+    return calcular_gravacoes_pastas(listar_pastas_cameras(raiz), hoje, dias, cache, limite_s)
+
+
+def calcular_gravacoes_pastas(pastas, hoje=None, dias=DIAS_PADRAO, cache=None, limite_s=LIMITE_TOTAL_S):
+    """Igual a `calcular_gravacoes`, mas para as pastas dadas ({chave: Path da pasta da camera, com Indices}).
+    Pasta inexistente ou ilegivel: None na chave dela (a camera fica NAO_VERIFICADO)."""
     hoje = hoje or date.today()
     primeiro = hoje - timedelta(days=dias - 1)
     arquivos_cache = _carregar_cache(cache)
     novos = {}
     limite = time.monotonic() + limite_s
     resultado = {}
-    for nome, pasta in listar_pastas_cameras(raiz).items():
+    for nome, pasta in pastas.items():
         indices = []
         try:
             for arq in (pasta / "Indices").iterdir():
