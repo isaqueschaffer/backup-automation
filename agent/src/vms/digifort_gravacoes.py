@@ -127,10 +127,17 @@ def segundos_por_dia(intervalos, destino=None):
     return destino
 
 
+def normalizar_raiz(raiz) -> str:
+    """'D:' vira 'D:\\': no Windows a unidade sozinha e a pasta atual daquele disco, nao a raiz dele
+    (o Digifort que grava direto em D:\\17\\, D:\\18\\... tem como raiz comum so 'D:')."""
+    texto = str(raiz).strip()
+    return texto + "\\" if re.fullmatch(r"[A-Za-z]:", texto) else texto
+
+
 def listar_pastas_cameras(raiz):
     """{nome da pasta: Path} das cameras em `raiz`. Aceita <raiz>/<camera>/{Dados,Indices} ou a pasta
     de uma camera so (com Dados e Indices direto, o nome e o da propria pasta)."""
-    raiz = Path(raiz)
+    raiz = Path(normalizar_raiz(raiz))
     if not raiz.is_dir():
         return {}
     if (raiz / "Indices").is_dir():

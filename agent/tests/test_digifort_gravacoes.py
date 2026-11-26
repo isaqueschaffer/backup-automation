@@ -137,6 +137,13 @@ class TestPastasECache(unittest.TestCase):
         escrever_indice(unica / "Indices" / "20261029_19.dix", segundos(datetime(2026, 10, 29, 9, 0), datetime(2026, 10, 29, 9, 1)))
         self.assertEqual(list(g.listar_pastas_cameras(unica)), ["Cliente"])
 
+    def test_unidade_sozinha_vira_raiz_do_disco(self):
+        # Digifort gravando direto em D:\17\, D:\18\...: a raiz comum da planilha sai como "D:"
+        self.assertEqual(g.normalizar_raiz("D:"), "D:\\")
+        self.assertEqual(g.normalizar_raiz(" d: "), "d:\\")
+        self.assertEqual(g.normalizar_raiz("D:\\Gravacoes"), "D:\\Gravacoes")
+        self.assertEqual(g.normalizar_raiz("D:\\"), "D:\\")
+
     def test_pasta_inexistente(self):
         self.assertEqual(g.listar_pastas_cameras(self.raiz / "nao existe"), {})
         self.assertEqual(g.calcular_gravacoes(self.raiz / "nao existe", self.hoje), {})

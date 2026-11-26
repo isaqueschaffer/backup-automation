@@ -75,7 +75,9 @@ export function raizComumCaminhos(caminhos: string[]): string {
     if (partes.every(p => p[i].toLowerCase() === seg.toLowerCase())) comuns.push(seg);
     else break;
   }
-  return comuns.join("\\");
+  const raiz = comuns.join("\\");
+  // Só a unidade ("D:\17\", "D:\18\" -> "D:"): no Windows "D:" é a pasta atual do disco, a raiz é "D:\"
+  return /^[A-Za-z]:$/.test(raiz) ? raiz + "\\" : raiz;
 }
 
 // Converte linhas brutas em matriz de texto limpo (máx. 100 colunas por linha e descarta linhas vazias)
