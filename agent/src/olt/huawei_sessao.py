@@ -70,3 +70,31 @@ def conectar_com_novas_tentativas(abrir, descricao: str, tentativas: int = None,
             logging.warning(f"[HUAWEI] {descricao}: a OLT fechou a conexao no login (tentativa {n}/{tentativas}); "
                             f"nova tentativa em {int(pausa_s)} s. ({e})")
             time.sleep(pausa_s)
+
+
+def sair_da_olt(shell, espera_s: float = 5.0) -> None:
+    """Logout limpo antes de fechar o SSH (1.1.70): volta ao modo privilegiado (`return`), manda `quit` e confirma o
+    "Are you sure to log out? (y/n)" com `y`. So derrubar a conexao (ssh.close) pode deixar a sessao contando na OLT
+    ate o idle-timeout, e a OLT limita as sessoes do usuario. Nunca levanta erro: se a OLT responder diferente, quem
+    chamou fecha a conexao do mesmo jeito."""
+    try:
+        shell.send("return\n")
+        time.sleep(0.5)
+        if shell.recv_ready():
+            shell.recv(65535)
+        shell.send("quit\n")
+        fim = time.monotonic() + espera_s
+        buf = ""
+        while time.monotonic() < fim:
+            if shell.closed or shell.exit_status_ready():
+                return
+            if shell.recv_ready():
+                buf += shell.recv(4096).decode("utf-8", errors="ignore")
+                if "(y/n)" in buf.lower():
+                    shell.send("y\n")
+                    time.sleep(0.5)
+                    return
+            else:
+                time.sleep(0.2)
+    except Exception:
+        logging.debug("[HUAWEI] Logout da OLT nao confirmado; a conexao sera fechada assim mesmo.", exc_info=True)

@@ -101,10 +101,11 @@ def preparar_backup_huawei_texto(equipamento: dict, limite_memoria: int) -> dict
         porta = 22
 
     from contextlib import ExitStack
-    from src.olt.huawei_sessao import conectar_com_novas_tentativas, sessao_exclusiva
+    from src.olt.huawei_sessao import conectar_com_novas_tentativas, sair_da_olt, sessao_exclusiva
     from src.olt.huawei_status import explicar_erro_ssh
 
     ssh = None
+    shell = None
     pilha = ExitStack()
     try:
         pilha.enter_context(sessao_exclusiva(ip))  # uma sessao por vez do agente na OLT (status, teste, backup)
@@ -156,6 +157,8 @@ def preparar_backup_huawei_texto(equipamento: dict, limite_memoria: int) -> dict
         logging.error(f"[HUAWEI] FALHA em {ip}:{porta}: {explicar_erro_ssh(e, ip, porta)}")
     finally:
         try:
+            if shell is not None:
+                sair_da_olt(shell)  # logout limpo: libera a sessao na OLT (1.1.70)
             if ssh is not None:
                 ssh.close()
         except Exception:

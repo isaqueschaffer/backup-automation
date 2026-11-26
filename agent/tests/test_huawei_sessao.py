@@ -155,3 +155,38 @@ class TestBackupAtivoMensagem(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSairDaOlt(unittest.TestCase):
+    """1.1.70: logout limpo antes de fechar o SSH, para a sessão não ficar contando na OLT até o idle-timeout."""
+
+    class _ShellFalso:
+        def __init__(self, respostas, falhar=False):
+            self.enviados, self.respostas, self.falhar = [], list(respostas), falhar
+            self.closed = False
+
+        def send(self, texto):
+            if self.falhar:
+                raise OSError("canal fechado")
+            self.enviados.append(texto)
+
+        def recv_ready(self):
+            return bool(self.respostas)
+
+        def recv(self, n):
+            return self.respostas.pop(0)
+
+        def exit_status_ready(self):
+            return False
+
+    def test_confirma_o_logout_quando_a_olt_pergunta(self):
+        from src.olt.huawei_sessao import sair_da_olt
+        shell = self._ShellFalso([b"OLT#", b"Are you sure to log out? (y/n)[n]:"])
+        with mock.patch("src.olt.huawei_sessao.time.sleep"):
+            sair_da_olt(shell, espera_s=1)
+        self.assertEqual(shell.enviados, ["return\n", "quit\n", "y\n"])
+
+    def test_nunca_levanta_erro(self):
+        from src.olt.huawei_sessao import sair_da_olt
+        with mock.patch("src.olt.huawei_sessao.time.sleep"):
+            sair_da_olt(self._ShellFalso([], falhar=True), espera_s=0.1)

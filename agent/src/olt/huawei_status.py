@@ -16,7 +16,7 @@ from datetime import datetime
 
 import paramiko
 
-from .huawei_sessao import OltOcupada, conectar_com_novas_tentativas, sessao_exclusiva
+from .huawei_sessao import OltOcupada, conectar_com_novas_tentativas, sair_da_olt, sessao_exclusiva
 from .unm_telnet import qualidade_sinal, resumir_onus
 
 PORTA_PADRAO = 22
@@ -167,6 +167,7 @@ def _coletar(ip: str, usuario: str, senha: str, porta: int) -> dict:
             finally:
                 comando("quit")
     finally:
+        sair_da_olt(shell)  # logout limpo antes de fechar: a coleta roda a cada 5 min (1.1.70)
         ssh.close()
 
     for onu in onus:

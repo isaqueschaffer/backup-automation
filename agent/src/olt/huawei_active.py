@@ -11,7 +11,7 @@ from pyftpdlib.authorizers import DummyAuthorizer
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
-from src.olt.huawei_sessao import conectar_com_novas_tentativas, sessao_exclusiva
+from src.olt.huawei_sessao import conectar_com_novas_tentativas, sair_da_olt, sessao_exclusiva
 from src.olt.huawei_status import abrir_ssh_huawei, explicar_erro_ssh
 
 # Usaremos a porta 21 padrao, agora que o WFTPD sera desinstalado
@@ -98,6 +98,7 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
     # ── CONECTAR VIA SSH NA OLT ───────────────────────────────────────
     # Uma sessao por vez do agente na OLT (coleta de status, teste e backup esperam um ao outro)
     ssh = None
+    shell = None
     pilha = ExitStack()
     porta = 22
 
@@ -209,6 +210,8 @@ def realizar_backup_huawei_ativo(equipamento: dict, pasta_destino: Path) -> dict
         logging.error(f"[HUAWEI] ERRO INESPERADO em {ip}:{porta}: {type(e).__name__}: {e}")
     finally:
         try:
+            if shell is not None:
+                sair_da_olt(shell)  # logout limpo: libera a sessao na OLT (1.1.70)
             if ssh is not None:
                 ssh.close()
         except Exception:

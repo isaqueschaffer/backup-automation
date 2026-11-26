@@ -14,6 +14,12 @@ nova entrada que cite a antiga.
 - **Versão**: 1.1.70 em `updater.py`, `installer.iss`, `server/dashboard/package.json` e `package-lock.json`, levando o merge do ramo `helena`. `requirements-linux.txt` intacto. Testes: suíte do agente 374 OK (1 skipped).
 - **Entrou** (helenaoc-dotcom: `ac68026` e `701a75f`): ver as duas entradas abaixo, escritas pela Helena.
 
+### [2026-11-26] — Agente 1.1.70: merge da Helena (OLT Huawei, backup de pasta) + logout limpo da OLT Huawei
+
+- **Merge `helena`** (helenaoc-dotcom, 26/11: `ac68026` validador de data, `701a75f` sessões da OLT Huawei): ver as duas entradas abaixo, escritas pela Helena. **Auditoria**: só `agent/` e `docs/CHANGELOG.md` (11 arquivos, +370/−37); sem segredos, sem servidor/painel/compose/requirements; `tools/verificar_regras.py`: 0 erro, 0 aviso. Nada bloqueado. Conflito só no topo do changelog (as duas entradas mantidas).
+- **Acrescentado no merge (logout limpo)**: a investigação do dono no mesmo dia chegou à mesma causa (sessões SSH da OLT Huawei esgotadas: Georgina falhou dia sim, dia não de 20 a 26/11; Recanto Real em 19 e 26/11) e viu um ponto que faltava: o backup (`huawei_active`), o backup do túnel (`huawei_texto`) e a coleta de status (`huawei_status`) terminavam com `ssh.close()` sem logout, o que pode deixar a sessão contando na OLT até o idle-timeout. Novo `huawei_sessao.sair_da_olt(shell)`: `return`, `quit` e `y` no "Are you sure to log out? (y/n)", sem nunca levantar erro, chamado antes do `close` nos três. Testes em `test_huawei_sessao.py` (`TestSairDaOlt`). Recomendação ao cliente continua: conferir `display users` e o `idle-timeout` das linhas VTY das duas OLTs.
+- **Testes**: agente 376 OK. **Versão**: 1.1.70 em `updater.py`, `installer.iss`, `package.json` e `package-lock.json`. `requirements-linux.txt` intacto.
+
 ### [2026-11-26] — OLT Huawei: uma sessão SSH por vez, nova tentativa quando a OLT fecha o login e mensagem certa no backup
 
 - **Corrige a entrada "Backup de pasta (UNM2000/Huawei/Digifort) aceita o arquivo das últimas 24 h"** (abaixo): Georgina e Recanto Real não usam a mesma OLT, e a senha do `root` não mudou.
