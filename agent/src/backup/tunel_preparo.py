@@ -35,12 +35,9 @@ def _memoria(nome_arquivo: str, dados: bytes, tipo: str):
 def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
     """Mesmo fluxo do agente Windows (`processar_nvr`), em memória: status das câmeras, telemetria, config
     (Intelbras CGI / Hikvision ISAPI .bin + .xls; Motorola exportConfig + porta de serviço ou WebSocket) e planilha."""
-    import requests
-    from requests.auth import HTTPDigestAuth
     from src.application.backup_job import PLANILHAS_NVR
-    from src.backup.crypto import gerar_secretkey
-    from src.backup.downloader import baixar_bytes, com_novas_tentativas, isapi_responde
     from src.nvr.factory import coletar_telemetria_nvr, verificar_gravacao_nvr
+    from src.nvr.hikvision import backup as backup_hikvision
     from src.nvr.intelbras.backup import baixar_configuracao_intelbras_memoria
 
     nome = eq.get("name", "NVR")
@@ -52,14 +49,41 @@ def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
         return {"nome": nome, "status": "ERRO", "cameras": None}
     logging.info(f"\n{'='*50}\n{nome} [NVR / túnel] (IP: {ip})\n{'='*50}")
 
+    marca_up = (marca or "").upper()
+
+    def _arquivos_hikvision(cfg):
+        saida = []
+        if cfg.get("bin"):
+            saida.append(_memoria(f"CONFIG_NVR_{_data_arquivo()}.bin", cfg["bin"], "NVR_CONFIG"))
+        if cfg.get("xls"):
+            saida.append(_memoria(f"CONFIG_IPCAM_{_data_arquivo()}.xls", cfg["xls"], "NVR_CONFIG"))
+        return saida
+
+    # Hikvision ou marca não informada: a configuração vem ANTES da verificação de gravação (é ela que trava os NVR
+    # mais fracos); depois se completa o que faltou (mesmo fluxo do Windows, src/nvr/hikvision/backup.py)
+    config_hik = None
+    if marca_up not in ("MOTOROLA", "INTELBRAS"):
+        try:
+            config_hik = backup_hikvision.baixar_antes_da_gravacao(ip, user, pwd, senha_zip, limite=LIMITE_MEMORIA)
+        except LimiteMemoriaExcedido as e:
+            logging.error(f"  [NVR] {nome}: {e}")
+            return {"nome": nome, "status": "ERRO", "cameras": None, "motivo": str(e)}
+
     retorno = verificar_gravacao_nvr(ip, user, pwd, marca)
     if isinstance(retorno, tuple) and len(retorno) == 2:
         cameras_status, tipo_nvr = retorno
     else:
         cameras_status, tipo_nvr = retorno, "DESCONHECIDO"
     if not cameras_status and tipo_nvr == "DESCONHECIDO":
+        if config_hik and (config_hik.get("bin") or config_hik.get("xls")):
+            motivo = "câmeras e gravação não lidas (o NVR parou de responder depois da configuração)"
+            falhas = backup_hikvision.descrever_falhas(config_hik, telemetria_esperada=False)
+            motivo = f"{motivo}; {falhas}" if falhas else motivo
+            logging.warning(f"  {nome} PARCIAL: {motivo}", extra={"enviar_servidor": True})
+            return {"nome": nome, "status": "PRONTO", "status_final": "PARCIAL", "motivo": motivo,
+                    "arquivos_origem": _arquivos_hikvision(config_hik), "cameras": None}
         logging.error("  NVR INACESSIVEL ou falha no login.")
-        return {"nome": nome, "status": "ERRO"}
+        return {"nome": nome, "status": "ERRO", "motivo": "NVR inacessível ou falha no login"}
     if not cameras_status:
         logging.warning("  Nenhuma câmera encontrada no NVR. Prosseguindo com backup de configurações.")
     logging.info(f"  NVR acessivel (Detectado: {tipo_nvr}).")
@@ -67,6 +91,7 @@ def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
 
     arquivos = []
     status = "OK"
+    motivo = ""
     try:
         if tipo_nvr == "MOTOROLA":
             logging.info("  NVR Motorola detectado. Exportando configuracao restauravel (em memória, sem plugin)...")
@@ -75,44 +100,37 @@ def preparar_nvr(eq: dict, senha_zip: Optional[str]) -> dict:
             if dados is not None:
                 arquivos.append(_memoria(f"CONFIG_MOTOROLA_{_data_arquivo()}.bin", dados, "NVR_CONFIG"))
             else:
-                status = "PARCIAL"
-        elif tipo_nvr == "INTELBRAS" or (marca and marca.upper() == "INTELBRAS"):
+                status, motivo = "PARCIAL", "configuração do NVR Motorola não exportada (ver o log)"
+        elif tipo_nvr == "INTELBRAS" or marca_up == "INTELBRAS":
             logging.info("  NVR Intelbras detectado. Baixando configuracao completa via CGI (em memória)...")
             dados = baixar_configuracao_intelbras_memoria(ip, user, pwd, limite=LIMITE_MEMORIA)
             if dados is not None:
                 arquivos.append(_memoria(f"CONFIG_INTELBRAS_{_data_arquivo()}.backup", dados, "NVR_CONFIG"))
             else:
-                status = "PARCIAL"
+                status, motivo = "PARCIAL", "configuração do NVR Intelbras não baixada (ver o log)"
         else:
             try:
-                sessao = requests.Session()
-                sessao.auth = HTTPDigestAuth(user, pwd)
-                sessao.verify = False
-                if not com_novas_tentativas(lambda: isapi_responde(sessao, ip), "ISAPI do NVR"):
-                    raise RuntimeError(f"ISAPI de {ip} não respondeu")
-                sk, iv = gerar_secretkey(senha_zip)
-                url_bin = f"http://{ip}/ISAPI/System/configurationData?secretkey={sk}&security=1&iv={iv}"
-                dados = com_novas_tentativas(lambda: baixar_bytes(sessao, url_bin, min_bytes=100_000, valida_xml=True),
-                                             "Download da configuracao do NVR")
-                if dados:
-                    logging.info("  Backup NVR OK.")
-                    arquivos.append(_memoria(f"CONFIG_NVR_{_data_arquivo()}.bin", dados, "NVR_CONFIG"))
-                url_xls = f"http://{ip}/ISAPI/ContentMgmt/InputProxy/ipcConfig"
-                dados = com_novas_tentativas(lambda: baixar_bytes(sessao, url_xls), "Download da configuracao das IPCAM")
-                if dados:
-                    logging.info("  Backup IPCAM OK.")
-                    arquivos.append(_memoria(f"CONFIG_IPCAM_{_data_arquivo()}.xls", dados, "NVR_CONFIG"))
-                status = "OK" if len(arquivos) == 2 else "PARCIAL"
+                config_hik = backup_hikvision.completar(ip, user, pwd, senha_zip, config_hik, limite=LIMITE_MEMORIA)
             except LimiteMemoriaExcedido:
                 raise
-            except Exception:
+            except Exception as e:
                 logging.warning("  API ISAPI falhou. Backup de arquivos pulado.", exc_info=True)
-                status = "PARCIAL"
+                erro = f"{type(e).__name__}: {e}"
+                config_hik = {"bin": None, "xls": None, "motivos": {"bin": erro, "xls": erro}}
+            arquivos = _arquivos_hikvision(config_hik)
+            status = "OK" if len(arquivos) == 2 else "PARCIAL"
+            motivo = backup_hikvision.descrever_falhas(config_hik, cameras_status, telemetria)
     except LimiteMemoriaExcedido as e:
         logging.error(f"  [NVR] {nome}: {e}")
-        return {"nome": nome, "status": "ERRO", "cameras": cameras_status, "telemetria": telemetria}
+        return {"nome": nome, "status": "ERRO", "cameras": cameras_status, "telemetria": telemetria, "motivo": str(e)}
+
+    if status != "OK" or motivo:
+        nivel = logging.WARNING if status != "OK" else logging.INFO
+        logging.log(nivel, f"  {nome} {status}: {motivo or 'sem detalhe'}", extra={"enviar_servidor": True})
 
     res = {"nome": nome, "cameras": cameras_status, "telemetria": telemetria}
+    if motivo:
+        res["motivo"] = motivo
     if arquivos:
         res["status"] = "PRONTO"
         res["status_final"] = status

@@ -94,9 +94,17 @@ function EquipamentosCell({ results }: { results: NVRResult[] | null }) {
                 {tipo}
               </div>
               {stats.items.map((item, idx) => (
-                <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "6px 0" }}>
-                  <span className="text-sm text-secondary">{item.nome}</span>
-                  <StatusBadge status={item.status} />
+                <div key={idx} style={{ padding: "6px 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                    <span className="text-sm text-secondary">{item.nome}</span>
+                    <StatusBadge status={item.status} />
+                  </div>
+                  {/* Motivo enviado pelo agente (>= 1.1.69) quando o equipamento não ficou OK */}
+                  {item.motivo && (
+                    <div className="text-sm" style={{ color: "var(--text-muted)", marginTop: 4, overflowWrap: "anywhere" }}>
+                      {item.motivo}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

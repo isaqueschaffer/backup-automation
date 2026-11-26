@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 import shutil
@@ -36,7 +37,8 @@ from src.pabx.issabel import realizar_backup_issabel
 from src.mikrotik.routeros import realizar_backup_mikrotik
 from src.vms.defense import realizar_backup_defense
 from src.backup.crypto import gerar_secretkey
-from src.backup.downloader import baixar_arquivo, com_novas_tentativas, isapi_responde
+from src.backup.downloader import sem_query
+from src.nvr.hikvision import backup as backup_hikvision
 from src.backup.archiver import criar_zip, data_hoje
 
 TEMP_DIR = DIR_AGENT / "tmp_backup"
@@ -67,7 +69,11 @@ def nome_seguro(nome: str) -> str:
 
 
 def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: dict = None) -> dict:
-    """Processa backup de NVR (Hikvision/Motorola/Digifort)."""
+    """Processa backup de NVR (Hikvision/Intelbras/Motorola).
+
+    Hikvision (desde 1.1.69): a configuração (.bin e .xls) é baixada ANTES da verificação de gravação, que é a parte
+    pesada e trava o serviço web dos NVR mais fracos; depois se completa o que faltou, com novas tentativas. O
+    resultado leva `motivo` quando não fica OK (vai para o painel e para o log)."""
     nome, ip, user, pwd = (
         equipamento["name"], equipamento["ip"],
         equipamento["username"], equipamento["password"]
@@ -79,6 +85,12 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
 
     config_extra = parse_config_extra(equipamento)
     marca = config_extra.get("marca")
+    marca_up = (marca or "").upper()
+
+    # Hikvision ou marca não informada: tenta a configuração antes (Intelbras e Motorola têm caminho próprio)
+    config_hik = None
+    if marca_up not in ("MOTOROLA", "INTELBRAS"):
+        config_hik = backup_hikvision.baixar_antes_da_gravacao(ip, user, pwd, zip_password)
 
     retorno = verificar_gravacao_nvr(ip, user, pwd, marca)
     if isinstance(retorno, tuple) and len(retorno) == 2:
@@ -87,8 +99,16 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
         cameras_status, tipo_nvr = retorno, "DESCONHECIDO"
 
     if not cameras_status and tipo_nvr == "DESCONHECIDO":
+        if config_hik and (config_hik.get("bin") or config_hik.get("xls")):
+            # O NVR respondeu à configuração e parou na verificação: o backup de fato está salvo
+            _gravar_config_hikvision(config_hik, pasta_nvr)
+            motivo = "câmeras e gravação não lidas (o NVR parou de responder depois da configuração)"
+            falhas = backup_hikvision.descrever_falhas(config_hik, telemetria_esperada=False)
+            motivo = f"{motivo}; {falhas}" if falhas else motivo
+            logging.warning(f"  {nome} PARCIAL: {motivo}", extra={"enviar_servidor": True})
+            return {"nome": nome, "status": "PARCIAL", "motivo": motivo}
         logging.error("  NVR INACESSIVEL ou falha no login.")
-        return {"nome": nome, "status": "ERRO"}
+        return {"nome": nome, "status": "ERRO", "motivo": "NVR inacessível ou falha no login"}
 
     if not cameras_status:
         logging.warning("  Nenhuma câmera encontrada no NVR. Prosseguindo com backup de configurações.")
@@ -97,49 +117,33 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
 
     telemetria = coletar_telemetria_nvr(ip, user, pwd, tipo_nvr, marca, config_extra.get("snmp_community"))
 
-    sessao = requests.Session()
-    sessao.auth = HTTPDigestAuth(user, pwd)
-    sessao.verify = False
-
-    sucessos = 0
     status = "OK"
+    motivo = ""
 
     if tipo_nvr == "MOTOROLA":
         logging.info("  NVR Motorola detectado. Exportando configuracao restauravel (sem plugin)...")
         arq_cfg = pasta_nvr / f"CONFIG_MOTOROLA_{data_hoje()}.bin"
-        status = "OK" if baixar_configuracao_motorola(ip, user, pwd, arq_cfg) else "PARCIAL"
-    elif tipo_nvr == "INTELBRAS" or (marca and marca.upper() == "INTELBRAS"):
+        if not baixar_configuracao_motorola(ip, user, pwd, arq_cfg):
+            status, motivo = "PARCIAL", "configuração do NVR Motorola não exportada (ver o log)"
+    elif tipo_nvr == "INTELBRAS" or marca_up == "INTELBRAS":
         logging.info("  NVR Intelbras detectado. Baixando configuracao completa via CGI...")
         arq_cfg = pasta_nvr / f"CONFIG_INTELBRAS_{data_hoje()}.backup"
-        if baixar_configuracao_intelbras(ip, user, pwd, arq_cfg):
-            status = "OK"
-        else:
-            status = "PARCIAL"
+        if not baixar_configuracao_intelbras(ip, user, pwd, arq_cfg):
+            status, motivo = "PARCIAL", "configuração do NVR Intelbras não baixada (ver o log)"
     else:
         try:
-            if not com_novas_tentativas(lambda: isapi_responde(sessao, ip), "ISAPI do NVR"):
-                raise RuntimeError(f"ISAPI de {ip} não respondeu")
-
-            # Config NVR (.bin)
-            sk, iv = gerar_secretkey(zip_password)
-            url_bin = f"http://{ip}/ISAPI/System/configurationData?secretkey={sk}&security=1&iv={iv}"
-            arq_bin = pasta_nvr / f"CONFIG_NVR_{data_hoje()}.bin"
-            if com_novas_tentativas(lambda: baixar_arquivo(sessao, url_bin, arq_bin, min_bytes=100_000, valida_xml=True),
-                                    "Download da configuracao do NVR"):
-                logging.info("  Backup NVR OK.")
-                sucessos += 1
-
-            # Config IPCAM (.xls)
-            url_xls = f"http://{ip}/ISAPI/ContentMgmt/InputProxy/ipcConfig"
-            arq_xls = pasta_nvr / f"CONFIG_IPCAM_{data_hoje()}.xls"
-            if com_novas_tentativas(lambda: baixar_arquivo(sessao, url_xls, arq_xls), "Download da configuracao das IPCAM"):
-                logging.info("  Backup IPCAM OK.")
-                sucessos += 1
-
-            status = "OK" if sucessos == 2 else "PARCIAL"
-        except Exception:
+            config_hik = backup_hikvision.completar(ip, user, pwd, zip_password, config_hik)
+        except Exception as e:
             logging.warning("  API ISAPI falhou. Backup de arquivos pulado.", exc_info=True)
-            status = "PARCIAL"
+            config_hik = {"bin": None, "xls": None, "motivos": {"bin": f"{type(e).__name__}: {sem_query(e)}",
+                                                                 "xls": f"{type(e).__name__}: {sem_query(e)}"}}
+        _gravar_config_hikvision(config_hik, pasta_nvr)
+        status = "OK" if config_hik.get("bin") and config_hik.get("xls") else "PARCIAL"
+        motivo = backup_hikvision.descrever_falhas(config_hik, cameras_status, telemetria)
+
+    if status != "OK" or motivo:
+        nivel = logging.WARNING if status != "OK" else logging.INFO
+        logging.log(nivel, f"  {nome} {status}: {motivo or 'sem detalhe'}", extra={"enviar_servidor": True})
 
     # A imagem da noite não é mais capturada no backup (atrasava backups manuais e agendados):
     # ela é capturada sob demanda pela Galeria do NVR no painel (tarefa RTSP modo "noite").
@@ -153,9 +157,21 @@ def processar_nvr(equipamento: dict, zip_password: str, pasta_data: Path, conf: 
             planilha = arq_planilha  # o run_backup move para NVR/PLANILHA/ do pacote final
 
     resultado = {"nome": nome, "status": status, "cameras": cameras_status, "telemetria": telemetria}
+    if motivo:
+        resultado["motivo"] = motivo
     if planilha is not None:
         resultado["_planilha"] = planilha  # caminho local; o run_backup remove antes de reportar ao servidor
     return resultado
+
+
+def _gravar_config_hikvision(config_hik: dict, pasta_nvr: Path) -> None:
+    """Grava no disco o que veio da configuração Hikvision (`.bin` e `.xls`), com o mesmo nome de antes."""
+    for chave, nome_arq in (("bin", f"CONFIG_NVR_{data_hoje()}.bin"), ("xls", f"CONFIG_IPCAM_{data_hoje()}.xls")):
+        dados = config_hik.get(chave)
+        if dados:
+            destino = pasta_nvr / nome_arq
+            destino.write_bytes(dados)
+            logging.info(f"  Salvo: {destino.name} ({len(dados)/1024:.1f} KB) SHA-256: {hashlib.sha256(dados).hexdigest()[:16]}...")
 
 
 def processar_olt(

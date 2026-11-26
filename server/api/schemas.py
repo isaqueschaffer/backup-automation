@@ -258,6 +258,9 @@ class NVRResult(BaseModel):
     status: str  # OK, PARCIAL, ERRO
     cameras: Optional[List[Dict[str, Any]]] = None
     telemetria: Optional[Dict[str, Any]] = None  # CPU/RAM/discos (NVR Hikvision)
+    # Por que o equipamento não ficou OK (agente >= 1.1.69): ex. "configuração do NVR (.bin) não baixada: HTTP 503;
+    # 4 câmera(s) com a gravação não verificada". Vai junto no nvr_results gravado no backup.
+    motivo: Optional[str] = Field(None, max_length=500)
 
 
 class BackupReportCreate(BaseModel):

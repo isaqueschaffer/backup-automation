@@ -319,6 +319,8 @@ export interface NVRResult {
   tipo?: TipoEquipamento;
   cameras?: CameraRecStatus[];
   telemetria?: NVRTelemetry | null;
+  // Por que não ficou OK (agente >= 1.1.69)
+  motivo?: string | null;
 }
 
 export interface Backup {

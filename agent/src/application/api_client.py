@@ -399,6 +399,8 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
                 "status": r["status"],
                 "cameras": r.get("cameras") or [],
                 "telemetria": r.get("telemetria"),
+                # Por que não ficou OK (1.1.69): o painel mostra; servidor antigo ignora o campo
+                **({"motivo": str(r["motivo"])[:500]} if r.get("motivo") else {}),
             }
             for r in resultados
         ],

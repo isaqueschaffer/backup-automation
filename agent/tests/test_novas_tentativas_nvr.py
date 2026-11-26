@@ -43,26 +43,24 @@ class TestComNovasTentativas(unittest.TestCase):
 
 class TestBackupHikvisionComNovaTentativa(unittest.TestCase):
     def test_config_baixa_na_segunda_tentativa_fica_ok(self):
+        """1.1.69: a 1a tentativa do .bin é a antecipada (antes da gravação, sem pausa); depois `completar` tenta de
+        novo com pausa entre as tentativas. Aqui: antecipada falha, 1a do completar falha, 2a dá certo -> OK."""
         import tempfile
         from pathlib import Path
         from src.application import backup_job
 
         eq = {"name": "NVR 03", "ip": "192.168.5.4", "username": "admin", "password": "x", "config_extra": None}
         cams = [{"canal": "1"}]
-        tentativas_bin = iter([False, True])
+        tentativas_bin = iter([None, None, b"B" * 150_000])
 
-        def baixar(sessao, url, destino, **kw):
-            return next(tentativas_bin) if "configurationData" in url else True
+        def baixar(sessao, url, **kw):
+            return next(tentativas_bin) if "configurationData" in url else b"X" * 500
 
-        with tempfile.TemporaryDirectory() as tmp, \
-                mock.patch.object(backup_job, "verificar_gravacao_nvr", return_value=(cams, "NVR")), \
-                mock.patch.object(backup_job, "coletar_telemetria_nvr", return_value=None), \
-                mock.patch.object(backup_job, "isapi_responde", return_value=True), \
-                mock.patch.object(backup_job, "baixar_arquivo", side_effect=baixar), \
-                mock.patch("src.backup.downloader.time.sleep") as dormir, \
-                mock.patch.dict(backup_job.PLANILHAS_NVR, {}, clear=True):
+        with tempfile.TemporaryDirectory() as tmp,                 mock.patch.object(backup_job, "verificar_gravacao_nvr", return_value=(cams, "NVR")),                 mock.patch.object(backup_job, "coletar_telemetria_nvr", return_value={"cpu": 1}),                 mock.patch.object(downloader, "isapi_responde", return_value=True),                 mock.patch.object(downloader, "baixar_bytes", side_effect=baixar),                 mock.patch("src.backup.downloader.time.sleep") as dormir,                 mock.patch.dict(backup_job.PLANILHAS_NVR, {}, clear=True):
             res = backup_job.processar_nvr(eq, "senha-zip", Path(tmp))
+            arquivos = sorted(p.name.split("_")[1] for p in Path(tmp).iterdir())
         self.assertEqual(res["status"], "OK")
+        self.assertEqual(arquivos, ["IPCAM", "NVR"])
         dormir.assert_called_once()
 
 

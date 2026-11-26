@@ -152,8 +152,8 @@ class TestEquipamentosSemValidacao(unittest.TestCase):
     def test_modulos_de_equipamento_mantem_verify_false(self):
         esperados = {
             "src/utils/http.py": "verify=False",
-            "src/application/backup_job.py": "sessao.verify = False",
-            "src/backup/tunel_preparo.py": "sessao.verify = False",
+            # backup da config Hikvision (antes em backup_job.py e tunel_preparo.py; módulo comum desde 1.1.69)
+            "src/nvr/hikvision/backup.py": "sessao.verify = False",
             "src/olt/vsol.py": "session.verify = False",
             "src/olt/vsol_status.py": "session.verify = False",
             "src/pabx/issabel.py": "verify=False",
