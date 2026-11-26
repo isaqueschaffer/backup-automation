@@ -1,17 +1,26 @@
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Tuple
 
 from src.backup.file_manager.models import BackupGroup, BackupStatus
+
+# Backup feito ha menos disto tambem vale, mesmo com a data de ontem: o UNM2000 exporta de madrugada (ex.: 03:00),
+# entao um backup do agente entre a meia-noite e a exportacao achava so o arquivo de ontem e marcava BACKUP_ANTIGO
+# (agenda das 02:00 do teste-mk e backup manual de 00:58 do Chiquinho, 26/11/2026).
+JANELA_BACKUP_RECENTE = timedelta(hours=24)
+
 
 class Validator:
     @staticmethod
     def is_expected_date(group: BackupGroup, expected_date: datetime) -> bool:
         """
-        Verifica se a data do grupo de backup é a data esperada (normalmente o dia de hoje).
+        True se o grupo e do dia esperado (normalmente hoje) ou foi feito nas ultimas JANELA_BACKUP_RECENTE
+        antes de `expected_date` (o arquivo da madrugada de ontem, quando o de hoje ainda nao saiu).
         """
-        return group.date.date() == expected_date.date()
+        if group.date.date() == expected_date.date():
+            return True
+        return timedelta(0) <= expected_date - group.date < JANELA_BACKUP_RECENTE
 
     @staticmethod
     def is_complete_huawei(group: BackupGroup) -> bool:

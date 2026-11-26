@@ -9,6 +9,14 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Backup de pasta (UNM2000/Huawei/Digifort) aceita o arquivo das últimas 24 h
+
+- **Origem**: investigação das OLTs com falha em 26/11. O teste-mk-maquina (agenda 02:00) e um backup manual do Chiquinho (00:58) deram `BACKUP_ANTIGO` porque o UNM2000 só exporta às 03:00: depois da meia-noite o agente exigia o arquivo do dia novo e achava o de ontem, com menos de 24 h.
+- **Correção**: `Validator.is_expected_date` (`agent/src/backup/file_manager/validators.py`) aceita o grupo do mesmo dia ou feito até `JANELA_BACKUP_RECENTE` (24 h) antes da hora do agente; mais velho continua `BACKUP_ANTIGO` (ex.: Hot Beach Resort, parado em 15/11). O log "Data esperada" passa a dizer "(ou backup das últimas 24 h)". Teste: `agent/tests/test_validador_data_backup.py`; suíte do agente 352 OK.
+- **Painel (sem código)**: horário do cliente teste-mk de 02:00 para 04:00 (depois da exportação do UNM).
+- **Achados sem correção no código** (dependem do cliente): Georgina e Recanto Real usam a mesma OLT Huawei `10.11.104.2` e as duas recusaram o login do `root` a partir de 26/11 02:00 (senha trocada ou usuário bloqueado); Hot Beach Resort sem exportação do UNM2000 desde 15/11; Server Defense Trilan com `STATUS_ACCESS_DENIED` para a conta `unm2000` em `\\192.168.91.6\emsback` (falta permissão de compartilhamento/NTFS).
+- **Versão**: muda `agent/`; precisa de versão nova do agente no merge do dono.
+
 ### [2026-11-26] — Agente 1.1.68: merge da Helena (Digifort pela pasta de cada câmera, NVR Hikvision com novas tentativas)
 
 - **Versão**: 1.1.68 em `updater.py`, `installer.iss`, `server/dashboard/package.json` e `package-lock.json`, levando o merge abaixo. `requirements-linux.txt` intacto. Testes: agente OK, API 188 aprovados, tipos do painel OK.
