@@ -199,7 +199,9 @@ class TestColetarHuawei(unittest.TestCase):
                 self.assertIn(esperado, h.explicar_erro_ssh(erro, "10.11.104.2", 22))
 
     def test_falha_de_login_vira_mensagem_explicada(self):
-        with patch.object(h.paramiko, "SSHClient", side_effect=paramiko.AuthenticationException("Authentication failed: transport shut down or saw EOF")):
+        # a coleta tenta o login de novo quando a OLT fecha a conexao: sem a pausa real de 30 s no teste
+        with patch.object(h.paramiko, "SSHClient", side_effect=paramiko.AuthenticationException("Authentication failed: transport shut down or saw EOF")), \
+                patch("src.olt.huawei_sessao.time.sleep"):
             resultado = h.coletar_huawei("10.11.104.2", "root", "senha")
         self.assertIn("fechou a conexão", resultado["erro"])
         self.assertNotIn("senha", resultado["erro"].replace("a senha não foi avaliada", ""))

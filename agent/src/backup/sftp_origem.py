@@ -171,9 +171,14 @@ def abrir_ssh(host: str, porta: int, usuario: str, senha: Optional[str] = None, 
     except ErroSftp:
         cli.close()
         raise
-    except paramiko.AuthenticationException:
+    except paramiko.AuthenticationException as e:
         cli.close()
-        raise ErroSftp(f"usuário/senha ou chave de SSH recusados por {host}:{porta}") from None
+        texto = str(e) or type(e).__name__
+        if "saw eof" in texto.lower() or "transport shut down" in texto.lower():
+            # O paramiko usa a mesma exceção quando o servidor fecha o login sem avaliar a senha
+            raise ErroSftp(f"{host}:{porta} fechou a conexão durante o login, sem avaliar a senha "
+                           f"(sessões ocupadas ou bloqueio temporário) ({texto})") from None
+        raise ErroSftp(f"usuário/senha ou chave de SSH recusados por {host}:{porta} ({texto})") from None
     except Exception as e:
         cli.close()
         # ErroChaveHost levantado dentro da política chega embrulhado em alguns caminhos do paramiko

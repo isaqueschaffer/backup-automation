@@ -9,6 +9,16 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — OLT Huawei: uma sessão SSH por vez, nova tentativa quando a OLT fecha o login e mensagem certa no backup
+
+- **Corrige a entrada "Backup de pasta (UNM2000/Huawei/Digifort) aceita o arquivo das últimas 24 h"** (abaixo): Georgina e Recanto Real não usam a mesma OLT, e a senha do `root` não mudou.
+- **Origem**: o backup das OLTs Huawei da Recanto Real e da Georgina (OLTs diferentes, com o mesmo IP `10.11.104.2` em redes distintas) falhou em 26/11 às 02:00 com "Usuario ou senha incorretos", e o "Testar conexão" da Recanto Real às 13:55 com "A OLT fechou a conexão durante o login". A coleta de status entrou nas duas às 13:56 com o mesmo `root`: a senha está certa. A OLT recusa sessões quando já há outra do usuário aberta (a coleta de status do agente abre SSH a cada 5 min; o backup das 02:00 e o teste caíam em cima dela). Desde 23/11 a coleta da Recanto Real já registrava esse EOF umas 5 vezes por dia.
+- **Mensagem errada**: `huawei_active` tratava toda `paramiko.AuthenticationException` como senha incorreta, mas o EOF ("transport shut down or saw EOF") é a mesma exceção. Agora usa `explicar_erro_ssh`, como o teste de conexão.
+- **Correção**: novo `agent/src/olt/huawei_sessao.py`. `sessao_exclusiva(ip)` é uma trava por IP: coleta de status, teste e backup (Windows e Mikrotik) esperam um ao outro, até 600 s (depois disso, `OltOcupada` com explicação própria). `conectar_com_novas_tentativas` repete o login, com 30 s de pausa, só quando a OLT fechou a conexão sem avaliar a senha: 3 vezes no backup, 2 na coleta e no teste. Senha recusada de verdade não é repetida, para não bloquear o usuário. `huawei_status.abrir_ssh_huawei` cria um cliente novo a cada tentativa. `sftp_origem.abrir_ssh` (Mikrotik) mantém o texto original do paramiko e separa "fechou a conexão durante o login" de "usuário/senha recusados".
+- **Limite**: a trava vale dentro de um agente. Sessões de fora (outra máquina ou alguém do provedor logado como `root`) continuam podendo esgotar as sessões; a nova tentativa cobre a maior parte desses casos.
+- **Testes**: `agent/tests/test_huawei_sessao.py` (11; os 2 do backup Windows pulam sem o `pyftpdlib` e passam com ele); `test_huawei_status.py` sem a pausa real. Suíte do agente 363 OK.
+- **Versão**: muda `agent/`; precisa de versão nova do agente no merge do dono.
+
 ### [2026-11-26] — Backup de pasta (UNM2000/Huawei/Digifort) aceita o arquivo das últimas 24 h
 
 - **Origem**: investigação das OLTs com falha em 26/11. O teste-mk-maquina (agenda 02:00) e um backup manual do Chiquinho (00:58) deram `BACKUP_ANTIGO` porque o UNM2000 só exporta às 03:00: depois da meia-noite o agente exigia o arquivo do dia novo e achava o de ontem, com menos de 24 h.
