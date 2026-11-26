@@ -9,6 +9,10 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Agente 1.1.68: merge da Helena (Digifort pela pasta de cada câmera, NVR Hikvision com novas tentativas)
+
+- **Versão**: 1.1.68 em `updater.py`, `installer.iss`, `server/dashboard/package.json` e `package-lock.json`, levando o merge abaixo. `requirements-linux.txt` intacto. Testes: agente OK, API 188 aprovados, tipos do painel OK.
+
 ### [2026-11-26] — Merge `helena`: Digifort pela pasta de cada câmera e NVR Hikvision com novas tentativas
 
 - **Entrou** (helenaoc-dotcom, 25-26/11: `e2a22ce` conserto NVR Horizontes, `9e417e7` e `f629db5` Digifort): ver a entrada abaixo, escrita pela Helena.
