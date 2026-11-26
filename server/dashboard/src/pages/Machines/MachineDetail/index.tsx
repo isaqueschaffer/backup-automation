@@ -418,6 +418,9 @@ export default function MachineDetail() {
         onTriggerBackup={handleTriggerBackup} onRestartAgent={handleRestartAgent}
       />
 
+      {/* ── Configuração, status do agente e saúde do servidor (primeiro, a pedido do usuário) ── */}
+      <MachineInfoCards machine={machine} customerEmails={customerEmails} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} nowMs={now + serverSkewMs} />
+
       {/* ── Equipamentos ── */}
       <div style={{ marginBottom: 24 }}>
         <div className={`flex items-center justify-between ${equipamentosAberto ? "mb-3" : ""}`}>
@@ -508,9 +511,6 @@ export default function MachineDetail() {
           </div>
         )}
       </div>
-
-      {/* ── Configuração, status do agente e saúde do servidor ── */}
-      <MachineInfoCards machine={machine} customerEmails={customerEmails} isAgentOnline={isAgentOnline} nextPingStr={nextPingStr} onCopy={copyText} nowMs={now + serverSkewMs} />
 
       {/* ── Histórico de Backups ── */}
       <BackupHistory backups={backups} />

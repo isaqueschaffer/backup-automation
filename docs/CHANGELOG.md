@@ -9,6 +9,11 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Painel: detalhe da máquina com a configuração primeiro
+
+- **Pedido do usuário**: no detalhe da máquina, os cartões de Configuração da Máquina, Status do Agente e Saúde do Servidor voltam a aparecer logo abaixo do cabeçalho, antes de Equipamentos (corrige a ordem da entrada "detalhe da máquina com equipamentos primeiro", `ab163d1`).
+- **Arquivo**: `server/dashboard/src/pages/Machines/MachineDetail/index.tsx`. Sem mudança no agente (versão continua 1.1.70).
+
 ### [2026-11-26] — Painel: acessibilidade (rótulos, foco, teclado, movimento) e carregamento mais rápido (Notificações e pacote dividido)
 
 - **Problema** (revisão de experiência do painel, item 10): 112 rótulos sem ligação com o campo; áreas clicáveis que não eram botão nem link (fora do alcance do teclado); foco visível em uma regra só; 6 `transition: all`; telas levando 3 a 5 s; Notificações com mais de 4 s só no indicador. Medido em produção: `GET /notificacoes/cameras` levava ~32 s porque buscava as câmeras de cada equipamento uma a uma **com as fotos** (base64 de centenas de kB cada); o painel era um arquivo JavaScript único de 1,1 MB.
