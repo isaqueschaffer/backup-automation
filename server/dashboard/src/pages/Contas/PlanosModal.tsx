@@ -176,7 +176,7 @@ export default function PlanosModal({ onClose, onChanged }: PlanosModalProps) {
       ) : (
         <>
           <div className="table-wrap">
-            <table>
+            <table className="tabela-cartoes">
               <thead>
                 <tr>
                   <th>Nome</th>

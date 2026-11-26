@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -15,7 +16,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from auth import get_current_machine
-from database import get_db, SessionLocal
+from database import encerrar_transacao, get_db, SessionLocal
 from models import Machine, Backup, NVR, NVRCamera, AgentLog
 from schemas import (
     AgentConfigResponse,
@@ -283,9 +284,10 @@ async def ping_agent(
     Todo acesso ao banco roda em thread (asyncio.to_thread): consulta síncrona aqui dentro bloqueava o laço de
     eventos, e com o pool cheio o laço ficava 30 s parado esperando conexão enquanto as conexões presas só seriam
     devolvidas por pings que precisavam do próprio laço (impasse que derrubou a API em 23/11/2026)."""
+    # Lido antes do commit: depois dele a máquina expira e ler `machine.id` faria um SELECT aqui no laço de eventos
+    machine_id = machine.id
     # Commit imediato: persiste last_seen/telemetry antes de liberar a conexão para o long-polling
     await asyncio.to_thread(_iniciar_ping, db, machine, body)
-    machine_id = machine.id
     machine_id_str = str(machine_id)
     # Agente >= 1.1.8 informa que está fazendo backup: o reinício espera ele terminar (senão o backup se perde)
     # Passadas BACKUP_TRAVADO_MIN minutos (agente >= 1.1.36 informa `backup_ha_min`), o backup é tratado como
@@ -858,16 +860,14 @@ def _registrar_zip_recebido(db, request, machine, backup, backup_id, zip_path, z
     return {"status": "ok", "zip_size": zip_size, "email_sent": email_sent}
 
 
-@router.post("/backup/upload/{backup_id}")
-def upload_backup_zip(
-    backup_id: str,
-    request: Request,
-    device_type: str = Query("NVR", description="Tipo de equipamento: NVR, OLT, ONU, PABX"),
-    file: UploadFile = File(...),
-    machine: Machine = Depends(get_current_machine),
-    db: Session = Depends(get_db),
-):
-    """Agent uploads the ZIP file. Server stores it and sends email."""
+def _preparar_upload(db: Session, machine: Machine, backup_id: str, device_type: str, nome_arquivo: str,
+                     tipo_padrao: str) -> tuple:
+    """Validações do envio do ZIP (conta, backup da máquina, tipo e nome) e os dados da pasta de destino.
+
+    Termina devolvendo a conexão ao pool (`encerrar_transacao`): o upload pode levar minutos (Mikrotik em túnel,
+    disco lento) e antes a sessão ficava "idle in transaction" segurando uma conexão do pool durante todo o envio
+    (pool esgotado em 24/11/2026). Por isso a pasta do Cliente vai como cópia simples (id e nome), sem lazy load.
+    Retorna (backup, date_str, clean_device_type, filename, dados_da_pasta)."""
     if maquina_bloqueada(machine):
         raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
 
@@ -882,7 +882,7 @@ def upload_backup_zip(
     if not backup:
         raise HTTPException(status_code=404, detail="Backup record not found")
 
-    clean_device_type = device_type.strip().upper()
+    clean_device_type = (device_type or tipo_padrao).strip().upper()
     if clean_device_type not in TIPOS_EQUIPAMENTO and clean_device_type != "MIXED":
         raise HTTPException(
             status_code=400,
@@ -891,7 +891,7 @@ def upload_backup_zip(
 
     date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
     clean_machine = _sanitize_name(machine.name)
-    raw_filename = file.filename or f"backup_{clean_device_type.lower()}_{date_str}.zip"
+    raw_filename = nome_arquivo or f"backup_{clean_device_type.lower()}_{date_str}.zip"
     if clean_machine.lower() not in raw_filename.lower():
         if raw_filename.startswith("backup_"):
             filename = f"backup_{clean_machine}_{raw_filename[7:]}"
@@ -900,18 +900,41 @@ def upload_backup_zip(
     else:
         filename = raw_filename
 
+    customer = machine.customer
+    pasta = {
+        "machine_id": machine.id,
+        "machine_name": machine.name,
+        "customer": SimpleNamespace(id=customer.id, name=customer.name) if customer is not None else None,
+    }
+    encerrar_transacao(db)
+    return backup, date_str, clean_device_type, filename, pasta
+
+
+@router.post("/backup/upload/{backup_id}")
+def upload_backup_zip(
+    backup_id: str,
+    request: Request,
+    device_type: str = Query("NVR", description="Tipo de equipamento: NVR, OLT, ONU, PABX"),
+    file: UploadFile = File(...),
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """Agent uploads the ZIP file. Server stores it and sends email."""
+    backup, date_str, clean_device_type, filename, pasta = _preparar_upload(
+        db, machine, backup_id, device_type, file.filename, "NVR",
+    )
+
     # Grava em streaming (chunks) com limite de tamanho; o nome é sanitizado e o
     # caminho final validado dentro do diretório da máquina (anti path traversal).
+    # Sem transação aberta: a conexão do banco já voltou ao pool (_preparar_upload).
     try:
         zip_path, zip_size = save_zip_stream(
-            machine_id=machine.id,
-            machine_name=machine.name,
             date_str=date_str,
             device_type=clean_device_type,
             filename=filename,
             source=file.file,
             max_bytes=settings.MAX_UPLOAD_MB * 1024 * 1024,
-            customer=machine.customer,
+            **pasta,
         )
     except UploadTooLargeError:
         raise HTTPException(
@@ -941,41 +964,19 @@ async def upload_backup_zip_stream(
     from starlette.requests import ClientDisconnect
     from services.storage_service import save_zip_async_stream
 
-    if maquina_bloqueada(machine):
-        raise HTTPException(status_code=403, detail="Conta bloqueada: backups suspensos até a renovação.")
-    try:
-        backup_uuid = UUID(backup_id)
-    except (ValueError, AttributeError, TypeError):
-        raise HTTPException(status_code=404, detail="Backup record not found")
-    backup = db.query(Backup).filter(Backup.id == backup_uuid, Backup.machine_id == machine.id).first()
-    if not backup:
-        raise HTTPException(status_code=404, detail="Backup record not found")
-
-    clean_device_type = device_type.strip().upper()
-    if clean_device_type not in TIPOS_EQUIPAMENTO and clean_device_type != "MIXED":
-        raise HTTPException(status_code=400, detail=f"Tipo de equipamento inválido: '{clean_device_type}'.")
-
-    date_str = (backup.started_at or datetime.utcnow()).strftime("%d-%m-%Y")
-    clean_machine = _sanitize_name(machine.name)
-    raw_filename = nome or f"backup_{clean_device_type.lower()}_{date_str}.zip"
-    if clean_machine.lower() not in raw_filename.lower():
-        if raw_filename.startswith("backup_"):
-            filename = f"backup_{clean_machine}_{raw_filename[7:]}"
-        else:
-            filename = f"backup_{clean_machine}_{raw_filename}"
-    else:
-        filename = raw_filename
+    # Banco fora do laço de eventos; a conexão volta ao pool antes do envio, que pode levar minutos
+    backup, date_str, clean_device_type, filename, pasta = await run_in_threadpool(
+        _preparar_upload, db, machine, backup_id, device_type, nome, "MIXED",
+    )
 
     try:
         zip_path, zip_size = await save_zip_async_stream(
-            machine_id=machine.id,
-            machine_name=machine.name,
             date_str=date_str,
             device_type=clean_device_type,
             filename=filename,
             chunks=request.stream(),
             max_bytes=settings.MAX_UPLOAD_MB * 1024 * 1024,
-            customer=machine.customer,
+            **pasta,
         )
     except UploadTooLargeError:
         raise HTTPException(status_code=413, detail=f"Arquivo excede o limite de {settings.MAX_UPLOAD_MB} MB")

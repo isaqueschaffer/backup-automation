@@ -1,3 +1,4 @@
+import { useAutoAtualizar } from "../../utils/useAutoAtualizar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Bell, ChevronDown, ChevronRight, Pencil, Plus, Power, PowerOff, Siren, Trash2, Unplug, VideoOff } from "lucide-react";
 import {
@@ -57,7 +58,7 @@ function agruparPorMaquina<T extends { machine_id: string; machine_nome: string 
   return grupos;
 }
 
-const ESTILO_SELO = { fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 999 } as const;
+const ESTILO_SELO = { fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap" } as const;
 const SELO_NEUTRO = { ...ESTILO_SELO, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" };
 const SELO_ERRO = { ...ESTILO_SELO, background: "var(--err-bg, rgba(239,68,68,0.12))", color: "var(--err)" };
 
@@ -87,18 +88,21 @@ export default function NotificacoesPage() {
   const [salvando, setSalvando] = useState<TipoNotificacao | string | null>(null);
   const [formAberto, setFormAberto] = useState<"nova" | NotificacaoPersonalizada | null>(null);
 
-  const carregar = useCallback(() => {
-    setLoading(true);
+  // silencioso: atualização automática, sem spinner nem toast de erro
+  const carregar = useCallback((silencioso = false) => {
+    if (!silencioso) setLoading(true);
     Promise.all([
       fetchNotificacoes(true), fetchConfigNotificacoes(), fetchNotificacoesPersonalizadas(), fetchCamerasNotificacao(),
       fetchAlarmesNotificacao(), fetchOltsNotificacao(),
     ])
       .then(([n, c, p, cam, alm, olt]) => { setAbertas(n); setConfig(c); setPersonalizadas(p); setCameras(cam); setAlarmes(alm); setOlts(olt); })
-      .catch(() => toast("Erro ao carregar notificações.", "error"))
+      .catch(() => { if (!silencioso) toast("Erro ao carregar notificações.", "error"); })
       .finally(() => setLoading(false));
   }, [toast]);
 
   useEffect(() => { carregar(); }, [carregar]);
+  // Não atualiza enquanto salva uma alteração ou com o formulário aberto (não desfaz o que a pessoa está fazendo)
+  useAutoAtualizar(() => { carregar(true); }, 30000, salvando === null && formAberto === null);
 
   const cameraPorMaquina = useMemo(() => agruparPorMaquina(cameras), [cameras]);
   const alarmePorMaquina = useMemo(() => agruparPorMaquina(alarmes), [alarmes]);
@@ -335,13 +339,13 @@ export default function NotificacoesPage() {
                   (soma, eq) => soma + eq.cameras.filter((c) => c.status_comunicacao === "OFFLINE").length, 0);
                 return (
                 <div key={maquina.machine_id}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", minWidth: 0, flexWrap: "wrap", textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
                     }}
                   >
@@ -424,13 +428,13 @@ export default function NotificacoesPage() {
                 const totalSinal = maquina.equipamentos.reduce((s, eq) => s + eq.onus_sinal_critico, 0);
                 return (
                 <div key={maquina.machine_id}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", minWidth: 0, flexWrap: "wrap", textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
                     }}
                   >
@@ -540,13 +544,13 @@ export default function NotificacoesPage() {
                   + maquina.equipamentos.filter((eq) => eq.erro).length;
                 return (
                 <div key={maquina.machine_id}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: aberta ? "none" : "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => alternarMaquinaAberta(chave)}
                     aria-expanded={aberta}
                     style={{
-                      display: "flex", alignItems: "center", gap: 8, flex: 1, textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8, flex: "1 1 220px", minWidth: 0, flexWrap: "wrap", textAlign: "left",
                       background: "none", border: "none", padding: "8px 4px", cursor: "pointer",
                     }}
                   >

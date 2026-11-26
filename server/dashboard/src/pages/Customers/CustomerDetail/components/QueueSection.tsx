@@ -148,6 +148,7 @@ export default function QueueSection({
                 // Clique na linha abre a máquina (exceto na alça e nos botões/links)
                 onClick={e => { if (!(e.target as HTMLElement).closest("button, a, [data-drag-handle]")) navigate(`/maquinas/${m.id}`); }}
                 title="Abrir a máquina"
+                className="fila-linha"
                 style={{ cursor: "pointer",
                   position: "relative", display: "flex", alignItems: "center", gap: 14, padding: "12px 16px",
                   borderBottom: idx < machines.length - 1 ? "1px solid var(--border)" : "none",
@@ -173,7 +174,7 @@ export default function QueueSection({
                   background: !m.active ? "var(--text-muted)" : m.is_online ? "var(--ok)" : "var(--err)",
                   boxShadow: m.active && m.is_online ? "0 0 6px var(--ok)" : "none",
                 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="fila-info" style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <Link to={`/maquinas/${m.id}`} style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>{m.name}</Link>
                     {isCurrent && <span style={{ fontSize: 11, fontWeight: 700, color: "var(--warn)" }}>● Em backup agora</span>}

@@ -34,4 +34,4 @@ Criar `server/.env` a partir de `server/.env.local.example` e gerar `SECRET_KEY`
 
 ## Produção
 
-Código vai para a produção por git (push na `isaque` redeploya Backend e Frontend). Configuração da produção (variáveis, serviço novo, volumes) é feita no próprio Dokploy, não no compose. O Claude tem acesso de leitura ao Dokploy (ver `CLAUDE.md`); alterar algo lá só a pedido do usuário. Não rodar o compose de produção nem comandos contra o servidor.
+Código vai para a produção pelo `server/deploy_producao.ps1` (push `isaque` -> `producao` no repositório público e deploy de Backend e Frontend pela API do Dokploy; não há auto-deploy desde 25/11/2026, ver `CLAUDE.md`). Configuração da produção (variáveis, serviço novo, volumes) é feita no próprio Dokploy, não no compose. O Claude tem acesso de leitura ao Dokploy (ver `CLAUDE.md`); alterar algo lá só a pedido do usuário. Não rodar o compose de produção nem comandos contra o servidor.

@@ -132,6 +132,7 @@ export default function CustomerRuns({
                   {/* Linha de cabeçalho da rodada */}
                   <div
                     onClick={open ? undefined : () => toggleExpand(run.id)}
+                    className="rodada-linha"
                     style={{
                       display: "grid",
                       gridTemplateColumns: "auto 150px 1fr auto auto auto",
@@ -154,22 +155,22 @@ export default function CustomerRuns({
                     </div>
 
                     {/* Data */}
-                    <div className="text-sm text-secondary truncate">
+                    <div className="text-sm text-secondary truncate rodada-data">
                       {fmtDate(run.started_at)}
                     </div>
 
                     {/* Tipo */}
-                    <div className="text-sm truncate">
+                    <div className="text-sm truncate rodada-tipo">
                       {runTriggerLabel(run)}
                     </div>
 
                     {/* Status */}
-                    <div>
+                    <div className="rodada-status">
                       <StatusBadge status={run.status} />
                     </div>
 
                     {/* Máquinas OK / Total */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div className="rodada-ok" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span
                         style={{
                           fontWeight: 600,
@@ -191,7 +192,7 @@ export default function CustomerRuns({
                     </div>
 
                     {/* E-mail e Ações */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div className="rodada-email" style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <span className="text-sm">
                         {open ? (
                           <span className="text-muted">aguardando</span>

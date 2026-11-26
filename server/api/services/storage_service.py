@@ -763,6 +763,7 @@ def sincronizar_imagens_existentes(session_factory) -> dict:
                     falhas += 1
                     logger.exception("Falha ao salvar imagem de referência da câmera id=%s em disco", cid)
             db.expunge_all()
+            db.rollback()  # fim do lote (só leitura): não mantém uma transação aberta durante a varredura inteira
 
     return {"gravadas": gravadas, "falhas": falhas}
 

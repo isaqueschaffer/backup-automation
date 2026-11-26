@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from database import encerrar_transacao
 from models import Conta, Usuario
 from services.contas import status_da_conta
 from services.email_service import _clean_recipients, _smtp_config, _smtp_send
@@ -78,6 +79,7 @@ def enviar_aviso(db: Session, conta: Conta, marco: int, dias: int, para: List[st
     msg.set_content(texto_puro)
     msg.add_alternative(html_corpo, subtype="html")
 
+    encerrar_transacao(db)  # não segura a conexão do banco durante o SMTP (até ~100 s)
     return _smtp_send(msg, cfg, para)
 
 

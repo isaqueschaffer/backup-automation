@@ -18,7 +18,7 @@ export default function RecordingModal({ nvrName, cameras, lastBackupAt, onClose
         <div className="empty-state">Sem dados de gravação disponíveis.</div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead>
               <tr>
                 <th>Câmera</th>

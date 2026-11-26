@@ -48,6 +48,8 @@ class Contexto:
     somente_leitura: bool
     # Isolamento por máquina (VISUALIZADOR/LEITURA): ids das máquinas que o usuário vê; None = todas as da conta
     maquinas_permitidas: Optional[frozenset] = None
+    # "mcp" quando a chamada veio de uma IA conectada pelo MCP (mcp_server/); aparece na Auditoria
+    via: Optional[str] = None
 
     @property
     def super_admin(self) -> bool:
@@ -55,7 +57,8 @@ class Contexto:
 
     @property
     def feito_por(self) -> str:
-        return self.email or "admin"
+        base = self.email or "admin"
+        return f"{base} (IA via MCP)" if self.via == "mcp" else base
 
     @property
     def pode_testar(self) -> bool:
@@ -147,6 +150,7 @@ def _montar_contexto(token: str, x_conta_id: Optional[str], db: Session) -> Cont
             conta_id=conta_id,
             conta=conta,
             somente_leitura=False,
+            via=payload.get("via"),
         )
 
     # Usuário ADMIN, VISUALIZADOR ou LEITURA (ignora X-Conta-ID)
@@ -171,6 +175,7 @@ def _montar_contexto(token: str, x_conta_id: Optional[str], db: Session) -> Cont
         conta=conta,
         somente_leitura=somente_leitura,
         maquinas_permitidas=maquinas_permitidas,
+        via=payload.get("via"),
     )
 
 

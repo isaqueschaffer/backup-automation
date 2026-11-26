@@ -2,6 +2,7 @@
 import axios from "axios";
 import { AgentLog, CameraNotificacao, CentralAlarmeNotificacao, ConexaoTeste, ConfiguracaoNotificacao, Customer, CustomerRun, EquipamentoAlarmesNotificacao, EquipamentoCamerasNotificacao, EquipamentoOltNotificacao, Machine, Notificacao, NotificacaoPersonalizada, NotificacaoPersonalizadaPayload, PaginatedAuditoria, PaginatedBackups, TipoNotificacao, UsuarioAuditoriaOpcao } from "./types";
 import { saveBlob } from "../utils/download";
+import { marcarConexao } from "../utils/conexao";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -31,10 +32,17 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Redirect to login on 401
+// Redirect to login on 401; marca conexão (aviso "Sem conexão" no Layout)
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    marcarConexao(true);
+    return res;
+  },
   (err) => {
+    if (!axios.isCancel(err)) {
+      const st = err.response?.status;
+      marcarConexao(!!err.response && st !== 502 && st !== 503 && st !== 504);
+    }
     const isLogin = String(err.config?.url || "").includes("/auth/login");
     if (err.response?.status === 401 && !isLogin) {
       localStorage.removeItem("trilan_token");
@@ -48,6 +56,9 @@ api.interceptors.response.use(
 // Com e-mail: usuário de uma conta. Sem e-mail: administrador da plataforma (senha única).
 export const login = (email: string | null, password: string) =>
   api.post("/auth/login", email ? { email, password } : { password }).then((r) => r.data);
+// Troca o token ainda válido por um novo (a tela aberta não cai no login). Login só com senha não renova (400).
+export const renovarSessao = (): Promise<{ access_token: string }> =>
+  api.post("/auth/renovar").then((r) => r.data);
 
 // ── Stats ─────────────────────────────────────────────────────
 export const fetchStats = () => api.get("/stats").then((r) => r.data);

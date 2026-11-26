@@ -47,7 +47,7 @@ export default function EqCard({ eq, somenteLeitura, podeTestar = !somenteLeitur
     <div style={{
       background: "var(--surface-2, rgba(255,255,255,0.03))",
       border: "1px solid var(--border)", borderRadius: "var(--radius)",
-      padding: "16px 20px", display: "flex", alignItems: "center", gap: 16,
+      padding: "16px 20px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
       transition: "border-color 0.15s", opacity: eq.active === false ? 0.6 : 1
     }}
       onMouseEnter={e => (e.currentTarget.style.borderColor = color)}
@@ -63,7 +63,7 @@ export default function EqCard({ eq, somenteLeitura, podeTestar = !somenteLeitur
       </div>
 
       {/* Info */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: "1 1 220px", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
           <span style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: 14 }}>{eq.name}</span>
           <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: `${color}18`, color, border: `1px solid ${color}30` }}>
@@ -76,7 +76,7 @@ export default function EqCard({ eq, somenteLeitura, podeTestar = !somenteLeitur
           )}
           <SeloConexao eq={eq} />
         </div>
-        <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" ? (
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <FolderOpen size={12} /> {eq.config_extra?.pasta_origem || "—"}
@@ -91,7 +91,7 @@ export default function EqCard({ eq, somenteLeitura, podeTestar = !somenteLeitur
       </div>
 
       {/* Actions */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      <div className="eq-acoes" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginLeft: "auto" }}>
         {(eq.tipo === "NVR" || eq.tipo === "DIGIFORT" || eq.tipo === "DEFENSE") && onViewCameras && (
           <button className="btn btn-secondary btn-sm" onClick={onViewCameras}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>

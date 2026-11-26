@@ -34,4 +34,4 @@ Criar `server/.env` a partir de `server/.env.local.example` e gerar `SECRET_KEY`
 
 ## Produção
 
-Você (Gemini) não tem acesso ao Dokploy: código vai para a produção só por git (push na `isaque` redeploya Backend e Frontend). Configuração da produção (variáveis, serviço novo, volumes) é feita pelo dono no próprio Dokploy, não no compose: se a tarefa exigir isso, diga no relatório o que precisa ser configurado lá. Não rodar o compose de produção nem comandos contra o servidor.
+Você (Gemini) não tem acesso ao Dokploy: código vai para a produção só pelo dono: você faz o push na `isaque`, e o dono leva ao ar (ramo `producao` do repositório público + deploy pelo `server/deploy_producao.ps1`, que você não roda). Configuração da produção (variáveis, serviço novo, volumes) é feita pelo dono no próprio Dokploy, não no compose: se a tarefa exigir isso, diga no relatório o que precisa ser configurado lá. Não rodar o compose de produção nem comandos contra o servidor.

@@ -6,7 +6,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import { login as apiLogin, CONTA_KEY, NOTIF_POPUP_KEY } from "../api/client";
+import { login as apiLogin, renovarSessao, CONTA_KEY, NOTIF_POPUP_KEY } from "../api/client";
 import { fetchMe } from "../api/contas";
 import type { Me } from "../api/types";
 
@@ -115,6 +115,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", handleFocus);
     };
   }, [isAuthenticated, recarregarMe]);
+
+  // Renovação da sessão: com o painel aberto (tela de monitoramento) o token é trocado a cada 30 min e nunca vence.
+  // A verificação roda a cada minuto (e ao voltar à aba) para pegar também o computador que acordou do descanso.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let ultima = 0; // 0 = renova logo ao abrir (o token salvo pode estar perto de vencer)
+    let parar = false; // login só com senha: o servidor não renova
+    let emAndamento = false;
+    const renovar = () => {
+      if (parar || emAndamento || Date.now() - ultima < 30 * 60 * 1000) return;
+      emAndamento = true;
+      renovarSessao()
+        .then((d) => {
+          ultima = Date.now();
+          try {
+            localStorage.setItem("trilan_token", d.access_token);
+          } catch {
+            // localStorage indisponível
+          }
+        })
+        .catch((err) => {
+          if (err?.response?.status === 400) parar = true;
+          // rede fora: tenta de novo no próximo minuto; 401 o interceptor já leva ao login
+        })
+        .finally(() => {
+          emAndamento = false;
+        });
+    };
+    renovar();
+    const t = window.setInterval(renovar, 60 * 1000);
+    const aoVoltar = () => {
+      if (!document.hidden) renovar();
+    };
+    document.addEventListener("visibilitychange", aoVoltar);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", aoVoltar);
+    };
+  }, [isAuthenticated]);
 
   return (
     <AuthContext.Provider

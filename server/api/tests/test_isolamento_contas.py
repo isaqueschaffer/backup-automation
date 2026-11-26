@@ -24,7 +24,9 @@ def _ambiente_habilitado() -> bool:
 
 def test_isolamento_contas():
     if not _ambiente_habilitado():
-        return
+        # skip, não return: com return o teste aparecia como "passou" sem ter verificado nada (API-03)
+        import pytest
+        pytest.skip("TRILAN_TESTE_ISOLAMENTO=1 não definido: roda só no container com o PostgreSQL local")
 
     from fastapi.testclient import TestClient
     from main import app

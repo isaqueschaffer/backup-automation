@@ -883,11 +883,11 @@ A produção **não** usa `server/docker-compose.yml`. No Dokploy, o projeto "Si
 
 | Serviço | Tipo no Dokploy | Origem | Build | Observações |
 |---|---|---|---|---|
-| Backend | Application | `projetoswmfa/trilan-backup-automation`, branch `isaque`, caminho `/server/api` | Railpack | Auto-deploy. Variáveis na aba Environment do Application (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`, `RAILPACK_PYTHON_VERSION`...). Bind mount `/opt/trilan/backups` -> `/data/backups` |
-| Frontend | Application | mesmo repositório e branch, caminho `/server/dashboard` | Railpack | Auto-deploy. Variável `VITE_API_URL` |
+| Backend | Application | Git `https://github.com/isaqueschaffer/backup-automation.git`, ramo `producao`, caminho `/server/api` (desde 25/11/2026; antes GitHub App em `projetoswmfa/trilan-backup-automation`, ramo `isaque`) | Railpack | Sem auto-deploy (deploy pelo `server/deploy_producao.ps1`). Variáveis na aba Environment do Application (`DATABASE_URL`, `SECRET_KEY`, `FERNET_KEY`, `ADMIN_PASSWORD`, `RAILPACK_PYTHON_VERSION`...). Bind mount `/opt/trilan/backups` -> `/data/backups` |
+| Frontend | Application | mesma origem e ramo, caminho `/server/dashboard` | Railpack | Sem auto-deploy. Variável `VITE_API_URL` |
 | Banco | Postgres do Dokploy | — | — | O `DATABASE_URL` do Backend aponta para ele pelo nome interno (`appName` do serviço) |
 
-- **Deploy:** cada push na `isaque` refaz Backend e Frontend.
+- **Deploy:** `./server/deploy_producao.ps1` (na raiz, ramo `isaque` já enviado): empurra `isaque` -> `producao` e dispara pela API do Dokploy o deploy do Backend e depois o do Frontend, esperando cada um. Não há webhook. O ramo `producao` tem o ruleset `producao-somente-admin` (só o administrador do repositório cria/atualiza/apaga).
 - **Serviço novo:** precisa ser criado no Dokploy como Application (variáveis, volume e endereço interno configurados lá); alterar o compose não tem efeito em produção. O nome interno de um serviço, usado por outro, é o `appName` dele.
 - **WhatsApp:** retirado em 10/11/2026 (solução arquivada em `archive/whatsapp/README.md`). O Application "WhatsApp" do Dokploy e as variáveis `WHATSAPP_*` do Backend foram removidos (ver o changelog de 10/11/2026).
 
@@ -895,7 +895,8 @@ A produção **não** usa `server/docker-compose.yml`. No Dokploy, o projeto "Si
 
 | Branch | Repositorio | Proposito |
 |---|---|---|
-| `isaque` | `projetoswmfa/trilan-backup-automation` (privado) | **Producao**: cada push dispara o deploy automatico no Dokploy; so o dono faz merge aqui |
+| `isaque` | `projetoswmfa/trilan-backup-automation` (privado) | Ramo de trabalho do dono e portao de merge; so o dono faz merge aqui (nao dispara deploy desde 25/11/2026) |
+| `producao` | `isaqueschaffer/backup-automation` (publico) | **Producao**: copia de `isaque` que o Dokploy poe no ar; protegido (so o dono atualiza, pelo `server/deploy_producao.ps1`) |
 | `integracao-equipamentos` | `isaqueschaffer/backup-automation` (publico) | Colaboradores e testadores; sem acesso direto a `isaque`; recebe o espelho do push duplo |
 | `helena` | `isaqueschaffer/backup-automation` (publico) | Colaboradora; sem acesso direto a `isaque`; o codigo so chega a producao por merge auditado feito pelo dono |
 
@@ -908,6 +909,8 @@ git push https://github.com/isaqueschaffer/backup-automation.git isaque:integrac
 ```
 
 **Excecao:** Branches de features externas (ex: `helena`) NAO devem ir para `integracao-equipamentos` sem auditoria de merge.
+
+Para ir ao ar (servidor/painel), depois do push duplo: `./server/deploy_producao.ps1` (faz o terceiro push, `isaque:producao`, e o deploy). Mudanca so no agente: `git push isaque_repo isaque:producao` basta, para manter `producao` igual a `isaque`.
 
 ### Auditoria de merge de ramos de colaboradores
 
@@ -1127,6 +1130,24 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 
 ## 16. Architecture Changelog
 
+### [2026-11-25] — Agente 1.1.66: Fase 0 da auditoria (OTA Linux com certificado, segredo fora do log, README, .gitignore)
+
+- **Origem**: auditoria de organização, padronização e documentação de 25/11/2026 (relatório no claude.ai, IDs AGT/API/WEB/DOC). Esta rodada aplica a Fase 0, exceto a senha padrão de câmera no código (AGT-03/API-06), que o dono decidiu manter por ora.
+- **AGT-01**: `updater_linux.verificar_e_instalar` deixou de usar `verify=False` no `update-check`. A resposta escolhe a URL e o SHA-256 do pacote executado no container; sem validar o certificado, quem interceptasse a conexão trocaria os dois. O agente Linux já exige `https://server.suportetrilan.com.br` (certificado público). Teste: `test_update_check_valida_o_certificado`.
+- **AGT-12**: `backup/downloader.py` ganhou `sem_query()`: os logs de HTTP de erro e de exceção não levam mais a query da URL. A URL do backup Hikvision traz `secretkey=...&iv=...` (dá para recuperar a senha do ZIP) e as mensagens do `requests` repetem a URL, o que o `split('?')` antigo não cobria. Teste: `agent/tests/test_downloader_log.py`.
+- **API-03**: `test_isolamento_contas.py` usa `pytest.skip` sem `TRILAN_TESTE_ISOLAMENTO=1` (antes fazia `return` e aparecia como aprovado sem verificar nada).
+- **WEB-02**: `npm run build` do painel passa a ser `tsc --noEmit && vite build` (erro de tipo derruba o build em vez de ir para a produção); novo script `typecheck`.
+- **DOC-04**: `.gitignore` versionado com padrões de segredo (`*.local.md`, `.env.*` exceto os exemplos, `*.pem`, `*.key`, `id_rsa*`, `acesso*.md`, `chave api*.md`, `.pytest_cache/`); antes só o `.git/info/exclude` local protegia as credenciais da raiz.
+- **DOC-01**: `README.md` da raiz reescrito (estava corrompido e falava só do agente de setembro): arquitetura, pastas, ambiente local, testes, instalação do agente, ramos e deploy pelo `server/deploy_producao.ps1`.
+- **DOC-09/10**: skill `especialista-dashboard` com a regra de deploy nova; cópia do Gemini de `criar-novo-agente` com a linha da planilha `.xlsx` (nunca grava usuário/senha).
+- **Versão**: 1.1.66 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto. Suíte do agente: 328 testes OK.
+
+### [2026-11-25] — Merge helena: Defense (planilha manda no acesso dos canais de gravador) e usuário SSH padrão `trilan_backup`
+
+- **Entrou** (commits `17ddfd8` e `d87cfb6` da Helena, 13 arquivos, +231/−21, só servidor e painel): `services/planilha_vms.py` (`gravadores_da_planilha` traz `usuario`/`senha` da linha do gravador; `casar_cameras_por_ip` compara nomes sem pontuação), `services/galeria_vms.py` (`cameras_do_relatorio_sem_par` cria o canal com o acesso do gravador; novo `credenciais_dos_gravadores`), `PUT /machines/{id}/equipamentos/{id}/planilha` (Defense: atualiza usuário e senha cifrada dos canais de gravador já na Galeria), painel (coluna de usuário na importação da planilha, campo Usuário SSH com padrão `trilan_backup` e aviso) e o script `server/dashboard/public/preparar_acesso_ssh.ps1`, mais testes novos em `test_planilha_vms.py` e `test_galeria_sync_defense.py`.
+- **Auditoria**: sem data com fuso (a rota segue com `datetime.utcnow()`), sem segredos (só valores fictícios nos testes; o script pede a senha na hora e não grava), rota alterada continua com `ctx` (`get_contexto`) e `_get_machine_or_404` com a conta e o equipamento filtrado pela máquina; a senha é gravada com `encrypt`. Nenhum arquivo sensível (compose, nginx, `models.py`, migrações, `requirements*`, `build.ps1`, `installer.iss`, `.env*`), nenhum arquivo na raiz nem binário. Nada bloqueado.
+- **Testes**: `server/api/tests` com as mesmas 8 falhas antigas de antes do merge (`test_storage*`, `test_dashboard_status_equipamentos`); os testes novos passam. Sem mudança em `agent/`: sem versão nova do agente, sem build, release ou cadastro; deploy de Backend e Frontend pelo `server/deploy_producao.ps1`.
+
 ### [2026-11-25] — Usuário SSH padrão "trilan_backup" e script de preparo da máquina do cliente
 
 - **Problema**: no Defense da `teste-mk-maquina` (agente no MikroTik), o backup falhava com `Connection reset by peer` no SSH de 192.168.75.41. Teste direto mostrou que o OpenSSH for Windows 9.5 derruba a conexão já no pedido de login do usuário `Administrator` (antes da senha); `Administrador`, `SERVIDOR-DEFENSE` e até um usuário inexistente recebiam a lista de métodos normalmente. Em Windows em português a conta interna é `Administrador` (e vem desativada); com `SERVIDOR-DEFENSE` o backup passou. Não existe nome de administrador comum a todos os Windows.
@@ -1141,6 +1162,26 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 - **Painel**: `rowsToCameras` lê a coluna "Nome de usuário"/"Usuário"/"User" e o usuário vai em `username` na importação (Galeria e formulário do Digifort); sem a coluna segue `admin`. A coluna de usuário não é mais confundida com a de nome da câmera.
 - **Testes**: `test_planilha_vms.py` e `test_galeria_sync_defense.py` (casos novos); `tsc --noEmit` do painel limpo. Não testado contra o servidor real nem com a planilha de verdade do Defense; versão do agente não alterada (mudança só em servidor e painel).
 
+### [2026-11-25] — Produção passa a vir do ramo `producao` do repositório público (deploy pelo script)
+
+- **Problema**: desde 24/11 à tarde nenhum deploy entrava: o GitHub App do Dokploy (`dokploy-2026-08-12-thuirh`, ligado a `projetoswmfa/trilan-backup-automation`) passou a responder "Bad credentials" e não existe mais no GitHub; o deploy do Frontend da 1.1.65 ficou "running" por 14 h e travou a fila. O backend seguiu com o código das 13:42 de 24/11 e o pool do banco esgotou de novo na madrugada (API fora do ar até o reinício do serviço às 09:21). Recriar o App exigiria o login da conta `projetoswmfa` (dono do repositório; o nosso acesso é de colaborador, sem admin).
+- **Mudança**: Backend e Frontend no Dokploy passaram para a fonte Git `https://github.com/isaqueschaffer/backup-automation.git`, ramo `producao` (público, sem credencial; caminhos `/server/api` e `/server/dashboard` mantidos; o GitHub App continua configurado mas fora de uso). O ramo `producao` tem o ruleset `producao-somente-admin` (update/creation/deletion/non-fast-forward bloqueados, com passe livre só para o administrador do repositório): Helena e `projetoswmfa` têm escrita no repositório público mas não atualizam `producao`. Sem webhook (o `gh` não tem `admin:repo_hook`), então o deploy é disparado pelo novo `server/deploy_producao.ps1` (push `isaque` -> `producao`, `application.deploy` do Backend e depois do Frontend pela API do Dokploy, espera cada um; credenciais lidas do arquivo local fora do git). Regras atualizadas em `CLAUDE.md` (produção, checklist da versão, merge), `.agents/rules/git-deploy.md` (o Gemini não empurra em `producao` nem faz deploy), skills `gerenciar-containers` (Claude e Gemini) e seção 11 deste arquivo.
+- **Também**: o primeiro build pelo novo caminho falhou no `apt` (`OpenPGP signature verification failed`) porque o relógio da VM estava 48 min atrasado (chrony sem `makestep` depois de a VM ficar pausada); corrigido com `chronyc makestep` (autorizado pelo usuário). A fila travada foi limpa com `application.cleanQueues` (`cancelDeployment` não existe no Dokploy self-hosted) e o serviço `dokploy` foi reiniciado a pedido do usuário.
+
+### [2026-11-24] — Servidor: pool do banco esgotado (API fora do ar de 16:35 a ~17:30)
+
+- **Problema**: às 16:35 a API parou de atender toda rota com banco, inclusive o login (`QueuePool limit of size 5 overflow 10 reached`, 2.811 erros até 17:21). No Postgres havia 15 conexões `idle in transaction` (10 s a 13 min) esperando o backend: sessões abertas que não voltavam ao pool. Pouco antes: `Falha ao fechar a rodada … can't subtract offset-naive and offset-aware datetimes` e `Falha geral ao verificar licenças da UNM2000`. O disco da VM lento (iowait 48–72%) piorava. Voltou com o redeploy (container novo, pool vazio).
+- **Causas encontradas no código**: (1) colunas `timestamptz` em produção devolvem data com fuso, e o fechamento das rodadas (`backup_runs._is_due/_still_running/finish_queue_run`) e `verificar_agentes_offline` comparavam com `datetime.utcnow()`; (2) `verificar_notificacoes` seguia para as próximas etapas sem `rollback` depois de uma falha, com a sessão em erro; (3) a sessão ficava numa transação aberta durante esperas longas sem banco: SMTP (até ~100 s), upload do ZIP (minutos, túnel do Mikrotik) e montagem do ZIP do Cliente no disco lento; (4) no ping, ler `machine.id` depois do commit fazia um SELECT síncrono no laço de eventos.
+- **Correção**: `services/datas.para_utc_naive` (REGRA-001) aplicada nessas comparações; `verificar_notificacoes` grava cada etapa e desfaz só a que falhar; `database.encerrar_transacao` grava e devolve a conexão antes do SMTP (`email_service`, `notificacoes`, `avisos_conta`), do upload (`routers/agent._preparar_upload`, comum aos dois endpoints de upload) e da montagem dos ZIPs (`backup_runs._montar_zip`, que também unifica as três montagens); `get_db` faz rollback em erro; `sincronizar_imagens_existentes` fecha a transação por lote; `machine.id` lido antes do commit no ping. Rede de segurança no engine (Postgres): `pool_timeout` 10 s, `pool_recycle` 1800 s e `idle_in_transaction_session_timeout` 120 s (o banco encerra a sessão esquecida), configuráveis por `DB_*` em `config.py`; SQLite (testes) só `pool_pre_ping`. Diagnóstico no início: o log avisa quais colunas são `timestamptz` (só leitura).
+- **Testes**: `server/api/tests/test_pool_e_datas.py` (4 novos). Suíte: 162 OK; 8 falhas em `test_storage*`/`test_dashboard_status_equipamentos` já existiam antes da mudança (mesmas 8 com o código anterior, nesta máquina Windows).
+- **Sem versão do agente** (só servidor). Trabalho iniciado por um subagente que foi interrompido; revisado e concluído na sessão principal.
+
+### [2026-11-24] — Merge `helena` + Agente 1.1.65: backup restaurável dos NVR Motorola
+
+- **Entrou** (commit `e1390a4` da Helena): `agent/src/nvr/motorola/backup.py` (exportação da configuração sem plugin, pelo protocolo binário da porta de serviço ou pelo WebSocket H5; entrada abaixo), integração em `backup_job.processar_nvr` (Windows) e `tunel_preparo.preparar_nvr` (Mikrotik, em memória), `sessionId` do `reqLogin` em `motorola/cameras.py`, testes `test_motorola_backup.py` e ajuste em `test_tunel_sftp.py`, docs (`DOCUMENTACAO_AGENTE.md`, `README_MIKROTIK.md`).
+- **Auditoria**: só `agent/` e docs (9 arquivos, +736/−10); sem data com fuso, sem segredos (a senha só vai no login da porta de serviço do NVR e não aparece em log), sem rotas do servidor, compose, nginx, models ou requirements; sem dependência nova. Conflito apenas no changelog (mantidas as duas entradas). Nada bloqueado. Suíte do agente: 324 testes OK.
+- **Versão**: 1.1.65 em `updater.py`, `installer.iss` e `server/dashboard/package.json` (a 1.1.64 foi publicada no GitHub mas não chegou a ser cadastrada no painel; a 1.1.65 a substitui). `requirements-linux.txt` intacto.
+
 ### [2026-11-24] — Backup restaurável da configuração dos NVR Motorola, sem plugin
 
 - **Problema**: a exportação da configuração dos NVR Motorola (OEM TVT, NVMS-9000) só existia pela tela web com o plugin ActiveX no Internet Explorer; o agente só verificava gravações e o backup ficava `SEM_ARQUIVOS`.
@@ -1149,6 +1190,12 @@ O histórico antigo ainda contém esses blobs e alguns segredos; reescrevê-lo (
 - **Integração**: `processar_nvr` (Windows) grava `CONFIG_MOTOROLA_<data>.bin`; `preparar_nvr` (túnel do Mikrotik) leva o arquivo em memória (`LIMITE_MEMORIA`). Status `OK`, ou `PARCIAL` se a exportação falhar. No túnel o container precisa alcançar também a porta de serviço do NVR.
 - **Validação** (24/11/2026, 192.168.124.2 a .10): TD-3116B2 1.3.3 e TD-3316B2-A1 1.3.4 (plugin v2), TD-2008NS-HL 1.3.7 e TD-2116NS-HL 1.3.8 (plugin v3) pelo protocolo binário; TD-3316B2-A1 1.4.8 (plugin v5) pelo WebSocket. Arquivos de 88 a 169 KB em 3 a 7 s, todos com o mesmo cabeçalho de arquivo do NVR; o do .2 é idêntico ao exportado pelo plugin. Testes: `agent/tests/test_motorola_backup.py` (NVR falso local com os dois protocolos). Não testado: restaurar um desses arquivos (reinicia o NVR) e senha errada num NVR real.
 - **Versão**: não alterada (entra na próxima). `requirements-linux.txt` intacto.
+
+### [2026-11-24] — Merge `helena` + Agente 1.1.64: marca da câmera do Defense na captura noturna RTSP
+
+- **Entrou** (commit `3775bc6` da Helena, pelo merge `808e2b4`): `agent/src/vms/defense.py` lê a marca do dispositivo na árvore do Defense pelo campo `protocol` (1 = Intelbras/Dahua, 2 = Hikvision, 99 = ONVIF, caso das Motorola MTI/DIH), com `manufacturer` de reserva, e grava `marca` em cada câmera de `extrair_cameras_defense_tree`. Nova `completar_marca_cameras_defense` preenche a marca das câmeras da Galeria sem marca (casa por IP; sem IP, pelo nome) antes da captura noturna (`captura_noite_vms.py`, só tipo DEFENSE; falha na API só registra aviso e a captura segue deduzindo pelo modelo). `rtsp_client.capturar_imagens_noite_vms` passa `marca` à tarefa RTSP. Testes em `test_defense_api.py` e `test_captura_noite_vms.py`.
+- **Auditoria**: só `agent/` (5 arquivos, +144); sem data com fuso, sem segredos, sem rotas do servidor, compose, nginx, models ou requirements. Nada bloqueado. Suíte do agente: 307 testes OK.
+- **Versão**: 1.1.64 em `updater.py`, `installer.iss` e `server/dashboard/package.json`. `requirements-linux.txt` intacto.
 
 ### [2026-11-23] — Agente 1.1.63: foto pela API HTTP da Hikvision quando o RTSP não entrega imagem
 
@@ -2796,6 +2843,21 @@ Integração (merge em isaque): a dependência foi fixada em `pysnmp>=7.1,<8.0.0
 **Branch:** helena
 
 ---
+
+### [2026-11-24] — Servidor MCP (Claude, ChatGPT, Gemini)
+
+IA conectada ao sistema pelo Model Context Protocol, em `server/api/mcp_server/` (dentro do Backend, sem serviço novo no Dokploy).
+- **Endereço:** `POST https://server.suportetrilan.com.br/mcp` (Streamable HTTP sem estado, respostas JSON; GET/DELETE = 405).
+- **Ferramentas:** geradas das rotas do painel (`/api/v1`) que usam `get_contexto` e afins, com o esquema do OpenAPI (~100). Ficam de fora `/api/v1/auth`, `/api/v1/mcp`, `/api/v1/public`, `/api/v1/agent`, o cadastro de versão OTA e uploads multipart. Rota só do super admin só aparece para ele; o super admin escolhe a conta pelo argumento `contexto_conta_id` (vira `X-Conta-ID`). GET = `readOnlyHint`; DELETE, `*-all`, `rotate-key` = `destructiveHint` (o app pede confirmação). Rota nova do painel entra sozinha.
+- **Execução:** a ferramenta chama a rota dentro do processo (ASGI) com um JWT de 5 min do usuário com `"via": "mcp"`: valem papel, somente leitura e REGRA-010; a Auditoria grava `<e-mail> (IA via MCP)` (`Contexto.feito_por`). Senhas aparecem como no painel (decisão do usuário).
+- **Quem conecta:** só `SUPER_ADMIN` e `ADMIN` com e-mail (o login legado só com senha não).
+- **Autenticação:** OAuth 2.1 para Claude, ChatGPT e app do Gemini (metadados RFC 9728/8414 em `/.well-known/...`, registro dinâmico `POST /oauth/register` e client_id por URL (CIMD, só HTTPS em IP público), login em `/oauth/authorize`, PKCE S256 obrigatório, `POST /oauth/token` com access de 1 h e refresh de 90 dias com rotação, `POST /oauth/revoke`). Token pessoal (`trilan_mcp_...`, sem validade) para Antigravity/Gemini CLI, criado em "Minha conta". Trocar a senha ou o papel derruba todos os acessos (`token_versao`).
+- **Tabelas novas:** `mcp_tokens` (só o SHA-256), `mcp_oauth_clientes`, `mcp_oauth_codigos` (criadas pelo `create_all`).
+- **Rotas do painel:** `GET /api/v1/mcp/info`, `GET|POST /api/v1/mcp/tokens`, `DELETE /api/v1/mcp/tokens/{id}`. Tela: card "Conectar IA (MCP)" em Minha conta.
+- **Imagens (`mcp_server/imagens.py`):** fotos em base64 dentro do JSON (`image_base64`, `perfect_image_base64`, `night_image_base64`) saem do texto e vão como conteúdo de imagem do MCP (até 4 por resposta, 8 MB); no JSON fica `[IMAGEM n]`. Antes, a foto ia como texto e era cortada em 80 mil caracteres.
+- **Incidente 24/11/2026 13:13 (-03):** a primeira versão da `ver_imagem_camera` lia a galeria inteira (todas as fotos de um NVR grande, dezenas de MB) a cada chamada; o Claude disparou várias em paralelo, o pool do banco esgotou e o uvicorn chegou a 3,9 GB e foi morto por falta de memória (VM de 5 GB, 1 CPU), derrubando junto o Postgres e o Dokploy por alguns minutos. Correção: `GET /api/v1/machines/{id}/equipamentos/{eq}/cameras/{canal}/imagem` (rota `ver_imagem_camera`, carrega só um canal); `get_nvr_cameras` ganhou `incluir_imagens` (o MCP sempre manda `false`: não carrega as fotos e põe um aviso no lugar; o painel continua igual); no máximo 3 chamadas de ferramenta ao mesmo tempo; resposta acima de 15 MB não é aberta.
+- **Config opcional:** `MCP_BASE_URL` (vazio = deduz de `X-Forwarded-Proto/Host`).
+- **Painel 24 h (mesmo dia):** `POST /api/v1/auth/renovar` (o painel renova o JWT a cada 30 min) e `/version.json` no build do painel (recarrega sozinho após deploy).
 
 ## 17. Fluxo de Atualização de Versão (Release)
 

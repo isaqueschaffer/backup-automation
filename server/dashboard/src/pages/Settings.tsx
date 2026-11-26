@@ -102,7 +102,7 @@ function OtaManager() {
       {versions.length === 0 ? (
         <p className="text-sm text-muted">Nenhuma versão publicada no banco de dados.</p>
       ) : (
-        <table className="table" style={{ marginTop: 10, minWidth: 900 }}>
+        <table className="table tabela-cartoes" style={{ marginTop: 10, minWidth: 900 }}>
           <thead>
             <tr>
               <th>Versão</th>

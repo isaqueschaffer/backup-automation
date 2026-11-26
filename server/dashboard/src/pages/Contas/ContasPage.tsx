@@ -190,7 +190,7 @@ function SuperAdminsSection() {
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead>
               <tr>
                 <th>Nome</th>
@@ -620,7 +620,7 @@ export default function ContasPage() {
         </div>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead>
               <tr>
                 <th>Conta</th>

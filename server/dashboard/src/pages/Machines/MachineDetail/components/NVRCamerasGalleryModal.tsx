@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Camera, Edit2, FileSpreadsheet, Image, Moon, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Camera, Edit2, FileSpreadsheet, Image, Moon, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 import api from "../../../../api/client";
 import { NvrCamera, PlanilhaVms, TipoEquipamento } from "../../../../api/types";
 import Modal from "../../../../components/Modal";
@@ -22,6 +22,7 @@ import {
 } from "../hooks/useCameraImport";
 import CameraImagePanel from "./CameraImagePanel";
 import PlanilhaVmsModal from "./PlanilhaVmsModal";
+import { useCelular } from "../../../../utils/useCelular";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // arquivo original
 const MAX_LADO = 3840; // reduz imagens maiores que 4K
@@ -97,6 +98,11 @@ export default function NVRCamerasGalleryModal({ machineId, nvrId, nvrName, eqTi
   const [zoomImage, setZoomImage] = useState<{ src: string, title: string } | null>(null);
   const [selectedCanal, setSelectedCanal] = useState<number | null>(null);
   const [filtro, setFiltro] = useState<Filtro>("todas");
+  // Celular: lista e detalhe não cabem lado a lado; mostra a lista e, ao tocar numa câmera, o detalhe (com "Voltar")
+  const celular = useCelular();
+  const [detalheCelular, setDetalheCelular] = useState(false);
+  const mostrarLista = !celular || !detalheCelular;
+  const mostrarDetalhe = !celular || detalheCelular;
   // Uma captura por vez: o servidor tem uma única vaga de tarefa RTSP por máquina
   const [ocupado, setOcupado] = useState<{ tipo: Tipo | "upload"; canal: number } | null>(null);
   const [lote, setLote] = useState<{ tipo: Tipo; done: number; total: number; atual: string; falhas: string[]; fim: boolean } | null>(null);
@@ -663,14 +669,14 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
             ) : "Nenhuma câmera sincronizada neste NVR ainda. Aguarde o próximo backup."}
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", height: "80vh", margin: "-24px" }}>
-            {isVms && !somenteLeitura && (
+          <div style={celular ? { display: "flex", flexDirection: "column", margin: "0 -16px -16px" } : { display: "flex", flexDirection: "column", height: "80vh", margin: "-24px" }}>
+            {isVms && !somenteLeitura && mostrarLista && (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface-50)" }}>
                 {botoesImportacaoVms}
               </div>
             )}
             {/* Ações em lote */}
-            {!somenteLeitura && (
+            {!somenteLeitura && mostrarLista && (
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: "14px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface-50)" }}>
               {grupoLote("ref", <Image size={15} color="#10b981" />, "Referência ideal", faltaRef,
                 "Anexada no e-mail quando a câmera fica offline. Ao vivo; câmera offline usa a gravação mais recente.")}
@@ -681,7 +687,8 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
 
             <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
               {/* Lateral: canais */}
-              <div style={{ width: 270, borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", background: "var(--surface-50)" }}>
+              {mostrarLista && (
+              <div style={{ width: celular ? "100%" : 270, borderRight: celular ? "none" : "1px solid var(--border)", display: "flex", flexDirection: "column", background: "var(--surface-50)" }}>
                 <div style={{ display: "flex", gap: 4, padding: "10px 10px 8px", flexWrap: "wrap" }}>
                   {filtros.map(f => (
                     <button key={f.id} onClick={() => setFiltro(f.id)} style={{
@@ -700,7 +707,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                     const isSelected = selectedCanal === cam.canal;
                     const capturando = ocupado?.canal === cam.canal;
                     return (
-                      <div key={cam.canal} onClick={() => setSelectedCanal(cam.canal)}
+                      <div key={cam.canal} onClick={() => { setSelectedCanal(cam.canal); setDetalheCelular(true); }}
                         style={{
                           padding: "10px 14px", cursor: "pointer", display: "flex", gap: 10,
                           background: isSelected ? "var(--primary-light)" : "transparent",
@@ -753,13 +760,21 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                   })}
                 </div>
               </div>
+              )}
 
               {/* Detalhe da câmera */}
-              <div style={{ flex: 1, padding: 24, overflowY: "auto", background: "var(--background)" }}>
+              {mostrarDetalhe && (
+              <div style={{ flex: 1, minWidth: 0, padding: celular ? 16 : 24, overflowY: "auto", background: "var(--background)" }}>
+                {celular && (
+                  <button className="btn btn-secondary" onClick={() => setDetalheCelular(false)}
+                    style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                    <ArrowLeft size={15} /> Voltar à lista
+                  </button>
+                )}
                 {selectedCam ? (
                   <>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid var(--border)", paddingBottom: 14, marginBottom: 20, flexWrap: "wrap" }}>
-                      <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{nomeCam(selectedCam)}</h2>
+                      <h2 style={{ fontSize: celular ? 18 : 22, fontWeight: 700, margin: 0, overflowWrap: "anywhere" }}>{nomeCam(selectedCam)}</h2>
                       <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Canal {selectedCam.canal}</span>
                       {isVms && (
                         <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "monospace" }}>
@@ -832,7 +847,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                       </div>
                     )}
 
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))", gap: 24 }}>
                       <div>
                         <CameraImagePanel
                           dotColor="#10b981"
@@ -843,7 +858,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                           onZoom={src => setZoomImage({ src, title: `${nomeCam(selectedCam)} - REFERÊNCIA IDEAL` })}
                         />
                         {!somenteLeitura && (
-                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                           <button className="btn btn-primary" disabled={travado} onClick={() => capturarUma("ref", selectedCam)}
                             title="Imagem ao vivo; se a câmera estiver offline, usa a gravação mais recente"
                             style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -870,7 +885,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                           onZoom={src => setZoomImage({ src, title: `${nomeCam(selectedCam)} - NOITE` })}
                         />
                         {!somenteLeitura && (
-                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                           <button className="btn btn-primary" disabled={travado} onClick={() => capturarUma("noite", selectedCam)}
                             title={isVms ? "Captura um frame ao vivo da câmera (stream principal)." : "Busca a madrugada (00h–06h) mais recente com gravação, até 15 dias atrás. Funciona com a câmera offline."}
                             style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -891,6 +906,7 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
                   </div>
                 )}
               </div>
+              )}
             </div>
           </div>
         )}
@@ -898,10 +914,10 @@ ${AVISO_FORA_DA_NOITE}` : ""}`
 
       {zoomImage && (
         <div
-          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.9)", zIndex: 999999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "zoom-out", padding: 40 }}
+          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.9)", zIndex: 999999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "zoom-out", padding: celular ? 12 : 40 }}
           onClick={() => setZoomImage(null)}
         >
-          <div style={{ color: "white", fontSize: 20, fontWeight: 600, marginBottom: 20, letterSpacing: "0.02em" }}>{zoomImage.title}</div>
+          <div style={{ color: "white", fontSize: celular ? 15 : 20, fontWeight: 600, marginBottom: celular ? 12 : 20, letterSpacing: "0.02em", textAlign: "center" }}>{zoomImage.title}</div>
           <img src={zoomImage.src} style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }} />
         </div>
       )}

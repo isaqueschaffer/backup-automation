@@ -71,7 +71,7 @@ export default function CamerasSection({
 
       {aberta && (
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table className="table tabela-cartoes" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left', background: 'var(--surface-2)' }}>
               <th style={{ padding: '12px 16px' }}>Descrição</th>

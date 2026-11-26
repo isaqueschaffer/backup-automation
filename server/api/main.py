@@ -359,6 +359,29 @@ def _conta_id_obrigatorio() -> None:
 
 _conta_id_obrigatorio()
 
+
+def _avisar_colunas_com_fuso() -> None:
+    """Diagnóstico (só leitura): REGRA-001 manda TIMESTAMP WITHOUT TIME ZONE. Coluna timestamptz devolve datetime com
+    fuso, que misturado com datetime.utcnow() dá TypeError (fechamento das rodadas em 24/11/2026). O código normaliza
+    com services.datas.para_utc_naive; este aviso mostra no log quais colunas estão fora do padrão (não altera nada)."""
+    if engine.dialect.name != "postgresql":
+        return
+    try:
+        with engine.connect() as conn:
+            linhas = conn.execute(text(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND data_type = 'timestamp with time zone' "
+                "ORDER BY table_name, column_name"
+            )).all()
+        if linhas:
+            logger.warning("REGRA-001: colunas com fuso (timestamptz) no banco: %s",
+                           ", ".join(f"{t}.{c}" for t, c in linhas))
+    except Exception:
+        logger.exception("Falha ao verificar colunas com fuso (REGRA-001)")
+
+
+_avisar_colunas_com_fuso()
+
 openapi_tags = [
     {"name": "auth", "description": "Autenticação administrativa"},
     {"name": "Contas", "description": "Contas (inquilinos), planos e super admins — só administrador da plataforma"},
@@ -411,6 +434,12 @@ app.include_router(update_admin_router)   # OTA: /api/v1/admin/agent-version
 app.include_router(storage_admin.router)  # Armazenamento admin: /api/v1/admin/storage
 app.include_router(notificacoes.router)   # Notificações: /api/v1/notificacoes
 app.include_router(auditoria.router)      # Auditoria: /api/v1/auditoria
+
+# MCP: IA (Claude, ChatGPT, Gemini) usando o sistema em nome de um administrador. /mcp, OAuth e /api/v1/mcp/tokens
+from mcp_server import oauth as mcp_oauth, servidor as mcp_servidor  # noqa: E402
+app.include_router(mcp_servidor.router)
+app.include_router(mcp_servidor.tokens_router)
+app.include_router(mcp_oauth.router)
 
 
 # ─── Tarefa de fundo: fechamento das rodadas de backup do Cliente ──────────

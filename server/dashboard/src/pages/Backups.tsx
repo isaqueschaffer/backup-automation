@@ -1,3 +1,4 @@
+import { useAutoAtualizar } from "../utils/useAutoAtualizar";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { fetchBackups, fetchMachines, fetchCustomers, resendBackupEmail, downloadBackupZip, BackupQuery } from "../api/client";
@@ -126,9 +127,10 @@ export default function Backups() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [resendingEmailId, setResendingEmailId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  // silencioso: atualização automática, sem spinner nem toast de erro
+  const load = useCallback(async (silencioso = false) => {
     const seq = ++loadSeq.current;
-    setLoading(true);
+    if (!silencioso) setLoading(true);
     const params: BackupQuery = { page, size: 20 };
     if (customerFilter) params.customer_id = customerFilter;
     if (machineFilter) params.machine_id = machineFilter;
@@ -141,7 +143,7 @@ export default function Backups() {
       setData(d);
     } catch {
       if (seq !== loadSeq.current) return;
-      toast("Erro ao carregar backups.", "error");
+      if (!silencioso) toast("Erro ao carregar backups.", "error");
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -158,6 +160,7 @@ export default function Backups() {
     [machines, customerFilter],
   );
   useEffect(() => { load(); }, [load]);
+  useAutoAtualizar(() => { void load(true); }, 30000);
   // Invalida respostas pendentes ao desmontar
   useEffect(() => () => { loadSeq.current++; }, []);
 
@@ -278,7 +281,7 @@ export default function Backups() {
             {data.total} backup(s) · página {data.page} de {data.pages}
           </div>
           <div className="table-wrap" style={{ overflowX: "auto" }}>
-            <table>
+            <table className="tabela-cartoes">
               <thead>
                 <tr>
                   <th>Máquina</th>

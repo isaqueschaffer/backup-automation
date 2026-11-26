@@ -90,7 +90,7 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
 
       {(olt.por_pon || []).length > 0 && (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead><tr><th>Slot / PON</th><th>TX da porta</th><th>Temp. GBIC</th><th>Total</th><th>Online</th><th>Offline</th><th>Sem energia</th><th>Sinal ruim</th></tr></thead>
             <tbody>
               {olt.por_pon!.map(p => (
@@ -114,7 +114,7 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
 
       {(olt.placas || []).length > 0 && (
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             <thead><tr><th>Placa (slot)</th><th>Tipo</th><th>Hardware</th><th>Software</th></tr></thead>
             <tbody>
               {olt.placas!.map((p, i) => (
@@ -141,7 +141,7 @@ function OltPainel({ olt, licenca }: { olt: OltStatus; licenca?: OltStatusRespon
           <span style={{ fontSize: 12, color: "var(--text-muted)", alignSelf: "center" }}>{onus.length} ONU(s)</span>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="tabela-cartoes">
             {temMac ? (
               <>
                 <thead><tr><th>ONU ID</th><th>MAC</th><th>Descrição</th><th>Status</th><th>Temperatura</th><th>RX Power</th></tr></thead>

@@ -94,5 +94,5 @@ Siga a `criar-widget-dashboard` (config Pydantic, `construir_x`, `registrar`, co
 
 - Atualize a tabela de cobertura do passo 1 desta skill.
 - `PROJECT_SPEC.md`: changelog com o widget novo e o que ele mostra.
-- Mudou só servidor/painel: não há versão do agente; commit e push conforme a memória/CLAUDE.md (o push na `isaque` faz deploy).
+- Mudou só servidor/painel: não há versão do agente; commit, push duplo e `./server/deploy_producao.ps1` (o push na `isaque` não faz deploy desde 25/11/2026; ver CLAUDE.md).
 - Ao entregar, liste em uma linha cada decisão que veio das perguntas, para o usuário conferir.

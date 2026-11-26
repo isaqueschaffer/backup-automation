@@ -5,6 +5,14 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
+    # Pool de conexões (Postgres). Espera curta por conexão: com o pool cheio a rota falha em 10 s em vez de 30 s.
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_S: int = 10
+    DB_POOL_RECYCLE_S: int = 1800
+    # O Postgres encerra a sessão que ficar parada dentro de uma transação por mais que isso (0 = desligado).
+    # Rede de segurança contra sessão esquecida aberta (pool esgotado em 24/11/2026).
+    DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: int = 120000
 
     # Security
     SECRET_KEY: str
@@ -17,6 +25,9 @@ class Settings(BaseSettings):
     # Token só para publicar versões do agente (POST /api/v1/admin/agent-version), enviado em
     # X-Publish-Token. Não dá acesso ao painel. Vazio = desativado (só o admin publica).
     PUBLISH_TOKEN: str = ""
+    # Endereço público desta API para o MCP e o OAuth (ex.: https://server.suportetrilan.com.br).
+    # Vazio = deduz do pedido (X-Forwarded-Proto/Host do proxy).
+    MCP_BASE_URL: str = ""
 
     # CORS — lista de origens permitidas separadas por vírgula.
     # Ex: CORS_ORIGINS=https://painel.suaempresa.com,https://outro.dominio.com

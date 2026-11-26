@@ -1,9 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { observarTabelasCartoes } from "../utils/tabelaCartoes";
 import { useLocation } from "react-router-dom";
 import { Menu, Server } from "lucide-react";
 import Sidebar from "./Sidebar";
 import AvisoConta from "./AvisoConta";
 import NotificacoesPopup from "./NotificacoesPopup";
+import SemConexao from "./SemConexao";
 
 export default function Layout({ children }: { children: ReactNode }) {
   // No celular a barra lateral vira gaveta; no desktop o estado é ignorado (CSS).
@@ -22,6 +24,9 @@ export default function Layout({ children }: { children: ReactNode }) {
     document.addEventListener("keydown", fn);
     return () => document.removeEventListener("keydown", fn);
   }, [menuAberto]);
+
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => (mainRef.current ? observarTabelasCartoes(mainRef.current) : undefined), []);
 
   return (
     <div className="app-layout">
@@ -46,10 +51,11 @@ export default function Layout({ children }: { children: ReactNode }) {
         aria-hidden="true"
       />
       <Sidebar aberta={menuAberto} onFechar={() => setMenuAberto(false)} />
-      <main className="main-content">
+      <main className="main-content" ref={mainRef}>
         <AvisoConta />
         <NotificacoesPopup />
         {children}
+        <SemConexao />
       </main>
     </div>
   );

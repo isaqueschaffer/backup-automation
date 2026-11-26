@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ToastProvider } from "./components/Toast";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import Layout from "./components/Layout";
+import NovaVersao from "./components/NovaVersao";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
 import CustomersPage from "./pages/Customers/CustomersPage";
@@ -140,6 +141,7 @@ export default function App() {
       <ToastProvider>
         <ConfirmProvider>
           <AppRoutes />
+          <NovaVersao />
         </ConfirmProvider>
       </ToastProvider>
     </AuthProvider>
