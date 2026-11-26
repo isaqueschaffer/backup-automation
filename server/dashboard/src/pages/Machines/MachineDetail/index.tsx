@@ -364,26 +364,26 @@ export default function MachineDetail() {
   const handleRestartAgent = async () => {
     if (!(await confirmar({
       title: "Reiniciar agente",
-      message: "Solicitar reinício do agente? Ele será reiniciado no próximo ping (em poucos segundos se estiver online).",
+      message: "Solicitar reinício do agente? Ele reinicia no próximo contato com o servidor (em poucos segundos, se estiver online).",
       confirmLabel: "Reiniciar",
       variant: "warning",
     }))) return;
     try {
       await restartMachineAgent(id!);
-      toast("Reinício agendado! O agente será reiniciado no próximo ping.", "success");
+      toast("Reinício pedido! O agente reinicia no próximo contato com o servidor.", "success");
     } catch { toast("Erro ao solicitar reinício.", "error"); }
   };
 
   const handleTriggerBackup = async () => {
     if (!(await confirmar({
       title: "Executar backup agora",
-      message: "Solicitar execução imediata de backup? Ele começará no próximo ping (em poucos segundos se estiver online).",
+      message: "Fazer o backup desta máquina agora? Ele começa no próximo contato do agente com o servidor (em poucos segundos, se estiver online).",
       confirmLabel: "Iniciar backup",
       variant: "info",
     }))) return;
     try {
       await triggerMachineBackup(id!);
-      toast("Backup agendado! Começará automaticamente no próximo ping.", "success");
+      toast("Backup pedido! Começa no próximo contato do agente com o servidor.", "success");
     } catch { toast("Erro ao solicitar backup.", "error"); }
   };
 
@@ -568,7 +568,7 @@ export default function MachineDetail() {
         />
       )}
 
-      {/* ── Modal: Nova API Key ── */}
+      {/* ── Modal: nova chave do agente ── */}
       {rotatedKey && (
         <RotatedKeyModal apiKey={rotatedKey} onCopy={copyText} onClose={() => setRotatedKey(null)} />
       )}

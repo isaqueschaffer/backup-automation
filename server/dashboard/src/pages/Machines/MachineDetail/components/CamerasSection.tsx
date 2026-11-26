@@ -45,7 +45,7 @@ export default function CamerasSection({
           ) : (
             <ChevronRight size={15} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
           )}
-          <Video size={15} /> Câmeras da Máquina (Teste RTSP)
+          <Video size={15} /> Câmeras da máquina (teste de imagem)
           <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
             {cameras.length}
           </span>
@@ -78,7 +78,7 @@ export default function CamerasSection({
               <th style={{ padding: '12px 16px' }}>Descrição</th>
               <th style={{ padding: '12px 16px' }}>IP</th>
               <th style={{ padding: '12px 16px' }}>Modelo</th>
-              <th style={{ padding: '12px 16px' }}>Status RTSP</th>
+              <th style={{ padding: '12px 16px' }}>Imagem ao vivo</th>
               <th style={{ padding: '12px 16px' }}>Preview</th>
               <th style={{ padding: '12px 16px', textAlign: 'right' }}>Ações</th>
             </tr>

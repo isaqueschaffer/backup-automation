@@ -39,9 +39,9 @@ export default function CustomerHeader({ customer, busy, onBack, onAction, onDas
               type="button"
               className="btn btn-secondary"
               onClick={onMoverConta}
-              title="Mover de conta"
+              title="Transferir este cliente, com as máquinas e o histórico, para outra conta"
             >
-              <ArrowRightLeft size={15} style={{ flexShrink: 0 }} /> Mover de conta
+              <ArrowRightLeft size={15} style={{ flexShrink: 0 }} /> Transferir para outra conta
             </button>
           )}
           {!somenteLeitura && (

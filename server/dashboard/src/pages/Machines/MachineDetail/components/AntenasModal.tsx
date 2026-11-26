@@ -195,7 +195,7 @@ export default function AntenasModal({ machineId, eq, onAlterado, onClose }: {
         <div className="table-wrap" style={{ marginBottom: 16 }}>
           <table className="tabela-cartoes">
             <thead>
-              <tr><th>Antena</th><th>Marca</th><th>Status</th><th>IP</th><th>MAC</th><th>Ping</th><th>Online / offline</th>{!somenteLeitura && <th></th>}</tr>
+              <tr><th>Antena</th><th>Marca</th><th>Status</th><th>IP</th><th>MAC</th><th>Latência</th><th>Online / offline</th>{!somenteLeitura && <th></th>}</tr>
             </thead>
             <tbody>
               {linhas.map(({ cad, st }) => (

@@ -51,8 +51,8 @@ export default function EditMachineModal({ form, setForm, agenteTipoAtual, custo
         {form.agente_tipo !== agenteTipoAtual && (
           <div className="text-xs" style={{ marginTop: 6, color: "var(--warning, #b45309)" }}>
             {form.agente_tipo === "MIKROTIK"
-              ? "Ao trocar para o MikroTik: instale o agente no roteador usando o Client ID e a API Key desta máquina (o histórico continua aqui), revise os equipamentos (IP de cada um; UNM2000/Digifort com o IP da máquina onde está a pasta) e lembre que no MikroTik só o backup de UNM2000 e Digifort por pasta de rede roda; NVR, PABX e outros que gravam arquivo ficam sem backup."
-              : "Ao trocar para o Windows: instale o agente na máquina usando o Client ID e a API Key desta máquina (o histórico continua aqui) e revise os equipamentos (UNM2000/Digifort podem voltar a usar a pasta local)."}
+              ? "Ao trocar para o MikroTik: instale o agente no roteador com o ID e a chave do agente desta máquina (o histórico continua aqui) e revise os equipamentos: o IP de cada um e, para UNM2000, Digifort e Defense, o IP e o acesso SSH do computador onde está a pasta. O roteador só repassa: nada de backup fica gravado nele."
+              : "Ao trocar para o Windows: instale o agente na máquina com o ID e a chave do agente desta máquina (o histórico continua aqui) e revise os equipamentos (UNM2000/Digifort podem voltar a usar a pasta local)."}
           </div>
         )}
       </div>

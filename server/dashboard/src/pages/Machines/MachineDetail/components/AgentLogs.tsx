@@ -26,7 +26,7 @@ interface AgentLogsProps {
 }
 
 const TIPO_LABELS: Record<string, string> = {
-  ping: "Ping",
+  ping: "Contato",
   ping_recovery: "Reconectou",
   queue_backup: "Fila",
   queue_backup_skipped: "Fila ignorada",
@@ -180,7 +180,7 @@ export default function AgentLogs({
             <StatusBadge status={online ? "ONLINE" : "OFFLINE"} />
           )}
           <span className="text-xs text-muted">
-            {lastSeen ? `Último ping: ${fmtDate(lastSeen)}` : "Sem ping ainda"}
+            {lastSeen ? `Último contato: ${fmtDate(lastSeen)}` : "Sem contato ainda"}
           </span>
         </div>
       </button>
@@ -252,7 +252,7 @@ export default function AgentLogs({
                 onChange={(e) => onFiltrosChange({ mostrarPings: e.target.checked })}
                 style={{ cursor: "pointer" }}
               />
-              Mostrar pings
+              Mostrar contatos de rotina
             </label>
 
             <label
@@ -283,8 +283,8 @@ export default function AgentLogs({
               {temFiltroAtivo
                 ? "Nenhum evento com esses filtros."
                 : filtros.mostrarPings
-                ? "Nenhum evento registrado ainda. O agente deve enviar pings a cada 15 segundos."
-                : "Nenhuma instrução ou erro recente. Marque “Mostrar pings” para ver também os pings."}
+                ? "Nenhum evento registrado ainda. O agente faz contato com o servidor a cada 15 segundos."
+                : "Nenhuma instrução ou erro recente. Marque “Mostrar contatos de rotina” para ver também os contatos a cada 15 s."}
             </div>
           ) : (
             <div

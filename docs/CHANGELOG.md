@@ -9,6 +9,13 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Painel: termos do dia a dia no lugar do jargão e Configurações enxuta
+
+- **Problema** (revisão de experiência do painel, itens 6 e 7): textos com jargão ("API Key", "Client ID", "Mover de conta", "ping", "Teste RTSP", "Status RTSP", "Telemetria") e Configurações misturando tudo, com campos sem rótulo ligado, carregamento que travava no indicador se a API falhasse e o botão Salvar sempre ativo.
+- **Termos**: "chave do agente" (nova máquina, troca de tipo de agente), "ID da máquina (vai no agent.conf)", "Transferir para outra conta", "contato" no lugar de "ping" (eventos do agente e avisos de backup/reinício), "teste de imagem"/"Imagem ao vivo" nas câmeras, "Saúde" (do gravador) no lugar de "Telemetria", "Latência" nas antenas. Corrigido também o aviso de troca para MikroTik, que ainda dizia que só UNM2000/Digifort faziam backup lá (desde a 1.1.60 todos os tipos fazem, sem gravar no roteador).
+- **Configurações** (`pages/Settings.tsx`): seções nomeadas pelo que fazem (e-mail de envio dos relatórios, tempo de guarda dos backups, senha do administrador), rótulos ligados aos campos, erro de carregamento com "Tentar novamente", Salvar só ativo quando algo mudou (com aviso "Alterações não salvas"), envia só o que mudou e limpa os campos de senha depois de salvar. As versões do agente seguem na página própria.
+- Só painel (sem API nem agente; versão continua 1.1.70).
+
 ### [2026-11-26] — Painel: detalhe da máquina com os equipamentos primeiro, ações perigosas em "Mais ações" e página própria para as versões do agente
 
 - **Problema** (revisão de experiência do painel, itens 4 e 5): o detalhe da máquina abria com ID da máquina, prefixo da API Key e versão; os equipamentos ficavam recolhidos lá embaixo; "Rodar API Key" ficava ao lado de "Gerar Backup" e "Apagar Câmeras" (vermelho) ao lado de "Adicionar Câmera"; a lista de Máquinas tinha a lixeira colada ao "ver" em toda linha. Configurações tinha ~45 versões do agente na mesma página (6.340 px no computador).

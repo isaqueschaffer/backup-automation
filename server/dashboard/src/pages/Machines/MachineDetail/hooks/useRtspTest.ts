@@ -52,7 +52,7 @@ export function useRtspTest({ machineId, equipamentos, machineName, toast }: {
     }
     if (stale()) return;
     setIsTesting(false);
-    toast("Teste RTSP concluído!", "success");
+    toast("Teste de imagem das câmeras concluído!", "success");
   };
 
   const downloadImages = async () => {

@@ -117,7 +117,7 @@ export default function EqCard({ eq, somenteLeitura, podeTestar = !somenteLeitur
         {eq.tipo === "NVR" && onViewTelemetry && (
           <button className="btn btn-secondary btn-sm" onClick={onViewTelemetry}
             style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Activity size={13} /> Telemetria
+            <Activity size={13} /> Saúde
           </button>
         )}
         {eq.tipo === "ANTENA" && onViewAntenas && (

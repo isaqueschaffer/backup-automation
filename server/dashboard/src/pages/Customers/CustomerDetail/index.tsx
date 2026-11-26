@@ -345,7 +345,7 @@ export default function CustomerDetail() {
 
       {showMover && (
         <Modal
-          title="Mover para outra conta"
+          title="Transferir para outra conta"
           onClose={() => {
             if (!movendo) setShowMover(false);
           }}

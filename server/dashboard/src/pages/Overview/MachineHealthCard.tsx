@@ -229,7 +229,7 @@ export default function MachineHealthCard({
 
       {!t ? (
         <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic", marginBottom: 8 }}>
-          Sem dados de telemetria
+          Sem dados de saúde ainda
         </div>
       ) : (
         <div style={{ opacity: isOnline ? 1 : 0.6 }}>

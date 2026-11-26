@@ -19,9 +19,9 @@ export default function NVRTelemetryModal({ nvrName, telemetry, onClose }: {
       : "Memória";
 
   return (
-    <Modal title={`Telemetria — ${nvrName}`} onClose={onClose}>
+    <Modal title={`Saúde do gravador — ${nvrName}`} onClose={onClose}>
       {!telemetry ? (
-        <div className="empty-state">Sem dados de telemetria disponíveis.</div>
+        <div className="empty-state">Ainda não há dados de saúde deste gravador (chegam no backup).</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {(telemetry.cpu_percent != null || telemetry.ram_percent != null || telemetry.uptime_seconds != null) && (
