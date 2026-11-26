@@ -54,30 +54,22 @@ function dividirCaminho(caminho: string): string[] {
   return caminho.split(/[\\/]+/).filter(Boolean);
 }
 
-// Nome da subpasta (último trecho do caminho) de cada câmera na coluna "Diretório de gravação" do Digifort.
-// Qualquer nome vale como está na planilha, só número ("34") ou mais longo ("1 ANDAR - ELEVADOR B").
-export function pastaGravacaoDoCaminho(caminho: string): string {
-  const partes = dividirCaminho(cleanCell(caminho));
-  return partes.length ? partes[partes.length - 1] : "";
+// Caminho completo do Windows ("D:\17\", "\\servidor\share\17") ou só o nome de uma pasta ("17")
+export function caminhoAbsoluto(caminho: string | null | undefined): boolean {
+  return /^([A-Za-z]:[\\/]|\\\\)/.test((caminho || "").trim());
 }
 
-// Raiz comum de vários caminhos ("F:\X\1 ANDAR" e "F:\X\SALA ADM" -> "F:\X"): a pasta raiz de gravação do
-// equipamento, para preencher sozinho o campo "Local de gravação das câmeras" a partir da planilha.
-export function raizComumCaminhos(caminhos: string[]): string {
-  const validos = caminhos.map(c => cleanCell(c)).filter(Boolean);
-  if (validos.length === 0) return "";
-  const partes = validos.map(dividirCaminho).filter(p => p.length > 0);
-  if (partes.length === 0) return "";
-  const minLen = Math.min(...partes.map(p => p.length));
-  const comuns: string[] = [];
-  for (let i = 0; i < minLen; i++) {
-    const seg = partes[0][i];
-    if (partes.every(p => p[i].toLowerCase() === seg.toLowerCase())) comuns.push(seg);
-    else break;
+// Pasta de gravação de cada câmera, da coluna "Diretório de gravação" do Digifort. Caminho completo fica inteiro
+// (sem a barra do fim): o agente lê essa pasta direto, mesmo com câmeras em discos diferentes. Sem unidade, vale o
+// último trecho, que o agente procura dentro do "Local de gravação das câmeras".
+export function pastaGravacaoDoCaminho(caminho: string): string {
+  const limpo = cleanCell(caminho);
+  if (caminhoAbsoluto(limpo)) {
+    const semBarraFinal = limpo.replace(/[\\/]+$/, "");
+    return /^[A-Za-z]:$/.test(semBarraFinal) ? semBarraFinal + "\\" : semBarraFinal;
   }
-  const raiz = comuns.join("\\");
-  // Só a unidade ("D:\17\", "D:\18\" -> "D:"): no Windows "D:" é a pasta atual do disco, a raiz é "D:\"
-  return /^[A-Za-z]:$/.test(raiz) ? raiz + "\\" : raiz;
+  const partes = dividirCaminho(limpo);
+  return partes.length ? partes[partes.length - 1] : "";
 }
 
 // Converte linhas brutas em matriz de texto limpo (máx. 100 colunas por linha e descarta linhas vazias)
@@ -415,26 +407,6 @@ export function textoDeGravadores(gravadores: GravadorLido[] | undefined): strin
   const nomes = gravadores.map(g => `${g.nome} (${g.ip})`).join(", ");
   return ` · ${gravadores.length} gravador(es) DVR/NVR reconhecido(s) (${nomes}): não viram câmera; os canais deles vêm do ` +
     `"Sincronizar da Máquina", com modelo ONVIF`;
-}
-
-// Raiz comum da coluna "Diretório de gravação" da planilha do Digifort (preenche sozinho o campo
-// "Local de gravação das câmeras" do equipamento); "" se a planilha não tiver essa coluna.
-export function raizGravacaoDaPlanilha(rows: unknown[][]): string {
-  if (!rows || rows.length === 0) return "";
-  const headerRowIdx = linhaDoCabecalho(rows);
-  const headers = (rows[headerRowIdx] || []).map(h => cleanCell(h).toLowerCase());
-  const idxDiretorio = headers.findIndex(h =>
-    (h.includes("diret") && h.includes("grava")) || (h.includes("pasta") && h.includes("grava"))
-  );
-  if (idxDiretorio < 0) return "";
-  const caminhos: string[] = [];
-  for (let i = headerRowIdx + 1; i < rows.length; i++) {
-    const cols = rows[i];
-    if (!cols) continue;
-    const raw = cleanCell(cols[idxDiretorio]);
-    if (raw) caminhos.push(raw);
-  }
-  return raizComumCaminhos(caminhos);
 }
 
 function summarize(ok: number, fail: number, okMsg: string, toast: ToastFn) {

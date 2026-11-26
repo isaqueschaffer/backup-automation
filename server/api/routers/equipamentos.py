@@ -699,6 +699,7 @@ def get_nvr_cameras(
                 "username": c_db.username if c_db else None,
                 "modelo": c_db.modelo if c_db else st.get("modelo"),
                 "canal_rtsp": c_db.canal_rtsp if c_db else None,
+                "pasta_gravacao": c_db.pasta_gravacao if c_db else None,
                 "ip_compartilhado": (ip_item or "").strip() in compartilhados,
                 "has_password": bool(c_db and c_db.password),
                 "perfect_image_base64": foto(c_db, "perfect_image_base64"),

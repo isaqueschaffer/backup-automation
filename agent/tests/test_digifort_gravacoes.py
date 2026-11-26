@@ -347,6 +347,58 @@ class TestCamerasEmQualquerDesfechoDoBackup(unittest.TestCase):
         self.assertIsNone(resultado["cameras"])
 
 
+class TestPastaCompletaDaPlanilha(TestCamerasEmQualquerDesfechoDoBackup):
+    """Planilha com a coluna "Diretorio de gravacao": cada camera da Galeria traz o caminho completo da pasta
+    (podem estar em discos diferentes) e o agente le direto, sem depender do "Local de gravacao"."""
+    # aproveita o setUp/processar da classe mae, sem repetir os testes dela
+    test_backup_antigo = test_backup_nao_encontrado = test_outros_tipos_nao_ganham_cameras = None
+
+    def setUp(self):
+        super().setUp()
+        hoje = date.today()
+        meia_noite = datetime.combine(hoje, datetime.min.time())
+        fim = max(datetime.now(), meia_noite + timedelta(minutes=2))
+        self.disco_d = self.dir / "D"
+        self.disco_e = self.dir / "E" / "GRAVACAO"
+        escrever_indice(self.disco_d / "17" / "Indices" / f"{hoje:%Y%m%d}_01.dix", segundos(meia_noite, fim))
+        # camera que caiu: gravou ontem e nada hoje
+        ontem = meia_noite - timedelta(days=1)
+        escrever_indice(self.disco_e / "44" / "Indices" / f"{ontem:%Y%m%d}_20.dix",
+                        segundos(ontem + timedelta(hours=9), ontem + timedelta(hours=21), passo_s=2))
+        self.eq["config_extra"] = {"pasta_origem": str(self.backup)}
+        self.eq["cameras_config"] = [
+            {"nome": "ACESSO CORREDOR", "ip": "192.168.5.202", "canal": 1, "pasta_gravacao": str(self.disco_d / "17") + "\\"},
+            {"nome": "4 ANDAR A FUNDO CORREDOR", "ip": "192.168.5.57", "canal": 2, "pasta_gravacao": str(self.disco_e / "44")},
+            {"nome": "Pasta Sumiu", "ip": "192.168.5.58", "canal": 3, "pasta_gravacao": str(self.dir / "X" / "99")},
+        ]
+
+    def test_le_cada_pasta_direto_em_discos_diferentes(self):
+        por_nome = {c["nome"]: c for c in self.processar()["cameras"]}
+        self.assertEqual(len(por_nome), 3)
+        acesso = por_nome["ACESSO CORREDOR"]
+        self.assertEqual((acesso["status_gravacao"], acesso["total_dias"]), ("COM_GRAVACAO", 1))
+        self.assertEqual(acesso["pasta_gravacao"], self.eq["cameras_config"][0]["pasta_gravacao"])
+        caiu = por_nome["4 ANDAR A FUNDO CORREDOR"]
+        self.assertEqual((caiu["status_gravacao"], caiu["total_dias"]), ("SEM_GRAVACAO", 1))
+        self.assertEqual(caiu["dias_com_gravacao"], [(date.today() - timedelta(days=1)).strftime("%Y-%m-%d")])
+        self.assertEqual(por_nome["Pasta Sumiu"]["status_gravacao"], "NAO_VERIFICADO")
+
+    def test_raiz_configurada_nao_duplica_a_pasta_da_camera(self):
+        self.eq["config_extra"]["pasta_gravacoes"] = str(self.disco_d)
+        escrever_indice(self.disco_d / "Outra" / "Indices" / f"{date.today():%Y%m%d}_01.dix",
+                        segundos(datetime.combine(date.today(), datetime.min.time()),
+                                 datetime.combine(date.today(), datetime.min.time()) + timedelta(minutes=2)))
+        nomes = sorted(c["nome"] for c in self.processar()["cameras"])
+        # "17" sai uma vez so (pela camera); "Outra" entra pela raiz, sem camera na Galeria
+        self.assertEqual(nomes, sorted(["ACESSO CORREDOR", "4 ANDAR A FUNDO CORREDOR", "Pasta Sumiu", "Outra"]))
+
+    def test_caminho_absoluto(self):
+        for texto in (r"D:\17", "d:/17", r"\\srv\share\17"):
+            self.assertTrue(g.caminho_absoluto(texto), texto)
+        for texto in ("17", "1 ANDAR", "", None, "D:"):
+            self.assertFalse(g.caminho_absoluto(texto), texto)
+
+
 @unittest.skipUnless(EXEMPLOS.is_dir(), "arquivos de exemplo do Digifort nao encontrados nesta maquina")
 class TestArquivosReais(unittest.TestCase):
     def test_exemplos_reais(self):

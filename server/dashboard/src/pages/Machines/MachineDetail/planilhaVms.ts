@@ -7,7 +7,6 @@ import {
   linhaDoCabecalho,
   linhasParaTexto,
   planilhaTemNomeEDescricao,
-  raizGravacaoDaPlanilha,
   readRowsFromFile,
   gravadoresDaPlanilha,
   rowsToCameras,
@@ -47,7 +46,6 @@ export async function lerPlanilhaVms(file: File, existentes: NvrCamera[]): Promi
     exemploNome: nome,
     exemploDescricao: descricao,
     cams,
-    raizGravacoes: raizGravacaoDaPlanilha(rows),
     gravadores: gravadoresDaPlanilha(rows),
   };
 }

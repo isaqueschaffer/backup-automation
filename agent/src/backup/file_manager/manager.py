@@ -18,20 +18,31 @@ def _gerar_mapa_vms(is_ok: bool) -> tuple:
         return 15, "█" * 15, dias_15
     return 0, "░" * 15, []
 
-def _resumos_gravacao_digifort(pasta_gravacoes: str):
-    """Resumo de gravacao de cada camera lido dos arquivos de indice do Digifort: {nome da pasta: resumo ou None}.
-    None (no lugar do dict) = pasta de gravacoes nao configurada: o chamador usa o ping, como antes.
+def _resumos_gravacao_digifort(pasta_gravacoes: str, cameras_servidor=None):
+    """Resumo de gravacao de cada camera lido dos arquivos de indice do Digifort: {chave da pasta: resumo ou None}.
+    As pastas vem do caminho completo de cada camera da Galeria (coluna "Diretorio de gravacao" da planilha) e,
+    para as demais, das subpastas de `pasta_gravacoes` ("Local de gravacao", planilhas sem essa coluna).
+    None (no lugar do dict) = nenhuma das duas fontes: o chamador usa o ping, como antes.
     Configurada mas ilegivel/inexistente devolve {} (as cameras ficam NAO_VERIFICADO, nunca 'gravando' por engano)."""
-    if not (pasta_gravacoes or "").strip():
+    from src.vms.digifort_gravacoes import pastas_das_cameras
+    raiz = (pasta_gravacoes or "").strip()
+    absolutas = pastas_das_cameras(cameras_servidor)
+    if not raiz and not absolutas:
         return None
     try:
         from src.core.config import DIR_AGENT
-        from src.vms.digifort_gravacoes import calcular_gravacoes, caminho_cache, resumir_camera
-        pasta = pasta_gravacoes.strip()
+        from src.vms.digifort_gravacoes import (calcular_gravacoes_pastas, caminho_cache, listar_pastas_cameras,
+                                                resumir_camera)
         hoje, agora = date.today(), datetime.now()
-        brutos = calcular_gravacoes(pasta, hoje, cache=caminho_cache(pasta, DIR_AGENT))
+        # Subpasta da raiz que tambem e o caminho completo de uma camera entra uma vez so (pela camera)
+        ja_vinculadas = {str(p).rstrip("\\/").lower() for p in absolutas.values()}
+        pastas = {nome: p for nome, p in (listar_pastas_cameras(raiz).items() if raiz else [])
+                  if str(p).rstrip("\\/").lower() not in ja_vinculadas}
+        pastas.update(absolutas)
+        chave_cache = raiz if not absolutas else raiz + "|" + "|".join(sorted(absolutas))
+        brutos = calcular_gravacoes_pastas(pastas, hoje, cache=caminho_cache(chave_cache, DIR_AGENT))
         if not brutos:
-            logging.warning(f"  [DIGIFORT] Nenhuma pasta de camera (com Dados e Indices) em: {pasta}")
+            logging.warning(f"  [DIGIFORT] Nenhuma pasta de camera (com Dados e Indices) em: {raiz}")
         return {nome: (resumir_camera(por_dia, hoje, agora) if por_dia is not None else None)
                 for nome, por_dia in brutos.items()}
     except Exception:
@@ -333,7 +344,8 @@ class FileManager:
             caminho_log = cfg_ext.get("caminho_log_csv", "")
 
             # Com a pasta de gravacoes configurada, as cameras e o status vem das pastas (sem export/CSV de quedas)
-            resumos_pastas = _resumos_gravacao_digifort(cfg_ext.get("pasta_gravacoes", ""))
+            resumos_pastas = _resumos_gravacao_digifort(
+                cfg_ext.get("pasta_gravacoes", ""), equipamento.get("cameras_config") or [])
             if resumos_pastas:
                 status_cameras, cameras_para_captura = _cameras_pelas_pastas(
                     resumos_pastas, equipamento.get("cameras_config") or [], ping_camera)
@@ -363,7 +375,8 @@ class FileManager:
                 if ip_srv:
                     por_ip_servidor.setdefault(ip_srv, []).append(c)
 
-            resumos_gravacao = _resumos_gravacao_digifort(cfg_ext.get("pasta_gravacoes", ""))
+            resumos_gravacao = _resumos_gravacao_digifort(
+                cfg_ext.get("pasta_gravacoes", ""), cameras_servidor)
             pastas_usadas = set()
 
             status_cameras = []

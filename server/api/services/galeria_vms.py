@@ -162,7 +162,8 @@ def com_nomes_da_galeria(relatorio, cameras_db: list):
             continue
         novo = {**st, "nome": c.nome}
         if st.get("pasta_gravacao"):
-            novo["pasta_gravacao"] = c.nome
+            # Caminho completo (lido da planilha) aparece como está; só o nome da subpasta vira o nome da Galeria
+            novo["pasta_gravacao"] = st["pasta_gravacao"] if re.match(r"^([A-Za-z]:[\\/]|\\\\)", st["pasta_gravacao"]) else c.nome
         saida[i] = novo
     return saida
 

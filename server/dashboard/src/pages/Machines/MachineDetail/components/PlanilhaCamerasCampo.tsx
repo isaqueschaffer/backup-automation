@@ -4,7 +4,7 @@ import { Trash2, Upload } from "lucide-react";
 import api from "../../../../api/client";
 import { EqForm, NvrCamera, PlanilhaPendente, PlanilhaVms } from "../../../../api/types";
 import { aplicarOpcaoNome, lerPlanilhaVms, mensagemDeErro } from "../planilhaVms";
-import { textoDeGravadores } from "../hooks/useCameraImport";
+import { caminhoAbsoluto, textoDeGravadores } from "../hooks/useCameraImport";
 import PlanilhaVmsModal from "./PlanilhaVmsModal";
 import { useConfirm } from "../../../../components/ConfirmDialog";
 
@@ -43,7 +43,10 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
       setEqForm(f => ({
         ...f,
         planilhaSalva: guardada || lista.length > 0
-          ? { nome_arquivo: guardada?.nome_arquivo, total_linhas: guardada?.total_linhas, importado_em: guardada?.importado_em, total_cameras: lista.length }
+          ? {
+            nome_arquivo: guardada?.nome_arquivo, total_linhas: guardada?.total_linhas, importado_em: guardada?.importado_em,
+            total_cameras: lista.length, com_pasta_completa: lista.filter(c => caminhoAbsoluto(c.pasta_gravacao)).length,
+          }
           : null,
       }));
     })();
@@ -125,8 +128,8 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
         <span style={{ fontSize: 12, color: nova || salva ? "var(--text-muted)" : "var(--warn)" }}>{textoEstado}</span>
       </div>
       <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-        CSV ou XLSX exportado do Digifort, no mesmo formato da Galeria. Os nomes das câmeras da planilha são associados às
-        pastas de gravação: cada câmera usa a subpasta de mesmo nome.
+        CSV ou XLSX exportado do Digifort, no mesmo formato da Galeria. Com a coluna "Diretório de gravação", o agente
+        lê a pasta de cada câmera direto dali (pode estar em discos diferentes).
       </span>
 
       {previa && createPortal(
@@ -141,11 +144,7 @@ export default function PlanilhaCamerasCampo({ machineId, nvrId, eqForm, setEqFo
           camerasLidas={previa.cams}
           confirmarLabel="Usar esta planilha"
           onConfirmar={() => {
-            setEqForm(f => ({
-              ...f,
-              planilhaNova: previa,
-              ...(previa.raizGravacoes ? { pasta_gravacoes: previa.raizGravacoes } : {}),
-            }));
+            setEqForm(f => ({ ...f, planilhaNova: previa }));
             setPrevia(null);
           }}
           onClose={() => setPrevia(null)}

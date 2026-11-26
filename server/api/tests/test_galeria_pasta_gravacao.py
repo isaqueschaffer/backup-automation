@@ -59,3 +59,27 @@ def test_painel_mostra_o_nome_da_galeria_no_lugar_da_pasta():
 
     eq.tipo = "NVR"
     assert NVRResponse.model_validate(eq).last_recording_status[0]["nome"] == "Garagem"
+
+
+def test_caminho_completo_da_planilha_pareia_e_aparece_como_esta():
+    from services.galeria_vms import com_nomes_da_galeria
+    caminho = r"D:\44"
+    cam = _cam("4° ANDAR A FUNDO CORREDOR", 1, "192.168.5.57", pasta=caminho)
+    outra = _cam("Outra", 2, "192.168.5.58", pasta=r"E:\GRAVACAO\45")
+    relatorio = [{"nome": "4 ANDAR A FUNDO CORREDOR", "pasta_gravacao": caminho, "status_gravacao": "SEM_GRAVACAO"}]
+    assert parear_cameras([outra, cam], relatorio)[0][2] is cam
+    exibido = com_nomes_da_galeria(relatorio, [outra, cam])
+    assert exibido[0]["nome"] == "4° ANDAR A FUNDO CORREDOR"
+    assert exibido[0]["pasta_gravacao"] == caminho
+
+
+def test_pasta_gravacao_aceita_caminho_ate_255():
+    from pydantic import ValidationError
+    from schemas import NVRCameraConfigItem
+    assert NVRCameraConfigItem(nome="a", ip="1.1.1.1", pasta_gravacao=r"D:\17").pasta_gravacao == r"D:\17"
+    try:
+        NVRCameraConfigItem(nome="a", ip="1.1.1.1", pasta_gravacao="D:\\" + "x" * 300)
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("caminho acima de 255 caracteres deveria ser recusado")
