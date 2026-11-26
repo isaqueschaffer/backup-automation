@@ -9,6 +9,15 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-26] — Relatório e ZIP do backup com novas tentativas quando o servidor não foi alcançado
+
+- **Origem**: na Horizontes, o backup manual de 26/11 às 12:10 (6 equipamentos, todos OK) terminou às 12:16:49, mas o `POST /agent/backup/report` falhou com `NameResolutionError` (queda de DNS da máquina de menos de 1 minuto: às 12:20 tudo normal). O `run_backup` apagava `tmp_backup_work`/`tmp_backup_final` sem tentar de novo: a rodada inteira se perdeu, sem registro nem e-mail. As linhas `[VSOL] Nenhum cookie retornado pela OLT` que seguiam a cada 10 min são da coleta de status das ONUs (`vsol_status`), não do backup, e são normais (essa OLT não usa cookie).
+- **Correção**: `agent/src/application/api_client.py` ganhou `_com_novas_tentativas_servidor`, usado por `post_report` e `upload_zip`: repete após 30 s, 1, 2 e 4 min (5 tentativas, ~7,5 min) **só** quando o pedido com certeza não chegou ao servidor (`_nao_chegou_ao_servidor`: DNS, conexão recusada, tempo de conexão esgotado) ou quando o proxy respondeu 502/503. Tempo de leitura esgotado, conexão caída no meio, 500/504 e 4xx não repetem: o servidor pode ter gravado o relatório, e repetir criaria backup duplicado e avançaria a fila do Cliente duas vezes. O `upload_zip` reabre o arquivo a cada tentativa. Vale para o Windows e para o túnel do Mikrotik (`tunel.py` usa o mesmo `post_report`); o `upload_zip_stream` não repete (o iterador não volta ao início).
+- **Fora do escopo (decisão do usuário)**: guardar a rodada no disco para reenviar no ciclo seguinte. Exigiria mudar o servidor (id da rodada contra duplicata, hora original, não avançar a fila nem sobrescrever câmeras com dados velhos).
+- **Folga**: as esperas ficam muito abaixo do `BACKUP_TRAVADO_MIN` (120 min) do servidor.
+- **Testes**: `agent/tests/test_novas_tentativas_servidor.py` (7). Suíte do agente 370 OK.
+- **Versão**: muda `agent/`; precisa de versão nova do agente no merge do dono.
+
 ### [2026-11-26] — OLT Huawei: uma sessão SSH por vez, nova tentativa quando a OLT fecha o login e mensagem certa no backup
 
 - **Corrige a entrada "Backup de pasta (UNM2000/Huawei/Digifort) aceita o arquivo das últimas 24 h"** (abaixo): Georgina e Recanto Real não usam a mesma OLT, e a senha do `root` não mudou.
