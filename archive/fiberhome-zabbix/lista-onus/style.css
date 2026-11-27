@@ -1,0 +1,242 @@
+/* ─── KPI Summary Bar ─────────────────────────────────────────────────────── */
+#onu-summary-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.kpi-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: #1e1e20;
+    min-width: 90px;
+    flex: 1;
+}
+
+.kpi-value {
+    font-size: 1.6rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.kpi-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #888;
+    margin-top: 4px;
+    letter-spacing: 0.05em;
+}
+
+.kpi-total   { border-color: rgba(100,100,255,0.4); background: rgba(100,100,255,0.08); }
+.kpi-total .kpi-value { color: #a0a8ff; }
+
+.kpi-online  { border-color: rgba(16,185,129,0.5); background: rgba(16,185,129,0.1); }
+.kpi-online .kpi-value { color: #10b981; }
+
+.kpi-offline { border-color: rgba(255,100,100,0.4); background: rgba(255,100,100,0.08); }
+.kpi-offline .kpi-value { color: #ff6b6b; }
+
+.kpi-warning { border-color: rgba(250,200,0,0.4); background: rgba(250,200,0,0.07); }
+.kpi-warning .kpi-value { color: #fac800; }
+
+.kpi-critical { border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.1); }
+.kpi-critical .kpi-value { color: #ef4444; }
+
+/* ─── Barra de Busca ──────────────────────────────────────────────────────── */
+#onu-search-bar {
+    margin-bottom: 12px;
+}
+
+#onu-search-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: #1e1e20;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 0.85rem;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+
+#onu-search-input:focus {
+    border-color: rgba(100,100,255,0.5);
+}
+
+/* ─── Grid de Cards ───────────────────────────────────────────────────────── */
+.onu-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+    gap: 6px;
+    font-family: 'Inter', Helvetica, sans-serif;
+}
+
+.onu-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1e1e20;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 8px 10px;
+    transition: all 0.2s ease;
+}
+
+.onu-card:hover {
+    background-color: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.onu-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden;
+    padding-right: 8px;
+}
+
+.onu-name {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+}
+
+.onu-serial {
+    font-family: 'Consolas', monospace;
+    font-size: 0.65rem;
+    color: #7cb9e8;
+    opacity: 0.9;
+}
+
+.onu-port {
+    font-size: 0.60rem;
+    font-weight: 600;
+    color: #888;
+    letter-spacing: 0.05em;
+}
+
+.onu-card-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    min-width: 65px;
+}
+
+@keyframes flash-offline {
+    0%   { border-color: rgba(255, 107, 107, 0.1); }
+    50%  { border-color: rgba(255, 107, 107, 0.6); box-shadow: 0 0 8px rgba(255,107,107,0.2); }
+    100% { border-color: rgba(255, 107, 107, 0.1); }
+}
+
+.onu-card.is-offline {
+    animation: flash-offline 2s infinite ease-in-out;
+    background-color: rgba(255, 107, 107, 0.03);
+}
+
+/* ─── Badge de Status ─────────────────────────────────────────────────────── */
+.status-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 20px;
+    font-size: 0.60rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: center;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.status-online {
+    background: rgba(16,185,129,0.15);
+    color: #10b981;
+    border: 1px solid rgba(16,185,129,0.4);
+}
+
+.status-offline {
+    background: rgba(255,107,107,0.12);
+    color: #ff6b6b;
+    border: 1px solid rgba(255,107,107,0.3);
+}
+
+/* ─── Cores do Sinal (Estilo Badge) ────────────────────────────────────────── */
+.signal-good {
+    background: rgba(16,185,129,0.15);
+    color: #10b981;
+    border: 1px solid rgba(16,185,129,0.4);
+}
+
+.signal-warning {
+    background: rgba(250,200,0,0.12);
+    color: #fac800;
+    border: 1px solid rgba(250,200,0,0.3);
+}
+
+.signal-critical {
+    background: rgba(239,68,68,0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239,68,68,0.4);
+    text-shadow: 0 0 8px rgba(239,68,68,0.3);
+}
+
+.signal-off {
+    background: rgba(255,107,107,0.12);
+    color: #ff6b6b;
+    border: 1px solid rgba(255,107,107,0.3);
+    font-style: italic;
+    opacity: 0.8;
+}
+
+/* ─── Paginação ───────────────────────────────────────────────────────────── */
+#onu-pagination-controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    flex-wrap: wrap;
+}
+
+.page-btn {
+    background: #2b2b30;
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.page-btn:hover:not(:disabled) {
+    background: #3b3b42;
+}
+
+.page-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.page-btn.active {
+    background: #10b981;
+    border-color: #10b981;
+    color: #000;
+}

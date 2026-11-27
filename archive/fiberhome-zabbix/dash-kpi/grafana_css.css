@@ -1,0 +1,151 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
+
+* { box-sizing: border-box; }
+
+.olt-dashboard { color: #f8fafc; font-family: 'Outfit', sans-serif; padding: 10px; }
+
+/* ── KPI Grid ──────────────────────────────────────────────────────────── */
+.olt-dashboard .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1.1rem; margin-bottom: 1.4rem; }
+.olt-dashboard .kpi-card {
+    background: rgba(30,41,59,0.75);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 1.1rem 1.2rem;
+    transition: transform .25s ease, box-shadow .25s ease;
+}
+.olt-dashboard .kpi-card:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,.45); }
+.olt-dashboard .kpi-title { font-size: .72rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: .4rem; }
+.olt-dashboard .kpi-value { font-size: 2.2rem; font-weight: 800; margin-bottom: .3rem; line-height: 1; }
+.olt-dashboard .kpi-trend  { font-size: .78rem; color: #64748b; }
+
+/* Card color tokens */
+.olt-dashboard .card-total   .kpi-value { color: #38bdf8; }
+.olt-dashboard .card-online  .kpi-value { color: #34d399; }
+.olt-dashboard .card-offline .kpi-value { color: #fb7185; }
+.olt-dashboard .card-power   .kpi-value { color: #fbbf24; }
+.olt-dashboard .card-falha   .kpi-value { color: #fb7185; }
+.olt-dashboard .card-temp    .kpi-value { color: #c084fc; }
+.olt-dashboard .card-uptime  .kpi-value { color: #facc15; }
+
+/* ── Main Grid ─────────────────────────────────────────────────────────── */
+.olt-dashboard .main-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1.2rem; }
+.olt-dashboard .panel {
+    background: rgba(30,41,59,0.75);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 1.2rem;
+    overflow: hidden;
+}
+.olt-dashboard .panel h2 { font-size: 1rem; color: #f8fafc; margin: 0 0 1rem 0; }
+
+/* ── Table ─────────────────────────────────────────────────────────────── */
+.olt-dashboard table { width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; table-layout: fixed; }
+.olt-dashboard th {
+    color: #94a3b8;
+    font-size: .75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: .8rem .6rem;
+    background: rgba(15,23,42,0.6);
+    border-bottom: 2px solid rgba(255,255,255,.05);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.olt-dashboard th:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.olt-dashboard th:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+
+/* Column widths for ONU table */
+.olt-dashboard table th:nth-child(1), .olt-dashboard table td:nth-child(1) { width: 30%; }
+.olt-dashboard table th:nth-child(2), .olt-dashboard table td:nth-child(2) { width: 14%; }
+.olt-dashboard table th:nth-child(3), .olt-dashboard table td:nth-child(3) { width: 20%; }
+.olt-dashboard table th:nth-child(4), .olt-dashboard table td:nth-child(4) { width: 16%; }
+.olt-dashboard table th:nth-child(5), .olt-dashboard table td:nth-child(5) { width: 14%; text-align: center; }
+
+.olt-dashboard td {
+    padding: .75rem .6rem;
+    border-bottom: 1px solid rgba(255,255,255,.02);
+    font-size: .9rem;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background .2s ease;
+}
+.olt-dashboard tr:nth-child(even) td { background: rgba(255,255,255,.01); }
+.olt-dashboard tr:hover td { background: rgba(255,255,255,.04); }
+.olt-dashboard tr:last-child td { border-bottom: none; }
+
+/* ── Badges ────────────────────────────────────────────────────────────── */
+.olt-dashboard .badge { 
+    display: inline-block; 
+    padding: .25rem .75rem; 
+    border-radius: 6px; 
+    font-size: .75rem; 
+    font-weight: 800; 
+    letter-spacing: .5px;
+    text-transform: uppercase;
+}
+.olt-dashboard .badge-critical { 
+    background: rgba(251,113,133,.15); 
+    color: #f43f5e; 
+    border: 1px solid rgba(244,63,94,.4);
+    box-shadow: 0 0 10px rgba(244,63,94,.2);
+}
+.olt-dashboard .badge-warning  { 
+    background: rgba(251,191,36,.15); 
+    color: #f59e0b; 
+    border: 1px solid rgba(245,158,11,.4);
+    box-shadow: 0 0 10px rgba(245,158,11,.2);
+}
+.olt-dashboard .badge-good     { 
+    background: rgba(52,211,153,.12); 
+    color: #10b981; 
+    border: 1px solid rgba(16,185,129,.3);
+}
+
+/* ── Pagination buttons ────────────────────────────────────────────────── */
+.olt-dashboard .page-btn {
+    background: linear-gradient(145deg, rgba(30,41,59,1), rgba(15,23,42,1));
+    border: 1px solid rgba(255,255,255,.1);
+    color: #cbd5e1;
+    font-family: 'Outfit', sans-serif;
+    font-size: .85rem;
+    font-weight: 600;
+    padding: .4rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all .2s ease;
+    box-shadow: 0 2px 5px rgba(0,0,0,.2);
+}
+.olt-dashboard .page-btn:hover:not(:disabled) { 
+    background: linear-gradient(145deg, rgba(51,65,85,1), rgba(30,41,59,1));
+    color: #fff;
+    border-color: rgba(255,255,255,.2);
+}
+.olt-dashboard .page-btn:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+
+/* ── Hardware bars ─────────────────────────────────────────────────────── */
+.olt-dashboard .hw-item { margin-bottom: 1.1rem; }
+.olt-dashboard .hw-header { display: flex; justify-content: space-between; margin-bottom: .4rem; font-size: .86rem; }
+.olt-dashboard .progress-bg { width: 100%; height: 6px; background: rgba(255,255,255,.07); border-radius: 4px; overflow: hidden; }
+.olt-dashboard .progress-fill { height: 100%; border-radius: 4px; transition: width .6s ease; }
+
+/* ── Helpers ───────────────────────────────────────────────────────────── */
+.olt-dashboard .muted-text { color: #64748b; font-size: .84rem; margin-bottom: .8rem; }
+.olt-dashboard .color-blue   { color: #38bdf8; }
+.olt-dashboard .color-purple { color: #c084fc; }
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+    .olt-dashboard .main-grid { grid-template-columns: 1fr; }
+    .olt-dashboard .kpi-grid  { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Ocultar Abas Nativas do Plugin (Frame Selector) ────────────────────── */
+/* Como nossa dashboard usa a classe .olt-dashboard, ordenamos ao CSS que 
+   esconda QUALQUER outro elemento que o Grafana/Plugin renderizar do lado de fora */
+.olt-dashboard ~ * {
+    display: none !important;
+}

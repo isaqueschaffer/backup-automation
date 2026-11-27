@@ -1,0 +1,537 @@
+import { useCallback, useEffect, useState, FormEvent } from "react";
+import { Plus, Edit2, UserX, UserCheck } from "lucide-react";
+import {
+  fetchUsuariosConta,
+  createUsuarioConta,
+  updateUsuarioConta,
+} from "../../api/contas";
+import { Usuario } from "../../api/types";
+import Modal from "../../components/Modal";
+import { useToast } from "../../components/Toast";
+import { useConfirm } from "../../components/ConfirmDialog";
+import { fmtDate } from "../../utils/date";
+import { apiErrorMessage } from "../../utils/errors";
+import { PAPEL_LABEL } from "./contaUi";
+import MaquinasUsuarioCampo from "./MaquinasUsuarioCampo";
+import NotificacoesUsuarioCampo from "./NotificacoesUsuarioCampo";
+
+interface UsuariosSectionProps {
+  contaId?: string;
+  podeEditar: boolean;
+}
+
+export default function UsuariosSection({ contaId, podeEditar }: UsuariosSectionProps) {
+  const { toast } = useToast();
+  const confirmar = useConfirm();
+
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Modal Novo Usuário
+  const [showNovoModal, setShowNovoModal] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [novoEmail, setNovoEmail] = useState("");
+  const [novaSenha, setNovaSenha] = useState("");
+  const [novoPapel, setNovoPapel] = useState<"ADMIN" | "VISUALIZADOR" | "LEITURA">("ADMIN");
+  const [novoRestringir, setNovoRestringir] = useState(false);
+  const [novoMaquinas, setNovoMaquinas] = useState<string[]>([]);
+  const [novoNotif, setNovoNotif] = useState(true);
+  const [novoNotifTipos, setNovoNotifTipos] = useState<string[] | null>(null);
+  const [novoSaving, setNovoSaving] = useState(false);
+
+  // Modal Editar Usuário
+  const [editingUsuario, setEditingUsuario] = useState<Usuario | null>(null);
+  const [editNome, setEditNome] = useState("");
+  const [editPapel, setEditPapel] = useState<"ADMIN" | "VISUALIZADOR" | "LEITURA">("ADMIN");
+  const [editSenha, setEditSenha] = useState("");
+  const [editRestringir, setEditRestringir] = useState(false);
+  const [editMaquinas, setEditMaquinas] = useState<string[]>([]);
+  const [editNotif, setEditNotif] = useState(false);
+  const [editNotifTipos, setEditNotifTipos] = useState<string[] | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Ação Ativar/Desativar
+  const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
+
+  const loadUsuarios = useCallback(async () => {
+    try {
+      setError(null);
+      const data = await fetchUsuariosConta(contaId);
+      setUsuarios(data);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Erro ao carregar usuários."));
+    } finally {
+      setLoading(false);
+    }
+  }, [contaId]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadUsuarios();
+  }, [loadUsuarios]);
+
+  const abrirNovoModal = () => {
+    setNovoNome("");
+    setNovoEmail("");
+    setNovaSenha("");
+    setNovoPapel("ADMIN");
+    setNovoRestringir(false);
+    setNovoMaquinas([]);
+    setNovoNotif(true);
+    setNovoNotifTipos(null);
+    setShowNovoModal(true);
+  };
+
+  const handleCriarUsuario = async (e: FormEvent) => {
+    e.preventDefault();
+    const nomeTrim = novoNome.trim();
+    const emailTrim = novoEmail.trim();
+
+    if (!nomeTrim) {
+      toast("Nome é obrigatório.", "error");
+      return;
+    }
+    if (!emailTrim) {
+      toast("E-mail é obrigatório.", "error");
+      return;
+    }
+    if (novaSenha.length < 10) {
+      toast("A senha deve ter no mínimo 10 caracteres.", "error");
+      return;
+    }
+    if (novoPapel !== "ADMIN" && novoRestringir && novoMaquinas.length === 0) {
+      toast("Marque pelo menos uma máquina, ou escolha \"Todas as máquinas da conta\".", "error");
+      return;
+    }
+    if (novoNotif && novoNotifTipos !== null && novoNotifTipos.length === 0) {
+      toast("Marque pelo menos um tipo de notificação, ou escolha \"Todos os tipos\".", "error");
+      return;
+    }
+
+    setNovoSaving(true);
+    try {
+      await createUsuarioConta(
+        {
+          nome: nomeTrim,
+          email: emailTrim,
+          senha: novaSenha,
+          papel: novoPapel,
+          maquinas: novoPapel !== "ADMIN" && novoRestringir ? novoMaquinas : [],
+          notif_email: novoNotif,
+          notif_tipos: novoNotif ? novoNotifTipos : null,
+        },
+        contaId
+      );
+      toast("Usuário criado com sucesso.", "success");
+      setShowNovoModal(false);
+      await loadUsuarios();
+    } catch (err) {
+      toast(apiErrorMessage(err, "Erro ao criar usuário."), "error");
+    } finally {
+      setNovoSaving(false);
+    }
+  };
+
+  const abrirEditarModal = (u: Usuario) => {
+    setEditingUsuario(u);
+    setEditNome(u.nome);
+    setEditPapel(u.papel === "LEITURA" || u.papel === "VISUALIZADOR" ? u.papel : "ADMIN");
+    setEditSenha("");
+    setEditRestringir((u.maquinas || []).length > 0);
+    setEditMaquinas(u.maquinas || []);
+    setEditNotif(!!u.notif_email);
+    setEditNotifTipos(u.notif_tipos ?? null);
+  };
+
+  const handleEditarUsuario = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingUsuario) return;
+
+    const nomeTrim = editNome.trim();
+    if (!nomeTrim) {
+      toast("Nome é obrigatório.", "error");
+      return;
+    }
+
+    const senhaTrim = editSenha.trim();
+    if (senhaTrim && senhaTrim.length < 10) {
+      toast("A nova senha deve ter no mínimo 10 caracteres.", "error");
+      return;
+    }
+    if (editPapel !== "ADMIN" && editRestringir && editMaquinas.length === 0) {
+      toast("Marque pelo menos uma máquina, ou escolha \"Todas as máquinas da conta\".", "error");
+      return;
+    }
+    if (editNotif && editNotifTipos !== null && editNotifTipos.length === 0) {
+      toast("Marque pelo menos um tipo de notificação, ou escolha \"Todos os tipos\".", "error");
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      await updateUsuarioConta(
+        editingUsuario.id,
+        {
+          nome: nomeTrim,
+          papel: editPapel,
+          senha: senhaTrim || undefined,
+          maquinas: editPapel !== "ADMIN" && editRestringir ? editMaquinas : [],
+          notif_email: editNotif,
+          notif_tipos: editNotif ? editNotifTipos : null,
+        },
+        contaId
+      );
+      toast("Usuário atualizado com sucesso.", "success");
+      setEditingUsuario(null);
+      await loadUsuarios();
+    } catch (err) {
+      toast(apiErrorMessage(err, "Erro ao atualizar usuário."), "error");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleToggleAtivo = async (u: Usuario) => {
+    const acao = u.ativo ? "desativar" : "reativar";
+    const confirmMsg = u.ativo
+      ? `Desativar o usuário "${u.nome}"? Ele não conseguirá mais acessar o painel.`
+      : `Reativar o usuário "${u.nome}"?`;
+
+    if (!(await confirmar({
+      title: u.ativo ? "Desativar usuário" : "Reativar usuário",
+      message: confirmMsg,
+      confirmLabel: u.ativo ? "Desativar" : "Reativar",
+      variant: u.ativo ? "danger" : "info",
+    }))) return;
+
+    setToggleBusyId(u.id);
+    try {
+      await updateUsuarioConta(u.id, { ativo: !u.ativo }, contaId);
+      toast(`Usuário ${u.ativo ? "desativado" : "reativado"}.`, "success");
+      await loadUsuarios();
+    } catch (err) {
+      toast(apiErrorMessage(err, `Erro ao ${acao} usuário.`), "error");
+    } finally {
+      setToggleBusyId(null);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 16,
+        }}
+      >
+        <h3
+          style={{
+            fontSize: 16,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+            margin: 0,
+          }}
+        >
+          Usuários
+        </h3>
+        {podeEditar && (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={abrirNovoModal}
+          >
+            <Plus size={14} style={{ flexShrink: 0 }} /> Novo usuário
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="loading-state">
+          <div className="spinner" />
+        </div>
+      ) : error && usuarios.length === 0 ? (
+        <div className="empty-state">
+          <div>{error}</div>
+          <button
+            type="button"
+            className="btn btn-secondary mt-2"
+            onClick={() => {
+              setLoading(true);
+              loadUsuarios();
+            }}
+          >
+            Tentar novamente
+          </button>
+        </div>
+      ) : usuarios.length === 0 ? (
+        <div className="empty-state">
+          <div>Nenhum usuário.</div>
+          {podeEditar && (
+            <button
+              type="button"
+              className="btn btn-primary mt-2"
+              onClick={abrirNovoModal}
+            >
+              <Plus size={14} style={{ flexShrink: 0 }} /> Novo usuário
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table className="tabela-cartoes">
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>E-mail</th>
+                <th>Papel</th>
+                <th>Máquinas</th>
+                <th>Notificações</th>
+                <th>Situação</th>
+                <th>Último acesso</th>
+                {podeEditar && <th>Ações</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {usuarios.map((u) => (
+                <tr key={u.id}>
+                  <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                    {u.nome}
+                  </td>
+                  <td>{u.email}</td>
+                  <td>{PAPEL_LABEL[u.papel] ?? u.papel}</td>
+                  <td className="text-sm">
+                    {u.papel === "ADMIN" || u.papel === "SUPER_ADMIN" || !(u.maquinas || []).length
+                      ? "Todas"
+                      : `${(u.maquinas || []).length} máquina(s)`}
+                  </td>
+                  <td className="text-sm">
+                    {!u.notif_email ? "Não recebe" : u.notif_tipos ? `${u.notif_tipos.length} tipo(s)` : "Todas"}
+                  </td>
+                  <td>
+                    {u.ativo ? (
+                      <span className="badge ok">Ativo</span>
+                    ) : (
+                      <span className="badge muted">Inativo</span>
+                    )}
+                  </td>
+                  <td className="text-secondary text-sm">
+                    {fmtDate(u.ultimo_login, { empty: "Nunca" })}
+                  </td>
+                  {podeEditar && (
+                    <td>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          title="Editar usuário"
+                          onClick={() => abrirEditarModal(u)}
+                        >
+                          <Edit2 size={15} style={{ flexShrink: 0 }} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          title={u.ativo ? "Desativar usuário" : "Ativar usuário"}
+                          onClick={() => handleToggleAtivo(u)}
+                          disabled={toggleBusyId === u.id}
+                          style={
+                            u.ativo
+                              ? { color: "var(--err)" }
+                              : { color: "var(--ok)" }
+                          }
+                        >
+                          {u.ativo ? (
+                            <UserX size={15} style={{ flexShrink: 0 }} />
+                          ) : (
+                            <UserCheck size={15} style={{ flexShrink: 0 }} />
+                          )}
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showNovoModal && (
+        <Modal
+          title="Novo usuário"
+          onClose={() => {
+            if (!novoSaving) setShowNovoModal(false);
+          }}
+        >
+          <form onSubmit={handleCriarUsuario}>
+            <div className="form-group">
+              <label className="form-label">Nome *</label>
+              <input
+                className="form-input"
+                type="text"
+                placeholder="Nome completo"
+                value={novoNome}
+                onChange={(e) => setNovoNome(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">E-mail *</label>
+              <input
+                className="form-input"
+                type="email"
+                placeholder="usuario@empresa.com.br"
+                value={novoEmail}
+                onChange={(e) => setNovoEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Senha *</label>
+              <input
+                className="form-input"
+                type="password"
+                placeholder="Mínimo de 10 caracteres"
+                value={novaSenha}
+                onChange={(e) => setNovaSenha(e.target.value)}
+                required
+                minLength={10}
+              />
+              <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+                Mínimo de 10 caracteres. Passe a senha ao usuário por um canal
+                seguro.
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Papel *</label>
+              <select
+                className="form-input"
+                value={novoPapel}
+                onChange={(e) => {
+                  const papel = e.target.value as "ADMIN" | "VISUALIZADOR" | "LEITURA";
+                  setNovoPapel(papel);
+                  setNovoNotif(papel === "ADMIN"); // padrão: admin recebe, os demais não
+                }}
+              >
+                <option value="ADMIN">Administrador</option>
+                <option value="VISUALIZADOR">Visualizador (vê e testa, não altera)</option>
+                <option value="LEITURA">Somente leitura</option>
+              </select>
+            </div>
+            {novoPapel !== "ADMIN" && (
+              <MaquinasUsuarioCampo contaId={contaId} restringir={novoRestringir} onRestringir={setNovoRestringir}
+                selecionadas={novoMaquinas} onSelecionadas={setNovoMaquinas} />
+            )}
+            <NotificacoesUsuarioCampo ativo={novoNotif} onAtivo={setNovoNotif} tipos={novoNotifTipos} onTipos={setNovoNotifTipos} />
+            <div
+              className="flex gap-3 mt-4"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowNovoModal(false)}
+                disabled={novoSaving}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={novoSaving}
+              >
+                {novoSaving ? (
+                  <span className="spinner spinner-sm" />
+                ) : (
+                  "Criar usuário"
+                )}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {editingUsuario && (
+        <Modal
+          title="Editar usuário"
+          onClose={() => {
+            if (!editSaving) setEditingUsuario(null);
+          }}
+        >
+          <form onSubmit={handleEditarUsuario}>
+            <div className="form-group">
+              <label className="form-label">Nome *</label>
+              <input
+                className="form-input"
+                type="text"
+                placeholder="Nome completo"
+                value={editNome}
+                onChange={(e) => setEditNome(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Papel *</label>
+              <select
+                className="form-input"
+                value={editPapel}
+                onChange={(e) =>
+                  setEditPapel(e.target.value as "ADMIN" | "VISUALIZADOR" | "LEITURA")
+                }
+              >
+                <option value="ADMIN">Administrador</option>
+                <option value="VISUALIZADOR">Visualizador (vê e testa, não altera)</option>
+                <option value="LEITURA">Somente leitura</option>
+              </select>
+            </div>
+            {editPapel !== "ADMIN" && (
+              <MaquinasUsuarioCampo contaId={contaId} restringir={editRestringir} onRestringir={setEditRestringir}
+                selecionadas={editMaquinas} onSelecionadas={setEditMaquinas} />
+            )}
+            <NotificacoesUsuarioCampo ativo={editNotif} onAtivo={setEditNotif} tipos={editNotifTipos} onTipos={setEditNotifTipos} />
+            <div className="form-group">
+              <label className="form-label">Nova senha (opcional)</label>
+              <input
+                className="form-input"
+                type="password"
+                placeholder="Deixe em branco para não alterar"
+                value={editSenha}
+                onChange={(e) => setEditSenha(e.target.value)}
+              />
+              <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+                Deixe em branco para não alterar.
+              </div>
+            </div>
+            <div
+              className="flex gap-3 mt-4"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setEditingUsuario(null)}
+                disabled={editSaving}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={editSaving}
+              >
+                {editSaving ? (
+                  <span className="spinner spinner-sm" />
+                ) : (
+                  "Salvar"
+                )}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}

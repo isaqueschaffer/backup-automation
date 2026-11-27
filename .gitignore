@@ -26,6 +26,21 @@ config_email.json
 server/.env
 agent/agent.conf
 agent/agent.conf.bak
+# Segredos em qualquer pasta (DOC-04, auditoria de 25/11/2026): antes só o .git/info/exclude local protegia as
+# credenciais da raiz, e um clone novo + "git add -A" as levaria para o repositório público
+*.local.md
+.env.*
+!.env.example
+!.env.local.example
+*.pem
+*.key
+*.pfx
+id_rsa*
+id_ed25519*
+acesso*.md
+chave api*.md
+.credenciais/
+.pytest_cache/
 
 # Logs and databases
 *.log
@@ -42,3 +57,30 @@ node_modules/
 scratch/
 agent/scratch/
 Check_Status_gravacao/
+
+# Python (qualquer nível)
+__pycache__/
+
+# Artefatos locais / dados que nunca devem ser versionados
+*.timestamp-*.mjs
+*.sql
+*.dat
+scratch_test/
+agent/index.xml
+test*.jpg
+respostas_telemetria_*/
+teste backup motorola/respostas_telemetria_*/
+
+# Configuração local do Claude Code (permissões pessoais); só as skills entram no git
+.claude/*
+!.claude/skills/
+
+# Cache de leitura das gravacoes do Digifort (gerado pelo agente)
+agent/cache_gravacoes_digifort_*.json
+agent/ferramentas/dist_ferramentas/
+agent/dist_ferramentas/
+agent/ferramentas/build_ferramentas/
+agent/build_ferramentas/
+
+# Imagem do container do Mikrotik: vai como anexo da release (57 MB; o push ao origin cai)
+agent/mikrotik/*.tar

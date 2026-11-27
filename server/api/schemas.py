@@ -1,17 +1,28 @@
 from __future__ import annotations
-from typing import List, Optional, Any, Dict
-from datetime import datetime
+from typing import List, Optional, Any, Dict, Union, Literal
+from datetime import date, datetime
 from uuid import UUID
-from pydantic import BaseModel, field_validator
+import re
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from services.contas import TIPOS_CONTA
+from services.galeria_vms import com_nomes_da_galeria
+from services.segredos_config import mascarar_segredos, tem_segredos
+from services.senhas import validar_senha_nova
 
 
 # ─────────────────────────────────────────────
-# NVR
+# Equipamento (antes chamado NVR)
 # ─────────────────────────────────────────────
+TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED", "DEFENSE", "CAMERA", "ANTENA", "HIKCENTRAL"]
+
 class NVRBase(BaseModel):
+    tipo: str = "NVR"  # NVR, OLT, ONU, PABX
     name: str
     ip: str
     username: str
+    config_extra: Optional[Dict[str, Any]] = None
+    active: bool = True
 
 
 class NVRCreate(NVRBase):
@@ -19,45 +30,194 @@ class NVRCreate(NVRBase):
 
 
 class NVRUpdate(BaseModel):
+    tipo: Optional[str] = None
     name: Optional[str] = None
     ip: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    config_extra: Optional[Dict[str, Any]] = None
+    active: Optional[bool] = None
 
 
 class NVRResponse(NVRBase):
     id: UUID
-    client_id: UUID
+    machine_id: UUID
     last_recording_status: Optional[Any] = None
+    last_telemetry_status: Optional[Any] = None
+    conexao_status: Optional[Any] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ajustes_de_exibicao(cls, data):
+        """Só exibição. Digifort: o painel mostra o nome que a câmera tem na Galeria (também no lugar do nome da pasta
+        de gravação), mesmo antes do próximo backup. Qualquer tipo: as senhas do config_extra nunca saem do servidor."""
+        if isinstance(data, dict):
+            return data
+        digifort = (getattr(data, "tipo", None) or "").upper() == "DIGIFORT"
+        config = getattr(data, "config_extra", None)
+        if not digifort and not tem_segredos(config):
+            return data
+        campos = {nome: getattr(data, nome, None) for nome in cls.model_fields}
+        campos["config_extra"] = mascarar_segredos(config)
+        if digifort:
+            campos["last_recording_status"] = com_nomes_da_galeria(
+                campos["last_recording_status"], list(getattr(data, "cameras_status", None) or []))
+        return campos
+
+
+# ─────────────────────────────────────────────
+# Câmeras atreladas a um NVR
+# ─────────────────────────────────────────────
+class NVRCameraResponse(BaseModel):
+    id: Optional[UUID] = None
+    nvr_id: UUID
+    canal: int
+    nome: str
+    ip: Optional[str] = None
+    username: Optional[str] = None
+    modelo: Optional[str] = None
+    canal_rtsp: Optional[int] = None
+    # Digifort: pasta de gravação da câmera (caminho completo vindo da planilha, ou só o nome da subpasta)
+    pasta_gravacao: Optional[str] = None
+    ip_compartilhado: bool = False
+    has_password: bool = False
+    perfect_image_base64: Optional[str] = None
+    night_image_base64: Optional[str] = None
+    night_image_date: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    status_comunicacao: Optional[str] = None
+    status_gravacao: Optional[str] = None
+    captura_status: Optional[str] = None
+    captura_motivo: Optional[str] = None
+    captura_horario: Optional[datetime] = None
+    offline_segundos: Optional[int] = None
+    offline_aprox: bool = False
 
     model_config = {"from_attributes": True}
 
 
+# ─── Câmeras RTSP individuais na Galeria (DIGIFORT / DEFENSE) ──────────────
+class NVRCameraConfigItem(BaseModel):
+    canal: Optional[int] = None
+    nome: str
+    ip: str
+    username: str = "admin"
+    password: Optional[str] = None
+    modelo: str = "Hikvision"
+    canal_rtsp: Optional[int] = Field(None, ge=1, le=512)
+    # Pasta de gravação da câmera (coluna "Diretório de gravação" do export do Digifort). Caminho completo
+    # ("D:\17"): o agente lê essa pasta direto. Só o nome ("17", planilhas antigas): subpasta do "Local de gravação".
+    pasta_gravacao: Optional[str] = Field(None, max_length=255)
+
+
+class NVRCameraBulkImport(BaseModel):
+    cameras: List[NVRCameraConfigItem] = []
+    sync_from_machine: bool = False
+    replace_existing: bool = False
+
+
+class NVRPlanilhaEntrada(BaseModel):
+    nome_arquivo: str = Field(..., min_length=1, max_length=255)
+    linha_cabecalho: int = Field(0, ge=0, le=20)
+    linhas: List[List[str]]
+
+    @field_validator("linhas")
+    @classmethod
+    def _validar_linhas(cls, v: List[List[str]]) -> List[List[str]]:
+        if not v:
+            raise ValueError("A planilha não pode estar vazia.")
+        if len(v) > 5000:
+            raise ValueError("A planilha não pode ter mais de 5000 linhas.")
+        resultado: List[List[str]] = []
+        for linha in v:
+            if len(linha) > 100:
+                raise ValueError("Cada linha pode ter no máximo 100 colunas.")
+            resultado.append([
+                (c[:500] if isinstance(c, str) else ("" if c is None else str(c)[:500]))
+                for c in linha
+            ])
+        return resultado
+
+
+class NVRPlanilhaResposta(BaseModel):
+    nome_arquivo: str
+    linha_cabecalho: int
+    total_linhas: int
+    importado_em: datetime
+    colunas_senha: List[int]
+    senhas_ocultas: bool
+    linhas: List[List[str]]
+
+
+class NVRCameraSetPerfect(BaseModel):
+    canal: int
+    nome: str
+    image_base64: str
+
+    @field_validator("image_base64")
+    @classmethod
+    def _jpeg_valido(cls, v: str) -> str:
+        """Captura RTSP ou upload do painel (já convertido para JPEG no navegador)."""
+        import base64, binascii
+        v = v.split(",", 1)[1] if v.startswith("data:") else v
+        try:
+            dados = base64.b64decode(v, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("Imagem inválida (base64)")
+        if not dados.startswith(b"\xff\xd8"):
+            raise ValueError("A imagem de referência precisa ser JPEG")
+        if len(dados) > 10 * 1024 * 1024:
+            raise ValueError("Imagem de referência maior que 10 MB")
+        return v
+
+class NVRCameraNightImage(BaseModel):
+    nvr_name: str
+    canal: int
+    nome: str
+    image_base64: str
+    night_image_date: datetime
+    ip: Optional[str] = None
+    modelo: Optional[str] = None
+    canal_rtsp: Optional[int] = None
+
+
 # ─────────────────────────────────────────────
-# Client
+# Máquina (computador com o agente instalado)
 # ─────────────────────────────────────────────
-class ClientBase(BaseModel):
+class MachineBase(BaseModel):
     name: str
-    backup_hour: int = 2
-    backup_minute: int = 0
+    backup_hour: int = Field(2, ge=0, le=23)
+    backup_minute: int = Field(0, ge=0, le=59)
     email_to: List[str] = []
     active: bool = True
+    # Onde o agente roda: na própria máquina (WINDOWS) ou no MikroTik (acessa cada equipamento pelo IP)
+    agente_tipo: Literal["WINDOWS", "MIKROTIK"] = "WINDOWS"
 
 
-class ClientCreate(ClientBase):
+class MachineCreate(MachineBase):
     zip_password: Optional[str] = None
+    # Opcional: vincula ao Cliente (fim da fila) e herda o horário dele
+    customer_id: Optional[UUID] = None
 
 
-class ClientUpdate(BaseModel):
+class MachineUpdate(BaseModel):
+    # Vínculo com Cliente e ordem na fila só pelas rotas /api/v1/clients/{id}/...
     name: Optional[str] = None
-    backup_hour: Optional[int] = None
-    backup_minute: Optional[int] = None
+    backup_hour: Optional[int] = Field(None, ge=0, le=23)
+    backup_minute: Optional[int] = Field(None, ge=0, le=59)
     email_to: Optional[List[str]] = None
     active: Optional[bool] = None
     zip_password: Optional[str] = None
+    agente_tipo: Optional[Literal["WINDOWS", "MIKROTIK"]] = None
 
 
-class ClientResponse(ClientBase):
+class MachineResponse(MachineBase):
+    # Sem limites na saída: registros antigos fora da faixa não podem derrubar a listagem (500)
+    backup_hour: int
+    backup_minute: int
     id: UUID
     api_key_prefix: str
     last_seen: Optional[datetime] = None
@@ -65,11 +225,26 @@ class ClientResponse(ClientBase):
     last_backup_status: Optional[str] = None
     created_at: datetime
     nvr_count: int = 0
+    restart_requested: bool = False
+    backup_requested: bool = False
+    telemetry: Optional[Dict[str, Any]] = None
+    # Versão do agente informada no último ping (None = agente < 1.1.49 ou nunca pingou)
+    agent_version: Optional[str] = None
+    # Calculado no servidor — nunca depende do relógio do navegador
+    is_online: bool = False
+    current_server_time: Optional[datetime] = None
+    customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
+    # True quando o horário vem do Cliente (máquina vinculada)
+    schedule_from_customer: bool = False
+    # True quando os e-mails do relatório são os do Cliente (máquina vinculada)
+    email_from_customer: bool = False
+    queue_order: int = 0
 
     model_config = {"from_attributes": True}
 
 
-class ClientWithKey(ClientResponse):
+class MachineWithKey(MachineResponse):
     """Returned only on creation — contains the raw API key."""
     api_key: str
 
@@ -79,8 +254,13 @@ class ClientWithKey(ClientResponse):
 # ─────────────────────────────────────────────
 class NVRResult(BaseModel):
     nome: str
+    tipo: str = "NVR"  # NVR, OLT, ONU, PABX
     status: str  # OK, PARCIAL, ERRO
     cameras: Optional[List[Dict[str, Any]]] = None
+    telemetria: Optional[Dict[str, Any]] = None  # CPU/RAM/discos (NVR Hikvision)
+    # Por que o equipamento não ficou OK (agente >= 1.1.69): ex. "configuração do NVR (.bin) não baixada: HTTP 503;
+    # 4 câmera(s) com a gravação não verificada". Vai junto no nvr_results gravado no backup.
+    motivo: Optional[str] = Field(None, max_length=500)
 
 
 class BackupReportCreate(BaseModel):
@@ -97,8 +277,11 @@ class BackupReportResponse(BaseModel):
 
 class BackupResponse(BaseModel):
     id: UUID
-    client_id: UUID
-    client_name: Optional[str] = None
+    machine_id: UUID
+    machine_name: Optional[str] = None
+    # Cliente da máquina hoje (não histórico)
+    customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     status: str
@@ -108,6 +291,8 @@ class BackupResponse(BaseModel):
     email_sent: bool
     trigger: str
     created_at: Optional[datetime]
+    # Rodada do Cliente (null para máquinas sem Cliente ou backups antigos)
+    run_id: Optional[UUID] = None
 
     model_config = {"from_attributes": True}
 
@@ -122,30 +307,280 @@ class PaginatedBackups(BaseModel):
 # ─────────────────────────────────────────────
 # Agent (config payload sent to Windows agent)
 # ─────────────────────────────────────────────
-class AgentNVR(BaseModel):
+class AgentEquipamento(BaseModel):
+    """Representa qualquer equipamento enviado ao agente Windows."""
+    tipo: str  # NVR, OLT, ONU, PABX
     name: str
     ip: str
     username: str
     password: str  # decrypted — sent over HTTPS only
+    config_extra: Optional[Dict[str, Any]] = None
+    # Câmeras RTSP da Galeria (DIGIFORT/DEFENSE), decriptadas — usadas na captura da imagem da noite
+    cameras_config: Optional[List[Dict[str, Any]]] = None
+
+
+# Mantido para compatibilidade com agentes mais antigos
+class AgentNVR(AgentEquipamento):
+    pass
 
 
 class AgentConfigResponse(BaseModel):
     client_name: str
+    customer_name: Optional[str] = None  # nome do Cliente da máquina (vai no nome da planilha do NVR Motorola)
     backup_hour: int
     backup_minute: int
     zip_password: Optional[str]
-    nvrs: List[AgentNVR]
+    equipamentos: List[AgentEquipamento]
+    nvrs: List[AgentEquipamento] = []  # alias de compatibilidade — igual a equipamentos
 
 
 class PingResponse(BaseModel):
     status: str
     restart: bool = False
+    backup: bool = False
+    rtsp_task: Optional[dict] = None
+    # "Testar conexão" do painel (agente >= 1.1.44; os antigos ignoram o campo)
+    conexao_task: Optional[dict] = None
+    # Armar/desarmar central do DEFENSE (agente >= 1.1.50; os antigos não recebem)
+    alarme_task: Optional[dict] = None
+
+
+class EtapaConexao(BaseModel):
+    id: str
+    rotulo: str
+    estado: str = "pendente"  # pendente | andamento | ok | erro | pulado
+    detalhe: Optional[str] = None
+
+
+class ConexaoProgresso(BaseModel):
+    """Estado de um "Testar conexão": o agente envia o estado inteiro a cada etapa (idempotente)."""
+    task_id: str
+    etapas: List[EtapaConexao] = []
+    concluido: bool = False
+    ok: Optional[bool] = None
+    mensagem: Optional[str] = None
+
+
+class ConexaoTesteResponse(BaseModel):
+    task_id: Optional[str] = None
+    equipamento_id: str
+    etapas: List[EtapaConexao] = []
+    concluido: bool = False
+    ok: Optional[bool] = None
+    mensagem: Optional[str] = None
+    segundos: int = 0
+
+
+class PingRequest(BaseModel):
+    telemetry: Optional[Dict[str, Any]] = None
+    # O que o agente sabe executar (>= 1.1.44: "teste_conexao"). Agentes antigos não mandam: o servidor não lhes
+    # entrega o `conexao_task` (eles registrariam a senha no log do ping).
+    recursos: Optional[List[str]] = None
+    # Versão do agente (>= 1.1.49). Agentes antigos não mandam: o servidor mantém o que já tinha gravado.
+    # Sem max_length: um valor estranho não pode derrubar o ping (422); o router corta em 20 caracteres.
+    versao: Optional[str] = None
+
+
+class CameraPresenca(BaseModel):
+    canal: Optional[Union[int, str]] = None
+    nome: Optional[str] = Field(None, max_length=255)
+    online: bool
+
+
+class EquipamentoPresenca(BaseModel):
+    nome: str = Field(max_length=255)
+    cameras: List[CameraPresenca] = Field(default_factory=list, max_length=1000)
+
+
+class PresencaCamerasReport(BaseModel):
+    equipamentos: List[EquipamentoPresenca] = Field(default_factory=list, max_length=200)
+
+
+class EquipamentoStatusOlt(BaseModel):
+    nome: str
+    olts: List[Dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
+class StatusOltReport(BaseModel):
+    equipamentos: List[EquipamentoStatusOlt] = Field(default_factory=list, max_length=50)
+
+
+class EquipamentoStatusAntena(BaseModel):
+    nome: str
+    erro: Optional[str] = Field(default=None, max_length=1000)
+    mikrotik: Dict[str, Any] = Field(default_factory=dict)
+    antenas: List[Dict[str, Any]] = Field(default_factory=list, max_length=200)
+    descobertas: List[Dict[str, Any]] = Field(default_factory=list, max_length=200)
+
+
+class StatusAntenaReport(BaseModel):
+    equipamentos: List[EquipamentoStatusAntena] = Field(default_factory=list, max_length=50)
+
+
+class EquipamentoStatusAlarme(BaseModel):
+    nome: str
+    ip: Optional[str] = None
+    erro: Optional[str] = None
+    alarmes: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)
+    incendio: List[Dict[str, Any]] = Field(default_factory=list, max_length=50)  # agente >= 1.1.44
+
+
+class StatusAlarmeReport(BaseModel):
+    equipamentos: List[EquipamentoStatusAlarme] = Field(default_factory=list, max_length=50)
+
+
+class ComandoAlarmeRequest(BaseModel):
+    central_id: str = Field(min_length=1, max_length=64)
+    acao: Literal["ARMAR", "DESARMAR"]
+
+
+class ComandoAlarmeResultado(BaseModel):
+    """Resultado do comando: enviado pelo agente e devolvido ao painel."""
+    sucesso: bool
+    mensagem: Optional[str] = Field(default=None, max_length=500)
+
+
+# ─────────────────────────────────────────────
+# Notificações
+# ─────────────────────────────────────────────
+TipoNotificacao = Literal["LICENCA_UNM2000", "BACKUP_FALHOU", "AGENTE_OFFLINE", "PERSONALIZADA", "CAMERA_OFFLINE", "ALARME", "ANTENA_OFFLINE", "ONU_OFFLINE", "SINAL_OPTICO"]
+ModoNotificacaoPersonalizada = Literal["RECORRENTE", "DATA"]
+
+
+class NotificacaoResponse(BaseModel):
+    id: UUID
+    tipo: TipoNotificacao
+    titulo: str
+    mensagem: str
+    machine_id: Optional[UUID] = None
+    nvr_id: Optional[UUID] = None
+    camera_id: Optional[UUID] = None
+    definicao_id: Optional[UUID] = None
+    criado_em: datetime
+    atualizado_em: datetime
+    model_config = {"from_attributes": True}
+
+
+class ConfiguracaoNotificacaoResponse(BaseModel):
+    tipo: TipoNotificacao
+    ativo: bool
+
+
+class ConfiguracaoNotificacaoUpdate(BaseModel):
+    ativo: bool
+
+
+# Notificação de câmera offline (CAMERA_OFFLINE): opt-in por câmera, só para equipamentos DEFENSE por ora
+class CameraNotificacaoResponse(BaseModel):
+    id: UUID
+    nome: str
+    notificar_offline: bool
+    status_comunicacao: Optional[str] = None
+    offline_segundos: Optional[int] = None
+    offline_aprox: bool = False
+
+
+class EquipamentoCamerasNotificacaoResponse(BaseModel):
+    nvr_id: UUID
+    nvr_nome: str
+    nvr_tipo: str
+    machine_id: UUID
+    machine_nome: str
+    cameras: List[CameraNotificacaoResponse]
+
+
+class CameraNotificarUpdate(BaseModel):
+    notificar_offline: bool
+
+
+class CentralAlarmeNotificacaoResponse(BaseModel):
+    central_id: str
+    nome: str
+    conectada: bool
+    disparada: bool
+    particoes_total: int
+    particoes_desarmadas: int
+    notificar: bool
+
+
+class EquipamentoAlarmesNotificacaoResponse(BaseModel):
+    nvr_id: UUID
+    nvr_nome: str
+    machine_id: UUID
+    machine_nome: str
+    atualizado_em: Optional[str] = None
+    erro: Optional[str] = None
+    centrais: List[CentralAlarmeNotificacaoResponse]
+
+
+class CentralAlarmeNotificarUpdate(BaseModel):
+    notificar: bool
+
+
+# Notificação de ONUs (ONU_OFFLINE) e sinal óptico (SINAL_OPTICO): opt-in por equipamento OLT
+class EquipamentoOltNotificacaoResponse(BaseModel):
+    nvr_id: UUID
+    nvr_nome: str
+    machine_id: UUID
+    machine_nome: str
+    fabricante: Optional[str] = None
+    atualizado_em: Optional[str] = None
+    erro: Optional[str] = None
+    total_onus: int = 0
+    onus_offline: int = 0
+    onus_sem_energia: int = 0
+    onus_fibra: int = 0
+    onus_sinal_critico: int = 0
+    onu_offline: bool = False
+    sinal_critico: bool = False
+
+
+class OltNotificarUpdate(BaseModel):
+    onu_offline: Optional[bool] = None
+    sinal_critico: Optional[bool] = None
+
+
+class NotificacaoPersonalizadaBase(BaseModel):
+    titulo: str = Field(min_length=1, max_length=255)
+    mensagem: str = Field(min_length=1, max_length=2000)
+    enviar_email: bool = False
+    mostrar_popup: bool = True
+    ativo: bool = True
+    modo: ModoNotificacaoPersonalizada
+    intervalo_dias: Optional[int] = Field(default=None, ge=1, le=365)
+    data_alvo: Optional[date] = None
+    dias_antes: Optional[int] = Field(default=None, ge=0, le=365)
+
+    @model_validator(mode="after")
+    def _checar_modo(self):
+        if self.modo == "RECORRENTE" and not self.intervalo_dias:
+            raise ValueError("Informe a cada quantos dias repetir (intervalo_dias).")
+        if self.modo == "DATA" and (not self.data_alvo or self.dias_antes is None):
+            raise ValueError("Informe a data e quantos dias antes avisar (data_alvo e dias_antes).")
+        return self
+
+
+class NotificacaoPersonalizadaCreate(NotificacaoPersonalizadaBase):
+    pass
+
+
+class NotificacaoPersonalizadaUpdate(NotificacaoPersonalizadaBase):
+    pass
+
+
+class NotificacaoPersonalizadaResponse(NotificacaoPersonalizadaBase):
+    id: UUID
+    ultimo_disparo_em: Optional[datetime] = None
+    criado_em: datetime
+    atualizado_em: datetime
+    model_config = {"from_attributes": True}
 
 
 # ─────────────────────────────────────────────
 # Auth
 # ─────────────────────────────────────────────
 class LoginRequest(BaseModel):
+    email: Optional[str] = None
     password: str
 
 
@@ -171,9 +606,766 @@ class SettingsResponse(BaseModel):
 # ─────────────────────────────────────────────
 # Stats (overview dashboard)
 # ─────────────────────────────────────────────
+class MaquinaSemBackup(BaseModel):
+    """Máquina que não fez backup desde o último horário agendado (Visão Geral, "esperado × realizado")."""
+    machine_id: UUID
+    machine_name: str
+    customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
+    agendado_em: datetime  # UTC naive
+    minutos_de_atraso: int
+    last_backup_at: Optional[datetime] = None
+    last_backup_status: Optional[str] = None
+    online: bool = False
+    last_seen: Optional[datetime] = None
+
+
 class StatsResponse(BaseModel):
-    total_clients: int
-    active_clients: int
+    """Contagens da Visão Geral. "Hoje" é o dia de Brasília (antes era o dia UTC: depois das 21:00 contava o dia
+    seguinte)."""
+    machines_total: int
+    machines_active: int
+    machines_online: int = 0
+    customers_total: int
     backups_today: int
     backups_ok: int
+    backups_partial: int = 0
     backups_error: int
+    dia_inicio: Optional[datetime] = None  # meia-noite de Brasília em UTC (para o link à lista filtrada)
+    sem_backup: List[MaquinaSemBackup] = []
+
+
+# ─────────────────────────────────────────────
+# Agent Logs
+# ─────────────────────────────────────────────
+class LogAgenteItem(BaseModel):
+    nivel: Literal["INFO", "WARNING", "ERROR"]
+    mensagem: str
+    equipamento: Optional[str] = None
+    segundos_atras: int = Field(0, ge=0, le=86400)
+    # Linha comum do log (INFO que não é marco): guardada como "agent_log_detalhe", com limite e prazo próprios.
+    # Agentes antigos não mandam o campo e continuam gravando como "agent_log".
+    detalhe: bool = False
+
+    @field_validator("mensagem", mode="before")
+    @classmethod
+    def _truncar_mensagem(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v[:4000]
+        return v
+
+    @field_validator("equipamento", mode="before")
+    @classmethod
+    def _limpar_equipamento(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v_limpo = v.strip()
+            if not v_limpo:
+                return None
+            return v_limpo[:255]
+        return v
+
+
+class LogsAgenteReport(BaseModel):
+    logs: List[LogAgenteItem] = Field(default_factory=list, max_length=100)
+
+
+class AuditoriaItem(BaseModel):
+    id: UUID
+    created_at: datetime
+    usuario: str
+    usuario_nome: Optional[str] = None
+    message: str
+    equipamento: Optional[str] = None
+    machine_id: UUID
+    machine_name: Optional[str] = None
+    customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
+
+
+class UsuarioAuditoriaOpcao(BaseModel):
+    usuario: str
+    nome: str
+
+
+class PaginatedAuditoria(BaseModel):
+    items: List[AuditoriaItem]
+    total: int
+    page: int
+    pages: int
+    dias_retencao: int
+
+
+class AgentLogResponse(BaseModel):
+    id: UUID
+    machine_id: UUID
+    event_type: str
+    message: str
+    nivel: str = "INFO"
+    equipamento: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─────────────────────────────────────────────
+# Agent OTA (Over The Air Updates)
+# ─────────────────────────────────────────────
+_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _validate_version(v: Optional[str]) -> Optional[str]:
+    """Versão do agente precisa seguir o formato X.Y.Z (REGRA-009)."""
+    if v is not None and not _VERSION_RE.match(v.strip()):
+        raise ValueError("Versão inválida: use o formato X.Y.Z (ex: 2.1.0)")
+    return v.strip() if v is not None else v
+
+
+def _validate_sha256(v: Optional[str], obrigatorio: bool = False) -> Optional[str]:
+    """SHA-256 precisa ter 64 caracteres hexadecimais, quando informado.
+
+    Campo vazio ("") vindo do formulário conta como não informado (o Tray é opcional).
+    """
+    if v is None or not v.strip():
+        if obrigatorio:
+            raise ValueError("Informe o SHA-256 do TrilanAgentService.exe")
+        return None
+    if not _SHA256_RE.match(v.strip()):
+        raise ValueError("SHA-256 inválido: deve ter 64 caracteres hexadecimais")
+    return v.strip()
+
+
+def _blank_to_none(v: Optional[str]) -> Optional[str]:
+    """URL opcional vazia ("") vinda do formulário vira None."""
+    if v is None or not v.strip():
+        return None
+    return v.strip()
+
+
+class AgentVersionCreate(BaseModel):
+    version: str                             # ex: "2.1.0"
+    notes: Optional[str] = None
+    url_service: str                         # URL pública do exe (ex: GitHub Release asset)
+    url_tray: Optional[str] = None
+    sha256_service: str                      # SHA256 do service.exe (64 chars hex)
+    sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None          # pacote do agente Linux/Mikrotik (>= 1.1.52)
+    sha256_linux: Optional[str] = None
+
+    @field_validator("version")
+    @classmethod
+    def _check_version(cls, v):
+        return _validate_version(v)
+
+    @field_validator("sha256_service")
+    @classmethod
+    def _check_sha256_service(cls, v):
+        return _validate_sha256(v, obrigatorio=True)
+
+    @field_validator("sha256_tray", "sha256_linux")
+    @classmethod
+    def _check_sha256_tray(cls, v):
+        return _validate_sha256(v)
+
+    @field_validator("url_tray", "url_linux")
+    @classmethod
+    def _check_url_tray(cls, v):
+        return _blank_to_none(v)
+
+
+class AgentVersionUpdate(BaseModel):
+    version: Optional[str] = None
+    url_service: Optional[str] = None
+    sha256_service: Optional[str] = None
+    url_tray: Optional[str] = None
+    sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None
+    sha256_linux: Optional[str] = None
+
+    @field_validator("version")
+    @classmethod
+    def _check_version(cls, v):
+        return _validate_version(v)
+
+    @field_validator("sha256_service", "sha256_tray", "sha256_linux")
+    @classmethod
+    def _check_sha256(cls, v):
+        return _validate_sha256(v)
+
+    @field_validator("url_tray", "url_linux")
+    @classmethod
+    def _check_url_tray(cls, v):
+        return _blank_to_none(v)
+
+
+class AgentVersionResponse(BaseModel):
+    id: UUID
+    version: str
+    notes: Optional[str]
+    url_service: str
+    url_tray: Optional[str]
+    sha256_service: str
+    sha256_tray: Optional[str]
+    url_linux: Optional[str] = None
+    sha256_linux: Optional[str] = None
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UpdateCheckResponse(BaseModel):
+    """Resposta ao agente ao verificar se há nova versão disponível."""
+    has_update: bool
+    version: Optional[str] = None
+    url_service: Optional[str] = None
+    url_tray: Optional[str] = None
+    sha256_service: Optional[str] = None
+    sha256_tray: Optional[str] = None
+    url_linux: Optional[str] = None      # só para o agente Linux (plataforma=linux)
+    sha256_linux: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# ─────────────────────────────────────────────
+# Cliente (empresa atendida; agrupa Máquinas)
+# ─────────────────────────────────────────────
+class CustomerBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    active: bool = True
+    backup_hour: int = Field(2, ge=0, le=23)
+    backup_minute: int = Field(0, ge=0, le=59)
+
+
+_EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+
+
+def _clean_email_list(v: Optional[List[str]]) -> Optional[List[str]]:
+    """Remove strings vazias e repetidas (ordem mantida) e valida o formato básico do e-mail."""
+    if v is None:
+        return None
+    result: List[str] = []
+    for item in v:
+        email = (item or "").strip()
+        if not email:
+            continue
+        if not _EMAIL_RE.match(email):
+            raise ValueError(f"E-mail inválido: {email}")
+        if email not in result:
+            result.append(email)
+    return result
+
+
+class CustomerCreate(CustomerBase):
+    # Destinatários do e-mail único por rodada de backup
+    email_to: List[str] = []
+    # Senha do ZIP do cliente (plaintext; armazenada criptografada)
+    zip_password: Optional[str] = None
+
+    @field_validator("email_to")
+    @classmethod
+    def _check_email_to(cls, v):
+        return _clean_email_list(v) or []
+
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    # Enviar "" ou null limpa a descrição (detectado via model_fields_set)
+    description: Optional[str] = None
+    active: Optional[bool] = None
+    backup_hour: Optional[int] = Field(None, ge=0, le=23)
+    backup_minute: Optional[int] = Field(None, ge=0, le=59)
+    email_to: Optional[List[str]] = None
+    # Senha do ZIP do cliente (plaintext); "" ou null remove a senha
+    zip_password: Optional[str] = None
+
+    @field_validator("email_to")
+    @classmethod
+    def _check_email_to(cls, v):
+        return _clean_email_list(v)
+
+
+class CustomerResponse(CustomerBase):
+    # Sem limites na saída: registros antigos fora da faixa não podem derrubar a listagem (500)
+    backup_hour: int
+    backup_minute: int
+    id: UUID
+    created_at: datetime
+    email_to: List[str] = []
+    machines_total: int = 0
+    machines_online: int = 0
+    health: str = "NO_DATA"  # ALL_OK | PARTIAL | ALL_ERROR | NO_DATA
+    last_backup_at: Optional[datetime] = None
+    queue_active: bool = False
+    queue_current_index: Optional[int] = None
+    # Informa ao frontend se o cliente tem senha no ZIP (sem expor a senha)
+    has_zip_password: bool = False
+    machines: List[MachineResponse] = []  # ordenadas por queue_order
+
+    model_config = {"from_attributes": True}
+
+
+class CustomerQueueOrder(BaseModel):
+    """Nova ordem da fila: precisa conter exatamente as máquinas do Cliente."""
+    machine_ids: List[UUID]
+
+
+class CustomerRunMachine(BaseModel):
+    machine_id: UUID
+    machine_name: str
+    backup_id: Optional[UUID] = None
+    # Status do backup; "NAO_EXECUTOU" se a rodada fechou sem relatório; null se ainda aberta
+    status: Optional[str] = None
+    zip: bool = False
+
+
+class CustomerRunResponse(BaseModel):
+    """Rodada de backup do Cliente (1 e-mail por rodada)."""
+    id: UUID
+    trigger: str  # scheduled | queue | manual_machine
+    started_at: datetime
+    deadline_at: datetime
+    closed_at: Optional[datetime] = None
+    status: str  # EM_ANDAMENTO | OK | PARCIAL | ERRO
+    email_sent: bool = False
+    machines_expected: int = 0
+    machines_reported: int = 0
+    machines_ok: int = 0
+    has_zip: bool = False
+    machines: List[CustomerRunMachine] = []
+
+
+# ─────────────────────────────────────────────
+# Teste RTSP Automático
+# ─────────────────────────────────────────────
+class RTSPTestResponse(BaseModel):
+    success: bool
+    error_message: Optional[str] = None
+    image_base64: Optional[str] = None
+    # Agente >= 1.1.6: horário exibido no NVR do frame da gravação e origem ("ao_vivo" | "gravacao")
+    horario: Optional[str] = None
+    origem: Optional[str] = None
+
+
+# ─────────────────────────────────────────────
+# Multi-contas
+# ─────────────────────────────────────────────
+_EMAIL_USUARIO_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validar_email_usuario(v: Optional[str], obrigatorio: bool = True) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("E-mail inválido.")
+        return None
+    s = v.strip().lower()
+    if not s:
+        if obrigatorio:
+            raise ValueError("E-mail inválido.")
+        return None
+    if len(s) > 255 or not _EMAIL_USUARIO_RE.match(s):
+        raise ValueError("E-mail inválido.")
+    return s
+
+
+def _validar_senha_schema(v: Optional[str], obrigatorio: bool = True) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("A senha é obrigatória.")
+        return None
+    validar_senha_nova(v)
+    return v
+
+
+def _validar_documento(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    digitos = "".join(c for c in str(v) if c.isdigit())
+    if not digitos:
+        return None
+    if len(digitos) not in (11, 14):
+        raise ValueError("CPF/CNPJ inválido.")
+    return digitos
+
+
+def _validar_nome(v: Optional[str], obrigatorio: bool = True, max_len: int = 255) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("Nome é obrigatório.")
+        return None
+    s = v.strip()
+    if not s:
+        if obrigatorio:
+            raise ValueError("Nome não pode ser vazio.")
+        return None
+    if len(s) > max_len:
+        raise ValueError(f"Nome pode ter no máximo {max_len} caracteres.")
+    return s
+
+
+def _validar_tipo_conta(v: Optional[str], obrigatorio: bool = True) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("Tipo de conta é obrigatório.")
+        return None
+    s = v.strip().upper()
+    if s not in TIPOS_CONTA:
+        raise ValueError(f"Tipo de conta inválido. Opções: {', '.join(TIPOS_CONTA)}.")
+    return s
+
+
+def _validar_papel_usuario(v: Optional[str], obrigatorio: bool = True) -> Optional[str]:
+    if v is None:
+        if obrigatorio:
+            raise ValueError("Papel é obrigatório.")
+        return None
+    s = v.strip().upper()
+    if s not in ("ADMIN", "VISUALIZADOR", "LEITURA"):
+        raise ValueError("Papel inválido. Deve ser ADMIN, VISUALIZADOR ou LEITURA.")
+    return s
+
+
+class TrocarSenhaRequest(BaseModel):
+    senha_atual: str
+    senha_nova: str
+
+    @field_validator("senha_nova")
+    @classmethod
+    def _check_senha_nova(cls, v: str) -> str:
+        return _validar_senha_schema(v, obrigatorio=True)
+
+
+class UsuarioMe(BaseModel):
+    id: Optional[UUID] = None
+    nome: str
+    email: Optional[str] = None
+    papel: str
+
+    model_config = {"from_attributes": True}
+
+
+class ContaResumo(BaseModel):
+    id: UUID
+    nome: str
+    tipo: str
+    plano_nome: Optional[str] = None
+    expira_em: Optional[datetime] = None
+    dias_restantes: Optional[int] = None
+    status: str
+    bloqueada: bool
+    plataforma: bool
+
+    model_config = {"from_attributes": True}
+
+
+class Rotulos(BaseModel):
+    grupo_singular: str
+    grupo_plural: str
+
+
+class MeResponse(BaseModel):
+    usuario: UsuarioMe
+    conta: Optional[ContaResumo] = None
+    somente_leitura: bool
+    pode_testar: bool = False  # captura ao vivo e "Testar conexão" (ADMIN e VISUALIZADOR)
+    rotulos: Rotulos
+
+
+class PlanoCreate(BaseModel):
+    nome: str
+    duracao_dias: int = Field(..., ge=1, le=3650)
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=60)
+
+
+class PlanoUpdate(BaseModel):
+    nome: Optional[str] = None
+    duracao_dias: Optional[int] = Field(None, ge=1, le=3650)
+    ativo: Optional[bool] = None
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_nome(v, obrigatorio=False, max_len=60)
+
+
+class PlanoResponse(BaseModel):
+    id: UUID
+    nome: str
+    duracao_dias: int
+    ativo: bool
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Tipos de notificação que saem por e-mail (o usuário escolhe quais recebe)
+TIPOS_EMAIL_NOTIFICACAO = (
+    "LICENCA_UNM2000", "CAMERA_OFFLINE", "ALARME", "ANTENA_OFFLINE", "ONU_OFFLINE", "SINAL_OPTICO", "PERSONALIZADA",
+)
+
+
+def _validar_tipos_notificacao(v):
+    if v is None:
+        return None
+    invalidos = [t for t in v if t not in TIPOS_EMAIL_NOTIFICACAO]
+    if invalidos:
+        raise ValueError(f"Tipo de notificação inválido: {invalidos[0]}")
+    return list(dict.fromkeys(v))
+
+
+class UsuarioCreate(BaseModel):
+    nome: str
+    email: str
+    senha: str
+    papel: str
+    # None = padrão do papel (admin recebe, os demais não)
+    notif_email: Optional[bool] = None
+    notif_tipos: Optional[List[str]] = None  # None = todos os tipos
+
+    @field_validator("notif_tipos")
+    @classmethod
+    def _check_notif_tipos(cls, v):
+        return _validar_tipos_notificacao(v)
+    # VISUALIZADOR/LEITURA: máquinas que o usuário vê (vazio ou ausente = todas); ignorado para ADMIN
+    maquinas: Optional[List[UUID]] = Field(default=None, max_length=2000)
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=255)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _validar_email_usuario(v, obrigatorio=True)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: str) -> str:
+        return _validar_senha_schema(v, obrigatorio=True)
+
+    @field_validator("papel")
+    @classmethod
+    def _check_papel(cls, v: str) -> str:
+        return _validar_papel_usuario(v, obrigatorio=True)
+
+
+class UsuarioUpdate(BaseModel):
+    nome: Optional[str] = None
+    papel: Optional[str] = None
+    ativo: Optional[bool] = None
+    senha: Optional[str] = None
+    notif_email: Optional[bool] = None
+    notif_tipos: Optional[List[str]] = None  # enviado como null = todos os tipos; ausente = não mexe
+
+    @field_validator("notif_tipos")
+    @classmethod
+    def _check_notif_tipos(cls, v):
+        return _validar_tipos_notificacao(v)
+    # None = não mexe; [] = volta a ver todas as máquinas
+    maquinas: Optional[List[UUID]] = Field(default=None, max_length=2000)
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_nome(v, obrigatorio=False, max_len=255)
+
+    @field_validator("papel")
+    @classmethod
+    def _check_papel(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_papel_usuario(v, obrigatorio=False)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_senha_schema(v, obrigatorio=False)
+
+
+class UsuarioResponse(BaseModel):
+    id: UUID
+    nome: str
+    email: str
+    papel: str
+    ativo: bool
+    maquinas: List[UUID] = []  # vazio = vê todas as máquinas da conta
+    notif_email: bool = False
+    notif_tipos: Optional[List[str]] = None
+    ultimo_login: Optional[datetime] = None
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SuperAdminCreate(BaseModel):
+    nome: str
+    email: str
+    senha: str
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=255)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _validar_email_usuario(v, obrigatorio=True)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: str) -> str:
+        return _validar_senha_schema(v, obrigatorio=True)
+
+
+class SuperAdminUpdate(BaseModel):
+    nome: Optional[str] = None
+    ativo: Optional[bool] = None
+    senha: Optional[str] = None
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_nome(v, obrigatorio=False, max_len=255)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_senha_schema(v, obrigatorio=False)
+
+
+class AdminInicial(BaseModel):
+    nome: str
+    email: str
+    senha: str
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=255)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _validar_email_usuario(v, obrigatorio=True)
+
+    @field_validator("senha")
+    @classmethod
+    def _check_senha(cls, v: str) -> str:
+        return _validar_senha_schema(v, obrigatorio=True)
+
+
+class ContaCreate(BaseModel):
+    nome: str
+    tipo: str
+    documento: Optional[str] = None
+    email_contato: Optional[str] = None
+    telefone: Optional[str] = None
+    observacoes: Optional[str] = None
+    plano_id: UUID
+    admin: AdminInicial
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: str) -> str:
+        return _validar_nome(v, obrigatorio=True, max_len=255)
+
+    @field_validator("tipo")
+    @classmethod
+    def _check_tipo(cls, v: str) -> str:
+        return _validar_tipo_conta(v, obrigatorio=True)
+
+    @field_validator("documento")
+    @classmethod
+    def _check_documento(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_documento(v)
+
+    @field_validator("email_contato")
+    @classmethod
+    def _check_email_contato(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_email_usuario(v, obrigatorio=False)
+
+
+class ContaUpdate(BaseModel):
+    nome: Optional[str] = None
+    tipo: Optional[str] = None
+    documento: Optional[str] = None
+    email_contato: Optional[str] = None
+    telefone: Optional[str] = None
+    observacoes: Optional[str] = None
+    expira_em: Optional[datetime] = None
+
+    @field_validator("nome")
+    @classmethod
+    def _check_nome(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_nome(v, obrigatorio=False, max_len=255)
+
+    @field_validator("tipo")
+    @classmethod
+    def _check_tipo(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_tipo_conta(v, obrigatorio=False)
+
+    @field_validator("documento")
+    @classmethod
+    def _check_documento(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_documento(v)
+
+    @field_validator("email_contato")
+    @classmethod
+    def _check_email_contato(cls, v: Optional[str]) -> Optional[str]:
+        return _validar_email_usuario(v, obrigatorio=False)
+
+    @field_validator("expira_em")
+    @classmethod
+    def _check_expira_em(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None and v.tzinfo is not None:
+            from datetime import timezone
+            return v.astimezone(timezone.utc).replace(tzinfo=None)
+        return v
+
+
+class RenovarRequest(BaseModel):
+    plano_id: UUID
+
+
+class MoverContaRequest(BaseModel):
+    conta_id: UUID
+
+
+class RenovacaoResponse(BaseModel):
+    id: UUID
+    plano_nome: str
+    dias: int
+    expira_em_anterior: Optional[datetime] = None
+    expira_em_nova: datetime
+    feito_por: Optional[str] = None
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ContaResponse(ContaResumo):
+    documento: Optional[str] = None
+    email_contato: Optional[str] = None
+    telefone: Optional[str] = None
+    observacoes: Optional[str] = None
+    plano_id: Optional[UUID] = None
+    ativo: bool = True
+    criado_em: datetime
+    total_clientes: int = 0
+    total_maquinas: int = 0
+    total_usuarios: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class ContaDetalheResponse(ContaResponse):
+    renovacoes: List[RenovacaoResponse] = []
+
+    model_config = {"from_attributes": True}

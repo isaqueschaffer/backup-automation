@@ -1,0 +1,14 @@
+# Linux ARMv7 pilot; Windows-only packages intentionally excluded.
+requests>=2.31,<3
+pyzipper>=0.3.6,<1
+pycryptodome>=3.20,<4
+paramiko==3.4.0
+pyftpdlib>=1.5.8,<3
+psutil>=5.9,<8
+pysnmp>=7.1,<8
+openpyxl>=3.1,<4
+pymysql>=1.1,<2
+Pillow>=10.3,<12
+smbprotocol>=1.15.0,<2
+# ffmpeg e ping vêm do sistema (Dockerfile.mikrotik). O SMB serve ao backup em túnel (src/backup/tunel.py).
+# Biblioteca Python pura nova aqui a OTA instala sozinha (>= 1.1.58); compilada sem wheel ARMv7 exige imagem nova.

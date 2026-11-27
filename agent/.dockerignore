@@ -1,0 +1,12 @@
+venv/
+dist/
+build/
+logs/
+tmp_backup*/
+tests/
+**/__pycache__/
+*.pyc
+agent.conf
+*.spec
+*.ps1
+*.iss

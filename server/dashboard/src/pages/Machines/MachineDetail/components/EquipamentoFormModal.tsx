@@ -1,0 +1,531 @@
+import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
+import { EqForm, TipoEquipamento } from "../../../../api/types";
+import Modal from "../../../../components/Modal";
+import { TIPOS, TIPO_ICONE_EMOJI, USUARIO_SSH_PADRAO } from "../utils";
+import PlanilhaCamerasCampo from "./PlanilhaCamerasCampo";
+import { caminhoAbsoluto } from "../hooks/useCameraImport";
+
+export default function EquipamentoFormModal({ machineId, agenteTipo, eqForm, setEqForm, editingEqId, saving, onSave, onClose, onErro }: {
+  machineId: string;
+  agenteTipo?: "WINDOWS" | "MIKROTIK";
+  eqForm: EqForm;
+  setEqForm: React.Dispatch<React.SetStateAction<EqForm>>;
+  editingEqId: string | null;
+  saving: boolean;
+  onSave: () => void;
+  onClose: () => void;
+  onErro: (mensagem: string) => void;
+}) {
+  const isSshOlt = eqForm.fabricante_olt === "VSOL" || eqForm.fabricante_olt === "HUAWEI";
+  // Enquanto a prévia da planilha está aberta por cima, o Esc fecha só a prévia (não o formulário)
+  const [previaAberta, setPreviaAberta] = useState(false);
+
+  return (
+    <Modal title={editingEqId ? "Editar Equipamento" : "Adicionar Equipamento"} onClose={() => { if (!previaAberta) onClose(); }}>
+      <div className="form-group">
+        <label className="form-label">Tipo de Equipamento *</label>
+        {eqForm.tipo === "CAMERA" ? (
+          <div style={{ padding: "10px", background: "rgba(255,255,255,0.05)", borderRadius: 6, marginBottom: 16 }}>📷 Câmera (RTSP)</div>
+        ) : (
+          <select className="form-input" value={eqForm.tipo}
+            onChange={e => setEqForm({ ...eqForm, tipo: e.target.value as TipoEquipamento, pasta_origem: e.target.value === "DEFENSE" ? "C:\\Intelbras Defense IA\\Intelbras Defense IA Server\\bak\\db_backup" : "", fabricante_olt: "UNM2000" })}>
+            {TIPOS.map(t => <option key={t} value={t}>{TIPO_ICONE_EMOJI[t]} {t}</option>)}
+          </select>
+        )}
+      </div>
+      <div className="form-group">
+        <label className="form-label">Nome *</label>
+        <input className="form-input" type="text"
+          placeholder={`${eqForm.tipo}_Maquina1`}
+          value={eqForm.name} onChange={e => setEqForm({ ...eqForm, name: e.target.value })} />
+      </div>
+      {(eqForm.tipo === "NVR" || eqForm.tipo === "PABX" || eqForm.tipo === "MIKROTIK" || eqForm.tipo === "CAMERA" || eqForm.tipo === "ANTENA") && (
+        <>
+          <div className="form-group">
+            <label className="form-label">{eqForm.tipo === "ANTENA" ? "Endereço IP do MikroTik *" : "Endereço IP ou Host *"}</label>
+            <input className="form-input" type="text" placeholder={eqForm.tipo === "PABX" ? "https://192.168.12.2" : "192.168.1.100"}
+              value={eqForm.ip} onChange={e => setEqForm({ ...eqForm, ip: e.target.value })} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Usuário *</label>
+              <input className="form-input" type="text"
+                value={eqForm.username} onChange={e => setEqForm({ ...eqForm, username: e.target.value })} />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Senha {editingEqId ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(vazio = manter atual)</span> : '*'}</label>
+              <input className="form-input" type="password"
+                value={eqForm.password} onChange={e => setEqForm({ ...eqForm, password: e.target.value })} />
+            </div>
+          </div>
+          {eqForm.tipo === "ANTENA" && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginTop: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Porta SSH</label>
+                  <input className="form-input" type="number" min={1} max={65535} placeholder="22"
+                    value={eqForm.porta_ssh ?? 22} onChange={e => setEqForm({ ...eqForm, porta_ssh: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Prefixos de MAC das antenas (busca automática)</label>
+                  <input className="form-input" type="text" placeholder="9C:2B:A6, 54:16:51"
+                    value={eqForm.prefixos_mac || ""} onChange={e => setEqForm({ ...eqForm, prefixos_mac: e.target.value })} />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, display: "block" }}>
+                O agente entra por SSH neste MikroTik (use um usuário só de leitura) e lê vizinhos, ARP e DHCP a cada 3 minutos. A busca
+                automática traz os pontos de acesso vizinhos e os MACs com os prefixos acima (os 3 primeiros bytes do fabricante). As antenas
+                são cadastradas depois, no botão "Antenas" do card: pela busca automática ou pelo MAC, e vale qualquer MAC até 32
+                endereços de diferença do informado.
+              </span>
+            </>
+          )}
+          {eqForm.tipo === "CAMERA" && (
+            <div className="form-group" style={{ marginTop: 12 }}>
+              <label className="form-label">Modelo / Fabricante</label>
+              <select className="form-input" value={eqForm.modelo || "Hikvision"} onChange={e => setEqForm({ ...eqForm, modelo: e.target.value })}>
+                <option value="Hikvision">Hikvision / Outro</option>
+                <option value="Intelbras">Intelbras</option>
+                <option value="Grandstream">Grandstream</option>
+                <option value="ONVIF">ONVIF Genérico</option>
+                <option value="Motorola">Motorola (ONVIF)</option>
+              </select>
+            </div>
+          )}
+          {eqForm.tipo === "NVR" && (
+            <div className="form-group" style={{ marginTop: 12 }}>
+              <label className="form-label">Marca do NVR</label>
+              <select className="form-input" value={eqForm.marca || "Hikvision"} onChange={e => setEqForm({ ...eqForm, marca: e.target.value })}>
+                <option value="Hikvision">Hikvision / Outros</option>
+                <option value="Intelbras">Intelbras</option>
+                <option value="Motorola">Motorola</option>
+              </select>
+              {eqForm.marca === "Intelbras" && (
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Telemetria (RAM e discos) via SNMP (porta 161, community "Public" por padrão).
+                </span>
+              )}
+            </div>
+          )}
+        </>
+      )}
+      {eqForm.tipo === "OLT" && (
+        <>
+          <div className="form-group">
+            <label className="form-label">Sistema da OLT *</label>
+            <select
+              className="form-input"
+              value={eqForm.fabricante_olt}
+              onChange={e => setEqForm({ ...eqForm, fabricante_olt: e.target.value })}
+            >
+              <option value="UNM2000">🔵 UNM2000</option>
+              <option value="HUAWEI">🔴 HUAWEI</option>
+              <option value="VSOL">🟢 VSOL</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              {isSshOlt ? "Endereço IP da OLT *" : "Pasta de Origem dos Backups *"}
+            </label>
+
+            <input
+              className="form-input"
+              type="text"
+              placeholder={isSshOlt ? "192.168.1.100" : "C:\\Users\\Helena\\Documents"}
+              value={isSshOlt ? eqForm.ip : eqForm.pasta_origem}
+              onChange={e => {
+                if (isSshOlt) {
+                  setEqForm({ ...eqForm, ip: e.target.value });
+                } else {
+                  setEqForm({ ...eqForm, pasta_origem: e.target.value });
+                }
+              }}
+            />
+          </div>
+
+          {isSshOlt && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Usuário *</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={eqForm.username}
+                  onChange={e => setEqForm({ ...eqForm, username: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Senha *</label>
+                <input
+                  className="form-input"
+                  type="password"
+                  value={eqForm.password}
+                  onChange={e => setEqForm({ ...eqForm, password: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+
+          {eqForm.fabricante_olt === "UNM2000" && (
+            <>
+              <div className="form-group" style={{ marginTop: 12 }}>
+                <label className="form-label">IP da OLT (Telnet, porta 23) — opcional</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="192.168.90.2"
+                  value={eqForm.olts || ""}
+                  onChange={e => setEqForm({ ...eqForm, olts: e.target.value })}
+                />
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Uma OLT por equipamento. O agente precisa alcançar esse IP pela rede da máquina. Ao salvar, o agente testa a conexão e já lê o estado das ONUs e o sinal óptico; depois, a cada 5 minutos.
+                </span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Usuário do Telnet</label>
+                  <input className="form-input" type="text" autoComplete="off"
+                    value={eqForm.telnet_usuario || ""}
+                    onChange={e => setEqForm({ ...eqForm, telnet_usuario: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Senha do Telnet</label>
+                  <input className="form-input" type="password" autoComplete="new-password"
+                    placeholder={eqForm.telnet_senha_definida ? "•••••• (vazio mantém)" : ""}
+                    value={eqForm.telnet_senha || ""}
+                    onChange={e => setEqForm({ ...eqForm, telnet_senha: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Senha enable</label>
+                  <input className="form-input" type="password" autoComplete="new-password"
+                    placeholder={eqForm.telnet_senha_definida ? "•••••• (vazio mantém)" : "igual à do Telnet"}
+                    value={eqForm.telnet_enable || ""}
+                    onChange={e => setEqForm({ ...eqForm, telnet_enable: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-group" style={{ marginTop: 12 }}>
+                <label className="form-label">Nomes das ONUs: banco da UNM2000 (somente leitura) — opcional</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <input className="form-input" type="text" autoComplete="off" placeholder="IP do servidor (vazio = este servidor)"
+                    value={eqForm.nomes_db_host || ""}
+                    onChange={e => setEqForm({ ...eqForm, nomes_db_host: e.target.value })} />
+                  <input className="form-input" type="text" autoComplete="off" placeholder="Usuário (padrão do sistema)"
+                    value={eqForm.nomes_db_usuario || ""}
+                    onChange={e => setEqForm({ ...eqForm, nomes_db_usuario: e.target.value })} />
+                  <input className="form-input" type="password" autoComplete="new-password"
+                    placeholder={eqForm.nomes_db_senha_definida ? "•••••• (vazio mantém)" : "Senha (padrão do sistema)"}
+                    value={eqForm.nomes_db_senha || ""}
+                    onChange={e => setEqForm({ ...eqForm, nomes_db_senha: e.target.value })} />
+                </div>
+                <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Como o agente roda no próprio servidor da UNM2000, pode deixar tudo em branco: ele lê os nomes no MySQL local e, se precisar, cria sozinho o usuário de leitura. Preencha o IP só se o banco estiver em outro servidor (vários, separados por vírgula) e o usuário/senha só se aquele servidor usar outra credencial. ONUs sem nome dado na UNM2000 aparecem só pelo serial.
+                </span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Licença da UNM2000: início — opcional</label>
+                  <input className="form-input" type="date" value={eqForm.licenca_inicio || ""}
+                    onChange={e => setEqForm({ ...eqForm, licenca_inicio: e.target.value })} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Licença da UNM2000: validade — opcional</label>
+                  <input className="form-input" type="date" value={eqForm.licenca_fim || ""}
+                    onChange={e => setEqForm({ ...eqForm, licenca_fim: e.target.value })} />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                A UNM2000 não informa a validade da licença por nenhuma consulta; informe a data para o painel mostrar os dias restantes.
+              </span>
+              {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
+            </>
+          )}
+
+          <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+            {(eqForm.fabricante_olt === "UNM2000")
+              ? `Pasta onde o ${eqForm.fabricante_olt} exporta os arquivos de backup.`
+              : "Endereço IP, usuário e senha utilizados para acessar a OLT via SSH."
+            }
+          </span>
+        </>
+      )}
+      {eqForm.tipo === "DIGIFORT" && (
+        <>
+          <div className="form-group">
+            <label className="form-label">Local de backup do Digifort *</label>
+            <input className="form-input" type="text"
+              placeholder="C:\Digifort\Backup"
+              value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+            <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+              Pasta onde o Digifort salva os backups da configuração.
+            </span>
+          </div>
+          {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
+          <PlanilhaCamerasCampo
+            machineId={machineId} nvrId={editingEqId} eqForm={eqForm} setEqForm={setEqForm}
+            onPreviaAberta={setPreviaAberta} onErro={onErro} />
+          <PastaGravacoesCampo eqForm={eqForm} setEqForm={setEqForm} />
+        </>
+      )}
+      {eqForm.tipo === "HIKCENTRAL" && (
+        <>
+          <div className="form-group">
+            <label className="form-label">Pasta de backup do HikCentral *</label>
+            <input className="form-input" type="text"
+              placeholder="D:\BACKUP HIKCENTRAL"
+              value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+            <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+              Pasta onde o HikCentral salva os backups (cada um numa subpasta VSM_V..._BACKUP_AAAAMMDDHHMMSS_n). O agente copia a mais recente.
+            </span>
+          </div>
+          {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
+        </>
+      )}
+      {eqForm.tipo === "DEFENSE" && (
+        <>
+          <div className="form-group">
+            <label className="form-label">Endereço IP / Host do Defense IA *</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="192.168.75.41"
+              value={eqForm.ip}
+              onChange={e => setEqForm({ ...eqForm, ip: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Porta da API HTTPS</label>
+              <input
+                className="form-input"
+                type="number"
+                placeholder="4433"
+                value={eqForm.porta_api ?? ""}
+                onChange={e => setEqForm({ ...eqForm, porta_api: e.target.value })}
+              />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Porta dos Alarmes</label>
+              <input
+                className="form-input"
+                type="number"
+                placeholder="3001"
+                value={eqForm.porta_alarme ?? ""}
+                onChange={e => setEqForm({ ...eqForm, porta_alarme: e.target.value })}
+              />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Usuário da API *</label>
+              <input
+                className="form-input"
+                type="text"
+                placeholder="system"
+                value={eqForm.username}
+                onChange={e => setEqForm({ ...eqForm, username: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">
+              Senha da API {editingEqId ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(vazio = manter atual)</span> : '*'}
+            </label>
+            <input
+              className="form-input"
+              type="password"
+              autoComplete="new-password"
+              placeholder="••••••••"
+              value={eqForm.password}
+              onChange={e => setEqForm({ ...eqForm, password: e.target.value })}
+            />
+            {editingEqId && (
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                Preencha apenas se quiser alterar a senha atual.
+              </span>
+            )}
+          </div>
+
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">Pasta de Origem do Backup</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="C:\Intelbras Defense IA\...\db_backup"
+              value={eqForm.pasta_origem}
+              onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })}
+            />
+            <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+              Pasta onde o Defense IA salva os arquivos gerados no backup automático de banco de dados (opcional).
+            </span>
+          </div>
+          {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
+        </>
+      )}
+      <div className="flex gap-3 mt-4" style={{ justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" onClick={onSave} disabled={saving}>
+          {saving ? <span className="spinner spinner-sm" /> : (editingEqId ? "Salvar" : <><Plus size={15} /> Adicionar</>)}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// "Local de gravação das câmeras" do Digifort. Com a coluna "Diretório de gravação" na planilha, cada câmera já traz o
+// caminho completo da pasta dela e o campo some; ele fica para planilhas sem essa coluna (uma pasta raiz com uma
+// subpasta por câmera) ou para completar as câmeras que vieram sem caminho.
+function PastaGravacoesCampo({ eqForm, setEqForm }: {
+  eqForm: EqForm;
+  setEqForm: React.Dispatch<React.SetStateAction<EqForm>>;
+}) {
+  const [mostrarCampo, setMostrarCampo] = useState(false);
+  const nova = eqForm.planilhaNova;
+  const total = nova ? nova.cams.length : eqForm.planilhaSalva?.total_cameras ?? 0;
+  const comPasta = nova
+    ? nova.cams.filter(c => caminhoAbsoluto(c.pastaGravacao)).length
+    : eqForm.planilhaSalva?.com_pasta_completa ?? 0;
+  const valor = eqForm.pasta_gravacoes || "";
+  const semPasta = Math.max(total - comPasta, 0);
+  const ajuda = { fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" } as const;
+
+  if (comPasta > 0 && !valor.trim() && !mostrarCampo) {
+    return (
+      <div className="form-group">
+        <label className="form-label">Pastas de gravação</label>
+        <span style={ajuda}>
+          Lidas da planilha: {comPasta} de {total} câmera(s), pela coluna "Diretório de gravação". O tempo gravado e os
+          dias sem gravação saem dos arquivos de cada pasta.
+          {semPasta > 0 && ` ${semPasta} câmera(s) sem caminho na planilha ficam como "não verificado".`}
+        </span>
+        {semPasta > 0 && (
+          <button type="button" className="btn btn-secondary" style={{ marginTop: 6 }} onClick={() => setMostrarCampo(true)}>
+            Informar uma pasta raiz para as demais
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="form-group">
+      <label className="form-label">Local de gravação das câmeras</label>
+      <input className="form-input" type="text"
+        placeholder="C:\Digifort\Gravacoes"
+        value={valor} onChange={e => setEqForm({ ...eqForm, pasta_gravacoes: e.target.value })} />
+      <span style={ajuda}>
+        {comPasta > 0
+          ? `Só para as câmeras sem caminho na planilha (${comPasta} de ${total} já têm a pasta lida da coluna "Diretório de gravação"). `
+          : "Para planilha sem a coluna \"Diretório de gravação\". "}
+        Pasta com uma subpasta por câmera (nome igual ao da planilha), cada uma com Dados e Indices.
+        Sem pasta nenhuma, o agente só testa se a câmera responde ao ping.
+      </span>
+    </div>
+  );
+}
+
+function SmbConfigSection({
+  eqForm,
+  setEqForm,
+}: {
+  eqForm: EqForm;
+  setEqForm: React.Dispatch<React.SetStateAction<EqForm>>;
+}) {
+  const sftp = eqForm.acesso_remoto !== "smb";
+  const rotulo = { fontSize: 11, marginBottom: 4 } as const;
+  // Usuário padrão: a conta que o script preparar_acesso_ssh.ps1 cria em qualquer Windows (o técnico pode trocar)
+  useEffect(() => {
+    if (!eqForm.ssh_usuario) setEqForm(f => (f.ssh_usuario ? f : { ...f, ssh_usuario: USUARIO_SSH_PADRAO }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const linkScript = (
+    <a href="/preparar_acesso_ssh.ps1" download style={{ color: "var(--accent)" }}>preparar_acesso_ssh.ps1</a>
+  );
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "12px 14px",
+        borderRadius: 8,
+        background: "var(--surface-2)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <label className="form-label" style={{ marginBottom: 8, display: "block", fontWeight: 600 }}>
+        Acesso remoto à máquina do cliente (agente fora da máquina, ex.: MikroTik)
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={rotulo}>IP da máquina *</label>
+          <input className="form-input" type="text" autoComplete="off" placeholder="192.168.1.50"
+            value={eqForm.smb_host || ""} onChange={e => setEqForm({ ...eqForm, smb_host: e.target.value })} />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={rotulo}>Método de acesso</label>
+          <select className="form-input" value={sftp ? "sftp" : "smb"}
+            onChange={e => setEqForm({ ...eqForm, acesso_remoto: e.target.value })}>
+            <option value="sftp">SFTP (recomendado)</option>
+            <option value="smb">SMB provisionado (cria usuário e share)</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 90px", gap: 12, marginTop: 12 }}>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={rotulo}>{sftp ? "Usuário SSH *" : "Administrador (SSH)"}</label>
+          <input className="form-input" type="text" autoComplete="off" placeholder={USUARIO_SSH_PADRAO}
+            value={eqForm.ssh_usuario || ""} onChange={e => setEqForm({ ...eqForm, ssh_usuario: e.target.value })} />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={rotulo}>{sftp ? "Senha do usuário SSH" : "Senha do administrador"}</label>
+          <input className="form-input" type="password" autoComplete="new-password"
+            placeholder={eqForm.ssh_senha_definida ? "•••••• (vazio mantém)" : "Senha"}
+            value={eqForm.ssh_senha || ""} onChange={e => setEqForm({ ...eqForm, ssh_senha: e.target.value })} />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label" style={rotulo}>Porta SSH</label>
+          <input className="form-input" type="number" placeholder="22"
+            value={eqForm.ssh_porta ?? ""} onChange={e => setEqForm({ ...eqForm, ssh_porta: e.target.value })} />
+        </div>
+      </div>
+      <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
+        Usuário padrão "{USUARIO_SSH_PADRAO}": rode uma vez o script {linkScript} como administrador na máquina do cliente. Ele liga o
+        OpenSSH, libera a porta 22 e cria essa conta no grupo Administradores (em Windows de qualquer idioma); a senha que você
+        digitar no script é a que vai aqui. Para usar outra conta já existente, troque o usuário. Evite "Administrator": em Windows
+        em português a conta interna se chama "Administrador", vem desativada e o SSH derruba a conexão.
+      </span>
+      {sftp ? (
+        <>
+          <div className="form-group" style={{ margin: "12px 0 0" }}>
+            <label className="form-label" style={rotulo}>Chave privada SSH (opcional; use no lugar da senha)</label>
+            <textarea className="form-input" rows={4} autoComplete="off" spellCheck={false}
+              style={{ fontFamily: "monospace", fontSize: 11, resize: "vertical" }}
+              placeholder={eqForm.ssh_chave_definida
+                ? "•••••• chave já cadastrada (vazio mantém; cole outra para trocar)"
+                : "-----BEGIN OPENSSH PRIVATE KEY-----"}
+              value={eqForm.ssh_chave || ""} onChange={e => setEqForm({ ...eqForm, ssh_chave: e.target.value })} />
+          </div>
+          <div className="form-group" style={{ margin: "12px 0 0" }}>
+            <label className="form-label" style={rotulo}>Impressão digital da chave do host (opcional)</label>
+            <input className="form-input" type="text" autoComplete="off" spellCheck={false} placeholder="SHA256:..."
+              value={eqForm.ssh_fingerprint || ""} onChange={e => setEqForm({ ...eqForm, ssh_fingerprint: e.target.value })} />
+          </div>
+          <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
+            No SFTP o agente entra por SSH e só lê o backup, em blocos: nada é criado na máquina do cliente (sem usuário novo, sem
+            compartilhamento, sem porta 445). Requer o OpenSSH Server no Windows (ou SSH no Linux). Recomendado: um usuário próprio, só com
+            leitura na pasta do backup (não o Administrador), e chave privada em vez de senha. Informe a pasta no formato do drive
+            (ex.: D:UNM2000/emsback). Na primeira conexão o agente grava a impressão digital da máquina e, se ela mudar, recusa o acesso;
+            se preencher a impressão digital acima, ela é exigida desde a primeira vez.
+          </span>
+        </>
+      ) : (
+        <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, display: "block" }}>
+          O agente entra por SSH uma vez com o administrador, cria o usuário somente leitura "trilan_leitura" e um compartilhamento
+          oculto só da pasta de origem; depois lê por SMB (porta 445) com esse usuário. Use a pasta com drive (ex.: D:UNM2000/emsback).
+          O IP vale para todas as pastas deste equipamento.
+        </span>
+      )}
+    </div>
+  );
+}

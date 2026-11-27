@@ -1,0 +1,1279 @@
+"""
+Router de Equipamentos.
+Substitui o antigo router de NVRs, agora suportando múltiplos tipos:
+NVR, OLT, ONU, PABX (e futuros).
+"""
+import asyncio
+import copy
+import logging
+from datetime import datetime
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session, defer
+
+from auth import Contexto, get_contexto, get_contexto_teste
+from database import get_db
+from models import AgentLog, Machine, NVR, NVRCamera, NVRPlanilha
+from routers.agent import equipamento_para_agente, mascarar_credenciais, pending_alarme_tasks, pending_rtsp_tasks
+from routers.machines import check_machine_online
+from services import teste_conexao
+from schemas import (
+    NVRCreate, NVRUpdate, NVRResponse, TIPOS_EQUIPAMENTO, NVRCameraResponse,
+    NVRCameraSetPerfect, NVRCameraBulkImport, NVRCameraConfigItem, RTSPTestResponse,
+    NVRPlanilhaEntrada, NVRPlanilhaResposta, ConexaoTesteResponse, ComandoAlarmeRequest, ComandoAlarmeResultado,
+)
+from services.agent_logs import registrar_alteracao
+from services.antenas import normalizar_config as normalizar_config_antena
+from services.camera_offline import segundos_offline
+from services.crypto_service import encrypt, decrypt
+from services.segredos_config import proteger_segredos, validar_acesso_remoto
+from services.escopo import obter_maquina
+from services.licenca_unm import licenca_da_config
+from services.galeria_vms import (
+    cameras_do_relatorio_sem_par,
+    credenciais_dos_gravadores,
+    canal_int as _canal_int,
+    ip_valido,
+    parear_cameras,
+    ips_compartilhados,
+    bloqueada_por_ip_compartilhado,
+)
+from services.planilha_vms import (
+    casar_cameras_por_ip,
+    gravadores_da_planilha,
+    colunas_senha,
+    mascarar_senhas,
+    empacotar,
+    desempacotar,
+)
+from services.storage_service import (
+    salvar_imagem_referencia,
+    pasta_imagens_do_nvr,
+    mover_pasta_imagens,
+)
+
+logger = logging.getLogger(__name__)
+
+TIPOS_VMS = ("DIGIFORT", "DEFENSE")
+
+router = APIRouter(prefix="/api/v1/machines/{machine_id}/equipamentos", tags=["Equipamentos"])
+
+
+def _get_machine_or_404(machine_id: UUID, db: Session, ctx: Contexto) -> Machine:
+    return obter_maquina(db, ctx, machine_id)
+
+
+_ROTULOS_CAMPOS = {
+    "tipo": "tipo", "name": "nome", "ip": "IP", "username": "usuário", "password": "senha", "active": "ativo/inativo",
+}
+
+
+def _campos_alterados(antes: dict, eq: NVR) -> List[str]:
+    """Nomes dos campos do equipamento que mudaram (nunca os valores: senhas e segredos ficam fora do evento)."""
+    alterados = [rotulo for campo, rotulo in _ROTULOS_CAMPOS.items() if getattr(eq, campo) != antes[campo]]
+    antigo, novo = antes["config_extra"] or {}, eq.config_extra or {}
+    chaves = sorted(k for k in set(antigo) | set(novo) if antigo.get(k) != novo.get(k))
+    if chaves:
+        alterados.append(f"configurações ({', '.join(chaves)})")
+    return alterados
+
+
+@router.get("", response_model=List[NVRResponse])
+def list_equipamentos(
+    machine_id: UUID,
+    tipo: Optional[str] = Query(None, description="Filtrar por tipo: NVR, OLT, ONU, PABX"),
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Lista todos os equipamentos de uma máquina, com filtro opcional por tipo."""
+    _get_machine_or_404(machine_id, db, ctx)
+    q = db.query(NVR).filter(NVR.machine_id == machine_id)
+    if tipo:
+        if tipo.upper() not in TIPOS_EQUIPAMENTO:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tipo inválido. Tipos suportados: {TIPOS_EQUIPAMENTO}",
+            )
+        q = q.filter(NVR.tipo == tipo.upper())
+    return q.all()
+
+
+@router.post(
+    "",
+    response_model=NVRResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_equipamento(
+    machine_id: UUID,
+    body: NVRCreate,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Cadastra um novo equipamento para uma máquina."""
+    _get_machine_or_404(machine_id, db, ctx)
+
+    tipo = (body.tipo or "NVR").upper()
+    if tipo not in TIPOS_EQUIPAMENTO:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo inválido. Tipos suportados: {TIPOS_EQUIPAMENTO}",
+        )
+
+    config_extra = body.config_extra
+    erro_acesso = validar_acesso_remoto(config_extra)
+    if erro_acesso:
+        raise HTTPException(status_code=400, detail=erro_acesso)
+    if tipo == "ANTENA":
+        config_extra = _config_antena(config_extra)
+
+    equipamento = NVR(
+        machine_id=machine_id,
+        tipo=tipo,
+        name=body.name,
+        ip=body.ip,
+        username=body.username,
+        password=encrypt(body.password),
+        config_extra=proteger_segredos(config_extra),
+        active=body.active,
+    )
+    db.add(equipamento)
+    registrar_alteracao(db, machine_id, ctx.feito_por, f"cadastrou o equipamento '{body.name}' ({tipo}).", body.name)
+    db.commit()
+    db.refresh(equipamento)
+    return equipamento
+
+
+@router.put(
+    "/{equipamento_id}",
+    response_model=NVRResponse,
+)
+def update_equipamento(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    body: NVRUpdate,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Atualiza um equipamento existente."""
+    _get_machine_or_404(machine_id, db, ctx)
+    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
+    if not eq:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+
+    nome_antigo = eq.name
+    antes = {c: copy.deepcopy(getattr(eq, c)) for c in ("tipo", "name", "ip", "username", "password", "active", "config_extra")}
+
+    for field, value in body.model_dump(exclude_none=True).items():
+        if field == "password" and value:
+            eq.password = encrypt(value)
+        elif field == "config_extra":
+            erro_acesso = validar_acesso_remoto(value)
+            if erro_acesso:
+                raise HTTPException(status_code=400, detail=erro_acesso)
+            if (body.tipo or eq.tipo or "").upper() == "ANTENA":
+                value = _config_antena(value)
+            eq.config_extra = proteger_segredos(value, eq.config_extra)
+        elif field == "tipo" and value:
+            if value.upper() not in TIPOS_EQUIPAMENTO:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Tipo inválido. Tipos suportados: {TIPOS_EQUIPAMENTO}",
+                )
+            eq.tipo = value.upper()
+        else:
+            setattr(eq, field, value)
+
+    alterados = _campos_alterados(antes, eq)
+    if alterados:
+        renomeou = f" (antes '{nome_antigo}')" if eq.name != nome_antigo else ""
+        registrar_alteracao(
+            db, machine_id, ctx.feito_por,
+            f"alterou o equipamento '{eq.name}'{renomeou}: {', '.join(alterados)}.", eq.name,
+        )
+    db.commit()
+    db.refresh(eq)
+
+    if eq.name != nome_antigo:
+        try:
+            customer = eq.machine.customer if eq.machine else None
+            mover_pasta_imagens(
+                pasta_imagens_do_nvr(customer, eq.machine.name, nome_antigo),
+                pasta_imagens_do_nvr(customer, eq.machine.name, eq.name),
+            )
+        except Exception:
+            logger.exception("Falha ao mover pasta de imagens do NVR %s após renomear", eq.id)
+
+    return eq
+
+
+@router.delete(
+    "/{equipamento_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_equipamento(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Remove um equipamento."""
+    _get_machine_or_404(machine_id, db, ctx)
+    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
+    if not eq:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    registrar_alteracao(db, machine_id, ctx.feito_por, f"removeu o equipamento '{eq.name}' ({eq.tipo}).", eq.name)
+    db.delete(eq)
+    db.commit()
+
+
+@router.post(
+    "/{equipamento_id}/test-rtsp",
+    response_model=RTSPTestResponse,
+)
+async def test_equipamento_rtsp(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    canal: Optional[int] = Query(None),
+    modo: str = Query("ao_vivo", pattern="^(ao_vivo|referencia|noite)$"),
+    nome: Optional[str] = Query(None, max_length=200),
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto_teste),
+):
+    """Captura um frame delegando a tarefa ao agente local via long-polling.
+
+    modo "ao_vivo": frame ao vivo (teste de conexão).
+    modo "referencia": ao vivo; se a câmera estiver offline, o frame mais recente da gravação (agente >= 1.1.6).
+    modo "noite": madrugada mais recente com gravação; o servidor já salva como imagem da noite do canal.
+    O VISUALIZADOR só pode o "ao_vivo", e nada da captura é gravado (nem a câmera recuperada do relatório).
+
+    Todo acesso ao banco roda em thread (asyncio.to_thread), como no ping: consulta síncrona aqui dentro bloqueava o
+    laço de eventos e, com o pool cheio, travava todos os pings (API fora do ar em 23/11/2026).
+    """
+    machine_id_str = str(machine_id)
+    preparo = await asyncio.to_thread(
+        _preparar_teste_rtsp, db, ctx, machine_id, equipamento_id, canal, modo, nome, machine_id_str
+    )
+    if isinstance(preparo, RTSPTestResponse):
+        return preparo
+    task_data, is_vms, nome_camera = preparo
+
+    # Conferido de novo aqui, sem `await` até a inclusão: dois pedidos simultâneos podem ter passado juntos
+    # pela conferência feita na thread.
+    if machine_id_str in pending_rtsp_tasks:
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe um teste RTSP em andamento para esta máquina. Aguarde a conclusão e tente novamente.",
+        )
+    event = asyncio.Event()
+
+    entry = {
+        "task": task_data,
+        "event": event,
+        "result": None,
+        "sent": False
+    }
+    pending_rtsp_tasks[machine_id_str] = entry
+    try:
+        # Libera a conexão do banco durante a espera (a captura pela gravação pode levar ~2 min)
+        await asyncio.to_thread(db.close)
+
+        # Ao vivo: até 55s. Pela gravação: busca dia a dia no NVR (o agente desiste em ~100s + envio).
+        espera = 55.0 if modo == "ao_vivo" else 130.0
+        try:
+            await asyncio.wait_for(event.wait(), timeout=espera)
+        except asyncio.TimeoutError:
+            return RTSPTestResponse(success=False, error_message="FALHA: O Agente local não respondeu ao comando a tempo. Verifique se o agente está online.")
+    finally:
+        # Sempre remove a tarefa (timeout, cancelamento ou sucesso); pop evita KeyError
+        if pending_rtsp_tasks.get(machine_id_str) is entry:
+            pending_rtsp_tasks.pop(machine_id_str, None)
+
+    result = entry.get("result")
+    if not result:
+        return RTSPTestResponse(success=False, error_message="FALHA: Agente respondeu, mas sem dados válidos.")
+
+    if modo == "noite":
+        if result.success and not result.horario and not is_vms:
+            # Agente antigo capturou ao vivo: não é imagem da noite
+            return RTSPTestResponse(success=False, error_message="Atualize o agente desta máquina para a versão 1.1.6 ou superior para capturar a imagem da noite pelo painel.")
+        await asyncio.to_thread(_gravar_resultado_noite, db, equipamento_id, canal, nome_camera or nome, result, is_vms)
+
+    return result
+
+
+def _preparar_teste_rtsp(db: Session, ctx: Contexto, machine_id: UUID, equipamento_id: UUID, canal: Optional[int],
+                         modo: str, nome: Optional[str], machine_id_str: str):
+    """Parte síncrona do teste RTSP (roda em thread): validações, câmera recuperada do relatório e auditoria.
+    Devolve um RTSPTestResponse (resposta antecipada) ou (task_data, is_vms, nome_da_camera)."""
+    so_testa = ctx.somente_leitura  # passou por get_contexto_teste sendo somente leitura = VISUALIZADOR
+    if so_testa and modo != "ao_vivo":
+        raise HTTPException(status_code=403, detail="Seu usuário só pode capturar a imagem ao vivo, sem salvar.")
+    _get_machine_or_404(machine_id, db, ctx)
+    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
+    if not eq:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    is_vms = (eq.tipo or "NVR").upper() in TIPOS_VMS
+    if is_vms and not canal:
+        raise HTTPException(status_code=422, detail="Informe o canal da câmera.")
+    if modo != "ao_vivo" and not canal:
+        raise HTTPException(status_code=422, detail="Informe o canal para capturar da gravação.")
+
+    # Só 1 teste RTSP por máquina por vez (o dicionário é indexado pela máquina).
+    # LIMITAÇÃO: o estado fica na memória do processo; requer 1 worker uvicorn.
+    if machine_id_str in pending_rtsp_tasks:
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe um teste RTSP em andamento para esta máquina. Aguarde a conclusão e tente novamente.",
+        )
+
+    cam_db = None
+    if is_vms:
+        cam_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == equipamento_id, NVRCamera.canal == canal).first()
+        if not cam_db or not cam_db.ip:
+            # Câmera detectada pelo agente e ainda sem IP na Galeria: usa o IP do relatório
+            todas = db.query(NVRCamera).filter(NVRCamera.nvr_id == equipamento_id).all()
+            st_cam = next((st for _, st, c, ch in parear_cameras(todas, eq.last_recording_status or [])
+                           if ch == canal and st is not None), None)
+            ip_recup = ip_valido(st_cam.get("ip")) if st_cam else ""
+            if ip_recup:
+                mod_recup = (st_cam.get("modelo") or "").strip() or "Hikvision"
+                if so_testa:
+                    # VISUALIZADOR: usa o IP do relatório só nesta captura, sem cadastrar a câmera
+                    cam_db = NVRCamera(nvr_id=equipamento_id, canal=canal, nome=st_cam.get("nome") or f"Canal {canal}",
+                                       ip=ip_recup, username=(cam_db.username if cam_db else None) or "admin",
+                                       password=(cam_db.password if cam_db else None) or encrypt("navarro@123"),
+                                       modelo=mod_recup, canal_rtsp=cam_db.canal_rtsp if cam_db else None)
+                elif not cam_db:
+                    cam_db = NVRCamera(
+                        nvr_id=equipamento_id,
+                        canal=canal,
+                        nome=st_cam.get("nome") or f"Canal {canal}",
+                        ip=ip_recup,
+                        username="admin",
+                        password=encrypt("navarro@123"),
+                        modelo=mod_recup
+                    )
+                    db.add(cam_db)
+                else:
+                    cam_db.ip = ip_recup
+                if not so_testa:
+                    db.commit()
+                    db.refresh(cam_db)
+            else:
+                return RTSPTestResponse(success=False, error_message="Câmera sem endereço IP configurado na galeria. Importe o CSV ou configure o IP da câmera.")
+
+        todas = db.query(NVRCamera).filter(NVRCamera.nvr_id == equipamento_id).all()
+        if bloqueada_por_ip_compartilhado(cam_db, todas):
+            return RTSPTestResponse(
+                success=False,
+                error_message=f"O IP {cam_db.ip} é usado por mais de uma câmera (gravador ou encoder com vários canais). Edite a câmera e informe o canal dela no equipamento.",
+            )
+
+        try:
+            cam_password = decrypt(cam_db.password) if cam_db.password else "navarro@123"
+        except Exception:
+            cam_password = cam_db.password or "navarro@123"
+        task_data = {
+            "equipamento_id": str(eq.id),
+            "ip": cam_db.ip.strip(),
+            "modelo": cam_db.modelo or "Hikvision",
+            "marca": cam_db.modelo or "Hikvision",
+            "username": cam_db.username or "admin",
+            "password": cam_password,
+            "canal": cam_db.canal_rtsp or 1,
+            "gravador": bool(cam_db.canal_rtsp),  # canal de DVR/NVR: com modelo ONVIF o canal entra na URL
+            "stream_principal": True,
+            "direct_camera": True,
+            "modo": modo,
+        }
+    else:
+        try:
+            senha_pura = decrypt(eq.password) if eq.password else "navarro@123"
+        except Exception:
+            senha_pura = eq.password or "navarro@123"
+
+        marca = (eq.config_extra or {}).get("marca", "") or ""
+        if not marca and any(isinstance(st, dict) and st.get("canal_guid") for st in (eq.last_recording_status or [])):
+            # NVR sem marca cadastrada: o backup detecta sozinho, mas o teste RTSP precisa saber.
+            # Só NVR Motorola (NVMS-9000) reporta `canal_guid` no relatório de gravação.
+            marca = "Motorola"
+
+        task_data = {
+            "equipamento_id": str(eq.id),
+            "ip": eq.ip.strip(),
+            "modelo": (eq.config_extra or {}).get("modelo", ""),
+            "marca": marca,
+            "username": eq.username or "admin",
+            "password": senha_pura,
+            "canal": canal,
+            "modo": modo,  # agentes < 1.1.6 ignoram e capturam ao vivo
+        }
+
+    # Lido antes do commit da auditoria: depois dele os objetos expiram e lê-los no laço faria SELECT lá
+    nome_camera = cam_db.nome if cam_db is not None else None
+    if modo == "ao_vivo":
+        alvo = f"da câmera '{nome_camera}'" if cam_db is not None else ""
+        registrar_alteracao(db, machine_id, ctx.feito_por,
+                            f"testou a captura ao vivo {alvo} do equipamento '{eq.name}' (sem salvar).".replace("  ", " "), eq.name)
+        db.commit()
+    return task_data, is_vms, nome_camera
+
+
+def _gravar_resultado_noite(db: Session, equipamento_id: UUID, canal: Optional[int], nome: Optional[str],
+                            result: RTSPTestResponse, is_vms: bool) -> None:
+    """Resultado da captura da noite (roda em thread): salva a imagem ou marca o motivo da falha na galeria."""
+    if result.success:
+        if not result.horario:
+            # Câmera direta (DIGIFORT/DEFENSE): capturada ao vivo pelo agente, sem horário de gravação
+            # (NVR sem horário já foi recusado antes, na rota)
+            result.horario = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        _salvar_imagem_noite(db, equipamento_id, canal, nome, result)
+        return
+    # Mostra o motivo na galeria (a imagem anterior, se houver, é mantida)
+    nvr = db.query(NVR).filter(NVR.id == equipamento_id).first()
+    if nvr is not None:
+        _marcar_imagem_noite(db, nvr, canal, {"status": "FALHA", "motivo": mascarar_credenciais(result.error_message), "horario": None},
+                             nome)
+        db.commit()
+
+
+def _gravadores_da_planilha_guardada(db: Session, nvr_id: UUID) -> list:
+    """DVR/NVR da última planilha importada neste equipamento (lista vazia sem planilha ou se ela não puder ser lida)."""
+    pl = db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == nvr_id).first()
+    if pl is None:
+        return []
+    try:
+        return gravadores_da_planilha(desempacotar(pl.dados), pl.linha_cabecalho)
+    except Exception:
+        logger.warning("Não foi possível ler os gravadores da planilha guardada do equipamento %s", nvr_id)
+        return []
+
+
+def _salvar_imagem_noite(db: Session, nvr_id: UUID, canal: int, nome: Optional[str], result: RTSPTestResponse) -> None:
+    """Salva a imagem da noite capturada pelo painel, como o envio do backup faria."""
+    try:
+        horario = datetime.fromisoformat(result.horario)  # horário exibido no NVR (naive), igual ao backup
+    except ValueError:
+        horario = None
+    nvr = db.query(NVR).filter(NVR.id == nvr_id).first()
+    if nvr is None:
+        return
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr_id, NVRCamera.canal == canal).first()
+    if camera is None:
+        camera = NVRCamera(nvr_id=nvr_id, canal=canal, nome=nome or f"Canal {canal}")
+        db.add(camera)
+    elif nome:
+        camera.nome = nome
+    camera.night_image_base64 = result.image_base64
+    camera.night_image_date = horario
+
+    _marcar_imagem_noite(db, nvr, canal, {"status": "OK", "motivo": None, "horario": result.horario}, camera.nome)
+    db.commit()
+
+
+def _marcar_imagem_noite(db: Session, nvr: NVR, canal: int, info: dict, nome: Optional[str] = None) -> None:
+    """Grava o status da captura da noite do canal em `last_recording_status` (lido pela galeria).
+    Em DIGIFORT/DEFENSE o canal é o da Galeria: a entrada do relatório vem do pareamento por nome/IP."""
+    relatorio = list(nvr.last_recording_status or [])
+    if (nvr.tipo or "NVR").upper() in TIPOS_VMS:
+        cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == nvr.id).all()
+        alvo = next((i for i, st, c, ch in parear_cameras(cameras_db, relatorio) if i is not None and ch == canal), None)
+        if alvo is not None:
+            relatorio[alvo] = {**relatorio[alvo], "imagem_noite": info}
+        elif nome:
+            relatorio.append({"canal": canal, "nome": nome, "imagem_noite": info})
+    else:
+        relatorio = [{**st, "imagem_noite": info} if isinstance(st, dict) and _canal_int(st.get("canal")) == canal else st
+                     for st in relatorio]
+    nvr.last_recording_status = relatorio
+
+
+# ─── Status das OLTs (UNM2000) ─────────────────────────────────────────────
+
+@router.post("/{equipamento_id}/testar-conexao", response_model=ConexaoTesteResponse)
+def testar_conexao(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto_teste),
+):
+    """Pede ao agente da máquina que teste a conexão com o equipamento (alcance do IP, login e leitura; na OLT, já
+    lê e envia o status das ONUs). Volta na hora com o `task_id`; o andamento sai em GET .../testar-conexao/{task_id}.
+    Pedido repetido com um teste em andamento devolve o mesmo teste."""
+    machine = _get_machine_or_404(machine_id, db, ctx)
+    eq = db.query(NVR).filter(NVR.id == equipamento_id, NVR.machine_id == machine_id).first()
+    if not eq:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if not check_machine_online(machine):
+        return teste_conexao.falha_imediata(
+            str(eq.id), "A máquina está offline: o agente precisa estar em comunicação com o servidor para testar.")
+    task = equipamento_para_agente(machine, eq).model_dump()
+    resposta = teste_conexao.criar(str(machine_id), str(eq.id), task)
+    registrar_alteracao(db, machine_id, ctx.feito_por, f"testou a conexão do equipamento '{eq.name}'.", eq.name)
+    db.commit()
+    return resposta
+
+
+@router.get("/{equipamento_id}/testar-conexao/{task_id}", response_model=ConexaoTesteResponse)
+def andamento_teste_conexao(
+    machine_id: UUID,
+    equipamento_id: UUID,
+    task_id: str,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Andamento do "Testar conexão" (o painel consulta a cada segundo)."""
+    _get_machine_or_404(machine_id, db, ctx)
+    estado = teste_conexao.estado(str(machine_id), task_id)
+    if estado is None or estado["equipamento_id"] != str(equipamento_id):
+        raise HTTPException(status_code=404, detail="Teste não encontrado (expirou ou o servidor reiniciou).")
+    return estado
+
+
+def _config_antena(config: Optional[dict]) -> Optional[dict]:
+    """Valida o cadastro de um equipamento ANTENA (MACs, porta SSH, prefixos); erro vira 400 com a mensagem do painel."""
+    try:
+        return normalizar_config_antena(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{id}/antena-status")
+def get_antena_status(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Último status das antenas de um equipamento ANTENA (lido pelo agente no MikroTik). Vazio se ainda não chegou."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "").upper() != "ANTENA":
+        raise HTTPException(status_code=400, detail="Este equipamento não é do tipo ANTENA.")
+    return nvr.antena_status or {"atualizado_em": None, "erro": None, "mikrotik": {}, "antenas": [], "descobertas": []}
+
+
+@router.get("/{id}/olt-status")
+def get_olt_status(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Último status das OLTs/ONUs de uma UNM2000, enviado pelo agente (SNMP). Vazio se ainda não chegou."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    status_olt = nvr.olt_status or {"atualizado_em": None, "olts": []}
+    return {**status_olt, "licenca": licenca_da_config(nvr.config_extra)}
+
+
+# ─── Alarmes (DEFENSE) ──────────────────────────────────────────────────────
+
+@router.get("/{id}/alarmes")
+def get_alarmes_status(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Último status das centrais de alarme de um DEFENSE, enviado pelo agente. Vazio se ainda não chegou."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    return nvr.last_alarm_status or {"atualizado_em": None, "ip": None, "erro": None, "alarmes": [], "incendio": []}
+
+
+ESPERA_COMANDO_ALARME_S = 75.0  # ping a cada 15s + login + comando no painel (o agente espera até 30s pela central)
+
+
+def _registrar_comando_alarme(machine_id: UUID, nvr_nome: str, mensagem: str, nivel: str, usuario: Optional[str] = None) -> None:
+    """`usuario` só no pedido (quem clicou): é o que faz o comando aparecer na tela de Auditoria."""
+    from database import SessionLocal
+    with SessionLocal() as sessao:
+        sessao.add(AgentLog(machine_id=machine_id, event_type="alarme_comando", message=mensagem, nivel=nivel,
+                            equipamento=nvr_nome, usuario=usuario))
+        sessao.commit()
+
+
+@router.post("/{id}/alarmes/comando", response_model=ComandoAlarmeResultado)
+async def comandar_central_alarme(
+    machine_id: UUID,
+    id: UUID,
+    body: ComandoAlarmeRequest,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Arma ou desarma uma central de alarme do DEFENSE pelo agente da máquina (o painel de alarmes só existe na rede
+    do cliente). Só ADMIN da conta e super admin (o get_contexto barra LEITURA e conta vencida em POST). Espera o
+    resultado do agente e registra o pedido e o resultado nos logs da máquina.
+
+    Todo acesso ao banco roda em thread (asyncio.to_thread), como no ping: consulta síncrona no laço de eventos
+    travava todos os pings com o pool cheio (23/11/2026)."""
+    machine_id_str = str(machine_id)
+    task, nvr_nome, nome_central, acao_texto = await asyncio.to_thread(
+        _preparar_comando_alarme, db, ctx, machine_id, id, body, machine_id_str
+    )
+
+    # Conferido de novo aqui, sem `await` até a inclusão: dois pedidos simultâneos podem ter passado juntos pela thread
+    if machine_id_str in pending_alarme_tasks:
+        raise HTTPException(status_code=409, detail="Já existe um comando de alarme em andamento nesta máquina. Aguarde.")
+    entry = {"task": task, "event": asyncio.Event(), "result": None, "sent": False}
+    pending_alarme_tasks[machine_id_str] = entry
+    try:
+        await asyncio.to_thread(db.close)  # não segura a conexão do banco durante a espera
+
+        await asyncio.to_thread(
+            _registrar_comando_alarme, machine_id, nvr_nome,
+            f"{ctx.feito_por} pediu para {acao_texto} a central '{nome_central}'.", "INFO", ctx.feito_por,
+        )
+        try:
+            await asyncio.wait_for(entry["event"].wait(), timeout=ESPERA_COMANDO_ALARME_S)
+            resultado = entry["result"] or ComandoAlarmeResultado(sucesso=False, mensagem="O agente respondeu sem resultado.")
+        except asyncio.TimeoutError:
+            resultado = ComandoAlarmeResultado(
+                sucesso=False,
+                mensagem="O agente não respondeu a tempo (agente offline ou ocupado).",
+            )
+    finally:
+        if pending_alarme_tasks.get(machine_id_str) is entry:
+            pending_alarme_tasks.pop(machine_id_str, None)
+
+    situacao = "concluído" if resultado.sucesso else "falhou"
+    await asyncio.to_thread(
+        _registrar_comando_alarme,
+        machine_id, nvr_nome,
+        f"Comando para {acao_texto} a central '{nome_central}' {situacao}" + (f": {resultado.mensagem}" if resultado.mensagem else "."),
+        "INFO" if resultado.sucesso else "ERROR",
+    )
+    return resultado
+
+
+def _preparar_comando_alarme(db: Session, ctx: Contexto, machine_id: UUID, id: UUID, body: ComandoAlarmeRequest,
+                             machine_id_str: str):
+    """Parte síncrona do comando de alarme (roda em thread): validações e montagem da tarefa do agente.
+    Devolve (task, nome_do_equipamento, nome_da_central, acao_texto)."""
+    machine = _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr or (nvr.tipo or "").upper() != "DEFENSE":
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    central = next((c for c in (nvr.last_alarm_status or {}).get("alarmes") or []
+                    if isinstance(c, dict) and str(c.get("id")) == body.central_id), None)
+    if not central:
+        raise HTTPException(status_code=404, detail="Central de alarme não encontrada no último status do agente")
+    if not check_machine_online(machine):
+        raise HTTPException(status_code=409, detail="O agente desta máquina está offline: o comando não pode ser entregue.")
+
+    if machine_id_str in pending_alarme_tasks:
+        raise HTTPException(status_code=409, detail="Já existe um comando de alarme em andamento nesta máquina. Aguarde.")
+
+    try:
+        senha = decrypt(nvr.password) if nvr.password else ""
+    except Exception:
+        senha = nvr.password or ""
+    try:
+        porta = int((nvr.config_extra or {}).get("porta_alarme") or 3001)
+    except (TypeError, ValueError):
+        porta = 3001
+    acao_texto = "armar" if body.acao == "ARMAR" else "desarmar"
+    nome_central = central.get("nome") or body.central_id
+    task = {
+        "equipamento_id": str(nvr.id), "equipamento": nvr.name, "ip": nvr.ip.strip(), "porta": porta,
+        "username": nvr.username or "system", "password": senha,
+        "central_id": body.central_id, "acao": body.acao,
+    }
+    return task, nvr.name, nome_central, acao_texto
+
+
+# ─── NVR Cameras Gallery ───────────────────────────────────────────────────
+
+@router.get("/{id}/cameras", response_model=List[NVRCameraResponse])
+def get_nvr_cameras(
+    machine_id: UUID,
+    id: UUID,
+    incluir_imagens: bool = True,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Retorna todas as câmeras de um NVR específico (com suas imagens).
+    incluir_imagens=false (usado pelo MCP): não carrega as fotos (dezenas de MB num NVR grande); no lugar vem um
+    aviso quando a câmera tem foto. A foto de um canal sai em GET .../cameras/{canal}/imagem."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="NVR não encontrado")
+
+    consulta = db.query(NVRCamera).filter(NVRCamera.nvr_id == id)
+    tem_foto: dict = {}
+    if not incluir_imagens:
+        consulta = consulta.options(defer(NVRCamera.perfect_image_base64), defer(NVRCamera.night_image_base64))
+        tem_foto = {
+            cid: (ref, noite) for cid, ref, noite in db.query(
+                NVRCamera.id,
+                NVRCamera.perfect_image_base64.isnot(None),
+                NVRCamera.night_image_base64.isnot(None),
+            ).filter(NVRCamera.nvr_id == id)
+        }
+
+    def foto(c_db, campo: str):
+        if c_db is None:
+            return None
+        if incluir_imagens:
+            return getattr(c_db, campo)
+        ref, noite = tem_foto.get(c_db.id, (False, False))
+        existe = ref if campo == "perfect_image_base64" else noite
+        return "[tem imagem: veja com ver_imagem_camera]" if existe else None
+
+    cameras_db = consulta.order_by(NVRCamera.canal).all()
+    agora = datetime.utcnow()
+    report_status = nvr.last_recording_status or []
+    is_vms = (nvr.tipo or "NVR").upper() in TIPOS_VMS
+
+    if is_vms:
+        # Pareia relatório do agente e Galeria por nome/IP (o canal do agente não é o da Galeria)
+        merged_cameras = []
+        compartilhados = ips_compartilhados(cameras_db)
+        for _, st, c_db, ch in parear_cameras(cameras_db, report_status):
+            st = st or {}
+            ip_item = (c_db.ip if c_db and c_db.ip else None) or ip_valido(st.get("ip")) or None
+            seg, aprox = segundos_offline(st, agora)
+            obj = {
+                "id": c_db.id if c_db else None,
+                "nvr_id": id,
+                "canal": ch,
+                "nome": (c_db.nome if c_db and c_db.nome else None) or (st.get("nome") or "").strip() or f"Canal {ch}",
+                "ip": ip_item,
+                "username": c_db.username if c_db else None,
+                "modelo": c_db.modelo if c_db else st.get("modelo"),
+                "canal_rtsp": c_db.canal_rtsp if c_db else None,
+                "pasta_gravacao": c_db.pasta_gravacao if c_db else None,
+                "ip_compartilhado": (ip_item or "").strip() in compartilhados,
+                "has_password": bool(c_db and c_db.password),
+                "perfect_image_base64": foto(c_db, "perfect_image_base64"),
+                "night_image_base64": foto(c_db, "night_image_base64"),
+                "night_image_date": c_db.night_image_date if c_db else None,
+                "updated_at": c_db.updated_at if c_db else None,
+                "status_comunicacao": st.get("status_comunicacao"),
+                "status_gravacao": st.get("status_gravacao"),
+                "captura_status": None,
+                "captura_motivo": None,
+                "captura_horario": None,
+                "offline_segundos": seg,
+                "offline_aprox": aprox,
+            }
+            if "imagem_noite" in st:
+                obj["captura_status"] = st["imagem_noite"].get("status")
+                obj["captura_motivo"] = mascarar_credenciais(st["imagem_noite"].get("motivo"))
+                obj["captura_horario"] = st["imagem_noite"].get("horario")
+            elif obj["night_image_base64"]:
+                obj["captura_status"] = "OK"
+            merged_cameras.append(obj)
+        return sorted(merged_cameras, key=lambda x: x["canal"])
+
+    # NVR tradicional (Intelbras/Hikvision/Motorola): canais físicos de hardware
+    db_dict = {c.canal: c for c in cameras_db}
+    report_by_ch = {}
+    for st in report_status:
+        ch_int = _canal_int(st.get("canal"))
+        if ch_int is not None:
+            report_by_ch[ch_int] = st
+
+    canais_set = set(db_dict.keys()) | set(report_by_ch.keys())
+
+    merged_cameras = []
+    for ch in sorted(canais_set):
+        c_db = db_dict.get(ch)
+        c_report = report_by_ch.get(ch)
+        seg, aprox = segundos_offline(c_report or {}, agora)
+
+        obj = {
+            "id": c_db.id if c_db else None,
+            "nvr_id": id,
+            "canal": ch,
+            "nome": (c_report.get("nome") if c_report else None) or (c_db.nome if c_db else f"Canal {ch}"),
+            "ip": c_db.ip if c_db else None,
+            "username": c_db.username if c_db else None,
+            "modelo": c_db.modelo if c_db else None,
+            "canal_rtsp": None,
+            "ip_compartilhado": False,
+            "has_password": bool(c_db and c_db.password),
+            "perfect_image_base64": foto(c_db, "perfect_image_base64"),
+            "night_image_base64": foto(c_db, "night_image_base64"),
+            "night_image_date": c_db.night_image_date if c_db else None,
+            "updated_at": c_db.updated_at if c_db else None,
+            "status_comunicacao": c_report.get("status_comunicacao") if c_report else None,
+            "status_gravacao": c_report.get("status_gravacao") if c_report else None,
+            "captura_status": None,
+            "captura_motivo": None,
+            "captura_horario": None,
+            "offline_segundos": seg,
+            "offline_aprox": aprox,
+        }
+
+        if c_report and "imagem_noite" in c_report:
+            obj["captura_status"] = c_report["imagem_noite"].get("status")
+            obj["captura_motivo"] = mascarar_credenciais(c_report["imagem_noite"].get("motivo"))
+            obj["captura_horario"] = c_report["imagem_noite"].get("horario")
+        else:
+            if obj["night_image_base64"]:
+                obj["captura_status"] = "OK"
+
+        merged_cameras.append(obj)
+
+    return merged_cameras
+
+
+@router.get("/{id}/cameras/{canal}/imagem")
+def ver_imagem_camera(
+    machine_id: UUID,
+    id: UUID,
+    canal: int,
+    tipo: str = Query("as_duas", pattern="^(noite|referencia|as_duas)$"),
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Mostra a imagem salva de UMA câmera: a da noite (capturada da gravação da madrugada), a de referência
+    (a "perfeita", usada para comparar) ou as duas. Carrega só esse canal. Para uma foto ao vivo use
+    test_equipamento_rtsp; para listar os canais, get_nvr_cameras."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="NVR não encontrado")
+    cam = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == canal).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail=f"Canal {canal} sem câmera cadastrada na galeria.")
+    resp = {"canal": cam.canal, "nome": cam.nome, "night_image_date": cam.night_image_date}
+    if tipo in ("noite", "as_duas"):
+        resp["night_image_base64"] = cam.night_image_base64
+    if tipo in ("referencia", "as_duas"):
+        resp["perfect_image_base64"] = cam.perfect_image_base64
+    if not resp.get("night_image_base64") and not resp.get("perfect_image_base64"):
+        raise HTTPException(status_code=404, detail="Essa câmera não tem imagem salva desse tipo. "
+                                                    "Para uma foto ao vivo, use test_equipamento_rtsp.")
+    return resp
+
+
+def _camera_response_dict(c: NVRCamera) -> dict:
+    return {
+        "id": c.id,
+        "nvr_id": c.nvr_id,
+        "canal": c.canal,
+        "nome": c.nome,
+        "ip": c.ip,
+        "username": c.username,
+        "modelo": c.modelo,
+        "canal_rtsp": c.canal_rtsp,
+        "ip_compartilhado": False,
+        "has_password": bool(c.password),
+        "perfect_image_base64": c.perfect_image_base64,
+        "night_image_base64": c.night_image_base64,
+        "night_image_date": c.night_image_date,
+        "updated_at": c.updated_at,
+    }
+
+
+@router.post("/{id}/cameras/import", response_model=List[NVRCameraResponse])
+def import_cameras(
+    machine_id: UUID,
+    id: UUID,
+    payload: NVRCameraBulkImport,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Importa/sincroniza em lote as câmeras RTSP da Galeria de um equipamento DIGIFORT/DEFENSE.
+
+    `sync_from_machine=True` copia as câmeras avulsas (tipo == "CAMERA") da máquina, em vez de usar `cameras`.
+    `replace_existing=True` remove as câmeras da galeria que não vieram nesta importação."""
+    machine = _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Importação de câmeras RTSP só é suportada para DIGIFORT e DEFENSE.")
+
+    if payload.sync_from_machine:
+        machine_cams = [e for e in machine.equipamentos if (e.tipo or "").upper() == "CAMERA" and e.active and e.ip]
+        itens = [
+            NVRCameraConfigItem(
+                nome=mc.name,
+                ip=mc.ip,
+                username=mc.username or "admin",
+                password=decrypt(mc.password) if mc.password else "navarro@123",
+                modelo=(mc.config_extra or {}).get("modelo") or "Hikvision",
+            )
+            for mc in machine_cams
+        ]
+        if (nvr.tipo or "").upper() == "DEFENSE":
+            # Câmeras que o Defense lista e a Galeria não tem (canais de DVR/NVR...), vindas do relatório do agente
+            ja_tem = {(i.nome or "").strip().lower() for i in itens}
+            todas_galeria = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).all()
+            itens += [
+                NVRCameraConfigItem(**dados)
+                for dados in cameras_do_relatorio_sem_par(
+                    todas_galeria, nvr.last_recording_status or [], _gravadores_da_planilha_guardada(db, id))
+                if dados["nome"].lower() not in ja_tem
+            ]
+        if not itens:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma câmera para sincronizar: a máquina não tem câmeras do tipo CAMERA"
+                       + (" e o Defense não informou câmeras novas (o agente precisa fazer um backup para reportá-las)."
+                          if (nvr.tipo or "").upper() == "DEFENSE" else "."),
+            )
+    else:
+        itens = payload.cameras
+        if not itens:
+            raise HTTPException(status_code=400, detail="Nenhuma câmera para importar.")
+
+    cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).all()
+    # Mesmo IP = mesma câmera: a da planilha nova substitui a antiga (ver casar_cameras_por_ip)
+    existentes_casadas = casar_cameras_por_ip(itens, cameras_db)
+
+    # Canais das câmeras que continuam na galeria: uma câmera nova não pode tomar o canal de uma delas
+    mantidas = [c for c in cameras_db if c in existentes_casadas] if payload.replace_existing else cameras_db
+    reservados = {c.canal for c in mantidas}
+
+    usados = set()
+    atualizadas = []
+    cams_renomeadas = []
+    for idx, (item, camera) in enumerate(zip(itens, existentes_casadas), start=1):
+        canal = camera.canal if camera else (item.canal or idx)
+        while canal in usados or (camera is None and canal in reservados):
+            canal += 1
+        usados.add(canal)
+
+        if camera is None:
+            camera = NVRCamera(nvr_id=id, canal=canal, nome=item.nome)
+            db.add(camera)
+        else:
+            if camera.nome != item.nome:
+                cams_renomeadas.append((camera, camera.nome))
+            camera.canal = canal
+            camera.nome = item.nome
+        if item.canal_rtsp is not None:
+            camera.canal_rtsp = item.canal_rtsp
+        if item.pasta_gravacao:
+            camera.pasta_gravacao = item.pasta_gravacao
+        camera.ip = item.ip
+        camera.username = item.username or "admin"
+        camera.modelo = item.modelo or "Hikvision"
+        if item.password:
+            camera.password = encrypt(item.password)
+        elif not camera.password:
+            camera.password = encrypt("navarro@123")
+        atualizadas.append(camera)
+
+    removidas = 0
+    if payload.replace_existing:
+        for c in cameras_db:
+            if c not in atualizadas:
+                db.delete(c)
+                removidas += 1
+
+    novas = sum(1 for c in existentes_casadas if c is None)
+    origem = "sincronizou as câmeras da máquina" if payload.sync_from_machine else "importou câmeras"
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        f"{origem} no equipamento '{nvr.name}': {novas} nova(s), {len(atualizadas) - novas} atualizada(s)"
+        + (f", {removidas} removida(s)." if removidas else "."),
+        nvr.name,
+    )
+    db.commit()
+    for c in atualizadas:
+        db.refresh(c)
+
+    for cam, antigo in cams_renomeadas:
+        if cam.perfect_image_base64:
+            try:
+                salvar_imagem_referencia(cam, antigo)
+            except Exception:
+                logger.exception("Falha ao renomear imagem de referência na importação para câmera %s", cam.id)
+
+    return [_camera_response_dict(c) for c in sorted(atualizadas, key=lambda c: c.canal)]
+
+
+@router.put("/{id}/cameras/{canal}", response_model=NVRCameraResponse)
+def set_camera_rtsp(
+    machine_id: UUID,
+    id: UUID,
+    canal: int,
+    payload: NVRCameraConfigItem,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Cria ou atualiza a conexão RTSP (nome, ip, usuário, senha, modelo) de um canal da galeria."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == canal).first()
+    nome_antigo = camera.nome if camera else None
+    if not camera:
+        camera = NVRCamera(nvr_id=id, canal=canal, nome=payload.nome)
+        db.add(camera)
+    else:
+        camera.nome = payload.nome
+    camera.canal_rtsp = payload.canal_rtsp
+    camera.ip = payload.ip
+    camera.username = payload.username or "admin"
+    camera.modelo = payload.modelo or "Hikvision"
+    if payload.password:
+        camera.password = encrypt(payload.password)
+    elif not camera.password:
+        camera.password = encrypt("navarro@123")
+
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        (f"alterou a câmera '{camera.nome}'" + (f" (antes '{nome_antigo}')" if nome_antigo and nome_antigo != camera.nome else "")
+         if nome_antigo is not None else f"adicionou a câmera '{camera.nome}'") + f" no equipamento '{nvr.name}'.",
+        nvr.name,
+    )
+    db.commit()
+    db.refresh(camera)
+
+    if camera.perfect_image_base64 and camera.nome != nome_antigo:
+        try:
+            salvar_imagem_referencia(camera, nome_antigo)
+        except Exception:
+            logger.exception("Falha ao renomear imagem de referência em disco para a câmera %s", camera.id)
+
+    return _camera_response_dict(camera)
+
+
+@router.delete("/{id}/cameras", status_code=status.HTTP_204_NO_CONTENT)
+def limpar_planilha_vms(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Limpa a planilha do equipamento DIGIFORT/DEFENSE: apaga todas as câmeras da galeria (com as imagens
+    salvas) e a planilha guardada, para importar uma nova do zero."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Limpar a planilha só é suportado para DIGIFORT e DEFENSE.")
+
+    total = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).delete(synchronize_session=False)
+    db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).delete(synchronize_session=False)
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        f"limpou a planilha do equipamento '{nvr.name}' ({total} câmera(s) removida(s) da Galeria).", nvr.name,
+    )
+    db.commit()
+    return None
+
+
+@router.delete("/{id}/cameras/{canal}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_camera(
+    machine_id: UUID,
+    id: UUID,
+    canal: int,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Remove o canal da galeria (a conexão RTSP e as imagens salvas)."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == canal).first()
+    if not camera:
+        raise HTTPException(status_code=404, detail="Câmera não encontrada")
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por, f"removeu a câmera '{camera.nome}' do equipamento '{nvr.name}'.", nvr.name,
+    )
+    db.delete(camera)
+    db.commit()
+
+
+@router.post("/{id}/cameras/perfect-image", response_model=NVRCameraResponse)
+def set_perfect_image(
+    machine_id: UUID,
+    id: UUID,
+    payload: NVRCameraSetPerfect,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Salva a 'Imagem Perfeita' de um canal específico."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="NVR não encontrado")
+
+    camera = db.query(NVRCamera).filter(NVRCamera.nvr_id == id, NVRCamera.canal == payload.canal).first()
+    nome_antigo = camera.nome if camera else None
+    if not camera:
+        camera = NVRCamera(
+            nvr_id=id,
+            canal=payload.canal,
+            nome=payload.nome,
+            perfect_image_base64=payload.image_base64
+        )
+        db.add(camera)
+    else:
+        camera.nome = payload.nome
+        camera.perfect_image_base64 = payload.image_base64
+
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        f"definiu a imagem de referência da câmera '{camera.nome}' no equipamento '{nvr.name}'.", nvr.name,
+    )
+    db.commit()
+    db.refresh(camera)
+
+    try:
+        salvar_imagem_referencia(camera, nome_antigo)
+    except Exception:
+        logger.exception("Falha ao salvar imagem de referência em disco para a câmera %s", camera.id)
+
+    return camera
+
+
+# ─────────────────────────────────────────────
+# Planilha VMS (DIGIFORT / DEFENSE)
+# ─────────────────────────────────────────────
+@router.put("/{id}/planilha", response_model=NVRPlanilhaResposta)
+def salvar_planilha(
+    machine_id: UUID,
+    id: UUID,
+    payload: NVRPlanilhaEntrada,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Cria ou substitui a planilha importada de um equipamento VMS (DIGIFORT/DEFENSE)."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Planilha só é suportada para DIGIFORT e DEFENSE.")
+
+    planilha = db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).first()
+    total = len(payload.linhas)
+    dados_enc = empacotar(payload.linhas)
+    agora = datetime.utcnow()
+
+    if not planilha:
+        planilha = NVRPlanilha(
+            nvr_id=id,
+            nome_arquivo=payload.nome_arquivo,
+            linha_cabecalho=payload.linha_cabecalho,
+            total_linhas=total,
+            dados=dados_enc,
+            importado_em=agora,
+        )
+        db.add(planilha)
+    else:
+        planilha.nome_arquivo = payload.nome_arquivo
+        planilha.linha_cabecalho = payload.linha_cabecalho
+        planilha.total_linhas = total
+        planilha.dados = dados_enc
+        planilha.importado_em = agora
+
+    # Defense: a planilha manda no acesso aos canais de DVR/NVR que a Galeria criou sozinha (a partir do relatório do
+    # agente, com a senha padrão): passam a usar o usuário e a senha da linha do gravador na planilha.
+    atualizados = 0
+    if (nvr.tipo or "").upper() == "DEFENSE":
+        gravadores = gravadores_da_planilha(payload.linhas, payload.linha_cabecalho)
+        if gravadores:
+            cameras_db = db.query(NVRCamera).filter(NVRCamera.nvr_id == id).all()
+            for camera, usuario, senha in credenciais_dos_gravadores(cameras_db, nvr.last_recording_status or [], gravadores):
+                camera.username = usuario
+                camera.password = encrypt(senha)
+                atualizados += 1
+
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por,
+        f"importou a planilha '{payload.nome_arquivo}' ({total} linha(s)) no equipamento '{nvr.name}'"
+        + (f"; usuário e senha de {atualizados} canal(is) de gravador atualizados pela planilha." if atualizados else "."),
+        nvr.name,
+    )
+    db.commit()
+    db.refresh(planilha)
+
+    cols = colunas_senha(payload.linhas, payload.linha_cabecalho)
+    linhas_mascaradas = mascarar_senhas(payload.linhas, payload.linha_cabecalho, cols)
+
+    return NVRPlanilhaResposta(
+        nome_arquivo=planilha.nome_arquivo,
+        linha_cabecalho=planilha.linha_cabecalho,
+        total_linhas=planilha.total_linhas,
+        importado_em=planilha.importado_em,
+        colunas_senha=cols,
+        senhas_ocultas=True,
+        linhas=linhas_mascaradas,
+    )
+
+
+@router.get("/{id}/planilha", response_model=NVRPlanilhaResposta)
+def obter_planilha(
+    machine_id: UUID,
+    id: UUID,
+    mostrar_senhas: bool = Query(False),
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Devolve a última planilha importada no equipamento, mascarando senhas por padrão."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Planilha só é suportada para DIGIFORT e DEFENSE.")
+
+    planilha = db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).first()
+    if not planilha:
+        raise HTTPException(status_code=404, detail="Nenhuma planilha importada neste equipamento.")
+
+    linhas = desempacotar(planilha.dados)
+    cols = colunas_senha(linhas, planilha.linha_cabecalho)
+
+    if not mostrar_senhas:
+        linhas = mascarar_senhas(linhas, planilha.linha_cabecalho, cols)
+
+    return NVRPlanilhaResposta(
+        nome_arquivo=planilha.nome_arquivo,
+        linha_cabecalho=planilha.linha_cabecalho,
+        total_linhas=planilha.total_linhas,
+        importado_em=planilha.importado_em,
+        colunas_senha=cols,
+        senhas_ocultas=not mostrar_senhas,
+        linhas=linhas,
+    )
+
+
+@router.delete("/{id}/planilha", status_code=status.HTTP_204_NO_CONTENT)
+def remover_planilha(
+    machine_id: UUID,
+    id: UUID,
+    db: Session = Depends(get_db),
+    ctx: Contexto = Depends(get_contexto),
+):
+    """Remove a planilha guardada no equipamento."""
+    _get_machine_or_404(machine_id, db, ctx)
+    nvr = db.query(NVR).filter(NVR.id == id, NVR.machine_id == machine_id).first()
+    if not nvr:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    if (nvr.tipo or "NVR").upper() not in TIPOS_VMS:
+        raise HTTPException(status_code=400, detail="Planilha só é suportada para DIGIFORT e DEFENSE.")
+
+    planilha = db.query(NVRPlanilha).filter(NVRPlanilha.nvr_id == id).first()
+    if not planilha:
+        raise HTTPException(status_code=404, detail="Nenhuma planilha importada neste equipamento.")
+
+    registrar_alteracao(
+        db, machine_id, ctx.feito_por, f"removeu a planilha guardada do equipamento '{nvr.name}'.", nvr.name,
+    )
+    db.delete(planilha)
+    db.commit()
+    return None

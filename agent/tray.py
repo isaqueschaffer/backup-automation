@@ -1,4 +1,4 @@
-﻿"""
+"""
 Trilan NVR Backup Agent — System Tray App
 Run with: pythonw tray.py
 """
@@ -17,9 +17,11 @@ from pystray import MenuItem as item
 
 DIRETORIO = Path(__file__).resolve().parent
 SERVICO = "TrilanAgentNVR"
-ARQUIVO_LOG = DIRETORIO / "logs" / "servico.log"
+PASTA_LOG = Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "Trilan NVR Backup Agent" / "logs"
+ARQUIVO_LOG = PASTA_LOG / "servico.log"
 EVENTO_BACKUP_MANUAL = r"Global\TrilanAgentNVR_RunNow"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
+_mutex = None  # mantém o mutex vivo enquanto a bandeja roda
 
 
 # ─────────────────────────────────────────────────────────────
@@ -44,9 +46,11 @@ def criar_icone(status_ok: bool = True):
 # ─────────────────────────────────────────────────────────────
 def cmd_servico(acao):
     try:
-        subprocess.run(["sc.exe", acao, SERVICO], creationflags=NO_WINDOW, check=False)
+        import ctypes
+        # "runas" força a janela de elevação de permissão do Windows (UAC) para esse comando
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", "sc.exe", f"{acao} {SERVICO}", None, 0)
     except Exception as e:
-        print(f"Erro sc.exe {acao}: {e}")
+        print(f"Erro ShellExecuteW {acao}: {e}")
 
 
 def servico_rodando() -> bool:
@@ -59,15 +63,19 @@ def servico_rodando() -> bool:
 
 
 def reiniciar_servico(icone, _):
-    def _fn():
-        cmd_servico("stop")
-        time.sleep(2)
-        cmd_servico("start")
-    threading.Thread(target=_fn, daemon=True).start()
+    # Um único comando elevado (1 confirmação do UAC) que espera o serviço parar antes de iniciar de novo.
+    # Antes eram dois "sc" separados com 2 s de intervalo: o "start" rodava com o serviço ainda parando e falhava.
+    try:
+        import ctypes
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", "powershell.exe",
+            f'-NoProfile -WindowStyle Hidden -Command "Restart-Service -Name {SERVICO} -Force"', None, 0)
+    except Exception as e:
+        icone.notify(f"Erro ao reiniciar o servico: {e}", "Trilan Agente NVR")
 
 
-def monitorar_servico(icone):
-    while True:
+def monitorar_servico(icone, stop_event: threading.Event):
+    while not stop_event.is_set():
         try:
             ok = servico_rodando()
             status = "em execucao" if ok else "PARADO"
@@ -75,7 +83,7 @@ def monitorar_servico(icone):
             icone.icon = criar_icone(ok)
         except Exception:
             pass
-        time.sleep(10)
+        stop_event.wait(10)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -91,14 +99,21 @@ def executar_backup_agora(icone, _):
         icone.notify(f"Erro: {e}\nO servico esta rodando?", "Trilan Agente NVR")
 
 
-def abrir_log(icone, _):
+def abrir_log_tempo_real(icone, _):
     try:
-        ARQUIVO_LOG.parent.mkdir(exist_ok=True)
+        ARQUIVO_LOG.parent.mkdir(parents=True, exist_ok=True)
         if not ARQUIVO_LOG.exists():
             ARQUIVO_LOG.touch()
-        subprocess.Popen(["notepad.exe", str(ARQUIVO_LOG)])
+        
+        import subprocess
+        # Abre uma janela interativa do PowerShell lendo o arquivo em tempo real (-Wait)
+        comando = f'$Host.UI.RawUI.WindowTitle="Trilan Logs em Tempo Real"; Get-Content "{ARQUIVO_LOG}" -Wait -Tail 50'
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-Command", comando],
+            creationflags=subprocess.CREATE_NEW_CONSOLE
+        )
     except Exception as e:
-        print(f"Erro ao abrir log: {e}")
+        icone.notify(f"Erro ao abrir log: {e}", "Trilan Agente NVR")
 
 
 def criar_menu():
@@ -109,7 +124,7 @@ def criar_menu():
         item("Parar servico", lambda i, j: cmd_servico("stop")),
         item("Reiniciar servico", reiniciar_servico),
         pystray.Menu.SEPARATOR,
-        item("Abrir log", abrir_log),
+        item("Ver Logs (Tempo Real)", abrir_log_tempo_real),
         pystray.Menu.SEPARATOR,
         item("Sair", lambda i, j: i.stop()),
     )
@@ -118,16 +133,55 @@ def criar_menu():
 # ─────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────
+def ja_esta_aberta() -> bool:
+    """Evita ícones duplicados (atalho de inicialização + 'iniciar agora' do instalador)."""
+    global _mutex
+    import ctypes
+    # use_last_error preserva o código de erro entre a chamada e a leitura (GetLastError direto não é confiável)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    _mutex = kernel32.CreateMutexW(None, False, r"Local\TrilanAgentTray")
+    return ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
+
+
 def main():
+    if ja_esta_aberta():
+        return
+    icone = None
+    stop_event = None
     while True:
         try:
+            if stop_event is not None:
+                stop_event.set()
+                stop_event = None
+            if icone is not None:
+                try:
+                    icone.stop()
+                except Exception:
+                    pass
+                icone = None
+
+            stop_event = threading.Event()
             icone = pystray.Icon("TrilanAgentNVR", criar_icone(), "Trilan Agente NVR", criar_menu())
-            threading.Thread(target=monitorar_servico, args=(icone,), daemon=True).start()
+            t = threading.Thread(target=monitorar_servico, args=(icone, stop_event), daemon=True)
+            t.start()
             icone.run()
             break
         except Exception as e:
             print(f"Erro na bandeja: {e} — reiniciando em 5s")
+            if stop_event is not None:
+                stop_event.set()
+                stop_event = None
+            if icone is not None:
+                try:
+                    icone.stop()
+                except Exception:
+                    pass
+                icone = None
             time.sleep(5)
+        finally:
+            if stop_event is not None:
+                stop_event.set()
 
 
 if __name__ == "__main__":

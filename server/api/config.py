@@ -1,10 +1,18 @@
-from typing import Optional
+from typing import List, Optional
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
+    # Pool de conexões (Postgres). Espera curta por conexão: com o pool cheio a rota falha em 10 s em vez de 30 s.
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_S: int = 10
+    DB_POOL_RECYCLE_S: int = 1800
+    # O Postgres encerra a sessão que ficar parada dentro de uma transação por mais que isso (0 = desligado).
+    # Rede de segurança contra sessão esquecida aberta (pool esgotado em 24/11/2026).
+    DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: int = 120000
 
     # Security
     SECRET_KEY: str
@@ -12,11 +20,33 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_HOURS: int = 8
 
     # Admin
-    ADMIN_PASSWORD: str = "admin"
+    ADMIN_PASSWORD: str  # Obrigatório — defina via variável de ambiente ADMIN_PASSWORD
     PUBLIC_URL: Optional[str] = None
+    # Token só para publicar versões do agente (POST /api/v1/admin/agent-version), enviado em
+    # X-Publish-Token. Não dá acesso ao painel. Vazio = desativado (só o admin publica).
+    PUBLISH_TOKEN: str = ""
+    # Endereço público desta API para o MCP e o OAuth (ex.: https://server.suportetrilan.com.br).
+    # Vazio = deduz do pedido (X-Forwarded-Proto/Host do proxy).
+    MCP_BASE_URL: str = ""
+
+    # CORS — lista de origens permitidas separadas por vírgula.
+    # Ex: CORS_ORIGINS=https://painel.suaempresa.com,https://outro.dominio.com
+    # Use "*" apenas em desenvolvimento local.
+    CORS_ORIGINS: str = ""
 
     # Storage
     BACKUP_STORAGE_PATH: str = "/data/backups"
+    # Tamanho máximo aceito no upload de ZIP do agente (em MB)
+    MAX_UPLOAD_MB: int = 1024
+
+    # Rodadas de backup do Cliente (1 e-mail por rodada)
+    # Prazo máximo da rodada a partir do início (horas)
+    RUN_DEADLINE_HOURS: int = 2
+    # Limite absoluto: passado o prazo, a rodada espera até este total as máquinas que ainda
+    # estão fazendo o backup (agente >= 1.1.8 informa `backup_em_andamento` no ping)
+    RUN_MAX_HOURS: int = 6
+    # Espera após o último relatório antes de fechar (tempo para o ZIP chegar)
+    RUN_UPLOAD_GRACE_SECONDS: int = 90
 
     # SMTP
     SMTP_SERVER: Optional[str] = None

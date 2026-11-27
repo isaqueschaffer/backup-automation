@@ -1,6 +1,17 @@
-requests>=2.31.0
-pyzipper>=0.3.6
-pycryptodome>=3.20.0
-pypiwin32>=223
-pystray>=0.19.5
-Pillow>=10.3.0
+# Versoes fixas (AGT-09, auditoria de 25/11/2026): as instaladas no venv validado do build 1.1.66.
+# Para atualizar uma biblioteca, mudar aqui, rodar a suite (python -m unittest discover -s tests) e testar o build.
+requests==2.34.2
+pyzipper==0.4.0
+pycryptodome==4.4.0
+pywin32==312; sys_platform == "win32"  # o build.ps1 tambem instala esta versao (substitui o pacote antigo pypiwin32)
+pystray==0.19.5
+Pillow==13.0.0
+paramiko==3.4.0  # fixo: versoes mais novas removem ssh-rsa/ssh-dss e quebram SSH com OLTs Huawei antigas
+pyftpdlib==2.2.0
+imageio-ffmpeg==0.8.1
+psutil==7.2.2
+GPUtil==1.4.0
+pysnmp==7.1.32
+openpyxl==3.1.5
+pymysql==1.2.4
+smbprotocol==1.17.0

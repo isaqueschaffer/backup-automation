@@ -1,0 +1,210 @@
+"""
+OTA Update router.
+- GET  /api/v1/agent/update-check    → chamado pelo agente no Ping para verificar se há nova versão
+- POST /api/v1/admin/agent-version   → admin registra uma nova versão (URL do GitHub Release + hash)
+- GET  /api/v1/admin/agent-version   → admin lista versões cadastradas
+- PUT  /api/v1/admin/agent-version/{version_id}/toggle → ativa/desativa uma versão
+"""
+from datetime import datetime, timedelta
+from typing import Dict, List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from auth import get_current_machine, verify_admin_token, verify_publish_or_admin
+from database import get_db
+from models import AgentVersion, Machine
+from schemas import AgentVersionCreate, AgentVersionResponse, UpdateCheckResponse, AgentVersionUpdate
+
+# ── Router para o agente (autenticado por X-Client-ID + X-API-Key) ──────────
+agent_router = APIRouter(prefix="/api/v1/agent", tags=["agent-update"])
+
+# ── Router para o admin (autenticado por Bearer token) ───────────────────────
+admin_router = APIRouter(prefix="/api/v1/admin", tags=["admin-update"])
+
+# O agente pede atualização logo ao iniciar. Se a troca do executável falha, ele volta na versão antiga
+# e pediria de novo em minutos, baixando ~80 MB e parando o serviço a cada volta (laço visto na 1.1.32).
+# Por isso cada máquina recebe a oferta no máximo uma vez por intervalo. Fica em memória (a API roda
+# com um único worker): reiniciar o servidor só libera uma tentativa a mais. Datas naive em UTC (REGRA-001).
+INTERVALO_OFERTA_ATUALIZACAO = timedelta(hours=1)
+_ultima_oferta_atualizacao: Dict[UUID, datetime] = {}
+
+# O apply_update.bat dos agentes < 1.1.35 não encerra o processo antigo, que fica preso e trava o
+# executável, e grava a "versão" recebida sem filtro numa linha do .bat. Para esses agentes a versão
+# leva comandos que esperam o serviço parar e encerram o processo à força antes da cópia. O serviço já
+# avisou "parado" ao Windows, então isso não aciona a recuperação automática. A 1.1.35 filtra a versão.
+VERSAO_SCRIPT_CORRIGIDO = (1, 1, 35)
+COMANDOS_ENCERRAR_PROCESSO_ANTIGO = (
+    " & ping -n 26 127.0.0.1 >nul"
+    " & sc stop TrilanAgentNVR >nul 2>&1"
+    " & ping -n 4 127.0.0.1 >nul"
+    " & taskkill /F /IM TrilanAgentService.exe >nul 2>&1"
+    " & ping -n 4 127.0.0.1 >nul"
+    " & echo Processo antigo encerrado a forca antes da copia"
+)
+
+# Piloto TEMPORÁRIO da 1.1.35: com IDs aqui, só essas máquinas recebem atualização (vazio = todas).
+# Piloto concluído em 30/10/2026 (máquina 39fb4aed-...: 1.1.32 -> 1.1.35 sem laço, sem intervenção manual).
+OTA_PILOTO_MAQUINAS: set = set()
+
+
+@agent_router.get("/update-check", response_model=UpdateCheckResponse)
+def check_for_update(
+    current_version: str = "0.0.0",
+    plataforma: str = "windows",
+    machine: Machine = Depends(get_current_machine),
+    db: Session = Depends(get_db),
+):
+    """
+    O agente envia sua versão atual como query param e recebe instruções de atualização.
+    Exemplo: GET /api/v1/agent/update-check?current_version=1.0.0
+    Cada máquina recebe a oferta no máximo 1 vez por hora. Com `OTA_PILOTO_MAQUINAS` preenchido, só as
+    máquinas do piloto recebem (piloto de 1.1.35 concluído e esvaziado em 30/10/2026).
+    `plataforma=linux` (agente do Mikrotik, >= 1.1.52): só conta versões com o pacote Linux cadastrado
+    (`url_linux` + `sha256_linux`); sem ele a máquina fica na versão que tem, sem oferta inútil.
+    """
+    linux = plataforma.strip().lower() == "linux"
+    # Compara versões semânticas X.Y.Z como tuplas numéricas
+    def _parse(v: str):
+        try:
+            return tuple(int(x) for x in v.strip().split("."))
+        except Exception:
+            return (0, 0, 0)
+
+    # Escolhe a MAIOR versão ativa (e não a mais recentemente criada)
+    ativas = db.query(AgentVersion).filter(AgentVersion.active == True).all()
+    if linux:
+        ativas = [av for av in ativas if av.url_linux and av.sha256_linux]
+    latest = max(ativas, key=lambda av: _parse(av.version), default=None)
+
+    if not latest:
+        return UpdateCheckResponse(has_update=False)
+
+    if _parse(latest.version) > _parse(current_version):
+        if OTA_PILOTO_MAQUINAS and machine.id not in OTA_PILOTO_MAQUINAS:
+            return UpdateCheckResponse(has_update=False)
+        agora = datetime.utcnow()
+        ultima = _ultima_oferta_atualizacao.get(machine.id)
+        if ultima is not None and agora - ultima < INTERVALO_OFERTA_ATUALIZACAO:
+            return UpdateCheckResponse(has_update=False)
+        _ultima_oferta_atualizacao[machine.id] = agora
+        versao = latest.version
+        if linux:
+            # O agente Linux não usa .exe nem o .bat: recebe só o pacote de código
+            return UpdateCheckResponse(
+                has_update=True, version=versao, notes=latest.notes,
+                url_linux=latest.url_linux, sha256_linux=latest.sha256_linux,
+            )
+        if _parse(current_version) < VERSAO_SCRIPT_CORRIGIDO:
+            versao += COMANDOS_ENCERRAR_PROCESSO_ANTIGO
+        return UpdateCheckResponse(
+            has_update=True,
+            version=versao,
+            url_service=latest.url_service,
+            url_tray=latest.url_tray,
+            sha256_service=latest.sha256_service,
+            sha256_tray=latest.sha256_tray,
+            notes=latest.notes,
+        )
+
+    return UpdateCheckResponse(has_update=False)
+
+
+# ── Admin endpoints ───────────────────────────────────────────────────────────
+
+@admin_router.post(
+    "/agent-version",
+    response_model=AgentVersionResponse,
+    status_code=201,
+    dependencies=[Depends(verify_publish_or_admin)],
+)
+def register_version(body: AgentVersionCreate, db: Session = Depends(get_db)):
+    """Registra uma nova versão do agente (URL do GitHub Release + SHA256)."""
+    existing = db.query(AgentVersion).filter(AgentVersion.version == body.version).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Versão {body.version} já cadastrada.")
+
+    version = AgentVersion(
+        version=body.version,
+        notes=body.notes,
+        url_service=body.url_service,
+        url_tray=body.url_tray,
+        sha256_service=body.sha256_service.lower(),
+        sha256_tray=body.sha256_tray.lower() if body.sha256_tray else None,
+        url_linux=body.url_linux,
+        sha256_linux=body.sha256_linux.lower() if body.sha256_linux else None,
+    )
+    db.add(version)
+    db.commit()
+    db.refresh(version)
+    return version
+
+
+@admin_router.get(
+    "/agent-version",
+    response_model=List[AgentVersionResponse],
+    dependencies=[Depends(verify_admin_token)],
+)
+def list_versions(db: Session = Depends(get_db)):
+    """Lista todas as versões registradas, mais recentes primeiro."""
+    return db.query(AgentVersion).order_by(AgentVersion.created_at.desc()).all()
+
+
+@admin_router.put(
+    "/agent-version/{version_id}/toggle",
+    response_model=AgentVersionResponse,
+    dependencies=[Depends(verify_admin_token)],
+)
+def toggle_version(version_id: UUID, db: Session = Depends(get_db)):
+    """Ativa ou desativa uma versão (rollback de emergência)."""
+    version = db.query(AgentVersion).filter(AgentVersion.id == version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="Versão não encontrada.")
+    version.active = not version.active
+    db.commit()
+    db.refresh(version)
+    return version
+
+@admin_router.delete(
+    "/agent-version/{version_id}",
+    dependencies=[Depends(verify_admin_token)],
+)
+def delete_version(version_id: UUID, db: Session = Depends(get_db)):
+    """Deleta uma versão."""
+    version = db.query(AgentVersion).filter(AgentVersion.id == version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="Versão não encontrada.")
+    db.delete(version)
+    db.commit()
+    return {"status": "ok"}
+
+@admin_router.put(
+    "/agent-version/{version_id}",
+    response_model=AgentVersionResponse,
+    dependencies=[Depends(verify_admin_token)],
+)
+def edit_version(version_id: UUID, payload: AgentVersionUpdate, db: Session = Depends(get_db)):
+    """Edita uma versão."""
+    version = db.query(AgentVersion).filter(AgentVersion.id == version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="Versão não encontrada.")
+    
+    if payload.version is not None:
+        version.version = payload.version
+    if payload.url_service is not None:
+        version.url_service = payload.url_service
+    if payload.sha256_service is not None:
+        version.sha256_service = payload.sha256_service.lower()
+    if payload.url_tray is not None:
+        version.url_tray = payload.url_tray
+    if payload.sha256_tray is not None:
+        version.sha256_tray = payload.sha256_tray.lower()
+    if payload.url_linux is not None:
+        version.url_linux = payload.url_linux
+    if payload.sha256_linux is not None:
+        version.sha256_linux = payload.sha256_linux.lower()
+
+    db.commit()
+    db.refresh(version)
+    return version

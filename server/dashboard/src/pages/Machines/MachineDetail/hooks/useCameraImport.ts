@@ -1,0 +1,602 @@
+import { useRef, useState } from "react";
+import { createEquipamento, deleteEquipamento } from "../../../../api/client";
+import { NVR } from "../../../../api/types";
+import { ToastFn } from "../utils";
+import { useConfirm } from "../../../../components/ConfirmDialog";
+
+// Parser robusto de CSV (suporta aspas e delimitadores no meio do texto)
+export function parseCsv(text: string): string[][] {
+  text = text.replace(/^\uFEFF/, "").replace(/^ï»¿/, "");
+  const rows: string[][] = [];
+  const delimiter = (text.indexOf(";") !== -1 && text.indexOf(";") < (text.indexOf("\n") === -1 ? 9999 : text.indexOf("\n"))) ? ";" : ",";
+
+  let currentRow: string[] = [];
+  let currentCell = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (i + 1 < text.length && text[i + 1] === '"') { currentCell += '"'; i++; }
+        else { inQuotes = false; }
+      } else { currentCell += c; }
+    } else {
+      if (c === '"') { inQuotes = true; }
+      else if (c === delimiter) { currentRow.push(currentCell.trim()); currentCell = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && i + 1 < text.length && text[i + 1] === "\n") i++;
+        currentRow.push(currentCell.trim());
+        if (currentRow.some(col => col !== "")) rows.push(currentRow);
+        currentRow = [];
+        currentCell = "";
+      } else { currentCell += c; }
+    }
+  }
+  if (currentCell || currentRow.length > 0) {
+    currentRow.push(currentCell.trim());
+    if (currentRow.some(col => col !== "")) rows.push(currentRow);
+  }
+  return rows;
+}
+
+export type DigifortNameOption = "descricao" | "nome" | "auto";
+
+export interface CameraRow { name: string; ip: string; password: string; modelo: string; pastaGravacao?: string; usuario?: string }
+
+function cleanCell(val: unknown): string {
+  if (val === null || val === undefined) return "";
+  return String(val).replace(/^\uFEFF/, "").replace(/^ï»¿/, "").replace(/\0/g, "").trim();
+}
+
+// "F:\GRAVAÇAO DIGIFORT\1 ANDAR\" -> ["F:", "GRAVAÇAO DIGIFORT", "1 ANDAR"] (aceita \ e /, remove partes vazias)
+function dividirCaminho(caminho: string): string[] {
+  return caminho.split(/[\\/]+/).filter(Boolean);
+}
+
+// Caminho completo do Windows ("D:\17\", "\\servidor\share\17") ou só o nome de uma pasta ("17")
+export function caminhoAbsoluto(caminho: string | null | undefined): boolean {
+  return /^([A-Za-z]:[\\/]|\\\\)/.test((caminho || "").trim());
+}
+
+// Pasta de gravação de cada câmera, da coluna "Diretório de gravação" do Digifort. Caminho completo fica inteiro
+// (sem a barra do fim): o agente lê essa pasta direto, mesmo com câmeras em discos diferentes. Sem unidade, vale o
+// último trecho, que o agente procura dentro do "Local de gravação das câmeras".
+export function pastaGravacaoDoCaminho(caminho: string): string {
+  const limpo = cleanCell(caminho);
+  if (caminhoAbsoluto(limpo)) {
+    const semBarraFinal = limpo.replace(/[\\/]+$/, "");
+    return /^[A-Za-z]:$/.test(semBarraFinal) ? semBarraFinal + "\\" : semBarraFinal;
+  }
+  const partes = dividirCaminho(limpo);
+  return partes.length ? partes[partes.length - 1] : "";
+}
+
+// Converte linhas brutas em matriz de texto limpo (máx. 100 colunas por linha e descarta linhas vazias)
+export function linhasParaTexto(rows: unknown[][]): string[][] {
+  if (!rows || rows.length === 0) return [];
+  const result: string[][] = [];
+  for (const r of rows) {
+    if (!r || r.length === 0) continue;
+    const cols = r.slice(0, 100).map(cleanCell);
+    if (cols.some(c => c !== "")) {
+      result.push(cols);
+    }
+  }
+  return result;
+}
+
+// Retorna os índices das colunas de senha baseado no cabeçalho
+export function colunasDeSenha(linhas: string[][], linhaCabecalho: number): number[] {
+  if (!linhas || linhaCabecalho < 0 || linhaCabecalho >= linhas.length) return [];
+  const cabecalho = linhas[linhaCabecalho] || [];
+  const colunas: number[] = [];
+  cabecalho.forEach((col, idx) => {
+    const c = (col || "").toLowerCase();
+    if (c.includes("senha") || c.includes("pass")) {
+      colunas.push(idx);
+    }
+  });
+  return colunas;
+}
+
+// Localiza o índice da linha do cabeçalho nas primeiras 5 linhas
+export function linhaDoCabecalho(rows: unknown[][]): number {
+  if (!rows || rows.length === 0) return 0;
+  for (let r = 0; r < Math.min(rows.length, 5); r++) {
+    const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+    if (
+      rowStr.some(c =>
+        // c.length < 80 descarta parágrafos de instrução (ex.: export de dispositivos do Defense IA) que
+        // citam essas palavras dentro de um texto corrido, em vez de serem o nome de uma coluna
+        c.length < 80 && (
+          c.includes("ip camera address") ||
+          c.includes("ip do dispositivo") ||
+          c.includes("endere") ||
+          c.includes("descri") ||
+          c.includes("identificador")
+        )
+      )
+    ) {
+      return r;
+    }
+  }
+  return 0;
+}
+
+// Verifica se a planilha possui colunas distintas de Nome e Descrição (padrão de exportação Digifort)
+export function planilhaTemNomeEDescricao(rows: unknown[][]): boolean {
+  if (!rows || rows.length === 0) return false;
+  let headerRowIdx = 0;
+  for (let r = 0; r < Math.min(rows.length, 5); r++) {
+    const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+    if (
+      rowStr.some(c =>
+        // c.length < 80 descarta parágrafos de instrução (ex.: export de dispositivos do Defense IA) que
+        // citam essas palavras dentro de um texto corrido, em vez de serem o nome de uma coluna
+        c.length < 80 && (
+          c.includes("ip camera address") ||
+          c.includes("ip do dispositivo") ||
+          c.includes("endere") ||
+          c.includes("descri") ||
+          c.includes("identificador")
+        )
+      )
+    ) {
+      headerRowIdx = r;
+      break;
+    }
+  }
+  const headers = (rows[headerRowIdx] || []).map(h => cleanCell(h).toLowerCase());
+  const idxDesc = headers.findIndex(h => h.includes("desc"));
+  const idxNome = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+  return idxDesc >= 0 && idxNome >= 0 && idxDesc !== idxNome;
+}
+
+// Extrai um exemplo de valor de 'Nome' e 'Descrição' da planilha para exibir ao usuário
+export function extrairExemplosNomeEDescricao(rows: unknown[][]): { nome: string; descricao: string } {
+  let headerRowIdx = 0;
+  for (let r = 0; r < Math.min(rows.length, 5); r++) {
+    const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+    if (
+      rowStr.some(c =>
+        // c.length < 80 descarta parágrafos de instrução (ex.: export de dispositivos do Defense IA) que
+        // citam essas palavras dentro de um texto corrido, em vez de serem o nome de uma coluna
+        c.length < 80 && (
+          c.includes("ip camera address") ||
+          c.includes("ip do dispositivo") ||
+          c.includes("endere") ||
+          c.includes("descri") ||
+          c.includes("identificador")
+        )
+      )
+    ) {
+      headerRowIdx = r;
+      break;
+    }
+  }
+  const headers = (rows[headerRowIdx] || []).map(h => cleanCell(h).toLowerCase());
+  const idxDesc = headers.findIndex(h => h.includes("desc"));
+  const idxNome = headers.findIndex(h => h.includes("nome") || h.includes("câmera") || h.includes("camera"));
+
+  let exemploNome = "";
+  let exemploDescricao = "";
+
+  for (let r = headerRowIdx + 1; r < rows.length; r++) {
+    const cols = rows[r];
+    if (!cols) continue;
+    const n = cleanCell(idxNome >= 0 ? cols[idxNome] : cols[0]);
+    const d = cleanCell(idxDesc >= 0 ? cols[idxDesc] : "");
+    if (n && !exemploNome) exemploNome = n;
+    if (d && !exemploDescricao) exemploDescricao = d;
+    if (n && d && n !== d) {
+      exemploNome = n;
+      exemploDescricao = d;
+      break;
+    }
+  }
+  return { nome: exemploNome, descricao: exemploDescricao };
+}
+
+// Converte linhas (CSV/XLSX) em câmeras a importar
+export function rowsToCameras(
+  rows: unknown[][],
+  digifortNameOption: DigifortNameOption = "descricao"
+): CameraRow[] {
+  if (!rows || rows.length === 0) return [];
+
+  // 1. Localiza a linha do cabeçalho real (linha 0 ou linhas subsequentes se houver metadados do NVR no topo)
+  let headerRowIdx = 0;
+  for (let r = 0; r < Math.min(rows.length, 5); r++) {
+    const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+    if (
+      rowStr.some(c =>
+        // c.length < 80 descarta parágrafos de instrução (ex.: export de dispositivos do Defense IA) que
+        // citam essas palavras dentro de um texto corrido, em vez de serem o nome de uma coluna
+        c.length < 80 && (
+          c.includes("ip camera address") ||
+          c.includes("ip do dispositivo") ||
+          c.includes("endere") ||
+          c.includes("descri") ||
+          c.includes("identificador")
+        )
+      )
+    ) {
+      headerRowIdx = r;
+      break;
+    }
+  }
+
+  const headers = (rows[headerRowIdx] || []).map(h => cleanCell(h).toLowerCase());
+
+  // Detecção específica do NVR Hikvision (exportação nativa do equipamento DS-*)
+  const isHikvisionNvr =
+    headers.some(h => h.includes("ip camera address")) ||
+    (rows[0] && cleanCell(rows[0][0]).toLowerCase().includes("device type"));
+
+  const out: CameraRow[] = [];
+
+  if (isHikvisionNvr) {
+    const idxName = headers.findIndex(h => h.includes("ip camera no") || h.includes("camera no") || h === "no" || h === "nº");
+    const idxIp = headers.findIndex(h => h.includes("ip camera address") || h === "ip");
+    const idxProto = headers.findIndex(h => h.includes("protocol") && !h.includes("transfer"));
+    const idxPass = headers.findIndex(h => h.includes("password") || h.includes("senha"));
+
+    for (let i = headerRowIdx + 1; i < rows.length; i++) {
+      const cols = rows[i];
+      if (!cols || cols.length === 0) continue;
+
+      const ip = cleanCell(idxIp >= 0 ? cols[idxIp] : cols[1]);
+      // Descarta linhas sem IP, cabeçalhos repetidos ou rodapés vazios com ;;;
+      if (!ip || !ip.includes(".") || ip.toLowerCase().includes("camera")) continue;
+
+      let name = cleanCell(idxName >= 0 ? cols[idxName] : cols[0]);
+      // Se o nome for apenas números (ex: "58", "195"), prefixa com CAM para ficar padronizado
+      if (/^\d+$/.test(name)) {
+        name = `CAM ${name.padStart(2, "0")}`;
+      } else if (!name) {
+        name = `CAM ${String(out.length + 1).padStart(2, "0")}`;
+      }
+
+      const pass = cleanCell(idxPass >= 0 ? cols[idxPass] : cols[6]);
+      const proto = cleanCell(idxProto >= 0 ? cols[idxProto] : cols[2]).toUpperCase();
+
+      let modelo = "Hikvision";
+      if (proto.includes("INTELBRAS")) modelo = "Intelbras";
+      else if (proto.includes("ONVIF") || proto.includes("MOTOROLA") || proto.includes("MTI")) modelo = "ONVIF";
+      else if (proto.includes("GRANDSTREAM")) modelo = "Grandstream";
+
+      out.push({
+        name,
+        ip,
+        password: pass || "navarro@123",
+        modelo,
+      });
+    }
+    return out;
+  }
+
+  // Demais formatos: Digifort, Intelbras Defense e Genéricos
+  let idxDesc = headers.findIndex(h => h.includes("desc"));
+  let idxNome = headers.findIndex(h => (h.includes("nome") && !h.includes("usu")) || h.includes("câmera") || h.includes("camera"));
+  // "Nome de usuário" (export do Defense) / "Usuário" / "User": acesso da câmera, que a planilha manda
+  const idxUsuario = headers.findIndex(h => h.includes("usu") || h === "user" || h === "username");
+  if (idxDesc === -1) idxDesc = idxNome;
+
+  // \bip\b (não h.includes("ip")): "ip" sozinho, não a substring dentro de "tipo do dispositivo"
+  const idxIp = headers.findIndex(h => /\bip\b/.test(h) || h.includes("endere") || h.includes("identificador"));
+  const idxPass = headers.findIndex(h => h.includes("senha") || h.includes("pass"));
+  const idxModelo = headers.findIndex(h =>
+    h.includes("modelo") || h.includes("protocolo") || h.includes("protocol") || h.includes("marca") || h.includes("fabricante")
+  );
+  const idxTipo = headers.findIndex(h =>
+    h.includes("tipo de dispositivo") ||
+    h.includes("tipo do dispositivo") ||
+    h.includes("tipo dispositivo") ||
+    h.includes("tipo de equipamento") ||
+    h.includes("device type") ||
+    h === "tipo"
+  );
+  // Export do Digifort: "Diretório de gravação" (ou "pasta de gravação"), um caminho completo por câmera
+  const idxDiretorio = headers.findIndex(h =>
+    (h.includes("diret") && h.includes("grava")) || (h.includes("pasta") && h.includes("grava"))
+  );
+
+  for (let i = headerRowIdx + 1; i < rows.length; i++) {
+    const cols = rows[i];
+    if (!cols || cols.length === 0 || (!cols[0] && !cols[1])) continue;
+
+    // Se a planilha possuir coluna de tipo de dispositivo (ex: Intelbras Defense),
+    // desconsidera tudo que não for tipo câmera ("camera", "câmera")
+    if (idxTipo >= 0) {
+      const tipoVal = cleanCell(cols[idxTipo]).toLowerCase();
+      if (!tipoVal.includes("camera") && !tipoVal.includes("câmera")) {
+        continue;
+      }
+    }
+
+    let desc = "";
+    let ender = "";
+    let pass = "";
+
+    if (idxDesc >= 0 || idxIp >= 0) {
+      const colNome = cleanCell(idxNome >= 0 ? cols[idxNome] : cols[0]);
+      const colDesc = cleanCell(idxDesc >= 0 ? cols[idxDesc] : "");
+      if (digifortNameOption === "nome") {
+        desc = colNome || colDesc;
+      } else if (digifortNameOption === "descricao") {
+        desc = colDesc || colNome;
+      } else {
+        desc = colDesc || colNome;
+        if (colNome && colDesc && colNome.length > colDesc.length && !/^\d+$/.test(colNome)) {
+          desc = colNome;
+        }
+      }
+      ender = cleanCell(idxIp >= 0 ? cols[idxIp] : cols[1]);
+      pass = cleanCell(idxPass >= 0 ? cols[idxPass] : "");
+    } else {
+      desc = cleanCell(cols[1]) || cleanCell(cols[0]);
+      ender = cleanCell(cols[3]);
+      pass = cleanCell(cols[6]);
+    }
+
+    if (!ender || !ender.includes(".")) continue;
+
+    // 1) Tenta usar a coluna modelo/protocolo/marca explícita do cabeçalho
+    let modelo = "";
+    if (idxModelo >= 0) {
+      const cellModelo = cleanCell(cols[idxModelo]).toUpperCase();
+      if (cellModelo.includes("INTELBRAS")) modelo = "Intelbras";
+      else if (cellModelo.includes("HIKVISION") || cellModelo.includes("HIKV")) modelo = "Hikvision";
+      else if (cellModelo.includes("GRANDSTREAM")) modelo = "Grandstream";
+      else if (cellModelo.includes("ONVIF") || cellModelo.includes("MOTOROLA") || cellModelo.includes("MTI")) modelo = "ONVIF";
+      // "Alternativo" é como o Defense IA chama o protocolo SDK da Hikvision (porta 8000) no export de dispositivos
+      else if (cellModelo.includes("ALTERNATIVO")) modelo = "Hikvision";
+      else if (cellModelo) modelo = cleanCell(cols[idxModelo]); // valor literal (ex: "Dahua")
+    }
+    // 2) Fallback: heurística pela linha inteira (quando não há coluna dedicada ou célula vazia)
+    if (!modelo) {
+      const rowStr = cols.join(" ").toUpperCase();
+      if (rowStr.includes("HIKVISION") || rowStr.includes("HIKV")) modelo = "Hikvision";
+      else if (rowStr.includes("INTELBRAS")) modelo = "Intelbras";
+      else if (rowStr.includes("GRANDSTREAM")) modelo = "Grandstream";
+      else if (rowStr.includes("ONVIF") || rowStr.includes("MOTOROLA") || rowStr.includes("MTI")) modelo = "ONVIF";
+      else if (rowStr.includes("CÂMERA") || rowStr.includes("CAMERA")) modelo = "Intelbras";
+      else modelo = "Hikvision";
+    }
+
+    if (desc && ender) {
+      const pastaGravacao = idxDiretorio >= 0 ? pastaGravacaoDoCaminho(cleanCell(cols[idxDiretorio])) : "";
+      const usuario = idxUsuario >= 0 ? cleanCell(cols[idxUsuario]) : "";
+      out.push({
+        name: desc, ip: ender, password: pass || "navarro@123", modelo,
+        ...(usuario ? { usuario } : {}), ...(pastaGravacao ? { pastaGravacao } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+// Gravadores (DVR/NVR) da planilha de dispositivos do Defense (tipo DVR/iMHDX, NVR/iNVD...): a linha é o gravador, não uma
+// câmera. Ela não entra na lista de câmeras: os canais vêm do Defense pelo "Sincronizar da Máquina", com modelo ONVIF.
+// (O servidor lê as mesmas linhas da planilha guardada para ligar cada canal ao nome e ao IP do gravador.)
+export interface GravadorLido { nome: string; ip: string }
+
+export function gravadoresDaPlanilha(rows: unknown[][]): GravadorLido[] {
+  if (!rows || rows.length === 0) return [];
+  const idxCab = linhaDoCabecalho(rows);
+  const headers = (rows[idxCab] || []).map(h => cleanCell(h).toLowerCase());
+  const idxTipo = headers.findIndex(h => h === "tipo" || (h.includes("tipo") && (h.includes("dispositivo") || h.includes("equipamento"))));
+  const idxNome = headers.findIndex(h => h.includes("nome") && !["usu", "identificador", "dom"].some(x => h.includes(x)));
+  const idxIp = headers.findIndex(h => h.includes("identificador") || h === "ip" || h.includes("endere"));
+  if (idxTipo < 0 || idxNome < 0 || idxIp < 0) return [];
+  const saida: GravadorLido[] = [];
+  for (let i = idxCab + 1; i < rows.length; i++) {
+    const cols = rows[i];
+    if (!cols) continue;
+    const tipo = cleanCell(cols[idxTipo]).toLowerCase();
+    const nome = cleanCell(cols[idxNome]);
+    const ip = cleanCell(cols[idxIp]);
+    if (nome && ip.includes(".") && ["dvr", "nvr", "imhdx", "invd", "gravador"].some(t => tipo.includes(t))) saida.push({ nome, ip });
+  }
+  return saida;
+}
+
+export function textoDeGravadores(gravadores: GravadorLido[] | undefined): string {
+  if (!gravadores || gravadores.length === 0) return "";
+  const nomes = gravadores.map(g => `${g.nome} (${g.ip})`).join(", ");
+  return ` · ${gravadores.length} gravador(es) DVR/NVR reconhecido(s) (${nomes}): não viram câmera; os canais deles vêm do ` +
+    `"Sincronizar da Máquina", com modelo ONVIF`;
+}
+
+function summarize(ok: number, fail: number, okMsg: string, toast: ToastFn) {
+  if (fail === 0) toast(okMsg, "success");
+  else toast(`${ok} ok, ${fail} falharam`, ok > 0 ? "info" : "error");
+}
+
+// Lê um arquivo CSV ou XLSX (planilha exportada do NVR/Digifort/Defense) e devolve as linhas brutas
+export function readRowsFromFile(file: File): Promise<unknown[][]> {
+  return new Promise((resolve, reject) => {
+    const isCsv = file.name.toLowerCase().endsWith(".csv");
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        if (isCsv) {
+          const buf = new Uint8Array(evt.target?.result as ArrayBuffer);
+          let text = "";
+          try {
+            text = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+          } catch {
+            text = new TextDecoder("iso-8859-1").decode(buf);
+          }
+          resolve(parseCsv(text));
+        } else {
+          const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+          // xlsx (~400 kB) só é baixado quando alguém importa uma planilha Excel
+          const XLSX = await import("xlsx");
+          const workbook = XLSX.read(data, { type: "array" });
+          const planilhas = workbook.SheetNames.map(
+            nome => XLSX.utils.sheet_to_json(workbook.Sheets[nome], { header: 1 }) as unknown[][]
+          );
+          // Arquivo com várias abas (ex.: export de dispositivos do Defense IA, que traz uma aba de
+          // referência antes da dos dados): usa a primeira aba cujas linhas iniciais têm cara de
+          // cabeçalho de dispositivo/câmera (coluna de senha + coluna de IP/endereço/identificador).
+          const pareceCabecalhoDeDados = (rows: unknown[][]) => {
+            for (let r = 0; r < Math.min(rows.length, 5); r++) {
+              const rowStr = (rows[r] || []).map(c => cleanCell(c).toLowerCase());
+              const temSenha = rowStr.some(c => c.includes("senha") || c.includes("pass"));
+              const temEndereco = rowStr.some(c =>
+                /\bip\b/.test(c) || c.includes("endere") || c.includes("identificador") || c.includes("descri")
+              );
+              if (temSenha && temEndereco) return true;
+            }
+            return false;
+          };
+          resolve(planilhas.find(pareceCabecalhoDeDados) || planilhas[0] || []);
+        }
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error("Erro ao ler o arquivo."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+export interface ModalImportCamerasState {
+  fileName: string;
+  rows: unknown[][];
+  temOpcaoNomeDescricao: boolean;
+  opcaoNome: DigifortNameOption;
+  cameras: CameraRow[];
+  exemploNome?: string;
+  exemploDescricao?: string;
+}
+
+// Importação (CSV/XLSX) e exclusão em massa de câmeras, sempre item a item
+export function useCameraImport({ machineId, cameras, setBusy, reload, toast }: {
+  machineId: string | undefined;
+  cameras: NVR[];
+  setBusy: (busy: boolean) => void;
+  reload: () => void;
+  toast: ToastFn;
+}) {
+  const confirmar = useConfirm();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [modalImport, setModalImport] = useState<ModalImportCamerasState | null>(null);
+
+  const importFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !machineId) return;
+    try {
+      const rows = await readRowsFromFile(file);
+      const temOpcao = planilhaTemNomeEDescricao(rows);
+      const cams = rowsToCameras(rows, "descricao");
+      if (cams.length === 0) {
+        toast("Nenhuma câmera encontrada na planilha.", "error");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+      const { nome: exNome, descricao: exDesc } = extrairExemplosNomeEDescricao(rows);
+      setModalImport({
+        fileName: file.name,
+        rows,
+        temOpcaoNomeDescricao: temOpcao,
+        opcaoNome: "descricao",
+        cameras: cams,
+        exemploNome: exNome,
+        exemploDescricao: exDesc,
+      });
+    } catch (err) {
+      console.error(err);
+      toast("Erro ao ler arquivo da planilha.", "error");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const mudarOpcaoNome = (novaOpcao: DigifortNameOption) => {
+    if (!modalImport) return;
+    setModalImport({
+      ...modalImport,
+      opcaoNome: novaOpcao,
+      cameras: rowsToCameras(modalImport.rows, novaOpcao),
+    });
+  };
+
+  const cancelarImportacao = () => {
+    setModalImport(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const confirmarImportacao = async () => {
+    if (!modalImport || !machineId) return;
+    setBusy(true);
+    try {
+      let ok = 0;
+      let fail = 0;
+      for (const cam of modalImport.cameras) {
+        try {
+          await createEquipamento(machineId, {
+            tipo: "CAMERA",
+            name: cam.name,
+            ip: cam.ip,
+            username: "admin",
+            password: cam.password || "navarro@123",
+            config_extra: { modelo: cam.modelo },
+          });
+          ok++;
+        } catch (err) {
+          console.error(err);
+          fail++;
+        }
+      }
+      summarize(ok, fail, `Importadas ${ok} câmeras com sucesso!`, toast);
+      reload();
+      setModalImport(null);
+    } catch (err) {
+      console.error(err);
+      toast("Erro ao importar câmeras.", "error");
+    } finally {
+      setBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const deleteAll = async () => {
+    if (!machineId) return;
+    if (cameras.length === 0) return toast("Nenhuma câmera para apagar.", "error");
+    if (!(await confirmar({
+      title: "Apagar todas as câmeras",
+      message: `Tem certeza que deseja apagar as ${cameras.length} câmeras? Isso não pode ser desfeito.`,
+      confirmLabel: "Apagar câmeras",
+      variant: "danger",
+    }))) return;
+    setBusy(true);
+    try {
+      let ok = 0;
+      let fail = 0;
+      for (const cam of cameras) {
+        try {
+          await deleteEquipamento(machineId, cam.id);
+          ok++;
+        } catch (err) {
+          console.error(err);
+          fail++;
+        }
+      }
+      summarize(ok, fail, "Todas as câmeras foram apagadas.", toast);
+      reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return {
+    fileInputRef,
+    importFile,
+    deleteAll,
+    modalImport,
+    mudarOpcaoNome,
+    cancelarImportacao,
+    confirmarImportacao,
+  };
+}

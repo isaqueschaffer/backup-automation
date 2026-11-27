@@ -1,0 +1,84 @@
+from enum import Enum
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, List, Optional
+
+class BackupStatus(str, Enum):
+    OK = "OK"
+    JA_PROCESSADO = "JA_PROCESSADO"
+    ANTIGO = "BACKUP_ANTIGO"
+    INCOMPLETO = "BACKUP_INCOMPLETO"
+    INCONSISTENTE = "BACKUP_INCONSISTENTE"
+    NAO_ENCONTRADO = "BACKUP_NAO_ENCONTRADO"
+    EM_PROCESSAMENTO = "BACKUP_EM_PROCESSAMENTO"
+    CORROMPIDO = "BACKUP_CORROMPIDO"
+    ERRO = "ERRO"
+    TIPO_NAO_SUPORTADO = "TIPO_NAO_SUPORTADO"
+    SEM_ARQUIVOS = "SEM_ARQUIVOS"
+    PARCIAL = "PARCIAL"
+
+@dataclass
+class BackupFile:
+    path: Path
+    file_type: str  # "ZIP", "TAR", "CONFIGURATION", "DB", etc.
+    remote_path: Optional[str] = None
+    is_smb: bool = False
+    _size: Optional[int] = None
+    # Origens do túnel do Mikrotik (nada em disco): SFTP (PastaSftp da máquina do cliente), memória (bytes já
+    # baixados do equipamento) e fluxo HTTP (`abrir_fluxo()` devolve (iterador_de_blocos, tamanho_ou_None)).
+    is_sftp: bool = False
+    sftp: Any = None
+    dados: Optional[bytes] = None
+    abrir_fluxo: Optional[Callable[[], Any]] = None
+
+    @property
+    def origem(self) -> str:
+        if self.dados is not None:
+            return "memoria"
+        if self.abrir_fluxo is not None:
+            return "http"
+        if self.is_sftp:
+            return "sftp"
+        return "smb" if self.is_smb else "local"
+
+    @property
+    def size_bytes(self) -> int:
+        if self.dados is not None:
+            return len(self.dados)
+        if self.is_sftp:
+            if self._size is not None:
+                return self._size
+            try:
+                return self.sftp.tamanho(self.remote_path)
+            except Exception:
+                return 0
+        if self.is_smb:
+            if self._size is not None:
+                return self._size
+            if self.remote_path:
+                try:
+                    from src.backup.smb_storage import SmbStorage
+                    return SmbStorage.get_file_size(self.remote_path)
+                except Exception:
+                    return 0
+            return 0
+        if not self.path.exists():
+            return 0
+        if self.path.is_file():
+            return self.path.stat().st_size
+        if self.path.is_dir():
+            return sum(f.stat().st_size for f in self.path.rglob('*') if f.is_file())
+        return 0
+
+@dataclass
+class BackupGroup:
+    """Um grupo lógico de arquivos que formam um backup (ex: 1 zip, ou 1 config + 1 db)"""
+    date: datetime
+    files: List[BackupFile] = field(default_factory=list)
+    ip: Optional[str] = None
+    group_id: str = ""
+    
+    @property
+    def total_size_mb(self) -> float:
+        return sum(f.size_bytes for f in self.files) / (1024 * 1024)

@@ -1,4 +1,4 @@
-﻿/* ======================================================
+/* ======================================================
    TRILAN NVR BACKUP — Design System
    Dark glassmorphism theme with purple/cyan accents
    ====================================================== */
@@ -43,6 +43,24 @@
   --sidebar-w: 240px;
   --header-h: 64px;
   --transition: 0.2s ease;
+  /* Só o que muda no hover/foco (em vez de "all", que anima até largura e altura e pesa na rolagem) */
+  --transicao-padrao: background-color var(--transition), color var(--transition), border-color var(--transition),
+    box-shadow var(--transition), transform var(--transition), opacity var(--transition);
+
+  /* Aliases (nomes usados em estilos inline) */
+  --primary:       var(--accent);
+  --primary-light: var(--accent-light);
+  --primary-dark:  #6d28d9;
+  --brand-primary: var(--accent);
+  --surface:       var(--bg-surface);
+  --surface-2:     var(--bg-elevated);
+  --surface-50:    var(--bg-elevated);
+  --surface-hover: var(--bg-hover);
+  --background:    var(--bg-base);
+  --radius:        var(--radius-md);
+  --text:          var(--text-primary);
+  --text-color:    var(--text-primary);
+  --danger:        var(--err);
 }
 
 /* ── Reset ───────────────────────────────────────────── */
@@ -81,6 +99,7 @@ img { max-width: 100%; }
   margin-left: var(--sidebar-w);
   padding: 32px;
   max-width: 100%;
+  min-width: 0; /* sem isso uma tabela larga estica a área toda e a página rola de lado */
   animation: fadeIn 0.3s ease;
 }
 
@@ -160,7 +179,7 @@ img { max-width: 100%; }
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 13.5px; font-weight: 500;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
   margin-bottom: 2px;
   position: relative;
 }
@@ -196,7 +215,7 @@ img { max-width: 100%; }
   border-radius: var(--radius-sm);
   color: var(--err);
   font-size: 13.5px; font-weight: 500;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
   width: 100%;
   background: none; border: none;
 }
@@ -242,7 +261,7 @@ img { max-width: 100%; }
 /* ── Stat cards ───────────────────────────────────────── */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); /* os 6 números da Visão Geral numa linha */
   gap: 16px;
   margin-bottom: 28px;
 }
@@ -275,6 +294,13 @@ img { max-width: 100%; }
 .stat-card.cyan::after   { background: var(--cyan); }
 .stat-card.green::after  { background: var(--ok); }
 .stat-card.red::after    { background: var(--err); }
+.stat-card.amber::after  { background: var(--warn); }
+
+/* Números da Visão Geral são botões (abrem a lista filtrada) */
+button.stat-card { font: inherit; color: inherit; text-align: left; width: 100%; cursor: pointer; }
+button.stat-card:disabled { cursor: default; }
+button.stat-card:disabled:hover { transform: none; box-shadow: none; }
+button.stat-card:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 
 .stat-label {
   font-size: 11px; font-weight: 600;
@@ -293,6 +319,7 @@ img { max-width: 100%; }
 .stat-value.cyan   { color: var(--cyan); }
 .stat-value.green  { color: var(--ok); }
 .stat-value.red    { color: var(--err); }
+.stat-value.amber  { color: var(--warn); }
 
 .stat-icon {
   position: absolute;
@@ -313,7 +340,7 @@ img { max-width: 100%; }
   border-radius: var(--radius-lg);
   padding: 20px;
   cursor: pointer;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
   position: relative;
   overflow: hidden;
 }
@@ -404,7 +431,7 @@ img { max-width: 100%; }
   border-radius: var(--radius-sm);
   font-size: 13.5px; font-weight: 600;
   border: none;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
   white-space: nowrap;
 }
 
@@ -440,6 +467,20 @@ img { max-width: 100%; }
 
 .btn-danger:hover { background: rgba(239,68,68,0.2); }
 
+.btn-success {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+.btn-success:hover { background: rgba(16,185,129,0.2); }
+
+.btn-sm { padding: 5px 10px; font-size: 12.5px; gap: 6px; }
+
+.btn:disabled, .btn-icon:disabled {
+  opacity: 0.45; cursor: not-allowed;
+  transform: none; box-shadow: none;
+}
+
 .btn-icon {
   width: 32px; height: 32px;
   padding: 0;
@@ -448,7 +489,7 @@ img { max-width: 100%; }
   background: var(--bg-elevated);
   color: var(--text-secondary);
   border: 1px solid var(--border);
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
 }
 
 .btn-icon:hover {
@@ -461,7 +502,7 @@ img { max-width: 100%; }
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto; /* tabela mais larga que a tela rola dentro do quadro, não a página */
 }
 
 table { width: 100%; border-collapse: collapse; }
@@ -560,6 +601,29 @@ tbody td {
   font-size: 18px; font-weight: 700;
   color: var(--text-primary);
 }
+
+/* ── Confirmação (substitui o confirm() do navegador) ─── */
+.confirm-overlay { z-index: 1500; }
+.confirm-dialog {
+  max-width: 440px; padding: 24px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.confirm-dialog .confirm-icon {
+  width: 44px; height: 44px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-glow); color: var(--accent-light);
+}
+.confirm-dialog.danger  { border-color: rgba(239,68,68,0.35); }
+.confirm-dialog.danger  .confirm-icon { background: var(--err-bg);  color: var(--err); }
+.confirm-dialog.warning .confirm-icon { background: var(--warn-bg); color: var(--warn); }
+.confirm-title { font-size: 17px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+.confirm-message {
+  font-size: 13.5px; color: var(--text-secondary); line-height: 1.55;
+  white-space: pre-line; overflow-wrap: anywhere;
+}
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.btn-danger-solid { background: var(--err); color: #fff; box-shadow: 0 2px 8px rgba(239,68,68,0.3); }
+.btn-danger-solid:hover { background: #dc2626; }
 
 /* ── Toast ────────────────────────────────────────────── */
 .toast-container {
@@ -701,6 +765,16 @@ tbody td {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Barra de progresso em andamento ("Testar conexão"): listras em movimento */
+.barra-progresso-ativa {
+  background-image: linear-gradient(45deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%,
+    rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%, transparent) !important;
+  background-size: 16px 16px !important;
+  animation: barra-listras 0.8s linear infinite;
+}
+@keyframes barra-listras { from { background-position: 0 0; } to { background-position: 16px 0; } }
+@media (prefers-reduced-motion: reduce) { .barra-progresso-ativa { animation: none; } }
+
 .loading-state {
   display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 16px;
@@ -736,7 +810,7 @@ tbody td {
   border: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 13px; font-weight: 500;
-  transition: all var(--transition);
+  transition: var(--transicao-padrao);
 }
 
 .page-btn:hover:not(:disabled) {
@@ -796,4 +870,383 @@ tbody td {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 8px;
+}
+
+
+/* ── Visão Geral: grade de 12 colunas personalizável ── */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+@media (max-width: 1000px) {
+  .overview-item { grid-column: span 6 !important; }
+}
+@media (max-width: 640px) {
+  .overview-item { grid-column: span 12 !important; }
+}
+
+/* ── Dashboards por cliente: grade de 12 colunas ── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: 50px;
+  gap: 12px;
+}
+.dash-item { min-width: 0; min-height: 0; }
+/* Grade livre (telas largas): itens posicionados por x/y em DashboardCanvas.tsx */
+.dash-grade-guia {
+  background-image: radial-gradient(circle, var(--border) 1.2px, transparent 1.6px);
+  border-radius: 8px;
+}
+body.dash-resizing { user-select: none; cursor: nwse-resize; }
+body.dash-arrastando { user-select: none; cursor: grabbing; }
+body.dash-arrastando * { cursor: grabbing !important; }
+.dash-resize-handle { opacity: 0.55; transition: opacity 0.15s, background 0.15s; border-radius: 4px; }
+.dash-resize-handle:hover { opacity: 1; background: var(--accent-glow); }
+@media (max-width: 1000px) {
+  .dash-resize-handle { display: none; }
+}
+@media (max-width: 1000px) {
+  .dash-grid { grid-auto-rows: auto; }
+  .dash-item { grid-column: span 6 !important; grid-row: auto !important; min-height: 120px; }
+}
+@media (max-width: 640px) {
+  .dash-grid { grid-auto-rows: auto; }
+  .dash-item { grid-column: span 12 !important; grid-row: auto !important; min-height: 120px; }
+}
+
+/* ======================================================
+   Responsivo (celular). Breakpoints: 768px (tablet/celular) e 480px (celular estreito).
+   Estilos inline com grid fixo são sobrescritos aqui por seletor de atributo.
+   ====================================================== */
+.mobile-topbar, .sidebar-backdrop { display: none; }
+
+@media (max-width: 768px) {
+  html, body { overflow-x: hidden; }
+
+  /* Navegação: barra superior + gaveta */
+  .mobile-topbar {
+    display: flex; align-items: center; gap: 10px;
+    position: fixed; top: 0; left: 0; right: 0; height: 56px;
+    padding: 0 12px; z-index: 90;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .mobile-menu-btn {
+    width: 44px; height: 44px; border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+  .mobile-menu-btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+  .mobile-topbar-title {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 14px; letter-spacing: 0.04em;
+  }
+  .sidebar {
+    width: min(82vw, 300px);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.25s ease, visibility 0.25s;
+    z-index: 1100;
+    height: 100dvh;
+  }
+  .sidebar.aberta { transform: translateX(0); visibility: visible; box-shadow: var(--shadow-lg); }
+  .sidebar-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 1050;
+    background: rgba(0,0,0,0.6);
+    opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+  }
+  .sidebar-backdrop.visivel { opacity: 1; pointer-events: auto; }
+  .nav-link, .sidebar-logout { min-height: 44px; }
+
+  .main-content {
+    margin-left: 0;
+    padding: 72px 16px 24px;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+  .page-header { margin-bottom: 20px; gap: 12px; }
+  .page-title { font-size: 20px; }
+  .card { padding: 16px; }
+
+  /* Tabelas: rolagem horizontal contida */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap > table { min-width: 560px; }
+  thead th, tbody td { padding-left: 12px; padding-right: 12px; }
+  .modal table, .card table { display: block; overflow-x: auto; max-width: 100%; }
+
+  /* Formulários e alvos de toque */
+  input, select, textarea, .form-input { font-size: 16px !important; }
+  .form-input, select.form-input { min-height: 44px; }
+  .btn { min-height: 40px; }
+  .btn-icon { min-width: 40px; min-height: 40px; }
+  .page-btn { min-width: 40px; min-height: 40px; }
+
+  /* Grids 2-4 colunas dos formulários nos modais viram 1 coluna */
+  .modal [style*="grid-template-columns"][style*="gap: 12px"],
+  .modal [style*="grid-template-columns: 1fr 1fr 1fr auto"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .main-content [style*="grid-template-columns: 1fr 1fr"][style*="gap: 12px"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  /* minmax mínimos largos demais para 360px */
+  [style*="minmax(320px"], [style*="minmax(300px"], [style*="minmax(260px"], [style*="minmax(230px"] {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)) !important;
+  }
+  .clients-grid { grid-template-columns: minmax(0, 1fr); }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .stat-value { font-size: 26px; }
+
+  /* Modais ocupam quase a tela; cabeçalho fixo, conteúdo rolável */
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal, .modal[style] {
+    width: 100% !important; max-width: 100% !important;
+    max-height: 96dvh; border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    padding: 0 16px 16px;
+  }
+  .modal-header {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg-elevated);
+    padding: 16px 16px 12px; margin: 0 -16px 12px; /* de ponta a ponta: conteúdo que sangra (galeria) não aparece nas laterais */
+  }
+  .confirm-dialog { max-width: 100%; padding: 20px 16px; }
+
+  /* Mídia sempre cabe na tela */
+  img, video, canvas, svg { max-width: 100%; }
+  img, video { height: auto; }
+}
+
+@media (max-width: 480px) {
+  .form-input[style*="width: 150px"] { width: 100% !important; }
+  .stats-grid { grid-template-columns: minmax(0, 1fr); }
+  .page-header > * { max-width: 100%; }
+  .page-header .btn { flex: 1 1 auto; justify-content: center; }
+}
+
+/* Ajustes conferidos em 390px (19/11/2026): filas de botões do cabeçalho quebram linha; grid sem colunas
+   declaradas (coluna "auto") não cresce além da tela; textos em linhas flex podem encolher e quebrar. */
+@media (max-width: 768px) {
+  .page-header, .page-header .flex { flex-wrap: wrap; }
+  .main-content [style*="display: grid"]:not([style*="grid-template-columns"]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .card [style*="display: flex"] > *, .modal [style*="display: flex"] > * { min-width: 0; overflow-wrap: break-word; }
+}
+
+/* Revisão de 23/11/2026 (conferida em 390px e 1366px com dados reais).
+   - Tabelas de lista (classe tabela-cartoes) viram cartões no celular: nada some na rolagem lateral.
+     Os rótulos (data-label) vêm do <thead>, aplicados por utils/tabelaCartoes.ts.
+   - Cabeçalhos de seção "título + botões" quebram linha em vez de espremer o título.
+   - Filtros ocupam a largura toda; fila de backup do cliente quebra em duas linhas. */
+@media (max-width: 768px) {
+  .table-wrap:has(> table.tabela-cartoes) { overflow: visible; background: transparent; border: none; }
+  .table-wrap > table.tabela-cartoes { min-width: 0; }
+  table.tabela-cartoes { min-width: 0 !important; }
+  table.tabela-cartoes, table.tabela-cartoes tbody, table.tabela-cartoes tr, table.tabela-cartoes td {
+    display: block; width: 100%;
+  }
+  .modal table.tabela-cartoes, .card table.tabela-cartoes { overflow: visible; }
+  table.tabela-cartoes thead { display: none; }
+  table.tabela-cartoes tbody tr {
+    background: var(--bg-surface);
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  table.tabela-cartoes tbody tr:hover { background: var(--bg-surface); }
+  table.tabela-cartoes tbody td {
+    display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px 10px;
+    padding: 5px 0 !important;
+    text-align: right !important;
+    min-width: 0; overflow-wrap: anywhere;
+    box-shadow: none !important;
+  }
+  table.tabela-cartoes tbody td > * { min-width: 0; }
+  table.tabela-cartoes tbody td::before {
+    content: attr(data-label);
+    flex-shrink: 0; max-width: 45%; margin-right: auto;
+    text-align: left;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  table.tabela-cartoes tbody td[data-label=""]::before { display: none; }
+  /* 1ª coluna (nome) é o título do cartão */
+  table.tabela-cartoes tbody td:first-child {
+    display: block; text-align: left !important;
+    font-size: 15px; padding: 0 0 8px !important; margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.tabela-cartoes tbody td:first-child::before { display: none; }
+  /* Célula de largura total (estado vazio, "carregando") */
+  table.tabela-cartoes tbody td[colspan] { display: block; text-align: center !important; border: none; }
+  table.tabela-cartoes tbody td .flex { justify-content: flex-end; flex-wrap: wrap; }
+
+  /* Cabeçalhos de seção com botões: o título fica em cima e os botões quebram linha */
+  .main-content .flex.items-center.justify-between { flex-wrap: wrap; gap: 10px; }
+  .main-content .flex.items-center.justify-between > .flex { flex-wrap: wrap; }
+  .main-content .flex.items-center.justify-between > .section-title { flex: 1 1 100%; flex-wrap: wrap; }
+
+  /* Filtros: um por linha, largura toda */
+  .filters-bar { gap: 10px; }
+  .filters-bar > *, .filters-bar .form-input, .filters-bar select { max-width: none !important; flex: 1 1 100%; }
+  .filters-bar > label, .filters-bar > div { display: flex; align-items: center; gap: 8px; }
+  .filters-bar > label .form-input, .filters-bar > div .form-input { flex: 1 1 auto; width: auto !important; min-width: 0; }
+  .filters-bar > label > span:first-child { min-width: 40px; }
+  .filters-bar > .btn { justify-content: center; }
+
+  /* Fila de backup do cliente: nome na 1ª linha, histórico e botões na 2ª */
+  .fila-linha { flex-wrap: wrap; row-gap: 10px !important; }
+  .fila-linha > .fila-info { flex: 1 1 calc(100% - 130px) !important; }
+  .eq-acoes { flex-basis: 100%; margin-left: 0 !important; }
+  /* Campos de largura fixa em linhas que quebram (filtros dentro de modais e páginas) ocupam a linha */
+  [style*="flex-wrap: wrap"] > .form-input[style*="width:"] { flex: 1 1 100%; width: 100% !important; }
+}
+
+/* Tablet / notebook estreito: menu lateral fixo mais fino e menos margem para sobrar espaço ao conteúdo */
+@media (min-width: 769px) and (max-width: 1100px) {
+  :root { --sidebar-w: 210px; }
+  .main-content { padding: 24px; }
+}
+
+/* Cabeçalho "título + botões" quebra linha em qualquer largura quando os botões não cabem */
+.main-content .flex.items-center.justify-between { flex-wrap: wrap; row-gap: 10px; }
+.main-content .flex.items-center.justify-between > .flex { flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 768px) {
+  .main-content .flex.items-center.justify-between > .flex { justify-content: flex-start; }
+}
+
+/* Rodadas de backup do cliente (celular): data + status / tipo + máquinas OK / e-mail + botões */
+@media (max-width: 768px) {
+  .rodada-linha { grid-template-columns: auto minmax(0, 1fr) auto !important; row-gap: 8px !important; }
+  .rodada-linha > .rodada-data   { grid-column: 2; grid-row: 1; }
+  .rodada-linha > .rodada-status { grid-column: 3; grid-row: 1; justify-self: end; }
+  .rodada-linha > .rodada-tipo   { grid-column: 2; grid-row: 2; }
+  .rodada-linha > .rodada-ok     { grid-column: 3; grid-row: 2; justify-self: end; flex-wrap: wrap; justify-content: flex-end; }
+  .rodada-linha > .rodada-email  { grid-column: 2 / 4; grid-row: 3; justify-content: space-between; }
+}
+
+/* Faixas flutuantes do painel 24 h (sem conexão, nova versão): no rodapé, centralizadas, acima de tudo */
+.faixa-flutuante {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-accent);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+  font-size: 14px;
+}
+.faixa-flutuante-erro {
+  border-color: var(--err);
+  color: var(--err);
+  bottom: 72px; /* não cobre a faixa de nova versão se as duas aparecerem */
+}
+@media (max-width: 600px) {
+  .faixa-flutuante { width: calc(100vw - 32px); font-size: 13px; }
+  .faixa-flutuante span { flex: 1; }
+}
+
+/* ── Visão Geral: sem backup, ordem e modo lista (26/11/2026) ─────────── */
+.sem-backup-card { padding: 14px 16px; margin-bottom: 24px; border-color: rgba(239,68,68,0.35); }
+.overview-barra { flex-wrap: wrap; }
+.overview-vista { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.overview-vista .form-input { width: auto; padding: 4px 8px; font-size: 12px; }
+.segmentado { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmentado button {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; font: inherit; font-size: 12px;
+  background: var(--bg-surface); color: var(--text-secondary); border: none; cursor: pointer;
+}
+.segmentado button + button { border-left: 1px solid var(--border); }
+.segmentado button.ativo { background: var(--accent); color: #fff; }
+.segmentado button:focus-visible { outline: 2px solid var(--accent-light); outline-offset: -2px; }
+.linha-clicavel { cursor: pointer; }
+.celula-linha { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.link-botao {
+  background: none; border: none; padding: 0; font: inherit; font-weight: 600;
+  color: var(--text-primary); cursor: pointer; text-align: left;
+}
+.link-botao:hover { color: var(--accent-light); text-decoration: underline; }
+.link-botao:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; border-radius: 4px; }
+@media (max-width: 768px) {
+  .overview-vista { margin-left: 0; width: 100%; }
+}
+
+/* ── Menu "Mais ações" (components/MenuAcoes.tsx) ─────────── */
+.menu-acoes { position: relative; display: inline-flex; }
+.menu-acoes-lista {
+  position: fixed; z-index: 1000;
+  min-width: 230px; padding: 6px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  display: flex; flex-direction: column;
+}
+.menu-acoes-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border: none; border-radius: 6px; background: none;
+  font: inherit; font-size: 13px; color: var(--text-primary); text-align: left; cursor: pointer;
+}
+.menu-acoes-item:hover:not(:disabled), .menu-acoes-item:focus-visible { background: var(--bg-surface); outline: none; }
+.menu-acoes-item:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-light); }
+.menu-acoes-item:disabled { opacity: 0.5; cursor: default; }
+.menu-acoes-item.perigo { color: var(--err); }
+.menu-acoes-sep { height: 1px; background: var(--border); margin: 6px 4px; }
+
+/* Dados técnicos recolhidos (detalhe da máquina) */
+.detalhes-tecnicos { margin-top: 4px; }
+.detalhes-tecnicos > summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-muted);
+  padding: 4px 0; list-style-position: inside;
+}
+.detalhes-tecnicos > summary:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; border-radius: 4px; }
+.detalhes-tecnicos[open] > summary { margin-bottom: 10px; }
+
+/* ── Celular (revisão de 26/11/2026, item 8) ─────────────── */
+.filtros-botao { display: none; }
+.filtros-contagem {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+}
+@media (max-width: 768px) {
+  .filtros-botao { display: inline-flex; width: 100%; justify-content: center; margin-bottom: 12px; }
+  .filtros-recolhiveis:not(.aberto) > .filters-bar { display: none; }
+  /* Visão Geral: Clientes e Máquinas já estão no menu; os números ficam em duas colunas, mais baixos */
+  .so-computador { display: none !important; }
+}
+@media (max-width: 480px) {
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .stats-grid .stat-card { padding: 12px 14px; }
+  .stats-grid .stat-label { font-size: 10px; letter-spacing: 0.04em; margin-bottom: 6px; }
+  .stats-grid .stat-value { font-size: 24px; }
+  .stats-grid .stat-icon, .stats-grid .stat-card::after { display: none; }
+}
+
+/* ── Acessibilidade (revisão de 26/11/2026, item 10) ─────── */
+/* Foco visível em tudo que se alcança pelo Tab (antes só alguns botões tinham). Campos de formulário já
+   mostram o foco pela borda (.form-input:focus). */
+:where(a, button, summary, [role="button"], [role="link"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+:where(input[type="checkbox"], input[type="radio"]):focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+/* Quem pede menos movimento no sistema não vê animações nem transições */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+  }
 }

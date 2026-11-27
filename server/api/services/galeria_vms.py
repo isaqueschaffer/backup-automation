@@ -1,0 +1,256 @@
+"""
+Pareamento das câmeras de equipamentos DIGIFORT/DEFENSE.
+
+O agente numera as câmeras pela ordem do export local e a Galeria pela ordem da importação, então o
+canal não identifica a mesma câmera nos dois lados: o pareamento é por nome e por IP.
+"""
+import re
+from typing import List, Optional, Tuple
+
+
+def canal_int(valor) -> Optional[int]:
+    # Motorola (agentes < 1.1.4) reportava o canal como GUID "{0000000N-0000-...}"
+    try:
+        return int(valor)
+    except (ValueError, TypeError):
+        try:
+            return int(str(valor).strip("{}").split("-")[0], 16)
+        except ValueError:
+            return None
+
+
+def _norm(texto) -> str:
+    return re.sub(r"[^a-z0-9]", "", (texto or "").lower())
+
+
+def _palavras(texto) -> list:
+    return re.findall(r"[a-z0-9]+", (texto or "").lower())
+
+
+def _parecidos(a, b) -> bool:
+    """Um nome contém o outro por palavras inteiras ('1 ANDAR' em '1 ANDAR- ACESSO'; 'Camera 1' não está em 'Camera 10')."""
+    pa, pb = _palavras(a), _palavras(b)
+    if not pa or not pb:
+        return False
+    curto, longo = (pa, pb) if len(pa) <= len(pb) else (pb, pa)
+    return any(longo[i:i + len(curto)] == curto for i in range(len(longo) - len(curto) + 1))
+
+
+def ip_valido(ip) -> str:
+    """IP reportado utilizável ('' para vazio ou 'N/A')."""
+    ip = (ip or "").strip()
+    return ip if ip and ip != "N/A" and "." in ip else ""
+
+
+def ips_compartilhados(cameras_db: list) -> set:
+    """Conjunto dos IPs que aparecem em 2 ou mais câmeras da lista."""
+    contagem: dict = {}
+    for c in cameras_db or []:
+        ip = (getattr(c, "ip", None) or (c.get("ip") if isinstance(c, dict) else None) or "").strip()
+        if ip:
+            contagem[ip] = contagem.get(ip, 0) + 1
+    return {ip for ip, qtd in contagem.items() if qtd >= 2}
+
+
+def bloqueada_por_ip_compartilhado(camera, cameras_db: list) -> bool:
+    """True se o IP da câmera está compartilhado entre 2 ou mais câmeras e ela não tem canal_rtsp definido."""
+    if not camera:
+        return False
+    ip = (getattr(camera, "ip", None) or (camera.get("ip") if isinstance(camera, dict) else None) or "").strip()
+    canal_rtsp = getattr(camera, "canal_rtsp", None) if not isinstance(camera, dict) else camera.get("canal_rtsp")
+    return bool(ip and ip in ips_compartilhados(cameras_db) and canal_rtsp is None)
+
+
+def marca_pelo_modelo(modelo) -> str:
+    """Marca usada na Galeria (define as URLs RTSP tentadas) a partir do modelo que o Defense informa.
+    DS-/IDS- = Hikvision; MTI/DIH (linha Motorola) = ONVIF; MHDX, VIP, VHD, iNVD... = Intelbras; o resto, Hikvision
+    (o padrão da Galeria; dá para trocar na edição da câmera)."""
+    m = (modelo or "").strip().upper()
+    if m.startswith(("DS-", "IDS-")):
+        return "Hikvision"
+    if m.startswith(("MTI", "DIH", "MOTOROLA")):
+        return "ONVIF"
+    if m.startswith(("MHDX", "VIP", "VHD", "INVD", "NVD", "IM", "MIP")):
+        return "Intelbras"
+    return "Hikvision"
+
+
+MODELO_CANAL_DE_GRAVADOR = "ONVIF"
+
+
+def gravador_do_canal(st: dict, gravadores: Optional[list]) -> Optional[dict]:
+    """Gravador (linha DVR/NVR da planilha: {nome, ip}) a que um canal do relatório pertence: pelo nome do dispositivo que
+    o agente informa (`dispositivo`) ou, sem ele, pelo nome do canal começando com o nome do gravador ("DVR X - FRENTE")."""
+    dispositivo, nome = _norm(st.get("dispositivo")), _norm(st.get("nome"))
+    for g in gravadores or []:
+        gn = _norm(g.get("nome"))
+        if gn and (dispositivo == gn or (not dispositivo and nome.startswith(gn))):
+            return g
+    return None
+
+
+def cameras_do_relatorio_sem_par(cameras_db: list, relatorio: list, gravadores: Optional[list] = None) -> List[dict]:
+    """Câmeras do relatório do agente que não casam com nenhuma da Galeria e têm IP: {nome, ip, modelo, canal_rtsp}.
+    São as que o Defense lista e a planilha não trouxe (ex.: canais de DVR/NVR); o "Sincronizar da Máquina" as cria.
+
+    Canal de DVR/NVR (tem `canal_rtsp` ou pertence a um gravador da planilha) nasce com modelo ONVIF; o IP do gravador da
+    planilha vale quando o Defense não informou um IP válido. Câmera de IP próprio segue a marca pelo modelo dela."""
+    saida = []
+    for _, st, c, _ in parear_cameras(cameras_db, relatorio):
+        if st is None or c is not None:
+            continue
+        nome = (st.get("nome") or "").strip()
+        gravador = gravador_do_canal(st, gravadores)
+        ip = ip_valido(st.get("ip")) or (ip_valido(gravador.get("ip")) if gravador else "")
+        if not nome or not ip:
+            continue
+        canal_rtsp = canal_int(st.get("canal_rtsp"))
+        canal_rtsp = canal_rtsp if canal_rtsp and 1 <= canal_rtsp <= 512 else None
+        eh_canal_de_gravador = canal_rtsp is not None or gravador is not None
+        item = {
+            "nome": nome, "ip": ip,
+            "modelo": MODELO_CANAL_DE_GRAVADOR if eh_canal_de_gravador else marca_pelo_modelo(st.get("modelo")),
+            "canal_rtsp": canal_rtsp,
+        }
+        # Usuário e senha do gravador vêm da planilha (a linha dele); sem eles a Galeria usa os padrões
+        if gravador and gravador.get("usuario"):
+            item["username"] = gravador["usuario"]
+        if gravador and gravador.get("senha"):
+            item["password"] = gravador["senha"]
+        saida.append(item)
+    return saida
+
+
+def credenciais_dos_gravadores(cameras_db: list, relatorio: list, gravadores: Optional[list]) -> List[Tuple[object, str, str]]:
+    """Canais de DVR/NVR que já estão na Galeria e a que gravador da planilha pertencem: [(câmera, usuario, senha)].
+    A planilha manda: o acesso ao canal é o do gravador (linha dele), não o padrão que a Galeria pôs sozinha quando a
+    câmera nasceu do relatório do agente. Só entram gravadores com usuário e senha na planilha."""
+    saida = []
+    for _, st, c, _ in parear_cameras(cameras_db, relatorio):
+        if st is None or c is None:
+            continue
+        gravador = gravador_do_canal(st, gravadores)
+        if gravador and gravador.get("usuario") and gravador.get("senha"):
+            saida.append((c, gravador["usuario"], gravador["senha"]))
+    return saida
+
+
+def aprender_pastas(cameras_db: list, relatorio: list) -> int:
+    """Grava `pasta_gravacao` nas câmeras da Galeria que casam por nome igual com uma entrada do relatório que
+    informa a pasta. Depois disso o vínculo é pela pasta e a câmera pode ser renomeada sem perder a gravação.
+    Só nome igual: pareamento por IP ou nome parecido poderia gravar o vínculo errado, e ele fica."""
+    gravadas = 0
+    for _, st, c, _ in parear_cameras(cameras_db, relatorio):
+        pasta = ((st or {}).get("pasta_gravacao") or "").strip()
+        if c is None or not pasta or (getattr(c, "pasta_gravacao", None) or "").strip():
+            continue
+        if _norm(c.nome) == _norm(st.get("nome")):
+            c.pasta_gravacao = pasta
+            gravadas += 1
+    return gravadas
+
+
+def com_nomes_da_galeria(relatorio, cameras_db: list):
+    """Cópia do relatório do agente com o nome da Galeria no lugar do nome de cada câmera pareada e, onde o agente
+    informou a pasta de gravação, o mesmo nome também em `pasta_gravacao`. Só para exibição: o vínculo real com a
+    pasta (coluna `pasta_gravacao` da Galeria) e o relatório gravado não mudam."""
+    if not isinstance(relatorio, list) or not cameras_db:
+        return relatorio
+    saida = list(relatorio)
+    for i, st, c, _ in parear_cameras(cameras_db, relatorio):
+        if i is None or c is None or not (c.nome or "").strip():
+            continue
+        novo = {**st, "nome": c.nome}
+        if st.get("pasta_gravacao"):
+            # Caminho completo (lido da planilha) aparece como está; só o nome da subpasta vira o nome da Galeria
+            novo["pasta_gravacao"] = st["pasta_gravacao"] if re.match(r"^([A-Za-z]:[\\/]|\\\\)", st["pasta_gravacao"]) else c.nome
+        saida[i] = novo
+    return saida
+
+
+def parear_cameras(cameras_db: list, relatorio: list) -> List[Tuple[Optional[int], Optional[dict], Optional[object], int]]:
+    """Pareia as câmeras do relatório do agente com as da Galeria.
+
+    Ordem de preferência: nome igual (sem pontuação/maiúsculas), mesmo IP (apenas se houver
+    exatamente 1 câmera não usada com aquele IP) e nome parecido (um contém o outro por
+    palavras inteiras, só com um único candidato e sem IPs diferentes). Nunca por canal.
+    A câmera do relatório sem par vira linha sem registro, num canal livre depois dos já usados na Galeria.
+
+    Retorna (índice no relatório | None, entrada do relatório | None, câmera da Galeria | None, canal)."""
+    entradas = [(i, st) for i, st in enumerate(relatorio or []) if isinstance(st, dict)]
+    par = {}
+    usadas = set()
+
+    def passada(casa):
+        for i, st in entradas:
+            if i in par:
+                continue
+            for c in cameras_db:
+                if c.id not in usadas and casa(st, c):
+                    par[i] = c
+                    usadas.add(c.id)
+                    break
+
+    # Passada 0: pasta de gravação (Digifort). É a chave do vínculo: vale mesmo se a câmera foi renomeada na Galeria
+    passada(lambda st, c: bool(_norm(st.get("pasta_gravacao"))) and _norm(getattr(c, "pasta_gravacao", None)) == _norm(st.get("pasta_gravacao")))
+    passada(lambda st, c: bool(_norm(st.get("nome"))) and _norm(c.nome) == _norm(st.get("nome")))
+
+    # Passada 2: pareamento por IP apenas quando houver EXATAMENTE UMA câmera não usada com aquele IP
+    for i, st in entradas:
+        if i in par:
+            continue
+        ip_st = ip_valido(st.get("ip"))
+        if not ip_st:
+            continue
+        candidatas = [c for c in cameras_db if c.id not in usadas and (c.ip or "").strip() == ip_st]
+        if len(candidatas) == 1:
+            par[i] = candidatas[0]
+            usadas.add(candidatas[0].id)
+
+    for i, st in entradas:
+        if i in par or not _palavras(st.get("nome")):
+            continue
+        ip_st = ip_valido(st.get("ip"))
+        candidatas = [c for c in cameras_db
+                      if c.id not in usadas and _parecidos(st.get("nome"), c.nome)
+                      and not (ip_st and (c.ip or "").strip() and (c.ip or "").strip() != ip_st)]
+        if len(candidatas) == 1:
+            par[i] = candidatas[0]
+            usadas.add(candidatas[0].id)
+
+    ocupados = {c.canal for c in cameras_db}
+    resultado = []
+    for i, st in entradas:
+        c = par.get(i)
+        if c is not None:
+            resultado.append((i, st, c, c.canal))
+            continue
+        canal = canal_int(st.get("canal")) or (i + 1)
+        while canal in ocupados:
+            canal += 1
+        ocupados.add(canal)
+        resultado.append((i, st, None, canal))
+
+    for c in cameras_db:
+        if c.id not in usadas:
+            resultado.append((None, None, c, c.canal))
+    return resultado
+
+
+TIPOS_VMS = ("DIGIFORT", "DEFENSE")  # pareadas por nome/pasta (parear_cameras); NVR tradicional e por canal
+
+
+def status_por_camera(cameras_db: list, tipo: str, relatorio: list) -> dict:
+    """{camera_id: entrada do relatorio ou None} pareando cada camera da Galeria com o `last_recording_status`
+    do agente, pela mesma regra do tipo do equipamento: nome/pasta (`parear_cameras`) para DIGIFORT/DEFENSE,
+    canal fisico para NVR tradicional. Usado pela Galeria e pela notificacao de camera offline."""
+    if (tipo or "NVR").upper() in TIPOS_VMS:
+        pares = parear_cameras(cameras_db, relatorio)
+        return {c.id: st for _, st, c, _ch in pares if c is not None}
+    por_canal = {}
+    for st in (relatorio or []):
+        if isinstance(st, dict):
+            ch = canal_int(st.get("canal"))
+            if ch is not None:
+                por_canal[ch] = st
+    return {c.id: por_canal.get(c.canal) for c in cameras_db}
