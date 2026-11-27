@@ -1,9 +1,11 @@
 // Caracteres do mapa de 15 dias (o último é o dia do relatório): █ gravou (acima de 10%), ▒ parcial (acima de 0% até 10%,
-// Digifort: qualquer registro no dia), ░ não gravou (nenhum registro), · sem histórico (dia anterior à primeira gravação)
+// Digifort: qualquer registro no dia), ░ não gravou (nenhum registro), · sem histórico (dia anterior à primeira gravação),
+// ? não verificado (o NVR não respondeu à busca do dia; agente 1.1.72+). Não é "sem gravação".
 const DIA = {
   "█": { rotulo: "Gravou (mais de 10% do dia)", cor: "var(--ok)" },
   "▒": { rotulo: "Gravou parcialmente (até 10% do dia)", cor: "var(--warn)" },
   "·": { rotulo: "Sem histórico (anterior à primeira gravação)", cor: "rgba(100,116,139,0.55)" },
+  "?": { rotulo: "Não verificado (o NVR não respondeu à busca deste dia)", cor: "rgba(100,116,139,0.35)" },
 } as const;
 const DIA_FALHOU = { rotulo: "Falhou", cor: "var(--err)" };
 
@@ -23,7 +25,7 @@ export default function MiniCalendar({ mapStr, referenceDate }: { mapStr: string
             style={{
               width: 26, height: 18, flexShrink: 0, borderRadius: 2,
               backgroundColor: estado.cor,
-              border: "1px solid rgba(255,255,255,0.15)", color: "white",
+              border: char === "?" ? "1px dashed rgba(148,163,184,0.9)" : "1px solid rgba(255,255,255,0.15)", color: "white",
               display: "flex", cursor: "help", transition: "transform 0.1s",
               alignItems: "center", justifyContent: "center"
             }}

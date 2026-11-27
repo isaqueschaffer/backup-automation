@@ -9,6 +9,14 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-27] — Agente 1.1.72: dia cuja busca de gravação falha fica "não verificado", não "sem gravação"
+
+- **Problema (relato do usuário)**: no NVR 03 da Horizontes (Hikvision DS-7616NI-K2, 192.168.5.4), PLACAS VISITANTES (canal 9) aparecia com gravação só em 25-27/11 e CASA ZANON (canal 10) só em 13-16/11 e "não verificado" hoje; no NVR as duas tinham os 15 dias gravados. Conferido por consulta direta ao NVR (ISAPI `ContentMgmt/search`, um dia por vez): os 15 dias com trechos nos dois canais.
+- **Causa**: quando o NVR não respondia à busca de um dia (tempo esgotado ou erro; o DS-7616NI-K2 fica com 98% de RAM e trava o serviço web logo depois do download da configuração, e a verificação daquela rodada levou ~10 min em vez de ~3), o agente só tratava a falha do **dia de hoje** (`NAO_VERIFICADO` + nova verificação). Nos outros 14 dias a falha virava ░ ("não gravou") no mapa, sem aviso, e os dias gravados ficavam "—".
+- **Correção** (`agent/src/nvr/factory.py`): cada busca que falha (qualquer dia dos 15, ou a dos dias gravados) é guardada; depois de 60 s o agente refaz **só essas buscas**, uma por vez, e repete mais uma vez após 120 s se ainda faltar alguma. O que continuar sem resposta vai no mapa como `?` e em `dias_nao_verificados` (nunca como ░). A nova verificação para depois de 2 câmeras seguidas sem nenhuma resposta (NVR fora do ar não prende o backup por horas). Teste ao vivo no NVR 03 com o código novo: as 14 câmeras iguais ao NVR (PLACAS VISITANTES e CASA ZANON com 15/15).
+- **Painel** (`MiniCalendar.tsx`, `types.ts`): o dia `?` aparece cinza tracejado com "Não verificado (o NVR não respondeu à busca deste dia)", em vez do vermelho de "Falhou".
+- **Testes**: `agent/tests/test_dias_nao_verificados.py` (dia antigo refeito, dia que nunca responde, hoje sem resposta, dias gravados refeitos, NVR mudo encerra a rodada). Suíte do agente: 389 OK.
+
 ### [2026-11-27] — Link público do dashboard ocupa a tela inteira
 
 - **Pedido do usuário**: o link compartilhado do Dashboard por Cliente ficava limitado a 1600 px no centro, com margem dos lados; os componentes deviam ocupar a tela toda, para ficarem mais folgados e caberem mais.

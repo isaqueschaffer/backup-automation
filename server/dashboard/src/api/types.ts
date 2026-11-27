@@ -10,6 +10,8 @@ export interface CameraRecStatus {
   mapa?: string;
   total_dias?: number;
   dias_gravados?: number | null;
+  // Dias (AAAA-MM-DD) cuja busca o NVR não respondeu; no mapa aparecem como "?" (agente 1.1.72+)
+  dias_nao_verificados?: string[];
   // Digifort: pasta de gravação usada pelo agente para a câmera (null = nenhuma pasta com o nome da câmera)
   pasta_gravacao?: string | null;
 }
