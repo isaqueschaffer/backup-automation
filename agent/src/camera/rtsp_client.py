@@ -555,10 +555,10 @@ def capture_night_image(ip: str, usuario: str, senha_pura: str, canal: int, date
 # Playback: rtsp://.../cam/playback?channel=N&subtype=0&starttime=AAAA_MM_DD_HH_MM_SS&endtime=...
 # no horário do relógio do NVR; os trechos vêm da busca mediaFileFind.cgi.
 
-def _frame_intelbras(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho, timeout=25):
+def _frame_intelbras(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho, timeout=25, janela=10):
     """Lê um frame do playback Intelbras/Dahua em `alvo` (horário exibido no NVR). Retorna (jpeg|None, stderr)."""
     from datetime import timedelta
-    fim = max(alvo + timedelta(seconds=2), min(alvo + timedelta(seconds=10), fim_trecho))
+    fim = max(alvo + timedelta(seconds=2), min(alvo + timedelta(seconds=janela), fim_trecho))
     rtsp_url = (
         f"rtsp://{usuario}:{senha_enc}@{ip}:554/cam/playback?channel={canal}&subtype=0"
         f"&starttime={alvo:%Y_%m_%d_%H_%M_%S}&endtime={fim:%Y_%m_%d_%H_%M_%S}"
@@ -669,44 +669,121 @@ def _resultado(r: dict, origem: str) -> Dict[str, Any]:
     return {"success": False, "error_message": r.get("motivo") or "Falha ao capturar da gravação."}
 
 
-def _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho):
+def _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, fim_trecho, timeout=25, janela=10):
     """Lê um frame do playback Hikvision em `alvo` (horário exibido no NVR). Retorna (jpeg|None, stderr)."""
     from datetime import timedelta
-    fim = max(alvo, min(alvo + timedelta(seconds=10), fim_trecho))
+    fim = max(alvo, min(alvo + timedelta(seconds=janela), fim_trecho))
     rtsp_url = (
         f"rtsp://{usuario}:{senha_enc}@{ip}:554/Streaming/tracks/{canal}01"
         f"?starttime={alvo:%Y%m%dT%H%M%S}Z&endtime={fim:%Y%m%dT%H%M%S}Z"
     )
     cmd = [ffmpeg_exe, "-y", "-rtsp_transport", "tcp", "-skip_frame", "nokey",
            "-i", rtsp_url, "-vframes", "1", "-update", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"]
-    result = subprocess.run(cmd, capture_output=True, timeout=25)
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if result.returncode == 0 and len(result.stdout) > 1000:
         return result.stdout, ""
     return None, _mascarar(result.stderr.decode('utf-8', errors='ignore'))
 
 
-def _gravacao_recente_hikvision(task, prazo) -> dict:
-    """Frame do fim do trecho gravado mais recente, buscando em janelas de 6h do agora para trás."""
+# Captura da gravação pedida pelo painel (modo "referência" com a câmera offline). Antes eram só os 2 trechos mais
+# recentes, lidos 5 s antes do fim, com 25 s cada: no NVR 02 do Horizontes (canal 24, câmera caindo em 27/11/2026)
+# os dois estouraram o tempo e o painel mostrava "Tempo esgotado ao ler o vídeo (25s)". O fim de um trecho de câmera
+# que está caindo costuma ser o pedaço que o NVR não consegue entregar, e câmera com codec inteligente
+# (H.264+/H.265+) manda quadro-chave a cada vários segundos: com -skip_frame nokey, 5 s sem quadro-chave deixam o
+# ffmpeg esperando. Agora são até 5 tentativas (15 s cada), de trechos diferentes, com 20 s de vídeo por tentativa,
+# pulando para o meio do trecho (e para trechos mais antigos) quando o fim não vem.
+TENTATIVAS_GRAVACAO = 5
+TIMEOUT_GRAVACAO_S = 15
+JANELA_GRAVACAO_S = 20
+
+
+def _alvos_trechos(trechos, fim_janela):
+    """Pontos para ler um quadro, do trecho mais recente para trás: (alvo, fim do trecho). Cada trecho rende um alvo
+    perto do fim (30 s antes) e, se for longo, outro no meio; trechos com menos de 3 s ficam de fora."""
+    from datetime import timedelta
+    alvos = []
+    for st, en in sorted(trechos, key=lambda t: t[1], reverse=True):
+        en = min(en, fim_janela)
+        if (en - st).total_seconds() < 3:
+            continue
+        perto_fim = max(st + timedelta(seconds=1), en - timedelta(seconds=JANELA_GRAVACAO_S + 10))
+        alvos.append((perto_fim, en))
+        meio = st + (en - st) / 2
+        if (perto_fim - meio).total_seconds() > 60:
+            alvos.append((meio.replace(microsecond=0), en))
+    return alvos
+
+
+def _gravacao_recente(task, prazo, buscar, ler_frame, rotulo) -> dict:
+    """Frame do trecho gravado mais recente que o NVR entregar, buscando em janelas de 6h do agora para trás.
+    `buscar(inicio, fim)` devolve [(datetime, datetime)] ou None; `ler_frame(alvo, fim_trecho)` devolve (jpeg, stderr)."""
     from datetime import datetime, timedelta
+
+    canal = int(task["canal"])
+    r = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
+    tentativas = tempo_esgotado = 0
+    mais_recente = None
+
+    fim_janela = datetime.now().replace(microsecond=0)
+    limite = fim_janela - timedelta(days=DIAS_BUSCA)
+    while fim_janela > limite and tentativas < TENTATIVAS_GRAVACAO:
+        if time.monotonic() > prazo:
+            break
+        inicio_janela = max(limite, fim_janela - timedelta(hours=6))
+        trechos = buscar(inicio_janela, fim_janela)
+        if trechos is None:
+            if tentativas == 0:
+                r["motivo"] = "NVR não respondeu à busca de gravações"
+                return r
+            break
+        for alvo, en in _alvos_trechos(trechos, fim_janela):
+            if tentativas >= TENTATIVAS_GRAVACAO or time.monotonic() + 3 > prazo:
+                break
+            mais_recente = mais_recente or alvo
+            tentativas += 1
+            try:
+                jpeg, stderr = ler_frame(alvo, en)
+            except subprocess.TimeoutExpired:
+                jpeg, stderr = None, "TIMEOUT"
+            if jpeg:
+                return {"image": base64.b64encode(jpeg).decode('utf-8'), "horario": alvo.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "status": "OK", "motivo": None}
+            if stderr == "TIMEOUT":
+                tempo_esgotado += 1
+            else:
+                r["motivo"] = _motivo_ffmpeg(stderr)
+                if r["motivo"].startswith("Usuário/senha"):
+                    return r  # insistir pode bloquear o usuário no NVR
+            logging.warning(f"Captura da gravação {rotulo} canal {canal} ({alvo}): {(stderr or '')[-300:]}")
+        fim_janela = inicio_janela
+
+    if tentativas == 0:
+        if time.monotonic() > prazo:
+            r["motivo"] = "Tempo limite da busca na gravação esgotado"
+            return r
+        r["status"] = "SEM_GRAVACAO"
+        r["motivo"] = f"Sem gravação nos últimos {DIAS_BUSCA} dias"
+        return r
+    if tempo_esgotado == tentativas:
+        r["motivo"] = (f"o NVR tem gravação (a mais recente perto de {mais_recente:%d/%m %H:%M}), mas não entregou "
+                       f"o vídeo em {tentativas} tentativa{'s' if tentativas > 1 else ''} (tempo esgotado)")
+    return r
+
+
+def _gravacao_recente_hikvision(task, prazo) -> dict:
+    """Frame da gravação mais recente de um NVR Hikvision (ver _gravacao_recente)."""
+    from datetime import datetime
     from src.nvr.hikvision.recordings import buscar_trechos
 
     ip, usuario, senha = task.get("ip", "").strip(), task.get("username", "admin"), task.get("password", "")
     canal = int(task["canal"])
-    r = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
     ffmpeg_exe = _ffmpeg_exe()
     senha_enc = urllib.parse.quote(senha, safe='')
 
-    fim_janela = datetime.now().replace(microsecond=0)
-    limite = fim_janela - timedelta(days=DIAS_BUSCA)
-    while fim_janela > limite:
-        if time.monotonic() > prazo:
-            r["motivo"] = r["motivo"] or "Tempo limite da busca na gravação esgotado"
-            return r
-        inicio_janela = max(limite, fim_janela - timedelta(hours=6))
-        trechos = buscar_trechos(ip, usuario, senha, canal, inicio_janela, fim_janela, max_results=100)
+    def buscar(inicio, fim):
+        trechos = buscar_trechos(ip, usuario, senha, canal, inicio, fim, max_results=100)
         if trechos is None:
-            r["motivo"] = "NVR não respondeu à busca de gravações"
-            return r
+            return None
         validos = []
         for st, en in trechos:
             try:
@@ -714,70 +791,32 @@ def _gravacao_recente_hikvision(task, prazo) -> dict:
                                 datetime.strptime(en.replace("Z", "")[:19], "%Y-%m-%dT%H:%M:%S")))
             except ValueError:
                 continue
-        for st, en in sorted(validos, key=lambda t: t[1], reverse=True)[:2]:
-            if time.monotonic() > prazo:
-                break
-            en = min(en, fim_janela)
-            alvo = max(st + timedelta(seconds=1), en - timedelta(seconds=5))
-            try:
-                jpeg, stderr = _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, en)
-            except subprocess.TimeoutExpired:
-                jpeg, stderr = None, "TIMEOUT_25S"
-            if jpeg:
-                return {"image": base64.b64encode(jpeg).decode('utf-8'), "horario": alvo.strftime("%Y-%m-%dT%H:%M:%S"),
-                        "status": "OK", "motivo": None}
-            r["motivo"] = _motivo_ffmpeg(stderr)
-            logging.warning(f"Captura da gravação canal {canal} ({alvo}): {stderr[-300:]}")
-        if validos:
-            return r  # havia gravação, mas o NVR não entregou o vídeo
-        fim_janela = inicio_janela
-    r["status"] = "SEM_GRAVACAO"
-    r["motivo"] = f"Sem gravação nos últimos {DIAS_BUSCA} dias"
-    return r
+        return validos
+
+    def ler(alvo, en):
+        return _frame_hikvision(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, en,
+                                timeout=TIMEOUT_GRAVACAO_S, janela=JANELA_GRAVACAO_S)
+
+    return _gravacao_recente(task, prazo, buscar, ler, "Hikvision")
 
 
 def _gravacao_recente_intelbras(task, prazo) -> dict:
-    """Frame do fim do trecho gravado mais recente de um NVR Intelbras, em janelas de 6h do agora para trás."""
-    from datetime import datetime, timedelta
+    """Frame da gravação mais recente de um NVR Intelbras (ver _gravacao_recente)."""
     from src.nvr.intelbras.recordings import buscar_trechos_intelbras
 
     ip, usuario, senha = task.get("ip", "").strip(), task.get("username", "admin"), task.get("password", "")
     canal = int(task["canal"])
-    r = {"image": None, "horario": None, "status": "FALHA", "motivo": None}
     ffmpeg_exe = _ffmpeg_exe()
     senha_enc = urllib.parse.quote(senha, safe='')
 
-    fim_janela = datetime.now().replace(microsecond=0)
-    limite = fim_janela - timedelta(days=DIAS_BUSCA)
-    while fim_janela > limite:
-        if time.monotonic() > prazo:
-            r["motivo"] = r["motivo"] or "Tempo limite da busca na gravação esgotado"
-            return r
-        inicio_janela = max(limite, fim_janela - timedelta(hours=6))
-        trechos = buscar_trechos_intelbras(ip, usuario, senha, canal, inicio_janela, fim_janela, max_results=100)
-        if trechos is None:
-            r["motivo"] = "NVR não respondeu à busca de gravações"
-            return r
-        for st, en in sorted(trechos, key=lambda t: t[1], reverse=True)[:2]:
-            if time.monotonic() > prazo:
-                break
-            en = min(en, fim_janela)
-            alvo = max(st + timedelta(seconds=1), en - timedelta(seconds=5))
-            try:
-                jpeg, stderr = _frame_intelbras(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, en)
-            except subprocess.TimeoutExpired:
-                jpeg, stderr = None, "TIMEOUT_25S"
-            if jpeg:
-                return {"image": base64.b64encode(jpeg).decode('utf-8'), "horario": alvo.strftime("%Y-%m-%dT%H:%M:%S"),
-                        "status": "OK", "motivo": None}
-            r["motivo"] = _motivo_ffmpeg(stderr)
-            logging.warning(f"Captura da gravação Intelbras canal {canal} ({alvo}): {stderr[-300:]}")
-        if trechos:
-            return r  # havia gravação, mas o NVR não entregou o vídeo
-        fim_janela = inicio_janela
-    r["status"] = "SEM_GRAVACAO"
-    r["motivo"] = f"Sem gravação nos últimos {DIAS_BUSCA} dias"
-    return r
+    def buscar(inicio, fim):
+        return buscar_trechos_intelbras(ip, usuario, senha, canal, inicio, fim, max_results=100)
+
+    def ler(alvo, en):
+        return _frame_intelbras(ffmpeg_exe, ip, usuario, senha_enc, canal, alvo, en,
+                                timeout=TIMEOUT_GRAVACAO_S, janela=JANELA_GRAVACAO_S)
+
+    return _gravacao_recente(task, prazo, buscar, ler, "Intelbras")
 
 
 def _gravacao_recente_motorola(task, sessao, prazo) -> dict:

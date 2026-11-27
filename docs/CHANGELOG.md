@@ -9,6 +9,12 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-27] — Agente 1.1.71: foto da gravação insiste em outros trechos quando o NVR não entrega o vídeo
+
+- **Problema**: NVR 02 do Horizontes (192.168.5.3, Hikvision), canal 24 "PORTAO CAMPO", câmera offline desde 27/11 09:19. O teste de imagem (modo referência) mostrou "Ao vivo: câmera sem vídeo. Gravação: Tempo esgotado ao ler o vídeo (25s)". Pelo log do agente, a busca achou gravação de hoje (05:51 e 03:45), mas o agente só tentava os 2 trechos mais recentes, 5 s antes do fim de cada um, com 25 s de espera: os dois estouraram o tempo e ele desistiu. O fim de um trecho de câmera que está caindo costuma ser justamente o pedaço que o NVR não entrega, e com codec inteligente (H.264+/H.265+) o quadro-chave pode demorar mais que os 5 s da janela (o ffmpeg usa `-skip_frame nokey` e fica esperando).
+- **Correção** (`agent/src/camera/rtsp_client.py`): Hikvision e Intelbras usam a mesma rotina `_gravacao_recente`, que faz até 5 tentativas de 15 s em pontos diferentes (30 s antes do fim de cada trecho e, nos trechos longos, também no meio), seguindo para trechos e janelas de 6 h mais antigos quando os recentes não vêm, sempre dentro do prazo de 100 s. Cada leitura pede 20 s de vídeo em vez de 10. Trechos com menos de 3 s ficam de fora, e senha recusada para na hora. Quando todas as tentativas estouram o tempo, a mensagem diz que há gravação e quando é a mais recente ("o NVR tem gravação (a mais recente perto de 27/11 05:21), mas não entregou o vídeo em 5 tentativas (tempo esgotado)"), em vez de só "Tempo esgotado".
+- **Testes**: `agent/tests/test_gravacao_recente.py` (novo); suíte do agente com 383 testes OK.
+
 ### [2026-11-26] — Painel: detalhe da máquina com a configuração primeiro
 
 - **Pedido do usuário**: no detalhe da máquina, os cartões de Configuração da Máquina, Status do Agente e Saúde do Servidor voltam a aparecer logo abaixo do cabeçalho, antes de Equipamentos (corrige a ordem da entrada "detalhe da máquina com equipamentos primeiro", `ab163d1`).
