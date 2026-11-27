@@ -1,12 +1,13 @@
 import { Network, Phone, RadioTower, Video, Wifi, WifiOff } from "lucide-react";
 
 // Ordem em que os grupos aparecem na tela; tipos fora da lista vão ao final
-export const EQ_TIPO_ORDEM = ["NVR", "DIGIFORT", "DEFENSE", "OLT", "ONU", "MIKROTIK", "ANTENA", "PABX", "MIXED"];
+export const EQ_TIPO_ORDEM = ["NVR", "DIGIFORT", "DEFENSE", "HIKCENTRAL", "OLT", "ONU", "MIKROTIK", "ANTENA", "PABX", "MIXED"];
 
 export const EQ_TIPO_ROTULO: Record<string, string> = {
   NVR: "NVR / DVR",
   DIGIFORT: "Digifort",
   DEFENSE: "Defense IA",
+  HIKCENTRAL: "HikCentral",
   OLT: "OLT",
   ONU: "ONU",
   MIKROTIK: "Mikrotik",
@@ -29,6 +30,7 @@ export function eqIcone(tipo: string, size = 18): React.ReactNode {
     ANTENA: <RadioTower size={size} />,
     DIGIFORT: <Video size={size} />,
     DEFENSE: <Video size={size} />,
+    HIKCENTRAL: <Video size={size} />,
   };
   return m[tipo] || <Video size={size} />;
 }
@@ -43,6 +45,7 @@ export function eqCor(tipo: string): string {
     ANTENA: "#06b6d4",
     DIGIFORT: "#f43f5e",
     DEFENSE: "#ec4899",
+    HIKCENTRAL: "#ef4444",
   };
   return m[tipo] || "var(--text-muted)";
 }

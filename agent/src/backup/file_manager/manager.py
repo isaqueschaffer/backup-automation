@@ -6,7 +6,7 @@ from typing import Dict, Any
 
 from src.backup.file_manager.models import BackupStatus, BackupGroup
 from src.backup.file_manager.utils import get_agent_date, sanitize_name
-from src.backup.file_manager.parsers import BaseParser, UNM2000Parser, HuaweiParser
+from src.backup.file_manager.parsers import BaseParser, UNM2000Parser, HuaweiParser, HikCentralParser
 from src.backup.file_manager.validators import Validator
 from src.backup.file_manager.copier import SafeCopier
 
@@ -263,7 +263,7 @@ class FileManager:
 
         # 3. Verifica duplicidade (já foi copiado?)
         # O nome do arquivo destino deve conter a identificação do equipamento
-        prefixo = "OLT_" + ("HUAWEI_" if is_huawei else "UNM2000_")
+        prefixo = "HIKCENTRAL_" if tipo_parser.upper() == "HIKCENTRAL" else "OLT_" + ("HUAWEI_" if is_huawei else "UNM2000_")
         arquivos_para_copiar = []
         ja_processado = True
         
@@ -492,4 +492,6 @@ class FileManager:
             return UNM2000Parser()
         elif tipo_parser.upper() == "HUAWEI":
             return HuaweiParser()
+        elif tipo_parser.upper() == "HIKCENTRAL":
+            return HikCentralParser()
         return None

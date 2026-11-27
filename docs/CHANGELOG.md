@@ -9,6 +9,30 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-27] — Merge do ramo `helena` + agente 1.1.73
+
+- **Entrou**: tipo novo **HIKCENTRAL** (backup do HikCentral Professional/VSM pela pasta `VSM_V<versão>_BACKUP_<AAAAMMDDHHMMSS>_<n>`, local, SMB ou SFTP, com teste de conexão e formulário no painel) e **novas tentativas do relatório e do ZIP** no fim do backup quando o pedido com certeza não chegou ao servidor (DNS, conexão recusada, tempo de conexão, 502/503), detalhados nas duas entradas abaixo.
+- **Auditoria**: sem data com fuso, sem segredo (o `hikcentral` em usuário/senha é o marcador fixo de equipamento por pasta, como no Digifort), sem rota nova em `routers` (só `TIPOS_EQUIPAMENTO`), sem compose/nginx/models/requirements. Nada bloqueado. Conflito só no changelog (mantidos os dois lados).
+- Versão 1.1.73 (inclui a 1.1.72, verificação de gravação com dias não verificados).
+
+### [2026-11-27] — Novo tipo de equipamento HIKCENTRAL (backup do HikCentral pela pasta)
+
+- **Pedido**: fazer o backup do HikCentral (VSM) como o do UNM2000, lendo direto da pasta (ex.: `D:\BACKUP HIKCENTRAL`), cujo conteúdo são pastas `VSM_V2.6.0.0_BACKUP_20261127123703_42904` (versão, data/hora `AAAAMMDDHHMMSS`, número).
+- **Agente**: `HikCentralParser` (`file_manager/parsers.py`) acha a pasta mais recente pelo nome (também aceita arquivo compactado com o mesmo nome) em pasta local, SMB ou SFTP; a pasta é copiada inteira, com o nome original (reaproveita a cópia de diretório do Digifort). `parse_backup_date` entende a data de 14 dígitos. `processar_hikcentral` em `backup_job.py`, também no túnel do Mikrotik (`tunel.py`) e no teste de conexão. Mesmas regras de validade do UNM2000: backup do dia ou das últimas 24 h; senão `BACKUP_ANTIGO`.
+- **API e painel**: `HIKCENTRAL` em `TIPOS_EQUIPAMENTO` e no e-mail; no painel, tipo na lista, ícone/cor e o campo "Pasta de backup do HikCentral" (com acesso remoto SMB no agente do Mikrotik).
+- **Testes**: `agent/tests/test_hikcentral.py` (9 casos); suíte do agente: 379 OK.
+- **Pendente**: versão do agente não subida (só vale com release e cadastro); deploy do painel/servidor pelo `server/deploy_producao.ps1`. Se o HikCentral gerar backups com menos frequência que a cada 24 h, a regra de data precisa de janela maior.
+
+---
+
+### [2026-11-26] — Relatório e ZIP do backup com novas tentativas quando o servidor não foi alcançado
+
+- **Origem**: na Horizontes, o backup manual de 26/11 às 12:10 (6 equipamentos, todos OK) terminou às 12:16:49, mas o `POST /agent/backup/report` falhou com `NameResolutionError` (queda de DNS da máquina de menos de 1 minuto: às 12:20 tudo normal). O `run_backup` apagava `tmp_backup_work`/`tmp_backup_final` sem tentar de novo: a rodada inteira se perdeu, sem registro nem e-mail. As linhas `[VSOL] Nenhum cookie retornado pela OLT` que seguiam a cada 10 min são da coleta de status das ONUs (`vsol_status`), não do backup, e são normais (essa OLT não usa cookie).
+- **Correção**: `agent/src/application/api_client.py` ganhou `_com_novas_tentativas_servidor`, usado por `post_report` e `upload_zip`: repete após 30 s, 1, 2 e 4 min (5 tentativas, ~7,5 min) **só** quando o pedido com certeza não chegou ao servidor (`_nao_chegou_ao_servidor`: DNS, conexão recusada, tempo de conexão esgotado) ou quando o proxy respondeu 502/503. Tempo de leitura esgotado, conexão caída no meio, 500/504 e 4xx não repetem: o servidor pode ter gravado o relatório, e repetir criaria backup duplicado e avançaria a fila do Cliente duas vezes. O `upload_zip` reabre o arquivo a cada tentativa. Vale para o Windows e para o túnel do Mikrotik (`tunel.py` usa o mesmo `post_report`); o `upload_zip_stream` não repete (o iterador não volta ao início).
+- **Fora do escopo (decisão do usuário)**: guardar a rodada no disco para reenviar no ciclo seguinte. Exigiria mudar o servidor (id da rodada contra duplicata, hora original, não avançar a fila nem sobrescrever câmeras com dados velhos).
+- **Folga**: as esperas ficam muito abaixo do `BACKUP_TRAVADO_MIN` (120 min) do servidor.
+- **Testes**: `agent/tests/test_novas_tentativas_servidor.py` (7). Suíte do agente 370 OK.
+- **Versão**: muda `agent/`; precisa de versão nova do agente no merge do dono.
 ### [2026-11-27] — Agente 1.1.72: dia cuja busca de gravação falha fica "não verificado", não "sem gravação"
 
 - **Problema (relato do usuário)**: no NVR 03 da Horizontes (Hikvision DS-7616NI-K2, 192.168.5.4), PLACAS VISITANTES (canal 9) aparecia com gravação só em 25-27/11 e CASA ZANON (canal 10) só em 13-16/11 e "não verificado" hoje; no NVR as duas tinham os 15 dias gravados. Conferido por consulta direta ao NVR (ISAPI `ContentMgmt/search`, um dia por vez): os 15 dias com trechos nos dois canais.

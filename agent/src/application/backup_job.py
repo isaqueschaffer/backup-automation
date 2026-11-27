@@ -261,6 +261,18 @@ def processar_olt(
     }
 
 
+def processar_hikcentral(equipamento: dict, pasta_data: Path, conf: dict = None, trigger: str = "scheduled",
+                         somente_preparar: bool = False) -> dict:
+    """HikCentral (VSM): copia a pasta de backup mais recente (VSM_V<versão>_BACKUP_<data>_<n>) de `pasta_origem`,
+    local, SMB ou SFTP, como o UNM2000 e o Digifort. `somente_preparar`: túnel do Mikrotik (nada em disco)."""
+    from src.backup.file_manager.manager import FileManager
+    check_hash = parse_config_extra(equipamento).get("validar_hash", True)
+    if isinstance(check_hash, str):
+        check_hash = check_hash.lower() == "true"
+    return FileManager(check_hash=check_hash).process_equipment(
+        equipamento, pasta_data, "HIKCENTRAL", conf, somente_preparar=somente_preparar)
+
+
 def processar_pabx(equipamento: dict, pasta_data: Path) -> dict:
     pasta_data.mkdir(parents=True, exist_ok=True)
     return realizar_backup_issabel(equipamento, pasta_data)
@@ -320,6 +332,9 @@ def processar_equipamento(equipamento: dict, zip_password: str, pasta_data: Path
 
     if tipo == "OLT" or tipo == "DIGIFORT":
         return processar_olt(equipamento, pasta_data, conf, trigger)
+
+    if tipo == "HIKCENTRAL":
+        return processar_hikcentral(equipamento, pasta_data, conf, trigger)
 
     if tipo == "PABX":
         return processar_pabx(equipamento, pasta_data)

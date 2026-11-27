@@ -19,9 +19,9 @@ export const OVERDUE_FAST_POLL_MS = 30 * 1000;
 export const serverUtcMs = (iso: string) =>
   new Date(/Z|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + "Z").getTime();
 
-export const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "ANTENA", "DIGIFORT", "DEFENSE"];
+export const TIPOS: TipoEquipamento[] = ["NVR", "OLT", "PABX", "MIKROTIK", "ANTENA", "DIGIFORT", "DEFENSE", "HIKCENTRAL"];
 export const TIPO_ICONE_EMOJI: Record<string, string> = {
-  NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", ANTENA: "📡", DIGIFORT: "🖥️", DEFENSE: "🛡️",
+  NVR: "📹", OLT: "🔌", PABX: "📞", MIKROTIK: "🌐", ANTENA: "📡", DIGIFORT: "🖥️", DEFENSE: "🛡️", HIKCENTRAL: "🗄️",
 };
 
 // Nome seguro para arquivo (espaços -> "_")
@@ -61,10 +61,10 @@ export function eqToForm(eq: NVR): EqForm {
   return {
     tipo: eq.tipo,
     name: eq.name,
-    ip: eq.tipo === "DIGIFORT" || (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000") ? "" : eq.ip,
+    ip: eq.tipo === "DIGIFORT" || eq.tipo === "HIKCENTRAL" || (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000") ? "" : eq.ip,
     username: eq.tipo === "DEFENSE" ? (eq.username || "system") : (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.username === "unm2000" ? "" : eq.username),
     password: "",
-    pasta_origem: cfg?.pasta_origem || (eq.tipo === "DIGIFORT" && eq.ip !== "127.0.0.1" ? eq.ip : (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.ip !== "127.0.0.1" ? eq.ip : "")),
+    pasta_origem: cfg?.pasta_origem || ((eq.tipo === "DIGIFORT" || eq.tipo === "HIKCENTRAL") && eq.ip !== "127.0.0.1" ? eq.ip : (eq.tipo === "OLT" && cfg?.fabricante_olt === "UNM2000" && eq.ip !== "127.0.0.1" ? eq.ip : "")),
     fabricante_olt: cfg?.fabricante_olt || "UNM2000",
     caminho_csv: cfg?.caminho_csv || "",
     caminho_log_csv: cfg?.caminho_log_csv || "",
@@ -175,6 +175,15 @@ export function buildEqPayload(
     const erroAcesso = aplicarAcessoRemoto(cfg, eqForm, agenteTipo, !!editingEqId);
     if (erroAcesso) return { error: erroAcesso };
     payload.config_extra = cfg;
+  } else if (eqForm.tipo === "HIKCENTRAL") {
+    if (!eqForm.pasta_origem.trim()) return { error: "Para HIKCENTRAL, informe a pasta de backup." };
+    payload.ip = "127.0.0.1";
+    payload.username = "hikcentral";
+    payload.password = "hikcentral";
+    const cfgHik: EquipamentoConfig = { pasta_origem: eqForm.pasta_origem.trim() };
+    const erroAcessoHik = aplicarAcessoRemoto(cfgHik, eqForm, agenteTipo, !!editingEqId);
+    if (erroAcessoHik) return { error: erroAcessoHik };
+    payload.config_extra = cfgHik;
   } else if (eqForm.tipo === "OLT") {
     if (!eqForm.fabricante_olt) return { error: "Selecione o sistema da OLT." };
     const cfg: EquipamentoConfig = { fabricante_olt: eqForm.fabricante_olt };

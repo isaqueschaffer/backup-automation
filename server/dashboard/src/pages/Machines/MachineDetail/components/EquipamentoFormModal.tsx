@@ -269,6 +269,20 @@ export default function EquipamentoFormModal({ machineId, agenteTipo, eqForm, se
           <PastaGravacoesCampo eqForm={eqForm} setEqForm={setEqForm} />
         </>
       )}
+      {eqForm.tipo === "HIKCENTRAL" && (
+        <>
+          <div className="form-group">
+            <label className="form-label">Pasta de backup do HikCentral *</label>
+            <input className="form-input" type="text"
+              placeholder="D:\BACKUP HIKCENTRAL"
+              value={eqForm.pasta_origem} onChange={e => setEqForm({ ...eqForm, pasta_origem: e.target.value })} />
+            <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+              Pasta onde o HikCentral salva os backups (cada um numa subpasta VSM_V..._BACKUP_AAAAMMDDHHMMSS_n). O agente copia a mais recente.
+            </span>
+          </div>
+          {agenteTipo === "MIKROTIK" && <SmbConfigSection eqForm={eqForm} setEqForm={setEqForm} />}
+        </>
+      )}
       {eqForm.tipo === "DEFENSE" && (
         <>
           <div className="form-group">

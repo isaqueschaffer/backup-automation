@@ -135,6 +135,70 @@ def _post(conf: dict, caminho: str, **kwargs) -> requests.Response:
     return _requisitar(conf, "POST", caminho, **kwargs)
 
 
+# ── Novas tentativas no fim do backup (26/11/2026) ─────────────────────────────────────────────────────────────
+# Na Horizontes, uma queda de DNS de menos de 1 minuto bem no fim do backup fez o relatório falhar e o agente
+# descartou a rodada inteira (6 equipamentos OK). O relatório e o ZIP agora são tentados de novo, mas SÓ quando o
+# pedido com certeza não chegou ao servidor: DNS, conexão recusada, tempo de conexão esgotado, ou 502/503 do proxy
+# (Dokploy/Traefik com o backend fora). Um tempo de leitura esgotado ou uma conexão que caiu no meio não entram:
+# o servidor pode ter gravado o relatório, e repetir criaria um backup duplicado e avançaria a fila do Cliente duas
+# vezes.
+ESPERAS_NOVA_TENTATIVA_S = (30, 60, 120, 240)  # ~7,5 min no total, além das 5 tentativas
+_STATUS_SEM_PROCESSAR = (502, 503)
+
+
+def _nao_chegou_ao_servidor(exc: BaseException) -> bool:
+    """True quando o erro é anterior ao envio do pedido (nada foi processado no servidor). Percorre a cadeia de
+    exceções (requests -> urllib3 MaxRetryError -> NewConnectionError/NameResolutionError)."""
+    from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+
+    if isinstance(exc, requests.exceptions.ConnectTimeout):
+        return True
+    if not isinstance(exc, requests.exceptions.ConnectionError) or isinstance(exc, requests.exceptions.SSLError):
+        return False
+    vistos = set()
+    pendentes = [exc]
+    while pendentes:
+        e = pendentes.pop()
+        if e is None or id(e) in vistos:
+            continue
+        vistos.add(id(e))
+        # NameResolutionError (urllib3 2.x) é subclasse de NewConnectionError
+        if isinstance(e, (NewConnectionError, ConnectTimeoutError)):
+            return True
+        pendentes.extend([getattr(e, "__cause__", None), getattr(e, "__context__", None),
+                          getattr(e, "reason", None)])
+        pendentes.extend(a for a in getattr(e, "args", ()) if isinstance(a, BaseException))
+    texto = str(exc)
+    return any(t in texto for t in ("NameResolutionError", "NewConnectionError", "getaddrinfo failed",
+                                    "Failed to resolve"))
+
+
+def _com_novas_tentativas_servidor(fazer, descricao: str, esperas=None) -> requests.Response:
+    """Roda `fazer()` (uma chamada ao servidor que devolve a Response) e repete após cada espera de
+    `ESPERAS_NOVA_TENTATIVA_S` enquanto o pedido não chegou ao servidor. Esgotadas as tentativas, levanta o último
+    erro ou devolve a última resposta (502/503), para quem chamou tratar como antes."""
+    import time
+
+    esperas = ESPERAS_NOVA_TENTATIVA_S if esperas is None else esperas
+    for tentativa in range(len(esperas) + 1):
+        ultima = tentativa == len(esperas)
+        try:
+            r = fazer()
+        except Exception as e:
+            if ultima or not _nao_chegou_ao_servidor(e):
+                raise
+            motivo = f"{type(e).__name__}: servidor inacessível"
+        else:
+            if ultima or r.status_code not in _STATUS_SEM_PROCESSAR:
+                return r
+            motivo = f"HTTP {r.status_code}"
+        espera = esperas[tentativa]
+        logging.warning(f"  {descricao}: {motivo}. Nova tentativa em {espera}s "
+                        f"({tentativa + 2}/{len(esperas) + 1}).")
+        time.sleep(espera)
+    raise AssertionError("inalcançável")
+
+
 def _get(conf: dict, caminho: str, **kwargs) -> requests.Response:
     return _requisitar(conf, "GET", caminho, **kwargs)
 
@@ -407,7 +471,10 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
         "trigger": trigger,
     }
     try:
-        r = _post(conf, "/api/v1/agent/backup/report", json=payload, timeout=30)
+        r = _com_novas_tentativas_servidor(
+            lambda: _post(conf, "/api/v1/agent/backup/report", json=payload, timeout=30),
+            "Envio do relatorio",
+        )
         r.raise_for_status()
         try:
             resp_data = r.json()
@@ -423,16 +490,20 @@ def post_report(conf: dict, started_at: datetime, finished_at: datetime,
         return None
 
 def upload_zip(conf: dict, backup_id: str, zip_path: Path, device_type: str = "NVR") -> bool:
-    try:
+    def _enviar():
         with open(zip_path, "rb") as f:
             # O requests lê o arquivo ao montar o corpo: se a 1ª tentativa cair no fallback de TLS, volta ao início
-            r = _post(
+            return _post(
                 conf, f"/api/v1/agent/backup/upload/{backup_id}",
                 params={"device_type": device_type},
                 files={"file": (zip_path.name, f, "application/zip")},
                 timeout=TIMEOUT_SERVER,
                 ao_repetir=lambda: f.seek(0),
             )
+
+    try:
+        # Cada nova tentativa reabre o arquivo (o corpo é lido do início)
+        r = _com_novas_tentativas_servidor(_enviar, f"Envio do ZIP ({device_type})")
         r.raise_for_status()
         try:
             resp_json = r.json()

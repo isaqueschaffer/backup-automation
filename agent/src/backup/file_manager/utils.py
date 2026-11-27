@@ -36,6 +36,13 @@ def parse_backup_date(data_str: str) -> datetime:
         except ValueError:
             pass
 
+    # Tenta padrão HikCentral (ex: 20261127123703 = 27/11/2026 12:37:03)
+    if re.match(r'^\d{14}$', data_str):
+        try:
+            return datetime.strptime(data_str, "%Y%m%d%H%M%S")
+        except ValueError:
+            pass
+
     # Tenta padrão Huawei (ex: 2026-09-17-033011)
     padrao_huawei = r'^(\d{4}-\d{2}-\d{2})-(\d{6})$'
     res_huawei = re.match(padrao_huawei, data_str)

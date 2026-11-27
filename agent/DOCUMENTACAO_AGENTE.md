@@ -160,6 +160,7 @@ arquivo (`BACKUP_ANTIGO`, `BACKUP_INCOMPLETO`, `BACKUP_INCONSISTENTE`, `BACKUP_N
 | `PABX` | `src/pabx/issabel.py` | Faz login no Issabel, dispara o backup completo e baixa o `.tar`. |
 | `MIKROTIK` | `src/mikrotik/routeros.py` | SSH (paramiko) e baixa o backup do RouterOS. |
 | `DEFENSE` | `src/vms/defense.py` | API do Defense (autenticação por assinatura) para exportar o backup do VMS. |
+| `HIKCENTRAL` | `src/backup/file_manager/parsers.py` (`HikCentralParser`) | Copia a pasta `VSM_V..._BACKUP_<data>_<n>` mais recente da pasta de origem (local, SMB ou SFTP). |
 | outros | | Retornam `TIPO_NAO_SUPORTADO`. |
 
 O fabricante da OLT é lido de `fabricante`, depois de `config_extra`; na falta, é deduzido do nome do equipamento.

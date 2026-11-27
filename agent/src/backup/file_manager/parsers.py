@@ -171,6 +171,64 @@ class UNM2000Parser(BaseParser):
         return grupos
 
 
+# Pasta de backup do HikCentral Professional (VSM): VSM_V2.6.0.0_BACKUP_20261127123703_42904
+# (versão, data e hora AAAAMMDDHHMMSS, número sequencial). Cada backup é uma pasta com vários arquivos;
+# um arquivo compactado com o mesmo nome também vale.
+PADRAO_HIKCENTRAL = re.compile(r'^VSM_V[\w.\-]*?_BACKUP_(\d{14})(?:_\d+)?(?:\.(?:zip|tar|gz|7z))?$', re.IGNORECASE)
+EXTENSOES_COMPACTADAS = {".zip", ".tar", ".gz", ".7z"}
+
+
+class HikCentralParser(BaseParser):
+    """Backups do HikCentral na pasta de origem (local, SMB ou SFTP). Pasta -> `DIGIFORT_DIR` (cópia recursiva, já
+    tratada pelo copiador, pelo SMB e pelo túnel); arquivo compactado -> `ZIP`."""
+
+    @staticmethod
+    def _grupo(nome: str, eh_pasta: bool, **campos):
+        match = PADRAO_HIKCENTRAL.match(nome)
+        if not match:
+            return None
+        if not eh_pasta and Path(nome).suffix.lower() not in EXTENSOES_COMPACTADAS:
+            return None
+        data_obj = parse_backup_date(match.group(1))
+        if not data_obj:
+            return None
+        bf = BackupFile(path=Path(nome), file_type="DIGIFORT_DIR" if eh_pasta else "ZIP", **campos)
+        return BackupGroup(date=data_obj, files=[bf], group_id=nome)
+
+    def find_backups(self, pasta_origem) -> List[BackupGroup]:
+        from src.backup.sftp_origem import PastaSftp
+        grupos = []
+        try:
+            if isinstance(pasta_origem, PastaSftp):
+                for e in pasta_origem.listar():
+                    g = self._grupo(e.name, e.is_dir, remote_path=e.path, is_sftp=True, sftp=pasta_origem,
+                                    _size=None if e.is_dir else e.size)
+                    if g:
+                        grupos.append(g)
+            else:
+                from src.backup.smb_storage import SmbStorage, SmbTarget
+                if isinstance(pasta_origem, SmbTarget):
+                    for e in SmbStorage().scandir(pasta_origem):
+                        g = self._grupo(e.name, e.is_dir, remote_path=e.unc_path, is_smb=True, _size=e.size)
+                        if g:
+                            grupos.append(g)
+                else:
+                    pasta = Path(pasta_origem)
+                    if not pasta.is_dir():
+                        logging.error(f"  [HIKCENTRAL] Pasta de origem não existe ou não é diretório: {pasta}")
+                        return grupos
+                    for item in pasta.iterdir():
+                        g = self._grupo(item.name, item.is_dir()) if (item.is_dir() or item.is_file()) else None
+                        if g:
+                            g.files[0].path = item
+                            grupos.append(g)
+        except Exception as e:
+            logging.error(f"  [HIKCENTRAL] Erro ao acessar a pasta de origem '{pasta_origem}': {e}")
+            return grupos
+        grupos.sort(key=lambda x: x.date, reverse=True)
+        return grupos
+
+
 class HuaweiParser(BaseParser):
     def find_backups(self, pasta_origem: Path) -> List[BackupGroup]:
         """

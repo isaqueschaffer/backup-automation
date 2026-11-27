@@ -987,10 +987,11 @@ Historico: o merge de 06/10 (`538600f`) levou datas com fuso (ADR-006), compose 
 | Antenas (Wi-Fi) | ANTENA | src/mikrotik/antenas.py + src/application/status_antena.py (server: services/antenas.py) | SSH no MikroTik (só leitura: vizinhos, ARP, DHCP, bridge) + ping ICMP do agente |
 | Digifort | DIGIFORT | src/application/webhook_digifort.py (ping ICMP) + src/vms/digifort_gravacoes.py (tempo gravado pelos índices `.dix`) | Ping + leitura dos arquivos de gravação |
 | Intelbras Defense | DEFENSE | src/vms/defense.py (+ src/application/webhook_defense.py, plano B) | API REST do Defense IA (HTTPS, porta `config_extra.porta_api`, padrão 4433): estado das câmeras e gravações no backup; só o estado (sem gravações e sem RTSP) na presença a cada 5 min. Gravação `COM_GRAVACAO` só se gravou hoje (como no NVR); sem dado da API = `NAO_VERIFICADO`. API sem resposta: estado pelo CSV do webhook (`config_extra.caminho_log_csv` ou o padrão), câmera sem informação = `ERRO_COMUNICACAO`. O webhook escuta só em `127.0.0.1:8181` |
+| HikCentral (VSM) | HIKCENTRAL | `HikCentralParser` (`src/backup/file_manager/parsers.py`) + `processar_hikcentral` (`backup_job.py`) | Backup pela pasta, como o UNM2000: `config_extra.pasta_origem` (local, SMB ou SFTP) com subpastas `VSM_V<versão>_BACKUP_<AAAAMMDDHHMMSS>_<n>`; copia a mais recente (pasta inteira, nome original), válida se for do dia ou das últimas 24 h. Sem câmeras nem status periódico |
 | Misto / Custom | MIXED | — | — |
 | Câmera IP (Teste RTSP)| CAMERA | server/api/routers/equipamentos.py + agent.py (`/rtsp-result`), agent/src/camera/rtsp_client.py | RTSP (TCP) |
 
-Os valores válidos de `nvrs.tipo` são os de `TIPOS_EQUIPAMENTO` (`server/api/schemas.py`): NVR, OLT, ONU, PABX, MIKROTIK, DIGIFORT, MIXED, DEFENSE, CAMERA e ANTENA (outro valor: 400). `DVR` e `MOTOROLA` são tipos detectados pelo agente em tempo de execução, nunca gravados em `nvrs.tipo`; a marca do NVR fica em `config_extra.marca` (Hikvision / Intelbras / Motorola).
+Os valores válidos de `nvrs.tipo` são os de `TIPOS_EQUIPAMENTO` (`server/api/schemas.py`): NVR, OLT, ONU, PABX, MIKROTIK, DIGIFORT, MIXED, DEFENSE, CAMERA, ANTENA e HIKCENTRAL (outro valor: 400). `DVR` e `MOTOROLA` são tipos detectados pelo agente em tempo de execução, nunca gravados em `nvrs.tipo`; a marca do NVR fica em `config_extra.marca` (Hikvision / Intelbras / Motorola).
 
 ---
 

@@ -25,11 +25,12 @@ MAX_OFFLINE_IMAGES = 10  # máx. de imagens de referência (câmeras offline) an
 # Tipos de equipamento que têm câmeras: só eles geram a seção de câmeras e as linhas de monitoramento
 TIPOS_COM_CAMERAS = ("NVR", "DIGIFORT", "DEFENSE", "CAMERA")
 # Ordem e rótulo dos tipos no e-mail (mesma ordem do painel, eqTipos.tsx); tipo fora da lista vai ao final
-ORDEM_TIPOS = ("NVR", "DIGIFORT", "DEFENSE", "CAMERA", "OLT", "ONU", "MIKROTIK", "PABX", "MIXED")
+ORDEM_TIPOS = ("NVR", "DIGIFORT", "DEFENSE", "HIKCENTRAL", "CAMERA", "OLT", "ONU", "MIKROTIK", "PABX", "MIXED")
 ROTULO_TIPO = {
     "NVR": "NVR/DVR",
     "DIGIFORT": "Digifort",
     "DEFENSE": "Defense IA",
+    "HIKCENTRAL": "HikCentral",
     "CAMERA": "Câmeras",
     "OLT": "OLT",
     "ONU": "ONU",
