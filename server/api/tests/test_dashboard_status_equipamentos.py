@@ -203,3 +203,30 @@ def test_ids_de_equipamento_dos_widgets_novos_entram_no_isolamento():
     ]})
     _, eqs = ids_referenciados(layout)
     assert eqs == {e1, e2, e3}
+
+
+# ─── Câmeras e gravação: tipos sem câmera e câmeras avulsas ─────────────
+def test_cameras_ignora_tipos_sem_camera_e_mostra_camera_avulsa_escolhida():
+    from services.dashboards.widgets import ConfigCameras, construir_cameras
+
+    vms = _eq("DIGIFORT", "Digifort", ip="10.0.0.5", last_recording_status=[
+        {"nome": "PORTARIA CAM", "ip": "10.0.0.31", "status_comunicacao": "OFFLINE", "status_gravacao": "SEM_GRAVACAO"},
+        {"nome": "Patio", "ip": "10.0.0.32", "status_comunicacao": "ONLINE", "status_gravacao": "COM_GRAVACAO"},
+    ])
+    cam_ip = _eq("CAMERA", "Câmera Portaria", ip="10.0.0.31", last_recording_status=None)
+    cam_nome = _eq("CAMERA", "Patio", ip="", last_recording_status=None)
+    cam_sem = _eq("CAMERA", "Fundos", ip="10.0.0.99", last_recording_status=None)
+    mk = _eq("MIKROTIK", "MK", ip="10.0.0.1", last_recording_status=None)
+    ctx = _ctx([vms, cam_ip, cam_nome, cam_sem, mk])
+
+    # Sem filtro: só o gravador (as avulsas já estão dentro dele) e nada do Mikrotik
+    todos = construir_cameras(ctx, ConfigCameras())
+    assert [e["nome"] for e in todos["equipamentos"]] == ["Digifort"]
+
+    escolhidos = construir_cameras(ctx, ConfigCameras(equipamentos=[cam_ip.id, cam_nome.id, cam_sem.id, mk.id]))
+    por_nome = {e["nome"]: e for e in escolhidos["equipamentos"]}
+    assert set(por_nome) == {"Câmera Portaria", "Patio", "Fundos"}
+    assert por_nome["Câmera Portaria"]["offline"] == 1 and por_nome["Câmera Portaria"]["cameras"][0]["nome"] == "Câmera Portaria"
+    assert por_nome["Patio"]["online"] == 1 and not por_nome["Patio"]["sem_status"]
+    assert por_nome["Fundos"]["sem_status"] and por_nome["Fundos"]["total"] == 0
+    assert "10.0.0" not in json.dumps(escolhidos)

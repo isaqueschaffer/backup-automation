@@ -147,7 +147,12 @@ export default function CamerasWidget({ dados }: Props) {
             </div>
 
             {/* Câmeras com problemas ou sucesso */}
-            {problemas.length === 0 ? (
+            {eq.sem_status ? (
+              <div style={{ fontSize: 11, color: "var(--warn)" }}>
+                Ainda sem status: nenhum gravador desta máquina informou esta câmera (o status vem do NVR, Digifort ou
+                Defense que a grava).
+              </div>
+            ) : problemas.length === 0 ? (
               <div
                 style={{
                   fontSize: 11,
@@ -155,7 +160,7 @@ export default function CamerasWidget({ dados }: Props) {
                   fontStyle: "italic",
                 }}
               >
-                Todas as câmeras online e gravando
+                {total === 1 ? "Câmera online e gravando" : "Todas as câmeras online e gravando"}
               </div>
             ) : (
               <div

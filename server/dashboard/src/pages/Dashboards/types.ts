@@ -203,6 +203,7 @@ export interface DadosCameras {
     nome: string;
     tipo: string;
     maquina: string;
+    sem_status?: boolean;
     total: number;
     online: number;
     offline: number;

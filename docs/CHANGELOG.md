@@ -9,6 +9,12 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-27] — Dashboard por Cliente: "Câmeras e gravação" só com gravadores e câmeras, e câmera avulsa com status próprio
+
+- **Problema (relato do usuário)**: na configuração do widget "Câmeras e gravação", o seletor listava todos os equipamentos da máquina (Mikrotik, OLT, câmeras avulsas...), e escolher uma câmera avulsa (tipo `CAMERA`) não mostrava nada. Causa: o seletor não tinha filtro de tipo, e o widget só exibe equipamentos com `last_recording_status`; a câmera avulsa não tem status próprio, porque quem a testa é o gravador/VMS da mesma máquina (Digifort/Defense/NVR), que a reporta na lista dele.
+- **Correção**: o seletor lista só NVR, DIGIFORT, DEFENSE, MIXED e CAMERA (`registry.tsx`). No servidor (`construir_cameras`), tipos sem câmera são ignorados mesmo se já estiverem num layout salvo, e a câmera avulsa escolhida aparece sozinha com o status que o gravador da mesma máquina informa, casada pelo IP e, sem IP que case, pelo nome (`_status_camera_avulsa`; o IP não sai na resposta). Sem nenhum gravador que a informe, aparece "Ainda sem status" em vez de um quadro vazio. Sem filtro, as avulsas continuam só dentro do gravador (sem duplicar).
+- **Testes**: `server/api/tests/test_dashboard_status_equipamentos.py` (Mikrotik ignorado, avulsa por IP, por nome e sem status). Suíte da API: 197 OK.
+
 ### [2026-11-27] — Dashboard por Cliente: OLT com gráficos de ONUs e de sinal e lista de ONUs com nome e sinal
 
 - **Pedido do usuário**: no dash da OLT, mostrar as ONUs online e offline e a potência do sinal. Escolhas (perguntadas antes): gráfico de situação, gráfico de qualidade do sinal, lista das ONUs com problema e lista de todas as ONUs com nome e sinal; identificação por posição + nome **também no link público**; dentro do widget `status_olt` existente (não um widget novo); cor da OLT com a regra de sempre (vermelho com mais de 5% fora).

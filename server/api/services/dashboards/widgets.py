@@ -505,6 +505,28 @@ class ConfigCameras(BaseModel):
     apenas_problemas: bool = False
 
 
+TIPOS_COM_CAMERAS_DASH = ("NVR", "DIGIFORT", "DEFENSE", "MIXED", "CAMERA")
+
+
+def _status_camera_avulsa(m, cam_eq: NVR) -> Optional[Dict[str, Any]]:
+    """Câmera avulsa (tipo CAMERA) não tem status próprio: quem a testa é o gravador/VMS da mesma máquina, que a
+    reporta no `last_recording_status` dele. Procura por IP e, sem IP que case, pelo nome."""
+    ip = (cam_eq.ip or "").strip()
+    nome = (cam_eq.name or "").strip().lower()
+    por_nome = None
+    for e in equipamentos_ativos(m):
+        if e.id == cam_eq.id or not isinstance(e.last_recording_status, list):
+            continue
+        for cam in e.last_recording_status:
+            if not isinstance(cam, dict):
+                continue
+            if ip and str(cam.get("ip") or "").strip() == ip:
+                return cam
+            if por_nome is None and nome and str(cam.get("nome") or "").strip().lower() == nome:
+                por_nome = cam
+    return por_nome
+
+
 def construir_cameras(ctx: ContextoDados, config: ConfigCameras) -> Dict[str, Any]:
     agora = datetime.utcnow()
     filtro_ids = set(config.equipamentos) if config.equipamentos else None
@@ -514,20 +536,37 @@ def construir_cameras(ctx: ContextoDados, config: ConfigCameras) -> Dict[str, An
         for e in equipamentos_ativos(m):
             if filtro_ids is not None and e.id not in filtro_ids:
                 continue
-            raw_cams = e.last_recording_status
-            if not isinstance(raw_cams, list) or not raw_cams:
-                continue
-            valid_cams = [c for c in raw_cams if isinstance(c, dict)]
-            if not valid_cams:
-                continue
+            tipo = (e.tipo or "NVR").upper()
+            if tipo not in TIPOS_COM_CAMERAS_DASH:
+                continue  # Mikrotik, OLT, PABX... selecionados por engano não têm câmeras
+            sem_status = False
+            if tipo == "CAMERA":
+                # Sem filtro, a câmera avulsa já aparece dentro do gravador que a reporta: só sai sozinha se escolhida
+                if filtro_ids is None:
+                    continue
+                cam = _status_camera_avulsa(m, e)
+                valid_cams = [{**cam, "nome": e.name}] if cam else []
+                sem_status = cam is None
+            else:
+                raw_cams = e.last_recording_status
+                valid_cams = [c for c in raw_cams if isinstance(c, dict)] if isinstance(raw_cams, list) else []
+                if not valid_cams:
+                    continue
 
-            cnt = contar_cameras(e)
+            cnt = {"total": 0, "online": 0, "offline": 0, "sem_gravacao": 0}
             cameras_lista = []
-            tem_problema = False
+            tem_problema = sem_status
 
             for cam in valid_cams[:300]:
                 comunicacao = cam.get("status_comunicacao") or ("ONLINE" if cam.get("online") else "OFFLINE")
                 gravacao = cam.get("status_gravacao")
+                cnt["total"] += 1
+                if comunicacao == "ONLINE":
+                    cnt["online"] += 1
+                    if gravacao == "SEM_GRAVACAO":
+                        cnt["sem_gravacao"] += 1
+                else:
+                    cnt["offline"] += 1
                 problema = (comunicacao != "ONLINE") or (gravacao == "SEM_GRAVACAO")
                 if problema:
                     tem_problema = True
@@ -548,8 +587,9 @@ def construir_cameras(ctx: ContextoDados, config: ConfigCameras) -> Dict[str, An
             itens.append({
                 "id": str(e.id),
                 "nome": e.name,
-                "tipo": e.tipo or "NVR",
+                "tipo": tipo,
                 "maquina": m.name,
+                "sem_status": sem_status,
                 "total": cnt["total"],
                 "online": cnt["online"],
                 "offline": cnt["offline"],

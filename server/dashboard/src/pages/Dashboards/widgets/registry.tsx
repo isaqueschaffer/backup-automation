@@ -171,7 +171,7 @@ export const DEFINICOES: Record<string, DefinicaoWidget> = {
     alturaMin: 6,
     configPadrao: { equipamentos: [], apenas_problemas: false },
     campos: [
-      { chave: "equipamentos", tipo: "equipamentos", rotulo: "Equipamentos exibidos" },
+      { chave: "equipamentos", tipo: "equipamentos", rotulo: "Gravadores e câmeras exibidos", tipos: ["NVR", "DIGIFORT", "DEFENSE", "MIXED", "CAMERA"] },
       { chave: "apenas_problemas", tipo: "booleano", rotulo: "Mostrar apenas câmeras com problema" },
     ],
     renderizar: (dados, widget) => {
