@@ -287,7 +287,29 @@ export interface ContagemOnus {
   sinal_ruim: number;
 }
 
+export interface QualidadeSinalOnus {
+  bom: number;
+  atencao: number;
+  ruim: number;
+  sem_leitura: number;
+}
+
+export interface OnuPublica {
+  posicao: string;
+  slot: number;
+  pon: number;
+  onu: number;
+  nome: string | null;
+  estado: "ONLINE" | "OFFLINE" | "FALHA" | "SEM_ENERGIA" | "DESCONHECIDO";
+  sinal_dbm: number | null;
+  qualidade: "bom" | "atencao" | "ruim" | null;
+  nivel: NivelStatus;
+}
+
 export interface DadosStatusOlt {
+  mostrar_graficos?: boolean;
+  mostrar_onus_problema?: boolean;
+  mostrar_todas_onus?: boolean;
   total: ContagemOnus;
   equipamentos: (AtualidadeStatus & {
     licenca: { fim: string; dias_restantes: number; nivel: NivelStatus } | null;
@@ -301,6 +323,9 @@ export interface DadosStatusOlt {
       percentual_fora: number;
       pons: ({ slot: number; pon: number } & ContagemOnus)[];
       pons_com_problema: number;
+      qualidade?: QualidadeSinalOnus;
+      onus?: OnuPublica[];
+      onus_total_lista?: number;
       nivel: NivelStatus;
     }[];
   })[];

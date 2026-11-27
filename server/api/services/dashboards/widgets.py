@@ -917,6 +917,55 @@ LIMITE_OLT_DADOS_MIN = 15           # o agente envia a cada 5 min
 LIMIAR_OLT_FORA_PCT = 5             # mais que isso de ONUs fora (offline + falha + sem energia) = vermelho
 LIMIAR_LICENCA_ATENCAO_DIAS = 10    # igual a LIMIAR_LICENCA_DIAS da notificação
 CHAVES_CONTAGEM_ONU = ("total", "online", "offline", "falha", "sem_energia", "sinal_ruim")
+LIMITE_SINAL_BOM_DBM = -25.5        # iguais aos do agente (agent/src/olt/unm_telnet.py qualidade_sinal)
+LIMITE_SINAL_CRITICO_DBM = -27.0
+LIMITE_ONUS_POR_OLT = 2048          # lista por OLT; as com problema vêm primeiro, então o corte nunca as esconde
+ESTADOS_ONU = ("ONLINE", "OFFLINE", "FALHA", "SEM_ENERGIA")
+
+
+def _qualidade_sinal(dbm: Optional[float]) -> Optional[str]:
+    if dbm is None:
+        return None
+    if dbm > LIMITE_SINAL_BOM_DBM:
+        return "bom"
+    if dbm > LIMITE_SINAL_CRITICO_DBM:
+        return "atencao"
+    return "ruim"
+
+
+def _onus_publicas(raw: Any) -> tuple:
+    """(qualidade, onus) de uma OLT. Só posição, nome, estado e sinal: sem serial, MAC, IP nem tipo.
+    O sinal é o lido na OLT (UNM2000) ou na ONU (VSOL/Huawei), o mesmo que o agente usa para "sinal ruim"."""
+    qualidade = {"bom": 0, "atencao": 0, "ruim": 0, "sem_leitura": 0}
+    onus = []
+    for o in raw if isinstance(raw, list) else []:
+        if not isinstance(o, dict):
+            continue
+        estado = o.get("estado") if o.get("estado") in ESTADOS_ONU else "DESCONHECIDO"
+        sinal = _num(o.get("sinal_olt_dbm"))
+        if sinal is None:
+            sinal = _num(o.get("sinal_onu_dbm"))
+        q = _qualidade_sinal(sinal) if estado == "ONLINE" else None
+        if estado == "ONLINE":
+            qualidade[q or "sem_leitura"] += 1
+        if estado in ("OFFLINE", "FALHA", "SEM_ENERGIA") or q == "ruim":
+            nivel = "critico"
+        elif estado == "DESCONHECIDO" or q == "atencao":
+            nivel = "atencao"
+        else:
+            nivel = "ok"
+        slot, pon, onu = _inteiro(o.get("slot")), _inteiro(o.get("pon")), _inteiro(o.get("onu"))
+        onus.append({
+            "posicao": f"{slot}/{pon}/{onu}",
+            "slot": slot, "pon": pon, "onu": onu,
+            "nome": _texto(o.get("nome"), 80),
+            "estado": estado,
+            "sinal_dbm": round(sinal, 2) if sinal is not None and estado == "ONLINE" else None,
+            "qualidade": q,
+            "nivel": nivel,
+        })
+    onus.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], x["slot"], x["pon"], x["onu"]))
+    return qualidade, onus
 
 
 def _contagem_onus(raw: Any) -> Dict[str, int]:
@@ -924,8 +973,9 @@ def _contagem_onus(raw: Any) -> Dict[str, int]:
     return {k: _inteiro(raw.get(k)) for k in CHAVES_CONTAGEM_ONU}
 
 
-def olt_publico(raw: Any, nome_padrao: str) -> List[Dict[str, Any]]:
-    """Uma entrada por OLT, só com contagens (sem ONU individual, serial, MAC, IP nem nome de assinante)."""
+def olt_publico(raw: Any, nome_padrao: str, onus: str = "nenhuma") -> List[Dict[str, Any]]:
+    """Uma entrada por OLT: contagens, qualidade do sinal e, conforme `onus` ("nenhuma", "problema" ou
+    "todas"), a lista de ONUs com posição, nome, estado e sinal (nunca serial, MAC nem IP)."""
     if not isinstance(raw, dict):
         return []
     olts = []
@@ -945,6 +995,11 @@ def olt_publico(raw: Any, nome_padrao: str) -> List[Dict[str, Any]]:
                 continue
             pons.append({"slot": _inteiro(p.get("slot")), "pon": _inteiro(p.get("pon")), **c})
         pons.sort(key=lambda p: (-(p["offline"] + p["falha"] + p["sem_energia"]), -p["sinal_ruim"], p["slot"], p["pon"]))
+        qualidade, lista = _onus_publicas(o.get("onus"))
+        if onus == "problema":
+            lista = [x for x in lista if x["nivel"] != "ok"]
+        elif onus != "todas":
+            lista = []
         if falha or pct > LIMIAR_OLT_FORA_PCT:
             nivel = "critico"
         elif fora or totais["sinal_ruim"]:
@@ -961,6 +1016,9 @@ def olt_publico(raw: Any, nome_padrao: str) -> List[Dict[str, Any]]:
             "percentual_fora": pct,
             "pons": pons[:64],
             "pons_com_problema": len(pons),
+            "qualidade": qualidade,
+            "onus": lista[:LIMITE_ONUS_POR_OLT],
+            "onus_total_lista": len(lista),
             "nivel": nivel,
         })
     olts.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], x["nome"].lower()))
@@ -972,6 +1030,9 @@ class ConfigStatusOlt(BaseModel):
     equipamentos: List[UUID] = Field(default_factory=list, max_length=200)
     mostrar_pons: bool = True
     mostrar_licenca: bool = True
+    mostrar_graficos: bool = True        # pizzas de situação (online x fora) e de qualidade do sinal
+    mostrar_onus_problema: bool = True   # lista das ONUs offline ou com sinal ruim/atenção
+    mostrar_todas_onus: bool = True      # lista de todas as ONUs com nome e sinal (aberta por um botão no widget)
 
 
 def construir_status_olt(ctx: ContextoDados, config: ConfigStatusOlt) -> Dict[str, Any]:
@@ -980,7 +1041,8 @@ def construir_status_olt(ctx: ContextoDados, config: ConfigStatusOlt) -> Dict[st
     total = {k: 0 for k in CHAVES_CONTAGEM_ONU}
     itens = []
     for m, e in equipamentos_do_tipo(ctx, "OLT", config.equipamentos):
-        olts = olt_publico(e.olt_status, e.name)
+        modo = "todas" if config.mostrar_todas_onus else "problema" if config.mostrar_onus_problema else "nenhuma"
+        olts = olt_publico(e.olt_status, e.name, modo)
         if not config.mostrar_pons:
             for o in olts:
                 o["pons"] = []
@@ -1014,7 +1076,13 @@ def construir_status_olt(ctx: ContextoDados, config: ConfigStatusOlt) -> Dict[st
             "olts": olts,
         })
     itens.sort(key=lambda x: (ORDEM_NIVEL[x["nivel"]], x["nome"].lower()))
-    return {"total": total, "equipamentos": itens}
+    return {
+        "mostrar_graficos": config.mostrar_graficos,
+        "mostrar_onus_problema": config.mostrar_onus_problema,
+        "mostrar_todas_onus": config.mostrar_todas_onus,
+        "total": total,
+        "equipamentos": itens,
+    }
 
 
 # ─── Centrais de alarme (DEFENSE) ───────────────────────────────────────
@@ -1212,7 +1280,7 @@ registrar(TipoWidget(
 registrar(TipoWidget(
     tipo="status_olt",
     rotulo="OLTs e ONUs",
-    descricao="ONUs online, fora do ar e com sinal ruim por OLT, PONs com problema e licença da UNM2000",
+    descricao="ONUs online e fora do ar, qualidade do sinal, lista de ONUs com nome e sinal, PONs com problema e licença da UNM2000",
     config_model=ConfigStatusOlt,
     largura_padrao=12,
     altura_padrao=14,

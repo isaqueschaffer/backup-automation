@@ -9,6 +9,13 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-27] — Dashboard por Cliente: OLT com gráficos de ONUs e de sinal e lista de ONUs com nome e sinal
+
+- **Pedido do usuário**: no dash da OLT, mostrar as ONUs online e offline e a potência do sinal. Escolhas (perguntadas antes): gráfico de situação, gráfico de qualidade do sinal, lista das ONUs com problema e lista de todas as ONUs com nome e sinal; identificação por posição + nome **também no link público**; dentro do widget `status_olt` existente (não um widget novo); cor da OLT com a regra de sempre (vermelho com mais de 5% fora).
+- **Servidor** (`server/api/services/dashboards/widgets.py`): `olt_publico` passa a devolver por OLT `qualidade` (bom acima de -25,5 dBm, atenção de -25,5 a -27, ruim a partir de -27, sem leitura; só das ONUs online, mesmos limites do agente) e `onus` (posição slot/PON/ONU, nome, estado, sinal em dBm e nível; nunca serial, MAC, IP nem tipo), com as ONUs com problema primeiro e no máximo 2048 por OLT. O sinal é o lido na OLT (UNM2000) ou na ONU (VSOL/Huawei). Config nova: `mostrar_graficos`, `mostrar_onus_problema` e `mostrar_todas_onus` (todas ligadas por padrão; com a lista completa desligada o servidor manda só as ONUs com problema, e com as duas desligadas não manda nenhuma).
+- **Painel** (`server/dashboard/src/pages/Dashboards/widgets/StatusOltWidget.tsx`, `types.ts`, `registry.tsx`): por OLT, duas roscas (situação: online, sem energia, offline ou falha; sinal das ONUs online) com legenda e números; lista das ONUs com problema (15 primeiras e botão "mostrar mais"); botão "Ver todas as ONUs (N)" que abre a tabela posição, nome, situação e sinal.
+- **Testes**: `server/api/tests/test_dashboard_status_equipamentos.py` (qualidade, ordem, preferência do sinal da OLT, serial/MAC/tipo fora da resposta, lista conforme a config). Sem mudança no agente.
+
 ### [2026-11-27] — Agente 1.1.71: foto da gravação insiste em outros trechos quando o NVR não entrega o vídeo
 
 - **Problema**: NVR 02 do Horizontes (192.168.5.3, Hikvision), canal 24 "PORTAO CAMPO", câmera offline desde 27/11 09:19. O teste de imagem (modo referência) mostrou "Ao vivo: câmera sem vídeo. Gravação: Tempo esgotado ao ler o vídeo (25s)". Pelo log do agente, a busca achou gravação de hoje (05:51 e 03:45), mas o agente só tentava os 2 trechos mais recentes, 5 s antes do fim de cada um, com 25 s de espera: os dois estouraram o tempo e ele desistiu. O fim de um trecho de câmera que está caindo costuma ser justamente o pedaço que o NVR não entrega, e com codec inteligente (H.264+/H.265+) o quadro-chave pode demorar mais que os 5 s da janela (o ffmpeg usa `-skip_frame nokey` e fica esperando).

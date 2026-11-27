@@ -100,7 +100,15 @@ OLT_STATUS = {
              {"slot": 2, "pon": 1, "total": 48, "online": 43, "offline": 5, "falha": 0, "sem_energia": 0, "sinal_ruim": 0},
              {"slot": 3, "pon": 1, "total": 12, "online": 12, "offline": 0, "falha": 0, "sem_energia": 0, "sinal_ruim": 0},
          ],
-         "onus": [{"nome": "João da Silva", "serial": "FHTT1234", "mac": "00:11:22:33:44:55", "estado": "OFFLINE"}]},
+         "onus": [
+             {"indice": "1/3/1", "slot": 1, "pon": 3, "onu": 1, "nome": "João da Silva", "serial": "FHTT1234",
+              "mac": "00:11:22:33:44:55", "tipo": "HG6145E", "estado": "OFFLINE"},
+             {"slot": 1, "pon": 3, "onu": 2, "nome": "Maria", "estado": "ONLINE", "sinal_olt_dbm": -21.4,
+              "sinal_onu_dbm": -30.0, "qualidade": "BOM"},
+             {"slot": 1, "pon": 3, "onu": 3, "estado": "ONLINE", "sinal_onu_dbm": -26.1},
+             {"slot": 2, "pon": 1, "onu": 4, "nome": "Bar", "estado": "ONLINE", "sinal_olt_dbm": -28.0},
+             {"slot": 2, "pon": 1, "onu": 5, "estado": "ONLINE"},
+         ]},
         {"nome": "OLT Bairro", "ip": "192.168.5.2", "totais": {"total": 50, "online": 49, "offline": 1}},
         {"nome": "OLT Morro", "ip": "192.168.5.3", "erro": "Telnet recusado em 192.168.5.3"},
     ],
@@ -122,9 +130,27 @@ def test_olt_niveis_pons_licenca_e_sem_dado_de_assinante():
     assert [(p["slot"], p["pon"]) for p in olts["OLT Centro"]["pons"]] == [(2, 1), (1, 3)]
     assert item["licenca"]["nivel"] == "atencao" and item["nivel"] == "critico"
     assert dados["total"]["total"] == 150 and dados["total"]["online"] == 139
+    centro = olts["OLT Centro"]
+    assert centro["qualidade"] == {"bom": 1, "atencao": 1, "ruim": 1, "sem_leitura": 1}
+    # problemas primeiro (offline e sinal ruim), depois atenção, depois as boas
+    assert [(x["posicao"], x["nivel"]) for x in centro["onus"]] == [
+        ("1/3/1", "critico"), ("2/1/4", "critico"), ("1/3/3", "atencao"), ("1/3/2", "ok"), ("2/1/5", "ok")]
+    joao = centro["onus"][0]
+    assert joao["nome"] == "João da Silva" and joao["sinal_dbm"] is None and joao["estado"] == "OFFLINE"
+    assert centro["onus"][3]["sinal_dbm"] == -21.4  # o sinal lido na OLT tem preferência
     texto = json.dumps(dados)
-    for proibido in ("192.168", "João", "FHTT", "00:11:22", "segredo", "Telnet"):
+    for proibido in ("192.168", "FHTT", "00:11:22", "HG6145E", "segredo", "Telnet"):
         assert proibido not in texto
+
+
+def test_olt_lista_de_onus_conforme_a_config():
+    eq = _eq("OLT", "OLT", olt_status=OLT_STATUS)
+    so_problema = construir_status_olt(_ctx([eq]), ConfigStatusOlt(mostrar_todas_onus=False))
+    centro = [o for o in so_problema["equipamentos"][0]["olts"] if o["nome"] == "OLT Centro"][0]
+    assert [x["posicao"] for x in centro["onus"]] == ["1/3/1", "2/1/4", "1/3/3"]
+    nenhuma = construir_status_olt(_ctx([eq]), ConfigStatusOlt(mostrar_todas_onus=False, mostrar_onus_problema=False))
+    assert all(o["onus"] == [] for o in nenhuma["equipamentos"][0]["olts"])
+    assert "João" not in json.dumps(nenhuma)
 
 
 def test_olt_sem_pons_e_sem_licenca():

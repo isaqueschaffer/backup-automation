@@ -27,7 +27,7 @@ Mapa de cobertura em 13/11/2026 (atualize esta tabela quando criar um widget):
 |---|---|---|
 | NVR (Hikvision, Motorola) | `cameras` (gravação/online), `last_recording_status`, `last_telemetry_status` (CPU/RAM/discos) | `cameras`, `status_nvr`, `telemetria_equipamentos`, `equipamentos`, `resumo` |
 | DIGIFORT, MIXED, CAMERA | câmeras e status do backup | `cameras`, `status_nvr`, `equipamentos` |
-| OLT (UNM2000, VSOL, Huawei) | `olt_status` (OLTs/ONUs, a cada 5 min; leitor em `routers/equipamentos.py` `get_olt_status`) | `status_olt` (totais, PONs com problema, licença; sem ONU individual) |
+| OLT (UNM2000, VSOL, Huawei) | `olt_status` (OLTs/ONUs, a cada 5 min; leitor em `routers/equipamentos.py` `get_olt_status`) | `status_olt` (totais, roscas de situação e de qualidade do sinal, ONUs com problema, lista de todas as ONUs com posição/nome/sinal, PONs com problema, licença; nome da ONU aparece no link público por escolha do usuário em 27/11/2026) |
 | DEFENSE (centrais Intelbras) | `last_alarm_status` (`alarmes`, `incendio`, a cada 5 min) | `alarmes_defense` (disparo, desconexão, partições; armada/desarmada fora do link público) |
 | ANTENA (Wi-Fi via MikroTik) | `antena_status` (`antenas` com ONLINE/OFFLINE/SEM_REGISTRO/ERRO, quando caiu, visto online; `services/antenas.py`, a cada 3 min) | `antenas` + cartão no `resumo` |
 | MIKROTIK, PABX, ONU | apenas resultado do backup (`Backup.nvr_results`) | `equipamentos` |
