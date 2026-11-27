@@ -57,11 +57,15 @@ function Pizza({ titulo, fatias }: { titulo: string; fatias: FatiaPizza[] }) {
 }
 
 function fatiasSituacao(t: ContagemOnus): FatiaPizza[] {
-  return [
+  const fatias = [
     { rotulo: "Online", valor: t.online, cor: "var(--ok)" },
     { rotulo: "Sem energia", valor: t.sem_energia, cor: "var(--warn)" },
     { rotulo: "Offline ou falha", valor: t.offline + t.falha, cor: "var(--err)" },
   ];
+  // A OLT às vezes devolve um estado que o agente não reconhece: entra como "desconhecido" para a soma bater com o total
+  const outros = t.total - t.online - t.sem_energia - t.offline - t.falha;
+  if (outros > 0) fatias.push({ rotulo: "Estado desconhecido", valor: outros, cor: "var(--text-muted)" });
+  return fatias;
 }
 
 function fatiasQualidade(q: QualidadeSinalOnus): FatiaPizza[] {
