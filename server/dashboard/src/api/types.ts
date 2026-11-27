@@ -1,4 +1,4 @@
-export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE" | "CAMERA" | "ANTENA" | "MIXED";
+export type TipoEquipamento = "NVR" | "OLT" | "ONU" | "PABX" | "MIKROTIK" | "DIGIFORT" | "DEFENSE" | "HIKCENTRAL" | "CAMERA" | "ANTENA" | "MIXED";
 
 // Status de gravação de uma câmera (NVR.last_recording_status)
 export interface CameraRecStatus {

@@ -339,7 +339,8 @@ def preparar_equipamentos(equipamentos: list, conf: dict, trigger: str, senha_zi
     """Fase 1 (sem gravar nada): acha/baixa o backup de cada equipamento e valida (data, completude, estabilidade).
     Quem está pronto volta com status "PRONTO" e `arquivos_origem` (SMB, SFTP, memória ou fluxo HTTP)."""
     from src.application import log_remoto
-    from src.application.backup_job import LIMITE_EQUIPAMENTO_S, _executar_com_limite, nome_seguro, processar_olt
+    from src.application.backup_job import (LIMITE_EQUIPAMENTO_S, _executar_com_limite, nome_seguro, processar_hikcentral,
+                                            processar_olt)
     from src.backup import tunel_preparo as prep
 
     despacho = {
@@ -357,6 +358,9 @@ def preparar_equipamentos(equipamentos: list, conf: dict, trigger: str, senha_zi
                 if tipo in ("OLT", "DIGIFORT"):
                     res = _executar_com_limite(processar_olt, LIMITE_EQUIPAMENTO_S, eq, PASTA_NENHUMA, conf, trigger,
                                                somente_preparar=True)
+                elif tipo == "HIKCENTRAL":
+                    res = _executar_com_limite(processar_hikcentral, LIMITE_EQUIPAMENTO_S, eq, PASTA_NENHUMA, conf,
+                                               trigger, somente_preparar=True)
                 elif tipo in despacho:
                     res = _executar_com_limite(despacho[tipo], LIMITE_EQUIPAMENTO_S, eq)
                 else:

@@ -471,6 +471,12 @@ def _testar_digifort(t: _Teste, eq: dict, cfg: dict) -> str:
     return "Pasta de origem dos backups do Digifort acessível."
 
 
+def _testar_hikcentral(t: _Teste, eq: dict, cfg: dict) -> str:
+    t.planejar(("pasta", "Pasta de origem dos backups do HikCentral"))
+    _pasta(t, "pasta", cfg.get("pasta_origem") or "", eq, cfg)
+    return "Pasta de origem dos backups do HikCentral acessível."
+
+
 def _testar_generico(t: _Teste, eq: dict, cfg: dict) -> str:
     try:
         porta = int(cfg.get("porta") or 80)
@@ -502,6 +508,8 @@ def executar_teste_conexao(task: dict, conf: dict, enviar: Callable[[dict], None
             mensagem = _testar_defense(t, task, cfg)
         elif tipo == "DIGIFORT":
             mensagem = _testar_digifort(t, task, cfg)
+        elif tipo == "HIKCENTRAL":
+            mensagem = _testar_hikcentral(t, task, cfg)
         else:
             mensagem = _testar_generico(t, task, cfg)
         t.concluir(True, mensagem)

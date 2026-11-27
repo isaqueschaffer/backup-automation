@@ -77,7 +77,7 @@ export default function EqCard({ eq, somenteLeitura, podeTestar = !somenteLeitur
           <SeloConexao eq={eq} />
         </div>
         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" ? (
+          {eq.tipo === "OLT" || eq.tipo === "DIGIFORT" || eq.tipo === "HIKCENTRAL" ? (
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <FolderOpen size={12} /> {eq.config_extra?.pasta_origem || "—"}
             </span>

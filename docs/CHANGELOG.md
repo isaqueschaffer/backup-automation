@@ -9,6 +9,16 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-27] — Novo tipo de equipamento HIKCENTRAL (backup do HikCentral pela pasta)
+
+- **Pedido**: fazer o backup do HikCentral (VSM) como o do UNM2000, lendo direto da pasta (ex.: `D:\BACKUP HIKCENTRAL`), cujo conteúdo são pastas `VSM_V2.6.0.0_BACKUP_20261127123703_42904` (versão, data/hora `AAAAMMDDHHMMSS`, número).
+- **Agente**: `HikCentralParser` (`file_manager/parsers.py`) acha a pasta mais recente pelo nome (também aceita arquivo compactado com o mesmo nome) em pasta local, SMB ou SFTP; a pasta é copiada inteira, com o nome original (reaproveita a cópia de diretório do Digifort). `parse_backup_date` entende a data de 14 dígitos. `processar_hikcentral` em `backup_job.py`, também no túnel do Mikrotik (`tunel.py`) e no teste de conexão. Mesmas regras de validade do UNM2000: backup do dia ou das últimas 24 h; senão `BACKUP_ANTIGO`.
+- **API e painel**: `HIKCENTRAL` em `TIPOS_EQUIPAMENTO` e no e-mail; no painel, tipo na lista, ícone/cor e o campo "Pasta de backup do HikCentral" (com acesso remoto SMB no agente do Mikrotik).
+- **Testes**: `agent/tests/test_hikcentral.py` (9 casos); suíte do agente: 379 OK.
+- **Pendente**: versão do agente não subida (só vale com release e cadastro); deploy do painel/servidor pelo `server/deploy_producao.ps1`. Se o HikCentral gerar backups com menos frequência que a cada 24 h, a regra de data precisa de janela maior.
+
+---
+
 ### [2026-11-26] — Relatório e ZIP do backup com novas tentativas quando o servidor não foi alcançado
 
 - **Origem**: na Horizontes, o backup manual de 26/11 às 12:10 (6 equipamentos, todos OK) terminou às 12:16:49, mas o `POST /agent/backup/report` falhou com `NameResolutionError` (queda de DNS da máquina de menos de 1 minuto: às 12:20 tudo normal). O `run_backup` apagava `tmp_backup_work`/`tmp_backup_final` sem tentar de novo: a rodada inteira se perdeu, sem registro nem e-mail. As linhas `[VSOL] Nenhum cookie retornado pela OLT` que seguiam a cada 10 min são da coleta de status das ONUs (`vsol_status`), não do backup, e são normais (essa OLT não usa cookie).

@@ -14,7 +14,7 @@ from services.senhas import validar_senha_nova
 # ─────────────────────────────────────────────
 # Equipamento (antes chamado NVR)
 # ─────────────────────────────────────────────
-TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED", "DEFENSE", "CAMERA", "ANTENA"]
+TIPOS_EQUIPAMENTO = ["NVR", "OLT", "ONU", "PABX", "MIKROTIK", "DIGIFORT", "MIXED", "DEFENSE", "CAMERA", "ANTENA", "HIKCENTRAL"]
 
 class NVRBase(BaseModel):
     tipo: str = "NVR"  # NVR, OLT, ONU, PABX
