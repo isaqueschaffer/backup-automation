@@ -9,6 +9,11 @@ nova entrada que cite a antiga.
 
 ---
 
+### [2026-11-27] — Link público do dashboard ocupa a tela inteira
+
+- **Pedido do usuário**: o link compartilhado do Dashboard por Cliente ficava limitado a 1600 px no centro, com margem dos lados; os componentes deviam ocupar a tela toda, para ficarem mais folgados e caberem mais.
+- **Correção** (`server/dashboard/src/pages/Dashboards/PublicDashboardPage.tsx`): sem o limite de largura e com margem menor (14 px × 16 px). A grade continua com 24 colunas proporcionais, então os layouts salvos não mudam de posição: cada componente só fica mais largo nas telas grandes.
+
 ### [2026-11-27] — Dashboard por Cliente: "Câmeras e gravação" só com gravadores e câmeras, e câmera avulsa com status próprio
 
 - **Problema (relato do usuário)**: na configuração do widget "Câmeras e gravação", o seletor listava todos os equipamentos da máquina (Mikrotik, OLT, câmeras avulsas...), e escolher uma câmera avulsa (tipo `CAMERA`) não mostrava nada. Causa: o seletor não tinha filtro de tipo, e o widget só exibe equipamentos com `last_recording_status`; a câmera avulsa não tem status próprio, porque quem a testa é o gravador/VMS da mesma máquina (Digifort/Defense/NVR), que a reporta na lista dele.

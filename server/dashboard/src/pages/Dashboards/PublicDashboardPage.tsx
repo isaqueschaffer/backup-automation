@@ -248,14 +248,15 @@ export default function PublicDashboardPage() {
       style={{
         minHeight: "100vh",
         backgroundColor: "var(--bg-base, var(--surface-2))",
-        padding: "20px 24px",
+        padding: "14px 16px",
         boxSizing: "border-box",
       }}
     >
+      {/* Ocupa a largura toda da tela (sem limite): a grade é proporcional, então os
+          componentes ficam maiores e cabem mais lado a lado */}
       <div
         style={{
-          maxWidth: 1600,
-          margin: "0 auto",
+          width: "100%",
           display: "flex",
           flexDirection: "column",
           gap: 16,
